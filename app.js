@@ -1,0 +1,2054 @@
+const views = [
+  ["budget", "Budget", "▦"],
+  ["transactions", "Transactions", "☰"],
+  ["paychecks", "Paychecks", "☑"],
+  ["calendar", "Calendar", "⌂"],
+  ["meals", "Meals", "♨"],
+  ["recipes", "Recipes", "▤"],
+  ["goals", "Goals", "◎"],
+  ["wealth", "Wealth", "▥"],
+  ["sharing", "Sharing", "♙"],
+  ["reports", "Reports", "◷"],
+  ["admin", "Admin", "⚙"]
+];
+
+let state = null;
+let sessionUser = null;
+let adminData = null;
+let households = [];
+let countryCatalog = [];
+let currentView = "budget";
+let autosaveTimer = null;
+
+const formatterCache = new Map();
+function currencyFormatter(exact = false) {
+  const currency = state?.household?.currency || "USD";
+  const locale = currency === "INR" ? "en-IN" : "en-US";
+  const key = `${locale}:${currency}:${exact}`;
+  if (!formatterCache.has(key)) {
+    formatterCache.set(key, new Intl.NumberFormat(locale, {
+      style: "currency",
+      currency,
+      maximumFractionDigits: exact ? 2 : 0,
+      minimumFractionDigits: exact ? 2 : 0
+    }));
+  }
+  return formatterCache.get(key);
+}
+const money = { format: (value) => currencyFormatter(false).format(Number(value || 0)) };
+const exactMoney = { format: (value) => currencyFormatter(true).format(Number(value || 0)) };
+const $ = (selector) => document.querySelector(selector);
+const nav = $("#nav");
+const view = $("#view");
+
+function api(path, options = {}) {
+  return fetch(path, {
+    headers: { "Content-Type": "application/json", ...(options.headers || {}) },
+    credentials: "same-origin",
+    ...options
+  }).then(async (response) => {
+    const contentType = response.headers.get("content-type") || "";
+    const body = contentType.includes("application/json") ? await response.json() : await response.text();
+    if (!response.ok) throw new Error(body.error || body || "Request failed");
+    return body;
+  });
+}
+
+function autosaveState() {
+  if (!state) return;
+  clearTimeout(autosaveTimer);
+  autosaveTimer = setTimeout(() => {
+    api("/api/state", { method: "PUT", body: JSON.stringify(state) }).catch((error) => {
+      console.warn("Autosave failed", error);
+    });
+  }, 350);
+}
+
+async function saveStateNow() {
+  if (!state) return;
+  clearTimeout(autosaveTimer);
+  await api("/api/state", { method: "PUT", body: JSON.stringify(state) });
+}
+
+function allLines() {
+  return state.budget.categories.flatMap((category) => category.lines.map((line) => ({ ...line, category: category.name, color: category.color })));
+}
+
+function lineName(lineId) {
+  return allLines().find((line) => line.id === lineId)?.name || lineId;
+}
+
+function lineSnapshot(lineId) {
+  const line = allLines().find((item) => item.id === lineId);
+  return {
+    categoryName: line?.category || "Deleted category",
+    subcategoryName: line?.name || lineId || "Deleted subcategory"
+  };
+}
+
+function transactionAssignmentLabel(transaction) {
+  const liveLine = allLines().find((line) => line.id === transaction.lineId);
+  const category = liveLine?.category || transaction.categoryName || "Deleted category";
+  const subcategory = liveLine?.name || transaction.subcategoryName || transaction.lineId || "Deleted subcategory";
+  return `${category} - ${subcategory}`;
+}
+
+function makeTransaction({ date, payee, amount, lineId, memo }) {
+  return { date, payee, amount, lineId, memo, ...lineSnapshot(lineId) };
+}
+
+function snapshotTransactionsForLine(line) {
+  if (!line) return;
+  state.transactions.forEach((transaction) => {
+    if (transaction.lineId === line.id) {
+      transaction.categoryName = line.category;
+      transaction.subcategoryName = line.name;
+    }
+  });
+}
+
+function plannedTotal() {
+  return allLines().reduce((sum, line) => sum + Number(line.planned || 0), 0);
+}
+
+function spentByLine(lineId) {
+  return state.transactions.filter((transaction) => transaction.lineId === lineId).reduce((sum, transaction) => sum + Number(transaction.amount || 0), 0);
+}
+
+function spentTotal() {
+  return state.transactions.reduce((sum, transaction) => sum + Number(transaction.amount || 0), 0);
+}
+
+function remainingTotal() {
+  return state.budget.income - spentTotal();
+}
+
+function netWorth() {
+  const assets = state.goals.netWorth.assets.reduce((sum, item) => sum + Number(item.value || 0), 0);
+  const liabilities = state.goals.netWorth.liabilities.reduce((sum, item) => sum + Number(item.value || 0), 0);
+  return { assets, liabilities, total: assets - liabilities };
+}
+
+function monthLabel() {
+  return formatMonth(state.budget.month);
+}
+
+function formatMonth(monthValue) {
+  if (!monthValue) return "";
+  const [year, month] = monthValue.split("-");
+  return new Date(Number(year), Number(month) - 1, 1).toLocaleDateString("en-US", { month: "long", year: "numeric" });
+}
+
+function availablePreviousBudgets() {
+  ensureBudgetHistory();
+  const history = state.budgetHistory || [];
+  return history
+    .filter((budget) => budget.month < state.budget.month && Array.isArray(budget.categories))
+    .sort((a, b) => b.month.localeCompare(a.month));
+}
+
+function offsetMonth(monthValue, offset) {
+  const [year, month] = monthValue.split("-").map(Number);
+  const date = new Date(year, month - 1 + offset, 1);
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}`;
+}
+
+function ensureBudgetHistory() {
+  state.budgetHistory ||= [];
+  if (state.budgetHistory.length > 0) return;
+  state.budgetHistory = [-1, -2].map((offset) => ({
+    month: offsetMonth(state.budget.month, offset),
+    income: state.budget.income,
+    categories: cloneBudgetCategories(state.budget.categories)
+  }));
+}
+
+function cloneBudgetCategories(categories) {
+  return JSON.parse(JSON.stringify(categories)).map((category) => ({
+    ...category,
+    lines: category.lines.map((line) => ({ ...line }))
+  }));
+}
+
+function copyBudgetFromMonth(month) {
+  const source = (state.budgetHistory || []).find((budget) => budget.month === month);
+  if (!source) return;
+  state.budget.categories = cloneBudgetCategories(source.categories);
+  state.budget.income = Number(source.income || state.budget.income || 0);
+  state.household.activity.unshift(`Copied budget from ${formatMonth(source.month)} into ${monthLabel()}`);
+}
+
+function rememberCurrentBudgetSnapshot() {
+  state.budgetHistory ||= [];
+  const snapshot = {
+    month: state.budget.month,
+    income: state.budget.income,
+    categories: cloneBudgetCategories(state.budget.categories)
+  };
+  const existingIndex = state.budgetHistory.findIndex((budget) => budget.month === snapshot.month);
+  if (existingIndex >= 0) state.budgetHistory[existingIndex] = snapshot;
+  else state.budgetHistory.push(snapshot);
+}
+
+function monthDateMin() {
+  return `${state.budget.month}-01`;
+}
+
+function monthDateMax() {
+  const [year, month] = state.budget.month.split("-").map(Number);
+  const lastDay = new Date(year, month, 0).getDate();
+  return `${state.budget.month}-${String(lastDay).padStart(2, "0")}`;
+}
+
+function dueDateValue(dueDay) {
+  if (!dueDay) return "";
+  return `${state.budget.month}-${String(dueDay).padStart(2, "0")}`;
+}
+
+function dueDayFromDate(value) {
+  if (!value || !value.startsWith(`${state.budget.month}-`)) return null;
+  return Number(value.slice(-2));
+}
+
+function formatShortDate(value) {
+  if (!value) return "";
+  const date = new Date(`${value}T00:00:00`);
+  if (Number.isNaN(date.getTime())) return value;
+  return date.toLocaleDateString("en-US", { month: "short", day: "numeric" });
+}
+
+function formatDateTime(value) {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value;
+  return date.toLocaleString("en-US", { month: "short", day: "numeric", year: "numeric", hour: "numeric", minute: "2-digit" });
+}
+
+function renderNav() {
+  nav.innerHTML = views.filter(([key]) => key !== "admin" || sessionUser?.isAdmin).map(([key, label, icon]) => `
+    <button class="nav-button ${key === currentView ? "active" : ""}" data-view="${key}" type="button">
+      <span>${icon}</span>${label}
+    </button>
+  `).join("");
+}
+
+function renderShell() {
+  const title = views.find(([key]) => key === currentView)?.[1] || "Budget";
+  const isAdminView = currentView === "admin";
+  $("#viewTitle").textContent = isAdminView ? "Application admin" : `${monthLabel()} plan`;
+  $("#householdName").textContent = title.toUpperCase();
+  $("#userName").textContent = sessionUser?.name || "Demo User";
+  $("#userEmail").textContent = sessionUser?.email || "demo@householdhub.app";
+  $(".demo-card strong").textContent = money.format(300);
+  $("#monthPicker").value = state.budget.month;
+  const isMealsView = currentView === "meals";
+  $("#mealWeekHeaderControl").hidden = !isMealsView;
+  if (isMealsView) {
+    ensureMealWeekData();
+    $("#mealWeekHeaderSelect").innerHTML = mealWeeksForMonth(state.budget.month).map((week) =>
+      `<option value="${week.number}" ${week.number === selectedMealWeek() ? "selected" : ""}>Week ${week.number} · ${week.label}</option>`
+    ).join("");
+  }
+  $("#householdPicker").innerHTML = households.map((household) =>
+    `<option value="${household.id}" ${household.selected ? "selected" : ""}>${household.name} · ${household.country}</option>`
+  ).join("");
+  $("#householdWorkspaceControl").hidden = isAdminView;
+  $("#removeHouseholdButton").disabled = households.length <= 1;
+  $(".month-control").hidden = isAdminView;
+  $("#syncButton").hidden = isAdminView;
+  $("#downloadCsvButton").hidden = isAdminView;
+  renderNav();
+  const metrics = metricsForView();
+  $("#metrics").hidden = metrics.length === 0;
+  $("#metrics").innerHTML = metrics.map(([label, value, note]) => `
+    <article class="metric">
+      <span>${label}</span>
+      <strong>${value}</strong>
+      ${note ? `<small>${note}</small>` : ""}
+    </article>
+  `).join("");
+}
+
+function metricsForView() {
+  const margin = state.budget.income - plannedTotal();
+  const upcoming = scheduleItems().length;
+  const groceries = groceryList().length;
+  if (currentView === "calendar") {
+    const birthdaysThisMonth = birthdayOccurrencesForMonth().length;
+    return [["Chore rotation", String(state.calendar.chores.length), "household chores"], ["Birthday reminders", String(birthdaysThisMonth), `annual birthdays in ${monthLabel()}`], [`${monthLabel()} events`, String(upcoming), "chores, birthdays and reminders"], ["Shared calendar", "Household", "tasks in every member"]];
+  }
+  if (currentView === "meals") {
+    ensureMealWeekData();
+    return [["Weekly meals", `${currentMealPlans().length}/28`, `occupied slots in Week ${selectedMealWeek()}`], ["Groceries estimate", money.format(107), "can post directly to budget"], ["Planned servings", String(plannedServingsTotal()), "people or portions planned"], ["Household plan", "Shared", "meals, recipes and grocery list"]];
+  }
+  if (currentView === "recipes") return [["Saved recipes", String(state.meals.recipes.length), "available to meal plans"], ["Ingredients", String(new Set(state.meals.recipes.flatMap((recipe) => recipe.ingredients)).size), "unique grocery items"], ["Average protein", `${Math.round(state.meals.recipes.reduce((sum, recipe) => sum + Number(recipe.protein || 0), 0) / Math.max(state.meals.recipes.length, 1))}g`, "per recipe"], ["Household library", "Shared", "available to every member"]];
+  if (currentView === "sharing") return [["Invite status", state.household.inviteCode || "Ready", "household invite"], ["Members", String(state.household.members.length), "active household users"], ["Shared scopes", String(state.household.sharedScopes.length), "workspace modules"], ["Activity", String(state.household.activity.length), "recent household changes"]];
+  if (currentView === "reports") return [["Spending", money.format(spentTotal()), "posted transactions"], ["Budget health", money.format(margin), "zero balance target"], ["Savings and debt", money.format(1220), "planned allocation"], ["Cash left", money.format(remainingTotal()), "after ledger"]];
+  if (currentView === "goals") return [["Active goals", String(state.goals.sinkingFunds.length), "sinking funds"], ["Saved", money.format(state.goals.sinkingFunds.reduce((sum, fund) => sum + fund.saved, 0)), "across goals"], ["Remaining", money.format(state.goals.sinkingFunds.reduce((sum, fund) => sum + fund.target - fund.saved, 0)), "to targets"], ["Margin finder", money.format(300), "potential monthly margin"]];
+  if (currentView === "wealth") return [["Assets", money.format(netWorth().assets), "tracked"], ["Liabilities", money.format(netWorth().liabilities), "tracked"], ["Net worth", money.format(netWorth().total), "current estimate"], ["Debt accounts", String(state.goals.debts.length), "payoff plan"]];
+  if (currentView === "admin") return [];
+  return [["Income", money.format(state.budget.income), "ready to assign"], ["Assigned", money.format(plannedTotal()), "planned this month"], ["Available", money.format(state.budget.income - plannedTotal()), "left to budget"], ["Overdue", money.format(0), "no urgent items"]];
+}
+
+function render() {
+  if (!state) return;
+  if (currentView === "admin" && !sessionUser?.isAdmin) currentView = "budget";
+  renderShell();
+  view.innerHTML = (renderers[currentView] || renderers.budget)();
+  bindViewEvents();
+  if (currentView === "admin" && !adminData) loadAdminData();
+  autosaveState();
+}
+
+const renderers = {
+  budget: renderBudget,
+  transactions: renderTransactions,
+  paychecks: renderPaychecks,
+  calendar: renderCalendar,
+  meals: renderMeals,
+  recipes: renderRecipes,
+  goals: renderGoals,
+  wealth: renderWealth,
+  sharing: renderSharing,
+  reports: renderReports,
+  admin: renderAdmin
+};
+
+function renderBudget() {
+  const previousBudgets = availablePreviousBudgets();
+  return `
+    <section class="work-grid transactions-grid">
+      <div class="main-stack">
+        <section class="budget-ledger-card card">
+          <div class="budget-ledger-head">
+            <div><h3>Income</h3><small data-income-left>${money.format(state.budget.income - plannedTotal())} left to budget</small></div>
+            <span>Planned</span>
+            <span>Remaining</span>
+          </div>
+          ${state.paychecks.map((paycheck, index) => `
+            <div class="budget-money-row">
+              <input class="line-name-input" data-income-name="${index}" value="${paycheck.name}">
+              <input class="money-input" data-income-amount="${index}" type="number" step="0.01" value="${paycheck.amount}">
+              <strong data-income-remaining="${index}">${exactMoney.format(paycheck.amount)}</strong>
+            </div>
+          `).join("")}
+          <button id="addIncomeButton" class="link-button" type="button">Add income</button>
+        </section>
+        <section class="card">
+          <div class="section-head">
+            <div><span class="card-label">Budget core</span><h3>Categories and subcategories</h3></div>
+            <label class="copy-budget-field">Use previous budget
+              <select id="copyBudgetSelect">
+                <option value="">Select month</option>
+                ${previousBudgets.map((budget) => `<option value="${budget.month}">${formatMonth(budget.month)}</option>`).join("")}
+              </select>
+            </label>
+          </div>
+          <div class="category-adder">
+            <label class="custom-combobox">Category
+              <input id="newCategoryName" autocomplete="off" placeholder="Type to search or add">
+              <div id="budgetCategoryMenu" class="combo-menu" hidden>
+                ${state.budget.categories.map((category) => `<button type="button" data-category-option="${category.name}">${category.name}</button>`).join("")}
+              </div>
+            </label>
+            <button id="addCategoryButton" class="ghost" type="button">Add category</button>
+            <button id="deleteCategoryByNameButton" class="danger-button" type="button">Delete selected</button>
+          </div>
+          <div class="budget-table">
+            ${state.budget.categories.map((category, categoryIndex) => `
+              <div class="category-row">
+                <div class="category-title">
+                  <i style="background:${category.color}"></i>
+                  <div><strong>${category.name}</strong><small data-category-left="${categoryIndex}">${money.format(category.lines.reduce((sum, line) => sum + Number(line.planned) - spentByLine(line.id), 0))} left</small></div>
+                  <span data-category-spent="${categoryIndex}">${money.format(category.lines.reduce((sum, line) => sum + spentByLine(line.id), 0))} spent</span>
+                  <b data-category-planned="${categoryIndex}">${money.format(category.lines.reduce((sum, line) => sum + Number(line.planned), 0))} planned</b>
+                  <button class="category-add-line" data-add-line-category="${categoryIndex}" type="button">+ Add subcategory</button>
+                  <button class="icon-button danger-button" data-delete-category="${categoryIndex}" type="button" aria-label="Remove ${category.name}">×</button>
+                </div>
+              </div>
+              ${category.lines.map((line, lineIndex) => {
+                const spent = spentByLine(line.id);
+                const remaining = Number(line.planned) - spent;
+                return `<div class="budget-line">
+                  <div class="line-title-stack">
+                    <input class="line-name-input" data-budget-line-name="${categoryIndex}:${lineIndex}" value="${line.name}">
+                    <label class="due-day-field">Due date <input data-budget-due-date="${categoryIndex}:${lineIndex}" type="date" min="${monthDateMin()}" max="${monthDateMax()}" value="${dueDateValue(line.dueDay)}"></label>
+                  </div>
+                  <input class="money-input" data-budget-line="${categoryIndex}:${lineIndex}" type="number" step="0.01" value="${line.planned}" min="0" aria-label="Planned amount for ${line.name}">
+                  <span>${exactMoney.format(spent)}</span>
+                  <b data-line-remaining="${categoryIndex}:${lineIndex}" class="${remaining < 0 ? "danger" : ""}">${exactMoney.format(remaining)}</b>
+                  <button class="icon-button danger-button" data-delete-line="${categoryIndex}:${lineIndex}" type="button">×</button>
+                </div>`;
+              }).join("")}
+            `).join("")}
+          </div>
+        </section>
+      </div>
+      <aside class="side-stack">
+        <section class="card">
+          <div class="card-label">Next up</div>
+          <h3>Due soon</h3>
+          ${dueDateRows().slice(0, 5).map((item) => compactRow(item.name, item.date, item.type)).join("")}
+        </section>
+        <section class="card">
+          <div class="card-label">Insights</div>
+          <h3>Margin moves</h3>
+          ${compactRow(`${money.format(300)} flexible margin`, "Available across lower-activity lines", "Move")}
+          ${compactRow("Groceries has $406 left", "Based on planned meal list", "Watch")}
+          ${compactRow("2 unassigned transactions", "Coffee House and Bookstore", "Assign")}
+        </section>
+      </aside>
+    </section>
+  `;
+}
+
+function renderTransactions() {
+  const imported = transactionInboxItems().filter((transaction) => !(state.transactionInboxDone || []).includes(transaction.id));
+  const unassignedLedger = [
+    { id: "bookstore-may21", payee: "Bookstore", amount: 42.10, date: "2026-05-21" },
+    { id: "coffee-house-may20", payee: "Coffee House", amount: 18.72, date: "2026-05-20" }
+  ].filter((item) => !state.transactions.some((transaction) =>
+    transaction.payee === item.payee
+    && transaction.date === item.date
+    && Number(transaction.amount) === Number(item.amount)
+  ));
+  const lineOptions = (selectedLineId) => allLines().map((line) => `<option value="${line.id}" ${line.id === selectedLineId ? "selected" : ""}>${line.category} - ${line.name}</option>`).join("");
+  const firstCategory = state.budget.categories[0];
+  return `
+    <section class="work-grid">
+      <div class="main-stack">
+        <section class="card soft-card"><div class="card-label">Transactions</div><h3>Connected accounts</h3><div class="sync-empty">Connect a bank to import transactions</div></section>
+        <section class="card">
+          <div class="section-head"><div><span class="card-label">Budget setup</span><h3>Manage subcategories from Transactions</h3></div></div>
+          <div class="transaction-subcategory-adder">
+            <label>Category<select id="transactionParentCategory">${state.budget.categories.map((category, index) => `<option value="${index}">${category.name}</option>`).join("")}</select></label>
+            <label class="custom-combobox">Subcategory
+              <input id="transactionSubcategoryName" autocomplete="off" placeholder="Type to search or add">
+              <div id="transactionSubcategoryMenu" class="combo-menu" hidden>
+                ${(firstCategory?.lines || []).map((line) => `<button type="button" data-subcategory-option="${line.name}">${line.name}</button>`).join("")}
+              </div>
+            </label>
+            <button id="addTransactionSubcategoryButton" class="ghost" type="button">Add subcategory</button>
+            <button id="deleteTransactionSubcategoryButton" class="danger-button" type="button">Delete selected</button>
+          </div>
+        </section>
+        <section class="card">
+          <div class="section-head"><div><span class="card-label">Bank expense</span><h3>Bank stream</h3></div><button id="addTransactionButton" type="button">+ Add transaction</button></div>
+          ${imported.map((transaction) => `
+            <div class="assign-row">
+              <div><strong>${transaction.payee}</strong><small>${formatShortDate(transaction.date)}</small></div>
+              <b>${exactMoney.format(transaction.amount)}</b>
+              <label>Budget line<select>${lineOptions(transaction.lineId)}</select></label>
+              <button class="icon-button" data-accept-import="${transaction.id}" type="button">✓</button>
+              <button class="icon-button danger-button" data-dismiss-import="${transaction.id}" type="button">×</button>
+            </div>
+          `).join("") || `<div class="empty-inline">No bank stream items waiting</div>`}
+        </section>
+      </div>
+      <aside class="side-stack">
+        <section class="card">
+          <div class="card-label">Entries</div><h3>Ledger</h3>
+          <form id="transactionForm" class="mini-form transaction-entry-form">
+            <label>Payee<input name="payee" placeholder="Coffee House" required></label>
+            <label>Amount<input name="amount" type="number" step="0.01" placeholder="18.72" required></label>
+            <label>Subcategory<select name="lineId">${allLines().map((line) => `<option value="${line.id}">${line.category} - ${line.name}</option>`).join("")}</select></label>
+            <button type="submit">Split</button>
+          </form>
+          ${unassignedLedger.map((transaction) => `
+            <div class="ledger-assign-row">
+              <div><strong>${transaction.payee}</strong><small>${formatShortDate(transaction.date)}</small></div>
+              <b>-${exactMoney.format(transaction.amount).replace("$", "$")}</b>
+              <label>Assign to<select data-ledger-line="${transaction.id}">${lineOptions("")}</select></label>
+              <button data-assign-ledger="${transaction.id}:${transaction.payee}:${transaction.amount}:${transaction.date}" type="button">Assign</button>
+            </div>
+          `).join("")}
+          ${[
+            { payee: "Power and Water", amount: -211.38, date: "2026-05-17", tag: "Housing - Utilities" },
+            { payee: "Green Market", amount: -96.80, date: "2026-05-14", tag: "Food - Groceries" },
+            ...state.transactions.slice(0, 6).map((transaction) => ({ payee: transaction.payee, amount: -transaction.amount, date: transaction.date, tag: transactionAssignmentLabel(transaction) }))
+          ].map((transaction) => compactRow(transaction.payee, formatShortDate(transaction.date), `${exactMoney.format(transaction.amount)} · ${transaction.tag}`, "danger")).join("")}
+        </section>
+      </aside>
+    </section>`;
+}
+
+function renderPaychecks() {
+  const paycheckOptions = state.paychecks.map((paycheck) => `<option value="${paycheck.date}">${paycheck.name} - ${money.format(paycheck.amount)}</option>`).join("");
+  const lineOptions = allLines().map((line) => `<option value="${line.id}">${line.category} - ${line.name}</option>`).join("");
+  const amountOptions = [50, 100, 150, 200, 250, 300, 350, 450, 520, 620, 850, 1850].map((amount) => `<option value="${amount}">${money.format(amount)}</option>`).join("");
+  return `
+    <section class="work-grid">
+      <div class="main-stack">
+        <section class="card">
+          <div class="section-head"><div><span class="card-label">Cash flow</span><h3>Paycheck plan</h3></div><button id="addPaycheckButton" type="button">+ Add paycheck</button></div>
+          <div class="paycheck-builder">
+            <label>Paycheck<select id="paycheckSelect">${paycheckOptions}</select></label>
+            <label>Budget line<select id="paycheckLineSelect">${lineOptions}</select></label>
+            <label>Amount<select id="paycheckAmountSelect">${amountOptions}</select></label>
+            <button id="assignBillButton" type="button">Assign bill</button>
+          </div>
+          <div class="paycheck-grid">
+            ${state.paychecks.map((paycheck) => {
+              const assigned = paycheck.assignedLineIds.reduce((sum, id) => sum + (allLines().find((line) => line.id === id)?.planned || 0), 0);
+              return `<article class="paycheck-card">
+                <div class="section-head"><h3>${paycheck.name}</h3><span class="pill">${money.format(paycheck.amount)}</span></div>
+                <small>${paycheck.date}</small>
+                <div class="mini-tags">${paycheck.assignedLineIds.map((id) => `<span>${lineName(id)}</span>`).join("")}</div>
+                <div class="split-stat"><span>Income ${money.format(paycheck.amount)}</span><b>Assigned ${money.format(assigned)}</b></div>
+              </article>`;
+            }).join("")}
+          </div>
+        </section>
+      </div>
+      <aside class="side-stack">
+        <section class="card"><div class="card-label">Calendar</div><h3>Due-date flow</h3>${dueDateRows().map((item) => compactRow(item.name, item.date, item.type)).join("")}</section>
+        <section class="card"><div class="card-label">Reminders</div><h3>Bills and goals</h3>${["Credit card payoff due", "Plan next month", "Move money to emergency fund"].map((item) => compactRow(item, "May", "Done")).join("")}</section>
+      </aside>
+    </section>`;
+}
+
+function renderCalendar() {
+  return `
+    <section class="work-grid calendar-layout">
+      <div class="main-stack">
+        <section class="card calendar-main-card">
+          <div class="section-head">
+            <div><span class="card-label">Household calendar</span><h3>Chores, birthdays and reminders</h3></div>
+            <div class="button-row"><button id="addChoreButton" class="ghost" type="button">+ Add chore</button><button id="addBirthdayButton" type="button">+ Add birthday</button></div>
+          </div>
+          <form id="calendarQuickAdd" class="calendar-quick-add">
+            <label>Type<select name="type"><option value="chore">Chore</option><option value="birthday">Birthday reminder</option><option value="reminder">Reminder</option></select></label>
+            <label>Title<input name="title" placeholder="Mom birthday reminder" required></label>
+            <label>Date<input name="date" type="date" value="${state.budget.month}-01" required></label>
+            <label>Owner<input name="owner" placeholder="Demo User"></label>
+            <label data-chore-recurrence-field>Repeat<select name="recurrence"><option value="once">Once</option><option value="weekly" selected>Weekly</option><option value="biweekly">Every 2 weeks</option><option value="monthly">Monthly</option></select></label>
+            <label data-birthday-reminder-field hidden>Remind before<select name="reminderDays"><option value="0">Same day</option><option value="1">1 day</option><option value="3">3 days</option><option value="7" selected>7 days</option><option value="14">14 days</option></select></label>
+            <button type="submit">Add</button>
+          </form>
+          <div class="calendar-grid">${calendarCells().map((cell) => `
+            <div class="day-cell ${cell.muted ? "muted-cell" : ""}">
+              <b>${cell.day}</b>
+              ${cell.items.map((item) => `<span class="event ${item.eventType || item.type}">${item.title}</span>`).join("")}
+            </div>
+          `).join("")}</div>
+        </section>
+      </div>
+      <aside class="side-stack">
+        <section class="card"><div class="card-label">Daily planner</div><h3>Upcoming schedule</h3>${scheduleItems().map((item) => compactRow(item.title, item.date, item.label || item.type)).join("")}</section>
+        <section class="card">
+          <div class="section-head"><div><span class="card-label">What to do</span><h3>Chore rotation</h3></div><button id="sideAddChoreButton" class="ghost" type="button">Add chore</button></div>
+          ${state.calendar.chores.map((chore, index) => {
+            const occurrence = nextChoreOccurrenceInMonth(chore);
+            return `<div class="compact-row">
+              <div><strong>${chore.title}</strong><small>${occurrence?.date || "No occurrence this month"} · ${chore.assignee} · ${choreCadenceLabel(chore)}</small></div>
+              ${occurrence ? `<button class="ghost chore-complete-button" data-complete-chore="${index}:${occurrence.date}" type="button">Complete</button>` : `<span class="pill">Recurring</span>`}
+            </div>`;
+          }).join("")}
+        </section>
+        <section class="card">
+          <div class="section-head"><div><span class="card-label">Birthdays</span><h3>Birthday reminders</h3></div><button id="sideAddBirthdayButton" class="ghost" type="button">Add birthday</button></div>
+          ${state.calendar.events.filter((event) => event.type === "birthday").map((event) => compactRow(birthdayDisplayTitle(event), `${formatBirthdayMonthDay(event)} · every year · ${Number(event.reminderDays || 0)} days before`, "Annual")).join("")}
+        </section>
+      </aside>
+    </section>`;
+}
+
+function renderMeals() {
+  const meals = ["Breakfast", "Lunch", "Dinner", "Snack"];
+  const days = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"];
+  ensureMealWeekData();
+  const weeks = mealWeeksForMonth(state.budget.month);
+  const selectedWeek = selectedMealWeek();
+  const selectedWeekInfo = weeks.find((week) => week.number === selectedWeek) || weeks[0];
+  const selectedRecipe = recipeById(state.meals.selectedRecipeId) || state.meals.recipes[0];
+  state.meals.selectedRecipeId = selectedRecipe?.id || "";
+  return `
+    <section class="meal-layout">
+      <div class="work-grid">
+        <div class="main-stack">
+          <section class="card">
+            <div class="section-head"><div><span class="card-label">Meal plan</span><h3>Household meal plan</h3></div><div class="button-row"><button id="saveMealWeekButton" class="ghost" type="button">Save week</button><button id="postGroceriesButton" class="ghost" type="button">Post groceries</button></div></div>
+            <form id="mealPlanForm" class="meal-toolbar">
+              <label>Day<select name="day">${days.map((day) => `<option value="${day}">${day}</option>`).join("")}</select></label>
+              <label>Meal<select name="slot">${meals.map((meal) => `<option value="${meal}">${meal}</option>`).join("")}</select></label>
+              <label class="custom-combobox meal-recipe-combobox">Recipe
+                <input id="mealRecipeName" autocomplete="off" placeholder="Type to search or add" value="${selectedRecipe?.name || ""}">
+                <input id="mealRecipeId" name="recipeId" type="hidden" value="${selectedRecipe?.id || ""}">
+                <div id="mealRecipeMenu" class="combo-menu" hidden>
+                  ${state.meals.recipes.map((recipe) => `<button type="button" data-meal-recipe-option="${recipe.id}">${recipe.name}</button>`).join("")}
+                </div>
+              </label>
+              <label>Servings<input name="servings" type="number" min="1" max="99" step="1" value="3" required></label>
+              <button id="addMealRecipeButton" class="ghost" type="button">Add recipe</button>
+              <button type="submit">Plan meal</button>
+            </form>
+            <div class="meal-week-caption"><strong>Week ${selectedWeek}</strong><span>${selectedWeekInfo.label} · ${monthLabel()}</span></div>
+            <div class="meal-grid">
+              ${days.map((day, dayIndex) => `<div class="meal-day"><h4>${day}<span>${dayIndex < 5 ? "Planned" : "Weekend"}</span></h4>${meals.map((meal) => {
+                const planned = plannedMeal(day, meal);
+                const plannedIndex = planned ? state.meals.plannedWeek.indexOf(planned) : -1;
+                return `<div class="meal-slot">
+                  <div class="meal-slot-head">
+                    <small>${meal}</small>
+                    ${planned ? `<button class="meal-remove-button" data-remove-planned-meal="${plannedIndex}" type="button" aria-label="Remove ${meal} from ${day}">×</button>` : ""}
+                  </div>
+                  <strong>${planned?.meal || "Open"}</strong>
+                  ${planned ? `<em>${recipeIngredients(planned.recipeId).slice(0, 2).join(", ")}</em>` : ""}
+                  ${planned ? `<label class="meal-servings-field">Servings<input data-meal-servings="${plannedIndex}" type="number" min="1" max="99" step="1" value="${planned.servings || 1}"></label>` : ""}
+                </div>`;
+              }).join("")}</div>`).join("")}
+            </div>
+          </section>
+        </div>
+        <aside class="side-stack">
+          <section class="card"><div class="card-label">Nutrition</div><h3>Calories and protein goals</h3>${progressBlock("Daily calories", 1780, state.meals.nutritionGoals.calories)}${progressBlock("Daily protein", 130, state.meals.nutritionGoals.protein)}</section>
+          <section class="card"><div class="card-label">Smart grocery list</div><h3>Auto-built from meals</h3>${groceryList().slice(0, 10).map((item) => compactRow(item, "from meal plan", "1x")).join("")}</section>
+        </aside>
+      </div>
+    </section>`;
+}
+
+function renderRecipes() {
+  const editingRecipe = recipeById(state.meals.editingRecipeId);
+  return `
+    <section class="recipe-library">
+      <section class="card">
+        <div class="section-head"><div><span class="card-label">Recipe setup</span><h3>${editingRecipe ? "Update recipe" : "Add a recipe"}</h3></div></div>
+        <form id="recipeForm" class="recipe-builder">
+          <input name="recipeId" type="hidden" value="${editingRecipe?.id || ""}">
+          <label>Name<input name="name" placeholder="Vegetable curry" value="${editingRecipe?.name || ""}" required></label>
+          <label>Ingredients<input name="ingredients" placeholder="onion, tomato, lentils" value="${editingRecipe?.ingredients.join(", ") || ""}" required></label>
+          <label>Calories<input name="calories" type="number" min="0" value="${editingRecipe?.calories ?? 400}"></label>
+          <label>Protein (g)<input name="protein" type="number" min="0" value="${editingRecipe?.protein ?? 20}"></label>
+          <div class="recipe-form-actions">
+            ${editingRecipe ? `<button id="cancelRecipeEditButton" class="ghost" type="button">Cancel</button>` : ""}
+            <button type="submit">${editingRecipe ? "Update recipe" : "Add recipe"}</button>
+          </div>
+        </form>
+      </section>
+      <section class="card">
+        <div class="section-head">
+          <div><span class="card-label">Saved recipes</span><h3>Recipes, ingredients and grocery-ready meals</h3></div>
+        </div>
+        <div class="recipe-grid">
+          ${state.meals.recipes.map((recipe) => `
+            <article class="recipe-card">
+              <div class="section-head">
+                <div><strong>${recipe.name}</strong><small>${recipe.calories} calories · ${recipe.protein}g protein</small></div>
+                <span class="pill">${recipe.ingredients.length} items</span>
+              </div>
+              <div class="mini-tags">${recipe.ingredients.map((ingredient) => `<span>${ingredient}</span>`).join("")}</div>
+              <div class="recipe-actions">
+                <button class="ghost" type="button" data-select-recipe="${recipe.id}">Use in Meals</button>
+                <button class="ghost" type="button" data-edit-recipe="${recipe.id}">Edit</button>
+                <button class="icon-button danger-button" data-delete-recipe="${recipe.id}" type="button">×</button>
+              </div>
+            </article>
+          `).join("")}
+        </div>
+      </section>
+    </section>`;
+}
+
+function renderGoals() {
+  return `
+    <section class="narrow-layout">
+      <section class="card">
+        <div class="section-head"><div><span class="card-label">Funding</span><h3>Sinking funds and goals</h3></div><button id="addGoalButton" type="button">+ Add goal</button></div>
+        ${state.goals.sinkingFunds.map((fund, index) => `
+          <article class="goal-card">
+            <div class="section-head"><div><strong>${fund.name}</strong><small>${money.format(fund.target)} target</small></div><button class="icon-button danger-button" data-delete-goal="${index}" type="button">×</button></div>
+            ${progressBlock("Progress", fund.saved, fund.target)}
+            <div class="split-stat"><span>${Math.round((fund.saved / fund.target) * 100)}%</span><b>${money.format(fund.target - fund.saved)} remaining</b></div>
+          </article>
+        `).join("")}
+      </section>
+    </section>`;
+}
+
+function renderWealth() {
+  return `
+    <section class="work-grid">
+      <div class="main-stack">
+        <section class="card">
+          <div class="section-head"><div><span class="card-label">Debt snowball</span><h3>Debt payoff tracker</h3></div><button id="addDebtButton" type="button">+ Add debt</button></div>
+          ${state.goals.debts.map((debt, index) => `<article class="debt-card">
+            <div class="section-head"><div><strong>${index === 0 ? "Next: " : ""}${debt.name}</strong><small>${money.format(debt.minimum)} minimum · ${debt.rate}% APR</small></div><b>${money.format(debt.balance)}</b></div>
+            <div class="bar"><span style="width:${Math.max(4, Math.min(95, Math.round((1 - debt.balance / 15000) * 100)))}%"></span></div>
+            <div class="payment-row"><label>Extra payment<input data-debt-payment="${index}" value="100" type="number" min="0"></label><button class="ghost" data-apply-debt-payment="${index}" type="button">Apply payment</button><button class="icon-button danger-button" data-delete-debt="${index}" type="button">×</button></div>
+          </article>`).join("")}
+        </section>
+      </div>
+      <aside class="side-stack"><section class="card"><div class="section-head"><div><span class="card-label">Net worth</span><h3>Assets and liabilities</h3></div><button id="addNetWorthItemButton" type="button">+ Add item</button></div><div class="net-worth-strip"><strong>${money.format(netWorth().total)}</strong><span>Assets ${money.format(netWorth().assets)} Liabilities ${money.format(netWorth().liabilities)}</span></div>${state.goals.netWorth.assets.map((asset, index) => compactRow(asset.name, "Asset", money.format(asset.value), "", `data-delete-asset="${index}"`)).join("")}${state.goals.netWorth.liabilities.map((item, index) => compactRow(item.name, "Liability", money.format(item.value), "danger", `data-delete-liability="${index}"`)).join("")}</section></aside>
+    </section>`;
+}
+
+function renderSharing() {
+  const accessRoles = ["Co-owner, full edit", "Adult, budget and calendar", "Viewer, read only", "Meals and chores only"];
+  const allScopes = [
+    "Budget",
+    "Transactions",
+    "Bank sync",
+    "Paychecks",
+    "Calendar",
+    "Chores",
+    "Birthday reminders",
+    "Meals",
+    "Grocery lists",
+    "Reminders",
+    "Goals",
+    "Debt payoff",
+    "Net worth",
+    "Reports"
+  ];
+  const sharedScopes = state.household.sharedScopes || [];
+  return `
+    <section class="work-grid">
+      <div class="main-stack">
+        <section class="card">
+          <div class="section-head"><div><span class="card-label">Household</span><h3>Complete household sharing</h3></div><button id="inviteButton" type="button">Generate invite</button></div>
+          <div class="invite-box"><span>Invite code</span><strong>${state.household.inviteCode || "No invite yet"}</strong></div>
+          <div class="shared-box">
+            <div class="section-head">
+              <div>
+                <h3>${state.household.name}</h3>
+                <p>Share the complete household workspace, or choose exactly which areas members can access.</p>
+              </div>
+              <label class="share-all-toggle"><input id="shareEverythingToggle" type="checkbox" ${sharedScopes.length === allScopes.length ? "checked" : ""}> Share everything</label>
+            </div>
+            <div class="scope-grid">
+              ${allScopes.map((scope) => `<label class="scope-toggle"><input data-share-scope="${scope}" type="checkbox" ${sharedScopes.includes(scope) ? "checked" : ""}> <span>${scope}</span></label>`).join("")}
+            </div>
+          </div>
+          <form id="inviteMemberForm" class="invite-form"><input name="name" value="Taylor Carter"><input name="email" value="taylor@example.com"><select name="role">${accessRoles.map((role) => `<option value="${role}">${role}</option>`).join("")}</select><button type="submit">Add spouse</button></form>
+          ${state.household.members.map((member) => compactRow(member.name, member.email, `${member.role}${member.role.includes("Invited") ? "" : " · Active"} · ${sharedScopes.length === allScopes.length ? "Complete household" : `${sharedScopes.length} shared areas`}`)).join("")}
+        </section>
+      </div>
+      <aside class="side-stack">
+        <section class="card">
+          <div class="card-label">Shared access</div>
+          <h3>Included areas</h3>
+          ${sharedScopes.map((scope) => compactRow(scope, "Shared with household members", "On")).join("")}
+        </section>
+        <section class="card"><div class="card-label">Shared activity</div><h3>Household changes</h3>${state.household.activity.map((item) => compactRow(item, "May 21", "Log")).join("")}</section>
+      </aside>
+    </section>`;
+}
+
+function renderReports() {
+  const categories = reportCategories();
+  return `
+    <section class="work-grid">
+      <div class="main-stack">
+        <section class="card"><div class="card-label">Spending</div><h3>Category report</h3>${categories.map((category) => `<div class="report-row"><strong>${category.name}</strong><div class="report-bar"><span style="width:${category.percent}%; background:${category.color}"></span></div><b>${money.format(category.value)}</b></div>`).join("")}</section>
+      </div>
+      <aside class="side-stack">
+        <section class="card"><div class="card-label">Budget health</div><h3>Snapshot</h3><div class="snapshot-grid"><span>Pending <b>${money.format(61)}</b></span><span>Cash left <b>${money.format(remainingTotal())}</b></span><span>Savings and debt <b>${money.format(1220)}</b></span><span>Zero balance <b>${money.format(0)}</b></span></div><div class="donut"></div>${[[3460, "Essentials"], [1220, "Savings and debt"], [520, "Giving"]].map(([value, label]) => compactRow(`${label} - ${money.format(value)}`, "", "")).join("")}</section>
+      </aside>
+    </section>`;
+}
+
+function renderAdmin() {
+  const users = adminData?.users || [];
+  const monthly = adminData?.monthly || [];
+  return `
+    <section class="admin-layout">
+      <section class="card">
+        <div class="section-head">
+          <div><span class="card-label">Owner controls</span><h3>Application administration</h3></div>
+          <button id="refreshAdminButton" class="ghost" type="button">Refresh stats</button>
+        </div>
+        <div class="admin-stat-grid">
+          ${[
+            ["Registered users", adminData?.stats?.users || 0],
+            ["Enabled logins", adminData?.stats?.activeUsers || 0],
+            ["Admin users", adminData?.stats?.admins || 0],
+            ["Households", adminData?.stats?.households || 0],
+            ["Total sign-ins", adminData?.stats?.totalLogins || 0],
+            ["30-day login users", adminData?.stats?.recentLogins || 0]
+          ].map(([label, value]) => `<article><span>${label}</span><strong>${value}</strong></article>`).join("")}
+        </div>
+      </section>
+      <section class="card">
+        <div class="section-head"><div><span class="card-label">Logins</span><h3>User access</h3></div></div>
+        ${adminData ? `
+          <div class="admin-table">
+            <div class="admin-table-head">
+              <span>User</span><span>Status</span><span>Logins</span><span>Last login</span><span>Controls</span>
+            </div>
+            ${users.map((user) => `
+              <div class="admin-user-row">
+                <div><strong>${user.name}</strong><small>${user.email}</small></div>
+                <span class="pill ${user.disabled ? "danger" : ""}">${user.disabled ? "Disabled" : user.isAdmin ? "Admin" : "Active"}</span>
+                <b>${user.loginCount}</b>
+                <small>${user.lastLoginAt ? formatDateTime(user.lastLoginAt) : "Never"}</small>
+                <div class="admin-actions">
+                  <button class="ghost" data-admin-toggle-disabled="${user.id}" type="button">${user.disabled ? "Enable" : "Disable"}</button>
+                  <button class="ghost" data-admin-toggle-admin="${user.id}" type="button">${user.isAdmin ? "Remove admin" : "Make admin"}</button>
+                  <button class="ghost" data-admin-reset-password="${user.id}" type="button">Reset password</button>
+                </div>
+              </div>
+            `).join("")}
+          </div>
+        ` : `<div class="empty-inline">Loading admin statistics</div>`}
+      </section>
+      <section class="card">
+        <div class="section-head"><div><span class="card-label">Month level statistics</span><h3>Application activity by month</h3></div></div>
+        ${adminData ? `
+          <div class="admin-month-table">
+            <div class="admin-month-head">
+              <span>Month</span><span>New users</span><span>New households</span><span>Logins</span><span>Users logged in</span>
+            </div>
+            ${monthly.map((row) => `
+              <div class="admin-month-row">
+                <strong>${row.label}</strong>
+                <span>${row.usersCreated}</span>
+                <span>${row.householdsCreated}</span>
+                <span>${row.logins}</span>
+                <span>${row.uniqueLoginUsers}</span>
+              </div>
+            `).join("")}
+          </div>
+        ` : `<div class="empty-inline">Loading monthly statistics</div>`}
+      </section>
+    </section>`;
+}
+
+function compactRow(title, detail, badge, tone = "", actionAttrs = "") {
+  return `<div class="compact-row ${tone}"><div><strong>${title}</strong>${detail ? `<small>${detail}</small>` : ""}</div>${badge ? `<span class="pill">${badge}</span>` : ""}${actionAttrs ? `<button class="icon-button danger-button" ${actionAttrs} type="button">×</button>` : ""}</div>`;
+}
+
+function progressBlock(label, value, target) {
+  const pct = Math.min(100, Math.round((value / Math.max(target, 1)) * 100));
+  return `<div class="progress-block"><div><span>${label}</span><b>${money.format(value)} / ${money.format(target)}</b></div><div class="bar"><span style="width:${pct}%"></span></div></div>`;
+}
+
+function dueDateRows() {
+  return allLines().sort((a, b) => (a.dueDay || 31) - (b.dueDay || 31)).map((line) => ({ name: line.name, date: `${String(line.dueDay || 28).padStart(2, "0")} · Bill ${money.format(line.planned)}`, type: line.dueDay % 2 ? "Pay" : "Due" }));
+}
+
+function scheduleItems() {
+  ensureBirthdayRecurrenceData();
+  ensureChoreRecurrenceData();
+  const selectedMonth = state.budget.month;
+  const oneTimeEvents = state.calendar.events
+    .filter((event) => event.type !== "birthday" && event.date?.startsWith(selectedMonth))
+    .map((event) => ({ title: event.title, date: event.date.slice(5), type: event.type }));
+  const chores = state.calendar.chores.flatMap((chore) =>
+    choreOccurrencesForMonth(chore).map((occurrence) => ({
+      title: chore.title,
+      date: occurrence.date.slice(5),
+      type: "Chore",
+      label: `${choreCadenceLabel(chore)} chore`,
+      eventType: "chore"
+    }))
+  );
+  const annualBirthdays = birthdayScheduleItems();
+  const builtInReminders = selectedMonth === "2026-05"
+    ? [
+        { title: "Plan next month", date: "05-28", type: "Reminder" },
+        { title: "Move money to emergency fund", date: "05-30", type: "Reminder" }
+      ]
+    : [];
+  return [...oneTimeEvents, ...chores, ...annualBirthdays, ...builtInReminders]
+    .sort((a, b) => a.date.localeCompare(b.date));
+}
+
+function ensureChoreRecurrenceData() {
+  state.calendar.chores.forEach((chore) => {
+    chore.startDate ||= chore.nextDue;
+    chore.recurrence ||= String(chore.cadence || "Once").toLowerCase() === "weekly" ? "weekly" : "once";
+    chore.cadence = choreCadenceLabel(chore);
+    chore.completedDates ||= [];
+  });
+}
+
+function choreCadenceLabel(chore) {
+  const recurrence = chore.recurrence || "once";
+  return {
+    once: "Once",
+    weekly: "Weekly",
+    biweekly: "Every 2 weeks",
+    monthly: "Monthly"
+  }[recurrence] || "Once";
+}
+
+function choreOccurrencesForMonth(chore) {
+  ensureChoreRecurrenceData();
+  const start = new Date(`${chore.startDate}T00:00:00`);
+  if (Number.isNaN(start.getTime())) return [];
+  const [year, month] = state.budget.month.split("-").map(Number);
+  const monthStart = new Date(year, month - 1, 1);
+  const monthEnd = new Date(year, month, 0);
+  const completed = new Set(chore.completedDates || []);
+  const dates = [];
+
+  if (chore.recurrence === "once") {
+    const key = dateKey(start);
+    return key.startsWith(state.budget.month) && !completed.has(key) ? [{ date: key }] : [];
+  }
+
+  if (chore.recurrence === "monthly") {
+    let cursor = new Date(start.getFullYear(), start.getMonth(), 1);
+    while (cursor <= monthEnd) {
+      const lastDay = new Date(cursor.getFullYear(), cursor.getMonth() + 1, 0).getDate();
+      const occurrence = new Date(cursor.getFullYear(), cursor.getMonth(), Math.min(start.getDate(), lastDay));
+      if (occurrence >= start && occurrence >= monthStart && occurrence <= monthEnd) {
+        const key = dateKey(occurrence);
+        if (!completed.has(key)) dates.push({ date: key });
+      }
+      cursor.setMonth(cursor.getMonth() + 1);
+    }
+    return dates;
+  }
+
+  const intervalDays = chore.recurrence === "biweekly" ? 14 : 7;
+  const cursor = new Date(start);
+  if (cursor < monthStart) {
+    const daysUntilMonth = Math.floor((monthStart - cursor) / 86400000);
+    cursor.setDate(cursor.getDate() + Math.max(0, Math.floor(daysUntilMonth / intervalDays) * intervalDays));
+    while (cursor < monthStart) cursor.setDate(cursor.getDate() + intervalDays);
+  }
+  while (cursor <= monthEnd) {
+    const key = dateKey(cursor);
+    if (!completed.has(key)) dates.push({ date: key });
+    cursor.setDate(cursor.getDate() + intervalDays);
+  }
+  return dates;
+}
+
+function nextChoreOccurrenceInMonth(chore) {
+  return choreOccurrencesForMonth(chore)[0] || null;
+}
+
+function ensureBirthdayRecurrenceData() {
+  state.calendar.events.forEach((event) => {
+    if (event.type !== "birthday") return;
+    event.monthDay ||= event.date?.slice(5);
+    event.annual = true;
+    event.reminderDays = Number(event.reminderDays ?? 7);
+  });
+}
+
+function annualBirthdayDate(event, year) {
+  const [month, requestedDay] = String(event.monthDay || event.date?.slice(5) || "01-01").split("-").map(Number);
+  const lastDay = new Date(year, month, 0).getDate();
+  return new Date(year, month - 1, Math.min(requestedDay, lastDay));
+}
+
+function dateKey(date) {
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
+}
+
+function birthdayOccurrencesForMonth() {
+  ensureBirthdayRecurrenceData();
+  const year = Number(state.budget.month.slice(0, 4));
+  return state.calendar.events
+    .filter((event) => event.type === "birthday")
+    .map((event) => ({ event, date: annualBirthdayDate(event, year) }))
+    .filter(({ date }) => dateKey(date).startsWith(state.budget.month));
+}
+
+function birthdayScheduleItems() {
+  const selectedYear = Number(state.budget.month.slice(0, 4));
+  return state.calendar.events
+    .filter((event) => event.type === "birthday")
+    .flatMap((event) => {
+      const birthdayDate = annualBirthdayDate(event, selectedYear);
+      const reminderDate = new Date(birthdayDate);
+      reminderDate.setDate(reminderDate.getDate() - Number(event.reminderDays || 0));
+      const birthdayTitle = birthdayDisplayTitle(event);
+      const items = [];
+      if (dateKey(birthdayDate).startsWith(state.budget.month)) {
+        items.push({ title: birthdayTitle, date: dateKey(birthdayDate).slice(5), type: "birthday", label: "Birthday", eventType: "birthday" });
+      }
+      if (Number(event.reminderDays || 0) > 0 && dateKey(reminderDate).startsWith(state.budget.month)) {
+        items.push({ title: `${birthdayTitle} reminder`, date: dateKey(reminderDate).slice(5), type: "birthday-reminder", label: "Birthday reminder", eventType: "birthday-reminder" });
+      }
+      return items;
+    });
+}
+
+function birthdayDisplayTitle(event) {
+  return String(event.title || "Birthday").replace(/\s+reminder$/i, "").trim();
+}
+
+function formatBirthdayMonthDay(event) {
+  ensureBirthdayRecurrenceData();
+  const date = annualBirthdayDate(event, 2000);
+  return date.toLocaleDateString("en-US", { month: "long", day: "numeric" });
+}
+
+function calendarCells() {
+  const eventMap = new Map();
+  scheduleItems().forEach((item) => {
+    const day = Number(item.date.split("-")[1]);
+    eventMap.set(day, [...(eventMap.get(day) || []), item]);
+  });
+  const cells = [];
+  for (let i = 0; i < 35; i += 1) {
+    const day = i + 1;
+    cells.push({ day, muted: day > 31, items: eventMap.get(day) || [] });
+  }
+  return cells;
+}
+
+function groceryList() {
+  ensureMealWeekData();
+  return [...new Set(currentMealPlans().flatMap((planned) => state.meals.recipes.find((recipe) => recipe.id === planned.recipeId)?.ingredients || []))];
+}
+
+function plannedMeal(day, slot) {
+  return currentMealPlans().find((planned) => planned.day === day && planned.slot === slot)
+    || currentMealPlans().find((planned) => planned.day === day && !planned.slot && slot === "Dinner");
+}
+
+function ensureMealWeekData() {
+  state.meals.selectedWeekByMonth ||= {};
+  state.meals.plannedWeek ||= [];
+  state.meals.plannedWeek.forEach((planned) => {
+    planned.month ||= state.budget.month;
+    planned.week ||= 1;
+    planned.servings ||= 3;
+  });
+  const weeks = mealWeeksForMonth(state.budget.month);
+  const selected = Number(state.meals.selectedWeekByMonth[state.budget.month] || 1);
+  state.meals.selectedWeekByMonth[state.budget.month] = Math.min(Math.max(selected, 1), weeks.length);
+}
+
+function selectedMealWeek() {
+  return Number(state.meals.selectedWeekByMonth?.[state.budget.month] || 1);
+}
+
+function currentMealPlans() {
+  return state.meals.plannedWeek.filter((planned) =>
+    planned.month === state.budget.month && Number(planned.week || 1) === selectedMealWeek()
+  );
+}
+
+function plannedServingsTotal() {
+  return currentMealPlans().reduce((sum, planned) => sum + Number(planned.servings || 1), 0);
+}
+
+function mealWeeksForMonth(monthValue) {
+  const [year, month] = monthValue.split("-").map(Number);
+  const firstDay = new Date(year, month - 1, 1);
+  const lastDay = new Date(year, month, 0);
+  const firstMonday = new Date(firstDay);
+  const mondayOffset = (firstDay.getDay() + 6) % 7;
+  firstMonday.setDate(firstDay.getDate() - mondayOffset);
+  const weeks = [];
+  for (let cursor = new Date(firstMonday), number = 1; cursor <= lastDay; number += 1, cursor.setDate(cursor.getDate() + 7)) {
+    const end = new Date(cursor);
+    end.setDate(end.getDate() + 6);
+    const visibleStart = cursor < firstDay ? firstDay : cursor;
+    const visibleEnd = end > lastDay ? lastDay : end;
+    const startLabel = visibleStart.toLocaleDateString("en-US", { month: "short", day: "numeric" });
+    const endLabel = visibleEnd.toLocaleDateString("en-US", { month: "short", day: "numeric" });
+    weeks.push({ number, label: `${startLabel}–${endLabel}` });
+  }
+  return weeks;
+}
+
+function recipeById(recipeId) {
+  return state.meals.recipes.find((recipe) => recipe.id === recipeId);
+}
+
+function recipeIngredients(recipeId) {
+  return recipeById(recipeId)?.ingredients || [];
+}
+
+function reportCategories() {
+  const max = Math.max(...state.budget.categories.map((category) => category.lines.reduce((sum, line) => sum + spentByLine(line.id), 0)), 1);
+  return state.budget.categories.map((category) => {
+    const value = category.lines.reduce((sum, line) => sum + spentByLine(line.id), 0);
+    return { name: category.name, value, color: category.color, percent: Math.max(2, Math.round((value / max) * 100)) };
+  });
+}
+
+function transactionInboxItems() {
+  return [
+    { id: "bank-coffee-house-may10", payee: "Coffee House", amount: 18.72, lineId: "church-charity", date: "2026-05-10" },
+    { id: "bank-bookstore-may12", payee: "Bookstore", amount: 42.10, lineId: "church-charity", date: "2026-05-12" },
+    ...(state.transactionInboxDrafts || [])
+  ];
+}
+
+function bindViewEvents() {
+  document.querySelectorAll("[data-budget-line]").forEach((input) => {
+    input.addEventListener("input", () => {
+      const [categoryIndex, lineIndex] = input.dataset.budgetLine.split(":").map(Number);
+      state.budget.categories[categoryIndex].lines[lineIndex].planned = Number(input.value || 0);
+      refreshBudgetTotals(categoryIndex, lineIndex);
+      refreshIncomeTotals();
+      autosaveState();
+    });
+    input.addEventListener("change", () => {
+      render();
+    });
+  });
+
+  document.querySelectorAll("[data-budget-line-name]").forEach((input) => {
+    input.addEventListener("input", () => {
+      const [categoryIndex, lineIndex] = input.dataset.budgetLineName.split(":").map(Number);
+      state.budget.categories[categoryIndex].lines[lineIndex].name = input.value || "Budget line";
+      autosaveState();
+    });
+    input.addEventListener("change", () => {
+      const [categoryIndex, lineIndex] = input.dataset.budgetLineName.split(":").map(Number);
+      state.budget.categories[categoryIndex].lines[lineIndex].name = input.value || "Budget line";
+      render();
+    });
+  });
+
+  document.querySelectorAll("[data-budget-due-date]").forEach((input) => {
+    input.addEventListener("input", () => {
+      const [categoryIndex, lineIndex] = input.dataset.budgetDueDate.split(":").map(Number);
+      state.budget.categories[categoryIndex].lines[lineIndex].dueDay = dueDayFromDate(input.value);
+      autosaveState();
+    });
+    input.addEventListener("change", () => {
+      render();
+    });
+  });
+
+  document.querySelectorAll("[data-income-amount]").forEach((input) => {
+    input.addEventListener("input", () => {
+      const index = Number(input.dataset.incomeAmount);
+      state.paychecks[index].amount = Number(input.value || 0);
+      state.budget.income = state.paychecks.reduce((sum, paycheck) => sum + Number(paycheck.amount || 0), 0);
+      refreshIncomeTotals(index);
+      autosaveState();
+    });
+    input.addEventListener("change", () => {
+      render();
+    });
+  });
+
+  document.querySelectorAll("[data-income-name]").forEach((input) => {
+    input.addEventListener("input", () => {
+      state.paychecks[Number(input.dataset.incomeName)].name = input.value || "Income";
+      autosaveState();
+    });
+    input.addEventListener("change", () => {
+      state.paychecks[Number(input.dataset.incomeName)].name = input.value || "Income";
+      render();
+    });
+  });
+
+  $("#copyBudgetSelect")?.addEventListener("change", (event) => {
+    if (!event.currentTarget.value) return;
+    copyBudgetFromMonth(event.currentTarget.value);
+    render();
+  });
+
+  $("#transactionForm")?.addEventListener("submit", (event) => {
+    event.preventDefault();
+    const data = Object.fromEntries(new FormData(event.currentTarget));
+    state.transactions.unshift(makeTransaction({ date: new Date().toISOString().slice(0, 10), payee: data.payee, lineId: data.lineId, amount: Number(data.amount), memo: "Manual split" }));
+    render();
+  });
+
+  $("#addIncomeButton")?.addEventListener("click", () => {
+    state.paychecks.push({ date: new Date().toISOString().slice(0, 10), name: `Income ${state.paychecks.length + 1}`, amount: 0, assignedLineIds: [] });
+    state.budget.income = state.paychecks.reduce((sum, paycheck) => sum + Number(paycheck.amount || 0), 0);
+    render();
+  });
+
+  document.querySelectorAll("[data-add-line-category]").forEach((button) => {
+    button.addEventListener("click", () => {
+      const category = state.budget.categories[Number(button.dataset.addLineCategory)];
+      category.lines.push({ id: uniqueId(category.name), name: "New subcategory", planned: 0, dueDay: 28 });
+      render();
+    });
+  });
+
+  $("#addCategoryButton")?.addEventListener("click", () => {
+    const name = ($("#newCategoryName")?.value || "New category").trim();
+    if (!name) return;
+    if (state.budget.categories.some((category) => category.name.toLowerCase() === name.toLowerCase())) return;
+    state.budget.categories.push({ name, color: "#13936d", lines: [{ id: uniqueId(name), name: "New subcategory", planned: 0, dueDay: 28 }] });
+    render();
+  });
+
+  $("#deleteCategoryByNameButton")?.addEventListener("click", () => {
+    const name = ($("#newCategoryName")?.value || "").trim().toLowerCase();
+    const categoryIndex = state.budget.categories.findIndex((category) => category.name.toLowerCase() === name);
+    if (categoryIndex < 0) return;
+    state.budget.categories[categoryIndex].lines.forEach((line) => {
+      snapshotTransactionsForLine({ ...line, category: state.budget.categories[categoryIndex].name });
+    });
+    state.budget.categories.splice(categoryIndex, 1);
+    render();
+  });
+
+  $("#newCategoryName")?.addEventListener("focus", () => {
+    refreshBudgetCategoryMenu();
+    $("#budgetCategoryMenu").hidden = false;
+  });
+
+  $("#newCategoryName")?.addEventListener("input", () => {
+    refreshBudgetCategoryMenu();
+    $("#budgetCategoryMenu").hidden = false;
+  });
+
+  $("#budgetCategoryMenu")?.addEventListener("click", (event) => {
+    const option = event.target.closest("[data-category-option]");
+    if (!option) return;
+    $("#newCategoryName").value = option.dataset.categoryOption;
+    $("#budgetCategoryMenu").hidden = true;
+  });
+
+  $("#addTransactionSubcategoryButton")?.addEventListener("click", () => {
+    const name = ($("#transactionSubcategoryName")?.value || "New subcategory").trim();
+    const category = state.budget.categories[Number($("#transactionParentCategory")?.value || 0)];
+    if (!name) return;
+    if (category.lines.some((line) => line.name.toLowerCase() === name.toLowerCase())) return;
+    category.lines.push({ id: uniqueId(name), name, planned: 0, dueDay: 28 });
+    state.household.activity.unshift(`Added ${name} subcategory under ${category.name} from Transactions`);
+    render();
+  });
+
+  $("#deleteTransactionSubcategoryButton")?.addEventListener("click", () => {
+    const categoryIndex = Number($("#transactionParentCategory")?.value || 0);
+    const category = state.budget.categories[categoryIndex];
+    const name = ($("#transactionSubcategoryName")?.value || "").trim().toLowerCase();
+    const lineIndex = category?.lines?.findIndex((line) => line.name.toLowerCase() === name) ?? -1;
+    const line = lineIndex >= 0 ? category.lines[lineIndex] : null;
+    if (!category || !line) return;
+    snapshotTransactionsForLine({ ...line, category: category.name });
+    category.lines.splice(lineIndex, 1);
+    state.household.activity.unshift(`Deleted ${line.name} subcategory from ${category.name}`);
+    render();
+  });
+
+  $("#transactionParentCategory")?.addEventListener("change", () => {
+    const input = $("#transactionSubcategoryName");
+    if (input) input.value = "";
+    refreshTransactionSubcategoryMenu();
+  });
+
+  $("#transactionSubcategoryName")?.addEventListener("focus", () => {
+    refreshTransactionSubcategoryMenu();
+    $("#transactionSubcategoryMenu").hidden = false;
+  });
+
+  $("#transactionSubcategoryName")?.addEventListener("input", () => {
+    refreshTransactionSubcategoryMenu();
+    $("#transactionSubcategoryMenu").hidden = false;
+  });
+
+  $("#transactionSubcategoryMenu")?.addEventListener("click", (event) => {
+    const option = event.target.closest("[data-subcategory-option]");
+    if (!option) return;
+    $("#transactionSubcategoryName").value = option.dataset.subcategoryOption;
+    $("#transactionSubcategoryMenu").hidden = true;
+  });
+
+  document.querySelectorAll("[data-delete-line]").forEach((button) => {
+    button.addEventListener("click", () => {
+      const [categoryIndex, lineIndex] = button.dataset.deleteLine.split(":").map(Number);
+      snapshotTransactionsForLine({ ...state.budget.categories[categoryIndex].lines[lineIndex], category: state.budget.categories[categoryIndex].name });
+      state.budget.categories[categoryIndex].lines.splice(lineIndex, 1);
+      if (state.budget.categories[categoryIndex].lines.length === 0) state.budget.categories.splice(categoryIndex, 1);
+      render();
+    });
+  });
+
+  document.querySelectorAll("[data-delete-category]").forEach((button) => {
+    button.addEventListener("click", () => {
+      const category = state.budget.categories[Number(button.dataset.deleteCategory)];
+      category.lines.forEach((line) => snapshotTransactionsForLine({ ...line, category: category.name }));
+      state.budget.categories.splice(Number(button.dataset.deleteCategory), 1);
+      render();
+    });
+  });
+
+  $("#addTransactionButton")?.addEventListener("click", () => {
+    state.transactionInboxDrafts ||= [];
+    state.transactionInboxDrafts.unshift({
+      id: uniqueId("manual-bank-stream"),
+      payee: "New bank stream item",
+      amount: 0,
+      lineId: allLines()[0]?.id || "",
+      date: new Date().toISOString().slice(0, 10)
+    });
+    render();
+  });
+
+  document.querySelectorAll("[data-assign-ledger]").forEach((button) => {
+    button.addEventListener("click", () => {
+      const [id, payee, amount, date] = button.dataset.assignLedger.split(":");
+      const lineId = document.querySelector(`[data-ledger-line="${id}"]`)?.value || allLines()[0]?.id;
+      state.transactions.unshift(makeTransaction({ date, payee, amount: Number(amount), lineId, memo: "Assigned from ledger" }));
+      state.household.activity.unshift(`Assigned ${payee} to ${transactionAssignmentLabel({ lineId })}`);
+      render();
+    });
+  });
+
+  $("#addPaycheckButton")?.addEventListener("click", () => {
+    state.paychecks.push({ date: new Date().toISOString().slice(0, 10), name: `Paycheck ${state.paychecks.length + 1}`, amount: 0, assignedLineIds: [] });
+    render();
+  });
+
+  $("#assignBillButton")?.addEventListener("click", () => {
+    const paycheck = state.paychecks.find((item) => item.date === $("#paycheckSelect")?.value);
+    const lineId = $("#paycheckLineSelect")?.value;
+    if (!paycheck || !lineId) return;
+    if (!paycheck.assignedLineIds.includes(lineId)) paycheck.assignedLineIds.push(lineId);
+    render();
+  });
+
+  $("#postGroceriesButton")?.addEventListener("click", () => {
+    state.transactions.unshift(makeTransaction({ date: new Date().toISOString().slice(0, 10), payee: "Meal plan groceries", lineId: "groceries", amount: 185, memo: "Posted from grocery list" }));
+    currentView = "transactions";
+    render();
+  });
+
+  $("#mealRecipeName")?.addEventListener("focus", () => {
+    refreshMealRecipeMenu();
+    $("#mealRecipeMenu").hidden = false;
+  });
+
+  $("#mealRecipeName")?.addEventListener("input", () => {
+    $("#mealRecipeId").value = "";
+    refreshMealRecipeMenu();
+    $("#mealRecipeMenu").hidden = false;
+  });
+
+  $("#mealRecipeMenu")?.addEventListener("click", (event) => {
+    const option = event.target.closest("[data-meal-recipe-option]");
+    if (!option) return;
+    const recipe = recipeById(option.dataset.mealRecipeOption);
+    if (!recipe) return;
+    state.meals.selectedRecipeId = recipe.id;
+    $("#mealRecipeName").value = recipe.name;
+    $("#mealRecipeId").value = recipe.id;
+    $("#mealRecipeMenu").hidden = true;
+    autosaveState();
+  });
+
+  $("#addMealRecipeButton")?.addEventListener("click", () => {
+    const name = ($("#mealRecipeName")?.value || "").trim();
+    if (!name) return;
+    const existing = state.meals.recipes.find((recipe) => recipe.name.toLowerCase() === name.toLowerCase());
+    const recipe = existing || {
+      id: uniqueId(name),
+      name,
+      ingredients: ["ingredient"],
+      calories: 400,
+      protein: 20
+    };
+    if (!existing) state.meals.recipes.push(recipe);
+    state.meals.selectedRecipeId = recipe.id;
+    render();
+  });
+
+  $("#mealPlanForm")?.addEventListener("submit", (event) => {
+    event.preventDefault();
+    const data = Object.fromEntries(new FormData(event.currentTarget));
+    const recipe = recipeById(data.recipeId);
+    if (!recipe) {
+      $("#mealRecipeName")?.focus();
+      return;
+    }
+    const week = selectedMealWeek();
+    const existing = state.meals.plannedWeek.find((planned) =>
+      planned.month === state.budget.month
+      && Number(planned.week || 1) === week
+      && planned.day === data.day
+      && (planned.slot === data.slot || (!planned.slot && data.slot === "Dinner"))
+    );
+    const planned = { month: state.budget.month, week, day: data.day, slot: data.slot, meal: recipe.name, recipeId: recipe.id, servings: Number(data.servings || 1) };
+    if (existing) {
+      Object.assign(existing, planned);
+    } else {
+      state.meals.plannedWeek.push(planned);
+    }
+    render();
+  });
+
+  document.querySelectorAll("[data-remove-planned-meal]").forEach((button) => {
+    button.addEventListener("click", () => {
+      const index = Number(button.dataset.removePlannedMeal);
+      if (!Number.isInteger(index) || !state.meals.plannedWeek[index]) return;
+      state.meals.plannedWeek.splice(index, 1);
+      render();
+    });
+  });
+
+  document.querySelectorAll("[data-meal-servings]").forEach((input) => {
+    input.addEventListener("input", () => {
+      const planned = state.meals.plannedWeek[Number(input.dataset.mealServings)];
+      if (!planned) return;
+      planned.servings = Math.max(1, Number(input.value || 1));
+      autosaveState();
+      refreshMealMetrics();
+    });
+  });
+
+  $("#saveMealWeekButton")?.addEventListener("click", () => {
+    const label = `${monthLabel()} · Week ${selectedMealWeek()}`;
+    state.meals.savedWeeks.push(label);
+    state.household.activity.unshift(`Saved meal week: ${label}`);
+    render();
+  });
+
+  $("#recipeForm")?.addEventListener("submit", (event) => {
+    event.preventDefault();
+    const data = Object.fromEntries(new FormData(event.currentTarget));
+    const name = String(data.name || "").trim();
+    if (!name) return;
+    const duplicate = state.meals.recipes.find((recipe) =>
+      recipe.id !== data.recipeId && recipe.name.toLowerCase() === name.toLowerCase()
+    );
+    if (duplicate) return;
+    const editingRecipe = recipeById(data.recipeId);
+    if (editingRecipe) {
+      editingRecipe.name = name;
+      editingRecipe.ingredients = String(data.ingredients || "").split(",").map((item) => item.trim()).filter(Boolean);
+      editingRecipe.calories = Number(data.calories || 0);
+      editingRecipe.protein = Number(data.protein || 0);
+      state.meals.plannedWeek.forEach((planned) => {
+        if (planned.recipeId === editingRecipe.id) planned.meal = editingRecipe.name;
+      });
+      state.meals.editingRecipeId = "";
+    } else {
+      state.meals.recipes.push({
+        id: uniqueId(name),
+        name,
+        ingredients: String(data.ingredients || "").split(",").map((item) => item.trim()).filter(Boolean),
+        calories: Number(data.calories || 0),
+        protein: Number(data.protein || 0)
+      });
+    }
+    render();
+  });
+
+  $("#cancelRecipeEditButton")?.addEventListener("click", () => {
+    state.meals.editingRecipeId = "";
+    render();
+  });
+
+  document.querySelectorAll("[data-edit-recipe]").forEach((button) => {
+    button.addEventListener("click", () => {
+      state.meals.editingRecipeId = button.dataset.editRecipe;
+      render();
+      $("#recipeForm input[name='name']")?.focus();
+    });
+  });
+
+  document.querySelectorAll("[data-select-recipe]").forEach((button) => {
+    button.addEventListener("click", () => {
+      const form = $("#mealPlanForm");
+      state.meals.selectedRecipeId = button.dataset.selectRecipe;
+      currentView = "meals";
+      render();
+      $("#mealPlanForm")?.day.focus();
+    });
+  });
+
+  document.querySelectorAll("[data-delete-recipe]").forEach((button) => {
+    button.addEventListener("click", () => {
+      state.meals.recipes = state.meals.recipes.filter((recipe) => recipe.id !== button.dataset.deleteRecipe);
+      if (state.meals.editingRecipeId === button.dataset.deleteRecipe) state.meals.editingRecipeId = "";
+      if (state.meals.selectedRecipeId === button.dataset.deleteRecipe) {
+        state.meals.selectedRecipeId = state.meals.recipes[0]?.id || "";
+      }
+      render();
+    });
+  });
+
+  $("#addGoalButton")?.addEventListener("click", () => {
+    state.goals.sinkingFunds.push({ name: `New goal ${state.goals.sinkingFunds.length + 1}`, target: 1000, saved: 0 });
+    render();
+  });
+
+  document.querySelectorAll("[data-delete-goal]").forEach((button) => {
+    button.addEventListener("click", () => {
+      state.goals.sinkingFunds.splice(Number(button.dataset.deleteGoal), 1);
+      render();
+    });
+  });
+
+  $("#addDebtButton")?.addEventListener("click", () => {
+    state.goals.debts.push({ name: `New debt ${state.goals.debts.length + 1}`, balance: 1000, rate: 0, minimum: 50 });
+    render();
+  });
+
+  document.querySelectorAll("[data-apply-debt-payment]").forEach((button) => {
+    button.addEventListener("click", () => {
+      const index = Number(button.dataset.applyDebtPayment);
+      const amount = Number(document.querySelector(`[data-debt-payment="${index}"]`)?.value || 0);
+      state.goals.debts[index].balance = Math.max(0, state.goals.debts[index].balance - amount);
+      state.household.activity.unshift(`Applied ${money.format(amount)} to ${state.goals.debts[index].name}`);
+      render();
+    });
+  });
+
+  document.querySelectorAll("[data-delete-debt]").forEach((button) => {
+    button.addEventListener("click", () => {
+      state.goals.debts.splice(Number(button.dataset.deleteDebt), 1);
+      render();
+    });
+  });
+
+  $("#addNetWorthItemButton")?.addEventListener("click", () => {
+    state.goals.netWorth.assets.push({ name: `New asset ${state.goals.netWorth.assets.length + 1}`, value: 0 });
+    render();
+  });
+
+  document.querySelectorAll("[data-delete-asset]").forEach((button) => {
+    button.addEventListener("click", () => {
+      state.goals.netWorth.assets.splice(Number(button.dataset.deleteAsset), 1);
+      render();
+    });
+  });
+
+  document.querySelectorAll("[data-delete-liability]").forEach((button) => {
+    button.addEventListener("click", () => {
+      state.goals.netWorth.liabilities.splice(Number(button.dataset.deleteLiability), 1);
+      render();
+    });
+  });
+
+  $("#calendarQuickAdd")?.addEventListener("submit", (event) => {
+    event.preventDefault();
+    const data = Object.fromEntries(new FormData(event.currentTarget));
+    if (data.type === "chore") {
+      const recurrence = data.recurrence || "once";
+      state.calendar.chores.push({
+        title: data.title,
+        assignee: data.owner || "Demo User",
+        cadence: choreCadenceLabel({ recurrence }),
+        recurrence,
+        startDate: data.date,
+        nextDue: data.date,
+        completedDates: []
+      });
+    } else {
+      const isBirthday = data.type === "birthday";
+      state.calendar.events.push({
+        title: data.title,
+        date: data.date,
+        monthDay: isBirthday ? data.date.slice(5) : undefined,
+        type: isBirthday ? "birthday" : "reminder",
+        annual: isBirthday,
+        reminderDays: isBirthday ? Number(data.reminderDays || 7) : undefined
+      });
+    }
+    render();
+  });
+
+  $("#calendarQuickAdd select[name='type']")?.addEventListener("change", updateCalendarQuickAddFields);
+  updateCalendarQuickAddFields();
+
+  document.querySelectorAll("[data-complete-chore]").forEach((button) => {
+    button.addEventListener("click", () => {
+      const separator = button.dataset.completeChore.indexOf(":");
+      const index = Number(button.dataset.completeChore.slice(0, separator));
+      const occurrenceDate = button.dataset.completeChore.slice(separator + 1);
+      const chore = state.calendar.chores[index];
+      if (!chore || !occurrenceDate) return;
+      chore.completedDates ||= [];
+      if (!chore.completedDates.includes(occurrenceDate)) chore.completedDates.push(occurrenceDate);
+      state.household.activity.unshift(`Completed ${chore.title} for ${occurrenceDate}`);
+      render();
+    });
+  });
+
+  $("#addChoreButton")?.addEventListener("click", () => focusCalendarType("chore"));
+  $("#sideAddChoreButton")?.addEventListener("click", () => focusCalendarType("chore"));
+  $("#addBirthdayButton")?.addEventListener("click", () => focusCalendarType("birthday"));
+  $("#sideAddBirthdayButton")?.addEventListener("click", () => focusCalendarType("birthday"));
+
+  document.querySelectorAll("[data-share-scope]").forEach((input) => {
+    input.addEventListener("change", () => {
+      const scope = input.dataset.shareScope;
+      const scopes = new Set(state.household.sharedScopes || []);
+      if (input.checked) scopes.add(scope);
+      else scopes.delete(scope);
+      state.household.sharedScopes = [...scopes];
+      render();
+    });
+  });
+
+  $("#shareEverythingToggle")?.addEventListener("change", (event) => {
+    const allScopes = [...document.querySelectorAll("[data-share-scope]")].map((input) => input.dataset.shareScope);
+    state.household.sharedScopes = event.currentTarget.checked ? allScopes : [];
+    render();
+  });
+
+  $("#inviteButton")?.addEventListener("click", () => {
+    state.household.inviteCode = `HUB-${Math.random().toString(36).slice(2, 8).toUpperCase()}`;
+    state.household.activity.unshift(`Generated invite code ${state.household.inviteCode}`);
+    render();
+  });
+
+  $("#inviteMemberForm")?.addEventListener("submit", (event) => {
+    event.preventDefault();
+    const data = Object.fromEntries(new FormData(event.currentTarget));
+    state.household.members.push({ name: data.name || "New member", email: data.email || "member@example.com", role: data.role || "Member" });
+    state.household.activity.unshift(`${data.name || "New member"} was invited to the household workspace`);
+    render();
+  });
+
+  $("#refreshAdminButton")?.addEventListener("click", () => {
+    adminData = null;
+    render();
+  });
+
+  document.querySelectorAll("[data-admin-toggle-disabled]").forEach((button) => {
+    button.addEventListener("click", async () => {
+      const user = adminData?.users?.find((item) => item.id === button.dataset.adminToggleDisabled);
+      if (!user) return;
+      await updateAdminUser(user.id, { disabled: !user.disabled });
+    });
+  });
+
+  document.querySelectorAll("[data-admin-toggle-admin]").forEach((button) => {
+    button.addEventListener("click", async () => {
+      const user = adminData?.users?.find((item) => item.id === button.dataset.adminToggleAdmin);
+      if (!user) return;
+      await updateAdminUser(user.id, { isAdmin: !user.isAdmin });
+    });
+  });
+
+  document.querySelectorAll("[data-admin-reset-password]").forEach((button) => {
+    button.addEventListener("click", async () => {
+      const password = window.prompt("Enter a new password with at least 8 characters");
+      if (!password || password.length < 8) return;
+      await updateAdminUser(button.dataset.adminResetPassword, { password });
+    });
+  });
+}
+
+function focusCalendarType(type) {
+  const form = $("#calendarQuickAdd");
+  if (!form) return;
+  form.type.value = type;
+  updateCalendarQuickAddFields();
+  form.title.focus();
+}
+
+function updateCalendarQuickAddFields() {
+  const form = $("#calendarQuickAdd");
+  if (!form) return;
+  const type = form.type.value;
+  const recurrenceField = form.querySelector("[data-chore-recurrence-field]");
+  const reminderField = form.querySelector("[data-birthday-reminder-field]");
+  if (recurrenceField) recurrenceField.hidden = type !== "chore";
+  if (reminderField) reminderField.hidden = type !== "birthday";
+}
+
+function refreshBudgetTotals(categoryIndex, lineIndex) {
+  const category = state.budget.categories[categoryIndex];
+  if (!category) return;
+
+  const line = category.lines[lineIndex];
+  if (line) {
+    const remaining = Number(line.planned || 0) - spentByLine(line.id);
+    const remainingEl = document.querySelector(`[data-line-remaining="${categoryIndex}:${lineIndex}"]`);
+    if (remainingEl) {
+      remainingEl.textContent = exactMoney.format(remaining);
+      remainingEl.classList.toggle("danger", remaining < 0);
+    }
+  }
+
+  const spent = category.lines.reduce((sum, item) => sum + spentByLine(item.id), 0);
+  const planned = category.lines.reduce((sum, item) => sum + Number(item.planned || 0), 0);
+  const left = planned - spent;
+  const leftEl = document.querySelector(`[data-category-left="${categoryIndex}"]`);
+  const spentEl = document.querySelector(`[data-category-spent="${categoryIndex}"]`);
+  const plannedEl = document.querySelector(`[data-category-planned="${categoryIndex}"]`);
+  if (leftEl) leftEl.textContent = `${money.format(left)} left`;
+  if (spentEl) spentEl.textContent = `${money.format(spent)} spent`;
+  if (plannedEl) plannedEl.textContent = `${money.format(planned)} planned`;
+}
+
+function refreshIncomeTotals(index) {
+  const paycheck = state.paychecks[index];
+  const remainingEl = document.querySelector(`[data-income-remaining="${index}"]`);
+  if (remainingEl && paycheck) remainingEl.textContent = exactMoney.format(Number(paycheck.amount || 0));
+
+  const left = state.budget.income - plannedTotal();
+  const leftEl = document.querySelector("[data-income-left]");
+  if (leftEl) leftEl.textContent = `${money.format(left)} left to budget`;
+
+  const metrics = $("#metrics");
+  if (metrics) {
+    metrics.innerHTML = metricsForView().map(([label, value, note]) => `
+      <article class="metric">
+        <span>${label}</span>
+        <strong>${value}</strong>
+        ${note ? `<small>${note}</small>` : ""}
+      </article>
+    `).join("");
+  }
+}
+
+function refreshMealMetrics() {
+  if (currentView !== "meals") return;
+  const metrics = $("#metrics");
+  if (!metrics) return;
+  metrics.innerHTML = metricsForView().map(([label, value, note]) => `
+    <article class="metric">
+      <span>${label}</span>
+      <strong>${value}</strong>
+      ${note ? `<small>${note}</small>` : ""}
+    </article>
+  `).join("");
+}
+
+function refreshBudgetCategoryMenu() {
+  const menu = $("#budgetCategoryMenu");
+  const input = $("#newCategoryName");
+  if (!menu || !input) return;
+  const query = input.value.trim().toLowerCase();
+  const matches = state.budget.categories.filter((category) => category.name.toLowerCase().includes(query));
+  menu.innerHTML = matches.length
+    ? matches.map((category) => `<button type="button" data-category-option="${category.name}">${category.name}</button>`).join("")
+    : `<div class="combo-empty">No matching category</div>`;
+}
+
+function transactionSelectedCategory() {
+  return state.budget.categories[Number($("#transactionParentCategory")?.value || 0)];
+}
+
+function refreshTransactionSubcategoryMenu() {
+  const menu = $("#transactionSubcategoryMenu");
+  const input = $("#transactionSubcategoryName");
+  const category = transactionSelectedCategory();
+  if (!menu || !input || !category) return;
+
+  const query = input.value.trim().toLowerCase();
+  const matches = category.lines.filter((line) => line.name.toLowerCase().includes(query));
+  menu.innerHTML = matches.length
+    ? matches.map((line) => `<button type="button" data-subcategory-option="${line.name}">${line.name}</button>`).join("")
+    : `<div class="combo-empty">No matching subcategory</div>`;
+}
+
+function refreshMealRecipeMenu() {
+  const menu = $("#mealRecipeMenu");
+  const input = $("#mealRecipeName");
+  if (!menu || !input) return;
+  const query = input.value.trim().toLowerCase();
+  const matches = state.meals.recipes.filter((recipe) => recipe.name.toLowerCase().includes(query));
+  menu.innerHTML = matches.length
+    ? matches.map((recipe) => `<button type="button" data-meal-recipe-option="${recipe.id}">${recipe.name}</button>`).join("")
+    : `<div class="combo-empty">No matching recipe. Use Add recipe.</div>`;
+}
+
+function uniqueId(seed) {
+  return String(seed || "item").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/(^-|-$)/g, "") + "-" + Math.random().toString(36).slice(2, 7);
+}
+
+nav.addEventListener("click", (event) => {
+  const button = event.target.closest("[data-view]");
+  if (!button) return;
+  if (button.dataset.view === "admin") adminData = null;
+  currentView = button.dataset.view;
+  render();
+});
+
+view.addEventListener("click", (event) => {
+  const acceptButton = event.target.closest("[data-accept-import]");
+  if (acceptButton) {
+    acceptImportTransaction(acceptButton);
+    return;
+  }
+
+  const dismissButton = event.target.closest("[data-dismiss-import]");
+  if (dismissButton) {
+    dismissImportTransaction(dismissButton);
+    return;
+  }
+
+  if (!event.target.closest(".custom-combobox")) {
+    const subcategoryMenu = $("#transactionSubcategoryMenu");
+    const categoryMenu = $("#budgetCategoryMenu");
+    const recipeMenu = $("#mealRecipeMenu");
+    if (subcategoryMenu) subcategoryMenu.hidden = true;
+    if (categoryMenu) categoryMenu.hidden = true;
+    if (recipeMenu) recipeMenu.hidden = true;
+  }
+});
+
+function acceptImportTransaction(button) {
+  let inboxItem = transactionInboxItems().find((item) => item.id === button.dataset.acceptImport);
+
+  if (!inboxItem && button.dataset.acceptImport?.includes(":")) {
+    const [payee, amount] = button.dataset.acceptImport.split(":");
+    inboxItem = { id: uniqueId(payee), payee, amount: Number(amount), date: new Date().toISOString().slice(0, 10) };
+  }
+
+  if (!inboxItem) return;
+  const lineId = button.closest(".assign-row")?.querySelector("select")?.value || allLines()[0]?.id;
+  state.transactions.unshift(makeTransaction({ date: inboxItem.date, payee: inboxItem.payee, amount: Number(inboxItem.amount), lineId, memo: "Accepted bank stream item" }));
+  state.transactionInboxDone ||= [];
+  if (!state.transactionInboxDone.includes(inboxItem.id)) state.transactionInboxDone.push(inboxItem.id);
+  state.transactionInboxDrafts = (state.transactionInboxDrafts || []).filter((item) => item.id !== inboxItem.id);
+  state.household.activity.unshift(`Assigned ${inboxItem.payee} to ${transactionAssignmentLabel({ lineId })}`);
+  render();
+}
+
+function dismissImportTransaction(button) {
+  const inboxItem = transactionInboxItems().find((item) => item.id === button.dataset.dismissImport);
+  state.transactionInboxDone ||= [];
+  if (!state.transactionInboxDone.includes(button.dataset.dismissImport)) state.transactionInboxDone.push(button.dataset.dismissImport);
+  state.transactionInboxDrafts = (state.transactionInboxDrafts || []).filter((item) => item.id !== button.dataset.dismissImport);
+  state.household.activity.unshift(`Dismissed bank stream item: ${inboxItem?.payee || button.dataset.dismissImport}`);
+  render();
+}
+
+$("#signinForm").addEventListener("submit", async (event) => {
+  event.preventDefault();
+  try {
+    await api("/api/auth/signin", { method: "POST", body: JSON.stringify(Object.fromEntries(new FormData(event.currentTarget))) });
+    await loadApp();
+  } catch (error) {
+    $("#authMessage").textContent = error.message;
+  }
+});
+
+$("#signupForm").addEventListener("submit", async (event) => {
+  event.preventDefault();
+  try {
+    await api("/api/auth/signup", { method: "POST", body: JSON.stringify(Object.fromEntries(new FormData(event.currentTarget))) });
+    await loadApp();
+  } catch (error) {
+    $("#authMessage").textContent = error.message;
+  }
+});
+
+$("#signOutButton").addEventListener("click", async () => {
+  await api("/api/auth/signout", { method: "POST", body: "{}" });
+  state = null;
+  sessionUser = null;
+  adminData = null;
+  households = [];
+  $("#householdWorkspaceControl").hidden = true;
+  $("#workspace").hidden = true;
+  $("#authPanel").hidden = false;
+});
+
+$("#downloadCsvButton").addEventListener("click", () => {
+  downloadCsv();
+});
+
+$("#syncButton").addEventListener("click", async (event) => {
+  const button = event.currentTarget;
+  button.disabled = true;
+  button.classList.add("is-loading");
+  try {
+    await saveStateNow();
+    await reloadSelectedHousehold();
+  } catch (error) {
+    console.warn("Refresh failed", error);
+  } finally {
+    button.disabled = false;
+    button.classList.remove("is-loading");
+  }
+});
+
+$("#monthPicker").addEventListener("change", (event) => {
+  rememberCurrentBudgetSnapshot();
+  state.budget.month = event.target.value;
+  autosaveState();
+  render();
+});
+
+$("#mealWeekHeaderSelect").addEventListener("change", (event) => {
+  state.meals.selectedWeekByMonth ||= {};
+  state.meals.selectedWeekByMonth[state.budget.month] = Number(event.target.value);
+  render();
+});
+
+$("#householdPicker").addEventListener("change", async (event) => {
+  await saveStateNow();
+  await api("/api/households/select", {
+    method: "POST",
+    body: JSON.stringify({ householdId: event.target.value })
+  });
+  await reloadSelectedHousehold();
+});
+
+$("#addHouseholdButton").addEventListener("click", () => {
+  const dialog = $("#householdDialog");
+  const form = $("#householdForm");
+  form.reset();
+  $("#householdDialogMessage").textContent = "";
+  dialog.showModal();
+  form.name.focus();
+});
+
+$("#removeHouseholdButton").addEventListener("click", () => {
+  const selected = households.find((household) => household.selected);
+  if (!selected) return;
+  $("#removeHouseholdName").textContent = `${selected.name} (${selected.country})`;
+  $("#removeHouseholdDialogMessage").textContent = "";
+  $("#removeHouseholdDialog").showModal();
+});
+
+$("#closeHouseholdDialogButton").addEventListener("click", () => $("#householdDialog").close());
+$("#cancelHouseholdButton").addEventListener("click", () => $("#householdDialog").close());
+$("#closeRemoveHouseholdDialogButton").addEventListener("click", () => $("#removeHouseholdDialog").close());
+$("#cancelRemoveHouseholdButton").addEventListener("click", () => $("#removeHouseholdDialog").close());
+
+$("#householdForm").addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const form = event.currentTarget;
+  const data = Object.fromEntries(new FormData(form));
+  const submitButton = form.querySelector('[type="submit"]');
+  submitButton.disabled = true;
+  $("#householdDialogMessage").textContent = "";
+  try {
+    await saveStateNow();
+    await api("/api/households", {
+      method: "POST",
+      body: JSON.stringify({ name: data.name.trim(), country: data.country })
+    });
+    $("#householdDialog").close();
+    await reloadSelectedHousehold();
+  } catch (error) {
+    $("#householdDialogMessage").textContent = error.message;
+  } finally {
+    submitButton.disabled = false;
+  }
+});
+
+$("#removeHouseholdForm").addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const selected = households.find((household) => household.selected);
+  if (!selected) return;
+  const submitButton = event.currentTarget.querySelector('[type="submit"]');
+  submitButton.disabled = true;
+  $("#removeHouseholdDialogMessage").textContent = "";
+  try {
+    await api(`/api/households/${selected.id}`, { method: "DELETE" });
+    $("#removeHouseholdDialog").close();
+    await reloadSelectedHousehold();
+  } catch (error) {
+    $("#removeHouseholdDialogMessage").textContent = error.message;
+  } finally {
+    submitButton.disabled = false;
+  }
+});
+
+function populateCountrySelects() {
+  document.querySelectorAll("[data-country-select]").forEach((select) => {
+    const previousValue = select.value || "US";
+    select.replaceChildren(...countryCatalog.map((country) => {
+      const option = document.createElement("option");
+      option.value = country.code;
+      option.textContent = `${country.name} (${country.code}) · ${country.currency}`;
+      return option;
+    }));
+    select.value = countryCatalog.some((country) => country.code === previousValue) ? previousValue : "US";
+  });
+}
+
+async function loadApp() {
+  const session = await api("/api/session");
+  if (!session.authenticated) {
+    sessionUser = null;
+    households = [];
+    $("#authPanel").hidden = false;
+    $("#workspace").hidden = true;
+    return;
+  }
+  sessionUser = session.user;
+  [households, state] = await Promise.all([
+    api("/api/households"),
+    api("/api/state")
+  ]);
+  $("#authPanel").hidden = true;
+  $("#workspace").hidden = false;
+  render();
+}
+
+async function reloadSelectedHousehold() {
+  const session = await api("/api/session");
+  sessionUser = session.user;
+  [households, state] = await Promise.all([
+    api("/api/households"),
+    api("/api/state")
+  ]);
+  adminData = null;
+  render();
+}
+
+async function loadAdminData() {
+  if (!sessionUser?.isAdmin) return;
+  const [stats, users, monthly] = await Promise.all([
+    api("/api/admin/stats"),
+    api("/api/admin/users"),
+    api("/api/admin/monthly-stats")
+  ]);
+  adminData = { stats, users, monthly };
+  render();
+}
+
+async function updateAdminUser(userId, patch) {
+  await api(`/api/admin/users/${userId}`, { method: "PATCH", body: JSON.stringify(patch) });
+  adminData = null;
+  await loadAdminData();
+}
+
+function csvEscape(value) {
+  return `"${String(value ?? "").replaceAll("\"", "\"\"")}"`;
+}
+
+function downloadCsv() {
+  if (!state) return;
+  const rows = [];
+  rows.push(["type", "date_or_month", "category", "line_or_payee", "planned", "spent", "remaining", "memo"]);
+
+  allLines().forEach((line) => {
+    const spent = spentByLine(line.id);
+    rows.push([
+      "budget_line",
+      state.budget.month,
+      line.category,
+      line.name,
+      Number(line.planned || 0).toFixed(2),
+      spent.toFixed(2),
+      (Number(line.planned || 0) - spent).toFixed(2),
+      `due day ${line.dueDay || ""}`
+    ]);
+  });
+
+  state.transactions.forEach((transaction) => {
+    const line = allLines().find((item) => item.id === transaction.lineId);
+    rows.push([
+      "transaction",
+      transaction.date,
+      line?.category || transaction.categoryName || "",
+      transaction.payee,
+      "",
+      Number(transaction.amount || 0).toFixed(2),
+      "",
+      transaction.memo || transactionAssignmentLabel(transaction)
+    ]);
+  });
+
+  const csv = rows.map((row) => row.map(csvEscape).join(",")).join("\n");
+  const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = `household-hub-${state.budget.month}.csv`;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  URL.revokeObjectURL(url);
+}
+
+async function initializeApp() {
+  countryCatalog = await api("/api/countries");
+  populateCountrySelects();
+  await loadApp();
+}
+
+initializeApp().catch((error) => {
+  $("#authMessage").textContent = error.message;
+});

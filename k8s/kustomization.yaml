@@ -1,0 +1,11 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: household-hub
+resources:
+  - namespace.yaml
+  - deployment.yaml
+  - service.yaml
+images:
+  - name: household-hub
+    newName: us-central1-docker.pkg.dev/PROJECT_ID/household-hub/household-hub
+    newTag: latest

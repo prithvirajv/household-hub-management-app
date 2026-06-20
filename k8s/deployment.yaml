@@ -1,0 +1,36 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: household-hub
+  namespace: household-hub
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: household-hub
+  template:
+    metadata:
+      labels:
+        app: household-hub
+    spec:
+      containers:
+        - name: app
+          image: household-hub:latest
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 8080
+          envFrom:
+            - secretRef:
+                name: household-hub-secrets
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: 8080
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: 8080
+            initialDelaySeconds: 20
+            periodSeconds: 20

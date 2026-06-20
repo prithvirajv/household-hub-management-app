@@ -1,0 +1,32 @@
+services:
+  app:
+    build: .
+    ports:
+      - "4173:8080"
+    environment:
+      DATABASE_URL: postgres://household_hub:household_hub_dev@postgres:5432/household_hub
+      SESSION_SECRET: local-compose-session-secret-change-me
+      DATABASE_SSL: "false"
+      PORT: "8080"
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  postgres:
+    image: postgres:16-alpine
+    ports:
+      - "15432:5432"
+    environment:
+      POSTGRES_DB: household_hub
+      POSTGRES_USER: household_hub
+      POSTGRES_PASSWORD: household_hub_dev
+    volumes:
+      - household_hub_pg:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U household_hub -d household_hub"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  household_hub_pg:

@@ -1,0 +1,121 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Household Hub</title>
+    <link rel="stylesheet" href="/styles.css?v=20260530-2">
+  </head>
+  <body>
+    <div class="app-shell">
+      <aside class="sidebar">
+        <div class="brand">
+          <div class="brand-mark">HH</div>
+          <div>
+            <h1>Household Hub</h1>
+            <p>Budget, meals & family calendar</p>
+          </div>
+        </div>
+        <section id="householdWorkspaceControl" class="sidebar-household" hidden>
+          <label class="household-control">Current household<select id="householdPicker"></select></label>
+          <div class="sidebar-household-actions">
+            <button id="addHouseholdButton" class="ghost" type="button">+ Add</button>
+            <button id="removeHouseholdButton" class="ghost danger-button" type="button">Remove</button>
+          </div>
+        </section>
+        <nav id="nav"></nav>
+        <div class="demo-card">
+          <span>Margin finder</span>
+          <strong>$300</strong>
+          <small>potential monthly margin</small>
+        </div>
+      </aside>
+
+      <main>
+        <header class="topbar">
+          <div>
+            <p id="householdName" class="eyebrow">Household workspace</p>
+            <h2 id="viewTitle">Dashboard</h2>
+          </div>
+          <div class="topbar-actions">
+            <label class="month-control">Month<input id="monthPicker" type="month" value="2026-05"></label>
+            <label id="mealWeekHeaderControl" class="week-control" hidden>Week<select id="mealWeekHeaderSelect"></select></label>
+            <button id="syncButton" class="icon-button ghost" type="button" aria-label="Refresh household data" title="Refresh household data">↻</button>
+            <button id="downloadCsvButton" class="icon-button ghost" type="button" aria-label="Download CSV">⇩</button>
+            <div class="user-chip">
+              <span>DU</span>
+              <div><strong id="userName">Demo User</strong><small id="userEmail">demo@householdhub.app</small></div>
+            </div>
+            <button id="signOutButton" class="ghost" type="button">Sign out</button>
+          </div>
+        </header>
+
+        <section id="authPanel" class="auth-panel">
+          <form id="signinForm" class="auth-form">
+            <h2>Sign in</h2>
+            <label>Email<input name="email" type="email" value="demo@householdhub.app" required></label>
+            <label>Password<input name="password" type="password" value="budget123" required></label>
+            <button type="submit">Open household</button>
+            <p id="authMessage"></p>
+          </form>
+          <form id="signupForm" class="auth-form secondary-form">
+            <h2>Create household</h2>
+            <label>Name<input name="name" value="Household Owner" required></label>
+            <label>Household<input name="householdName" value="My Household" required></label>
+            <label>Country<select name="country" data-country-select required></select></label>
+            <label>Email<input name="email" type="email" required></label>
+            <label>Password<input name="password" type="password" minlength="8" required></label>
+            <button type="submit">Create account</button>
+          </form>
+        </section>
+
+        <section id="workspace" class="workspace" hidden>
+          <section class="metrics-grid" id="metrics"></section>
+          <section id="view" class="view"></section>
+        </section>
+      </main>
+    </div>
+
+    <dialog id="householdDialog" class="app-dialog">
+      <form id="householdForm">
+        <div class="section-head">
+          <div><span class="card-label">New workspace</span><h2>Add household</h2></div>
+          <button id="closeHouseholdDialogButton" class="icon-button ghost" type="button" aria-label="Close">×</button>
+        </div>
+        <label>Household name<input name="name" placeholder="India Household" required></label>
+        <label>Country
+          <select name="country" data-country-select required></select>
+        </label>
+        <p id="householdDialogMessage" class="form-message"></p>
+        <div class="dialog-actions">
+          <button id="cancelHouseholdButton" class="ghost" type="button">Cancel</button>
+          <button type="submit">Add household</button>
+        </div>
+      </form>
+    </dialog>
+
+    <dialog id="removeHouseholdDialog" class="app-dialog">
+      <form id="removeHouseholdForm">
+        <div class="section-head">
+          <div><span class="card-label">Remove workspace</span><h2>Remove household</h2></div>
+          <button id="closeRemoveHouseholdDialogButton" class="icon-button ghost" type="button" aria-label="Close">×</button>
+        </div>
+        <p>Remove <strong id="removeHouseholdName"></strong> and all of its budget, transaction, calendar, meal, goal, debt, and asset data?</p>
+        <p id="removeHouseholdDialogMessage" class="form-message"></p>
+        <div class="dialog-actions">
+          <button id="cancelRemoveHouseholdButton" class="ghost" type="button">Cancel</button>
+          <button class="danger-button" type="submit">Remove household</button>
+        </div>
+      </form>
+    </dialog>
+
+    <template id="emptyTemplate">
+      <div class="empty-state">
+        <h3>No data yet</h3>
+        <p>Add entries and save this household to keep planning together.</p>
+      </div>
+    </template>
+
+    <script src="/app.js?v=20260530-2"></script>
+  </body>
+</html>
