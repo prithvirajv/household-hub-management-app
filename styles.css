@@ -967,6 +967,23 @@ main {
   overflow: hidden;
 }
 
+.calendar-weekday {
+  min-height: 34px;
+  display: grid;
+  place-items: center;
+  border-right: 1px solid var(--line);
+  border-bottom: 1px solid var(--line);
+  background: var(--soft-blue);
+  color: var(--muted);
+  font-size: 0.72rem;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+
+.calendar-weekday:nth-child(7) {
+  border-right: 0;
+}
+
 .day-cell {
   min-height: 112px;
   padding: 0.45rem;
@@ -981,6 +998,10 @@ main {
 
 .muted-cell {
   background: #f0f4fa;
+}
+
+.outside-month {
+  color: #9aa5b5;
 }
 
 .event {

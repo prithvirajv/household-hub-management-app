@@ -524,8 +524,10 @@ function renderCalendar() {
             <label data-birthday-reminder-field hidden>Remind before<select name="reminderDays"><option value="0">Same day</option><option value="1">1 day</option><option value="3">3 days</option><option value="7" selected>7 days</option><option value="14">14 days</option></select></label>
             <button type="submit">Add</button>
           </form>
-          <div class="calendar-grid">${calendarCells().map((cell) => `
-            <div class="day-cell ${cell.muted ? "muted-cell" : ""}">
+          <div class="calendar-grid">
+            ${["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"].map((day) => `<div class="calendar-weekday">${day}</div>`).join("")}
+            ${calendarCells().map((cell) => `
+            <div class="day-cell ${cell.muted ? "muted-cell" : ""} ${cell.currentMonth ? "" : "outside-month"}">
               <b>${cell.day}</b>
               ${cell.items.map((item) => `<span class="event ${item.eventType || item.type}">${item.title}</span>`).join("")}
             </div>
@@ -984,10 +986,23 @@ function calendarCells() {
     const day = Number(item.date.split("-")[1]);
     eventMap.set(day, [...(eventMap.get(day) || []), item]);
   });
+  const [year, month] = state.budget.month.split("-").map(Number);
+  const firstDay = new Date(year, month - 1, 1);
+  const lastDay = new Date(year, month, 0);
+  const previousMonthLastDay = new Date(year, month - 1, 0).getDate();
+  const leadingDays = firstDay.getDay();
+  const totalVisibleDays = leadingDays + lastDay.getDate();
+  const cellCount = totalVisibleDays <= 35 ? 35 : 42;
   const cells = [];
-  for (let i = 0; i < 35; i += 1) {
-    const day = i + 1;
-    cells.push({ day, muted: day > 31, items: eventMap.get(day) || [] });
+  for (let index = 0; index < cellCount; index += 1) {
+    const relativeDay = index - leadingDays + 1;
+    if (relativeDay < 1) {
+      cells.push({ day: previousMonthLastDay + relativeDay, currentMonth: false, muted: true, items: [] });
+    } else if (relativeDay > lastDay.getDate()) {
+      cells.push({ day: relativeDay - lastDay.getDate(), currentMonth: false, muted: true, items: [] });
+    } else {
+      cells.push({ day: relativeDay, currentMonth: true, muted: false, items: eventMap.get(relativeDay) || [] });
+    }
   }
   return cells;
 }
