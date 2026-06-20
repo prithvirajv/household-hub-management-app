@@ -16,6 +16,7 @@ const defaultState = {
       "Calendar",
       "Chores",
       "Birthday reminders",
+      "Notes",
       "Meals",
       "Grocery lists",
       "Reminders",
@@ -189,6 +190,59 @@ const defaultState = {
       { title: "Clean kitchen", assignee: "Alex", cadence: "Weekly", recurrence: "weekly", startDate: "2026-05-23", nextDue: "2026-05-23", completedDates: [] },
       { title: "Take out trash", assignee: "Taylor", cadence: "Weekly", recurrence: "weekly", startDate: "2026-05-30", nextDue: "2026-05-30", completedDates: [] },
       { title: "Fold laundry", assignee: "Rotation", cadence: "Weekly", recurrence: "weekly", startDate: "2026-05-31", nextDue: "2026-05-31", completedDates: [] }
+    ]
+  },
+  notes: {
+    initialized: true,
+    activeView: "notes",
+    activeLabel: "",
+    labels: ["Birthday", "House warming", "Groceries"],
+    entries: [
+      {
+        id: "weekend-todo",
+        title: "Weekend ToDo",
+        body: "",
+        checklist: [
+          { id: "weekend-1", text: "Organize the garage", done: false },
+          { id: "weekend-2", text: "Confirm dinner plans", done: false },
+          { id: "weekend-3", text: "Buy birthday card", done: true }
+        ],
+        labels: ["House warming"],
+        pinned: true,
+        archived: false,
+        trashed: false,
+        color: "#fff7d6",
+        createdAt: "2026-05-21T12:00:00.000Z"
+      },
+      {
+        id: "grocery-stops",
+        title: "Grocery stops",
+        body: "",
+        checklist: [
+          { id: "grocery-1", text: "Milk", done: false },
+          { id: "grocery-2", text: "Marinara sauce", done: false },
+          { id: "grocery-3", text: "Grapes", done: false },
+          { id: "grocery-4", text: "Bread", done: true }
+        ],
+        labels: ["Groceries"],
+        pinned: false,
+        archived: false,
+        trashed: false,
+        color: "#ffffff",
+        createdAt: "2026-05-20T12:00:00.000Z"
+      },
+      {
+        id: "birthday-ideas",
+        title: "Birthday ideas",
+        body: "Call the bakery and confirm the guest list.",
+        checklist: [],
+        labels: ["Birthday"],
+        pinned: false,
+        archived: false,
+        trashed: false,
+        color: "#eef7ff",
+        createdAt: "2026-05-19T12:00:00.000Z"
+      }
     ]
   },
   meals: {

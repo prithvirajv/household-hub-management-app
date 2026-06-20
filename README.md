@@ -1,6 +1,6 @@
 # Household Hub
 
-Household Hub is a deployable SaaS MVP for household management: zero-based budgeting, shared household planning, chores, birthdays, meals, groceries, goals, debt, net worth, and reports.
+Household Hub is a deployable SaaS MVP for household management: zero-based budgeting, shared notes and checklists, chores, birthdays, meals, groceries, goals, debt, net worth, and reports.
 
 ## Stack
 

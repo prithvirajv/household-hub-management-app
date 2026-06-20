@@ -3,6 +3,7 @@ const views = [
   ["transactions", "Transactions", "☰"],
   ["paychecks", "Paychecks", "☑"],
   ["calendar", "Calendar", "⌂"],
+  ["notes", "Notes", "✎"],
   ["meals", "Meals", "♨"],
   ["recipes", "Recipes", "▤"],
   ["goals", "Goals", "◎"],
@@ -234,7 +235,8 @@ function renderNav() {
 function renderShell() {
   const title = views.find(([key]) => key === currentView)?.[1] || "Budget";
   const isAdminView = currentView === "admin";
-  $("#viewTitle").textContent = isAdminView ? "Application admin" : `${monthLabel()} plan`;
+  const isNotesView = currentView === "notes";
+  $("#viewTitle").textContent = isAdminView ? "Application admin" : isNotesView ? "Household notes" : `${monthLabel()} plan`;
   $("#householdName").textContent = title.toUpperCase();
   $("#userName").textContent = sessionUser?.name || "Demo User";
   $("#userEmail").textContent = sessionUser?.email || "demo@householdhub.app";
@@ -253,9 +255,9 @@ function renderShell() {
   ).join("");
   $("#householdWorkspaceControl").hidden = isAdminView;
   $("#removeHouseholdButton").disabled = households.length <= 1;
-  $(".month-control").hidden = isAdminView;
+  $(".month-control").hidden = isAdminView || isNotesView;
   $("#syncButton").hidden = isAdminView;
-  $("#downloadCsvButton").hidden = isAdminView;
+  $("#downloadCsvButton").hidden = isAdminView || isNotesView;
   renderNav();
   const metrics = metricsForView();
   $("#metrics").hidden = metrics.length === 0;
@@ -276,6 +278,7 @@ function metricsForView() {
     const birthdaysThisMonth = birthdayOccurrencesForMonth().length;
     return [["Chore rotation", String(state.calendar.chores.length), "household chores"], ["Birthday reminders", String(birthdaysThisMonth), `annual birthdays in ${monthLabel()}`], [`${monthLabel()} events`, String(upcoming), "chores, birthdays and reminders"], ["Shared calendar", "Household", "tasks in every member"]];
   }
+  if (currentView === "notes") return [];
   if (currentView === "meals") {
     ensureMealWeekData();
     return [["Weekly meals", `${currentMealPlans().length}/28`, `occupied slots in Week ${selectedMealWeek()}`], ["Groceries estimate", money.format(107), "can post directly to budget"], ["Planned servings", String(plannedServingsTotal()), "people or portions planned"], ["Household plan", "Shared", "meals, recipes and grocery list"]];
@@ -304,6 +307,7 @@ const renderers = {
   transactions: renderTransactions,
   paychecks: renderPaychecks,
   calendar: renderCalendar,
+  notes: renderNotes,
   meals: renderMeals,
   recipes: renderRecipes,
   goals: renderGoals,
@@ -554,6 +558,157 @@ function renderCalendar() {
     </section>`;
 }
 
+function ensureNotesData() {
+  state.notes ||= { activeView: "notes", activeLabel: "", labels: [], entries: [], initialized: false };
+  if (!state.notes.initialized) {
+    state.notes.labels = ["Birthday", "House warming", "Groceries"];
+    state.notes.entries = [
+      {
+        id: uniqueId("weekend-todo"),
+        title: "Weekend ToDo",
+        body: "",
+        checklist: [
+          { id: uniqueId("item"), text: "Organize the garage", done: false },
+          { id: uniqueId("item"), text: "Confirm dinner plans", done: false },
+          { id: uniqueId("item"), text: "Buy birthday card", done: true }
+        ],
+        labels: ["House warming"],
+        pinned: true,
+        archived: false,
+        trashed: false,
+        color: "#fff7d6",
+        createdAt: new Date().toISOString()
+      },
+      {
+        id: uniqueId("grocery-stops"),
+        title: "Grocery stops",
+        body: "",
+        checklist: [
+          { id: uniqueId("item"), text: "Milk", done: false },
+          { id: uniqueId("item"), text: "Marinara sauce", done: false },
+          { id: uniqueId("item"), text: "Grapes", done: false },
+          { id: uniqueId("item"), text: "Bread", done: true }
+        ],
+        labels: ["Groceries"],
+        pinned: false,
+        archived: false,
+        trashed: false,
+        color: "#ffffff",
+        createdAt: new Date(Date.now() - 1000).toISOString()
+      },
+      {
+        id: uniqueId("birthday-ideas"),
+        title: "Birthday ideas",
+        body: "Call the bakery and confirm the guest list.",
+        checklist: [],
+        labels: ["Birthday"],
+        pinned: false,
+        archived: false,
+        trashed: false,
+        color: "#eef7ff",
+        createdAt: new Date(Date.now() - 2000).toISOString()
+      }
+    ];
+    state.notes.initialized = true;
+  }
+  state.notes.activeView ||= "notes";
+  state.notes.activeLabel ||= "";
+  state.notes.labels ||= [];
+  state.notes.entries ||= [];
+  state.notes.entries.forEach((note) => {
+    note.checklist ||= [];
+    note.labels ||= [];
+    note.pinned = Boolean(note.pinned);
+    note.archived = Boolean(note.archived);
+    note.trashed = Boolean(note.trashed);
+    note.color ||= "#ffffff";
+    note.createdAt ||= new Date().toISOString();
+  });
+}
+
+function visibleNotes() {
+  ensureNotesData();
+  const query = String(state.notes.search || "").trim().toLowerCase();
+  return state.notes.entries.filter((note) => {
+    if (state.notes.activeView === "archive" && !note.archived) return false;
+    if (state.notes.activeView === "trash" && !note.trashed) return false;
+    if (state.notes.activeView === "notes" && (note.archived || note.trashed)) return false;
+    if (state.notes.activeView === "reminders" && (note.archived || note.trashed || !note.reminder)) return false;
+    if (state.notes.activeView === "label" && (note.archived || note.trashed || !note.labels.includes(state.notes.activeLabel))) return false;
+    if (!query) return true;
+    return [note.title, note.body, ...note.labels, ...note.checklist.map((item) => item.text)]
+      .join(" ")
+      .toLowerCase()
+      .includes(query);
+  }).sort((a, b) => Number(b.pinned) - Number(a.pinned) || String(b.createdAt).localeCompare(String(a.createdAt)));
+}
+
+function renderNotes() {
+  ensureNotesData();
+  const notes = visibleNotes();
+  const pinned = notes.filter((note) => note.pinned);
+  const others = notes.filter((note) => !note.pinned);
+  return `
+    <section class="notes-layout">
+      <aside class="notes-filter-panel">
+        <button class="${state.notes.activeView === "notes" ? "active" : ""}" data-notes-view="notes" type="button">Notes</button>
+        <button class="${state.notes.activeView === "reminders" ? "active" : ""}" data-notes-view="reminders" type="button">Reminders</button>
+        <div class="notes-filter-label">Labels</div>
+        ${state.notes.labels.map((label) => `<div class="notes-label-row">
+          <button class="${state.notes.activeView === "label" && state.notes.activeLabel === label ? "active" : ""}" data-notes-label="${label}" type="button">${label}</button>
+          <button class="note-label-delete" data-delete-note-label="${label}" type="button" aria-label="Delete ${label} label">×</button>
+        </div>`).join("")}
+        <form id="noteLabelForm" class="note-label-form">
+          <input name="label" placeholder="New label" aria-label="New label">
+          <button type="submit" aria-label="Add label">+</button>
+        </form>
+        <button class="${state.notes.activeView === "archive" ? "active" : ""}" data-notes-view="archive" type="button">Archive</button>
+        <button class="${state.notes.activeView === "trash" ? "active" : ""}" data-notes-view="trash" type="button">Trash</button>
+      </aside>
+      <div class="notes-workspace">
+        <div class="notes-search">
+          <span aria-hidden="true">⌕</span>
+          <input id="notesSearch" placeholder="Search household notes" value="${state.notes.search || ""}">
+        </div>
+        <form id="noteComposer" class="note-composer">
+          <input name="title" placeholder="Title">
+          <textarea name="body" rows="2" placeholder="Take a note..."></textarea>
+          <textarea name="items" rows="2" placeholder="Checklist items, one per line"></textarea>
+          <div class="note-composer-row">
+            <label>Label<select name="label"><option value="">No label</option>${state.notes.labels.map((label) => `<option value="${label}">${label}</option>`).join("")}</select></label>
+            <label>Color<select name="color"><option value="#ffffff">White</option><option value="#fff7d6">Yellow</option><option value="#eef7ff">Blue</option><option value="#eaf8ef">Green</option><option value="#fff0ee">Coral</option></select></label>
+            <label>Reminder<input name="reminder" type="date"></label>
+            <label class="note-pin-toggle"><input name="pinned" type="checkbox"> Pin</label>
+            <button type="submit">Add note</button>
+          </div>
+        </form>
+        ${notes.length ? `
+          ${pinned.length ? `<section class="notes-result-section"><div class="notes-section-label">Pinned</div><div class="notes-board">${pinned.map(renderNoteCard).join("")}</div></section>` : ""}
+          ${others.length ? `<section class="notes-result-section"><div class="notes-section-label">${pinned.length ? "Others" : "Notes"}</div><div class="notes-board">${others.map(renderNoteCard).join("")}</div></section>` : ""}
+        ` : `<div class="notes-empty">No notes match this view.</div>`}
+      </div>
+    </section>`;
+}
+
+function renderNoteCard(note) {
+  const completed = note.checklist.filter((item) => item.done);
+  const open = note.checklist.filter((item) => !item.done);
+  return `<article class="note-card" data-note-id="${note.id}" style="background:${note.color}">
+    <div class="note-card-head">
+      <strong>${note.title || "Untitled note"}</strong>
+      <button class="note-icon-button ${note.pinned ? "active" : ""}" data-pin-note="${note.id}" type="button" aria-label="${note.pinned ? "Unpin note" : "Pin note"}">⌖</button>
+    </div>
+    ${note.body ? `<p>${note.body}</p>` : ""}
+    ${note.reminder ? `<div class="note-reminder">Reminder · ${formatShortDate(note.reminder)}</div>` : ""}
+    ${open.map((item) => `<label class="note-check-item"><input data-note-check="${note.id}:${item.id}" type="checkbox"> <span>${item.text}</span></label>`).join("")}
+    ${completed.length ? `<details class="note-completed"><summary>${completed.length} completed ${completed.length === 1 ? "item" : "items"}</summary>${completed.map((item) => `<label class="note-check-item done"><input data-note-check="${note.id}:${item.id}" type="checkbox" checked> <span>${item.text}</span></label>`).join("")}</details>` : ""}
+    ${note.labels.length ? `<div class="note-labels">${note.labels.map((label) => `<span>${label}</span>`).join("")}</div>` : ""}
+    <div class="note-card-actions">
+      ${note.trashed ? `<button data-restore-note="${note.id}" type="button">Restore</button><button class="danger-button" data-delete-note-forever="${note.id}" type="button">Delete</button>` : `<button data-archive-note="${note.id}" type="button">${note.archived ? "Unarchive" : "Archive"}</button><button class="danger-button" data-trash-note="${note.id}" type="button">Trash</button>`}
+    </div>
+  </article>`;
+}
+
 function renderMeals() {
   const meals = ["Breakfast", "Lunch", "Dinner", "Snack"];
   const days = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"];
@@ -694,6 +849,7 @@ function renderSharing() {
     "Calendar",
     "Chores",
     "Birthday reminders",
+    "Notes",
     "Meals",
     "Grocery lists",
     "Reminders",
@@ -1089,6 +1245,143 @@ function transactionInboxItems() {
 }
 
 function bindViewEvents() {
+  $("#notesSearch")?.addEventListener("input", (event) => {
+    const query = event.currentTarget.value.trim().toLowerCase();
+    state.notes.search = event.currentTarget.value;
+    document.querySelectorAll(".note-card[data-note-id]").forEach((card) => {
+      const note = state.notes.entries.find((item) => item.id === card.dataset.noteId);
+      const searchable = note
+        ? [note.title, note.body, ...note.labels, ...note.checklist.map((item) => item.text)].join(" ").toLowerCase()
+        : "";
+      card.hidden = Boolean(query) && !searchable.includes(query);
+    });
+    document.querySelectorAll(".notes-result-section").forEach((section) => {
+      section.hidden = ![...section.querySelectorAll(".note-card")].some((card) => !card.hidden);
+    });
+    autosaveState();
+  });
+
+  document.querySelectorAll("[data-notes-view]").forEach((button) => {
+    button.addEventListener("click", () => {
+      state.notes.activeView = button.dataset.notesView;
+      state.notes.activeLabel = "";
+      render();
+    });
+  });
+
+  document.querySelectorAll("[data-notes-label]").forEach((button) => {
+    button.addEventListener("click", () => {
+      state.notes.activeView = "label";
+      state.notes.activeLabel = button.dataset.notesLabel;
+      render();
+    });
+  });
+
+  $("#noteLabelForm")?.addEventListener("submit", (event) => {
+    event.preventDefault();
+    const label = String(new FormData(event.currentTarget).get("label") || "").trim();
+    if (!label || state.notes.labels.some((item) => item.toLowerCase() === label.toLowerCase())) return;
+    state.notes.labels.push(label);
+    state.notes.activeView = "label";
+    state.notes.activeLabel = label;
+    render();
+  });
+
+  document.querySelectorAll("[data-delete-note-label]").forEach((button) => {
+    button.addEventListener("click", () => {
+      const label = button.dataset.deleteNoteLabel;
+      state.notes.labels = state.notes.labels.filter((item) => item !== label);
+      state.notes.entries.forEach((note) => {
+        note.labels = note.labels.filter((item) => item !== label);
+      });
+      if (state.notes.activeLabel === label) {
+        state.notes.activeView = "notes";
+        state.notes.activeLabel = "";
+      }
+      render();
+    });
+  });
+
+  $("#noteComposer")?.addEventListener("submit", (event) => {
+    event.preventDefault();
+    const data = Object.fromEntries(new FormData(event.currentTarget));
+    const checklist = String(data.items || "").split("\n").map((item) => item.trim()).filter(Boolean);
+    if (!String(data.title || "").trim() && !String(data.body || "").trim() && checklist.length === 0) return;
+    state.notes.entries.unshift({
+      id: uniqueId("note"),
+      title: String(data.title || "").trim(),
+      body: String(data.body || "").trim(),
+      checklist: checklist.map((text) => ({ id: uniqueId("item"), text, done: false })),
+      labels: data.label ? [data.label] : [],
+      reminder: data.reminder || "",
+      color: data.color || "#ffffff",
+      pinned: data.pinned === "on",
+      archived: false,
+      trashed: false,
+      createdAt: new Date().toISOString()
+    });
+    state.notes.activeView = "notes";
+    state.notes.activeLabel = "";
+    render();
+  });
+
+  document.querySelectorAll("[data-note-check]").forEach((input) => {
+    input.addEventListener("change", () => {
+      const [noteId, itemId] = input.dataset.noteCheck.split(":");
+      const note = state.notes.entries.find((item) => item.id === noteId);
+      const checklistItem = note?.checklist.find((item) => item.id === itemId);
+      if (!checklistItem) return;
+      checklistItem.done = input.checked;
+      render();
+    });
+  });
+
+  document.querySelectorAll("[data-pin-note]").forEach((button) => {
+    button.addEventListener("click", () => {
+      const note = state.notes.entries.find((item) => item.id === button.dataset.pinNote);
+      if (!note) return;
+      note.pinned = !note.pinned;
+      render();
+    });
+  });
+
+  document.querySelectorAll("[data-archive-note]").forEach((button) => {
+    button.addEventListener("click", () => {
+      const note = state.notes.entries.find((item) => item.id === button.dataset.archiveNote);
+      if (!note) return;
+      note.archived = !note.archived;
+      note.trashed = false;
+      render();
+    });
+  });
+
+  document.querySelectorAll("[data-trash-note]").forEach((button) => {
+    button.addEventListener("click", () => {
+      const note = state.notes.entries.find((item) => item.id === button.dataset.trashNote);
+      if (!note) return;
+      note.trashed = true;
+      note.archived = false;
+      note.pinned = false;
+      render();
+    });
+  });
+
+  document.querySelectorAll("[data-restore-note]").forEach((button) => {
+    button.addEventListener("click", () => {
+      const note = state.notes.entries.find((item) => item.id === button.dataset.restoreNote);
+      if (!note) return;
+      note.trashed = false;
+      render();
+    });
+  });
+
+  document.querySelectorAll("[data-delete-note-forever]").forEach((button) => {
+    button.addEventListener("click", () => {
+      state.notes.entries = state.notes.entries.filter((note) => note.id !== button.dataset.deleteNoteForever);
+      render();
+    });
+  });
+
   document.querySelectorAll("[data-budget-line]").forEach((input) => {
     input.addEventListener("input", () => {
       const [categoryIndex, lineIndex] = input.dataset.budgetLine.split(":").map(Number);

@@ -1321,6 +1321,315 @@ main {
   background: white;
 }
 
+.notes-layout {
+  display: grid;
+  grid-template-columns: 190px minmax(0, 1fr);
+  gap: 1rem;
+  align-items: start;
+}
+
+.notes-filter-panel {
+  position: sticky;
+  top: 1rem;
+  display: grid;
+  gap: 0.25rem;
+  padding: 0.5rem;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: white;
+}
+
+.notes-filter-panel > button,
+.notes-label-row > button:first-child {
+  width: 100%;
+  min-height: 40px;
+  justify-content: flex-start;
+  border: 0;
+  background: transparent;
+  color: var(--text);
+  text-align: left;
+}
+
+.notes-filter-panel button.active {
+  background: #fff1b9;
+}
+
+.notes-filter-label,
+.notes-section-label {
+  color: var(--muted);
+  font-size: 0.72rem;
+  font-weight: 900;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.notes-filter-label {
+  padding: 0.65rem 0.65rem 0.2rem;
+}
+
+.notes-label-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 32px;
+  gap: 0.2rem;
+}
+
+.notes-label-row .note-label-delete {
+  min-height: 32px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--coral);
+}
+
+.note-label-form {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 36px;
+  gap: 0.3rem;
+  margin: 0.2rem 0 0.5rem;
+}
+
+.note-label-form input,
+.note-label-form button {
+  min-height: 36px;
+}
+
+.note-label-form input {
+  min-width: 0;
+  padding: 0.45rem 0.55rem;
+}
+
+.note-label-form button {
+  padding: 0;
+}
+
+.notes-workspace {
+  min-width: 0;
+  display: grid;
+  gap: 1rem;
+}
+
+.notes-search,
+.note-composer {
+  width: min(760px, 100%);
+  margin-inline: auto;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: white;
+  box-shadow: var(--shadow);
+}
+
+.notes-search {
+  display: grid;
+  grid-template-columns: 28px minmax(0, 1fr);
+  align-items: center;
+  padding: 0 0.75rem;
+}
+
+.notes-search span {
+  color: var(--muted);
+  font-size: 1.25rem;
+}
+
+.notes-search input {
+  min-height: 48px;
+  border: 0;
+  outline: 0;
+}
+
+.note-composer {
+  display: grid;
+  gap: 0;
+  padding: 0.65rem;
+}
+
+.note-composer > input,
+.note-composer > textarea {
+  min-height: 42px;
+  padding: 0.55rem;
+  border: 0;
+  border-radius: 0;
+  outline: 0;
+  resize: vertical;
+}
+
+.note-composer > input {
+  font-weight: 900;
+}
+
+.note-composer-row {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(120px, 1fr)) auto auto;
+  gap: 0.5rem;
+  align-items: end;
+  padding-top: 0.55rem;
+  border-top: 1px solid var(--line);
+}
+
+.note-composer-row label {
+  min-width: 0;
+  color: var(--muted);
+  font-size: 0.72rem;
+  font-weight: 900;
+}
+
+.note-composer-row select,
+.note-composer-row input[type="date"] {
+  width: 100%;
+  margin-top: 0.25rem;
+}
+
+.note-composer-row .note-pin-toggle {
+  min-height: 42px;
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  color: var(--text);
+  white-space: nowrap;
+}
+
+.notes-result-section {
+  min-width: 0;
+}
+
+.notes-section-label {
+  margin: 0 0 0.55rem 0.2rem;
+}
+
+.notes-board {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+  gap: 0.75rem;
+  align-items: start;
+}
+
+.note-card {
+  display: grid;
+  width: 100%;
+  gap: 0.55rem;
+  margin: 0;
+  padding: 0.8rem;
+  border: 1px solid #d8dee9;
+  border-radius: 8px;
+  box-shadow: 0 2px 8px rgba(25, 38, 61, 0.06);
+}
+
+.note-card[hidden] {
+  display: none;
+}
+
+.note-card-head {
+  display: flex;
+  gap: 0.5rem;
+  align-items: start;
+  justify-content: space-between;
+}
+
+.note-card-head strong {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  font-size: 1.05rem;
+}
+
+.note-card p {
+  margin: 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.note-icon-button {
+  flex: 0 0 32px;
+  min-height: 32px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--muted);
+}
+
+.note-icon-button.active {
+  color: var(--gold);
+  background: #fff1b9;
+}
+
+.note-reminder {
+  width: fit-content;
+  padding: 0.25rem 0.45rem;
+  border-radius: 6px;
+  background: rgba(19, 147, 109, 0.1);
+  color: var(--green);
+  font-size: 0.75rem;
+  font-weight: 900;
+}
+
+.note-check-item {
+  display: grid;
+  grid-template-columns: 18px minmax(0, 1fr);
+  gap: 0.4rem;
+  align-items: start;
+}
+
+.note-check-item input {
+  margin-top: 0.15rem;
+}
+
+.note-check-item span {
+  overflow-wrap: anywhere;
+}
+
+.note-check-item.done span {
+  color: var(--muted);
+  text-decoration: line-through;
+}
+
+.note-completed {
+  padding-top: 0.45rem;
+  border-top: 1px solid rgba(107, 117, 134, 0.25);
+}
+
+.note-completed summary {
+  color: var(--muted);
+  cursor: pointer;
+  font-size: 0.8rem;
+  font-weight: 800;
+}
+
+.note-labels,
+.note-card-actions {
+  display: flex;
+  gap: 0.35rem;
+  flex-wrap: wrap;
+}
+
+.note-labels span {
+  padding: 0.2rem 0.45rem;
+  border-radius: 999px;
+  background: rgba(25, 38, 61, 0.08);
+  font-size: 0.7rem;
+  font-weight: 900;
+}
+
+.note-card-actions {
+  padding-top: 0.35rem;
+  border-top: 1px solid rgba(107, 117, 134, 0.18);
+}
+
+.note-card-actions button {
+  min-height: 30px;
+  padding: 0.3rem 0.55rem;
+  background: transparent;
+  color: var(--muted);
+}
+
+.note-card-actions .danger-button {
+  color: var(--coral);
+}
+
+.notes-empty {
+  padding: 3rem 1rem;
+  color: var(--muted);
+  text-align: center;
+  font-weight: 800;
+}
+
 .admin-layout {
   display: grid;
   gap: 1rem;
@@ -1430,8 +1739,19 @@ main {
 @media (max-width: 1120px) {
   .work-grid,
   .transactions-grid,
-  .calendar-layout {
+  .calendar-layout,
+  .notes-layout {
     grid-template-columns: 1fr;
+  }
+
+  .notes-filter-panel {
+    position: static;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .notes-filter-label,
+  .note-label-form {
+    grid-column: 1 / -1;
   }
 
   .metrics-grid {
@@ -1517,6 +1837,19 @@ main {
   }
 
   .admin-stat-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .notes-filter-panel,
+  .note-composer-row {
+    grid-template-columns: 1fr;
+  }
+
+  .notes-label-row {
+    grid-template-columns: minmax(0, 1fr) 32px;
+  }
+
+  .notes-board {
     grid-template-columns: 1fr;
   }
 }
