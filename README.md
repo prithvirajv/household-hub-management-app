@@ -69,9 +69,28 @@ Household Hub sends a welcome email after signup and an invitation email when an
 
 Without `SMTP_HOST`, local development uses Nodemailer's JSON preview transport. The signup or invitation still succeeds, and the server logs that an email preview was created.
 
+### Free Brevo SMTP
+
+Brevo's free plan currently includes up to 300 email sends per day. Create a Brevo account, verify the sender address or domain, then create an SMTP key under **Transactional > Settings > SMTP & API**.
+
+Use:
+
+```bash
+SMTP_HOST="smtp-relay.brevo.com"
+SMTP_PORT="587"
+SMTP_SECURE="false"
+SMTP_USER="your-brevo-smtp-login"
+SMTP_PASS="your-brevo-smtp-key"
+EMAIL_FROM="Household Hub <your-verified-sender@example.com>"
+```
+
+The SMTP key is a secret. Keep it in local environment variables or the Kubernetes Secret and never commit it.
+
 ## GKE Deployment
 
-Create a GKE cluster and a reachable PostgreSQL database first. The app expects these environment variables in the Kubernetes Secret:
+The deployment script creates a small one-node zonal GKE cluster when the named cluster does not exist. It deploys one Household Hub pod and, by default, one PostgreSQL StatefulSet with a 10 Gi persistent volume. This is suitable for an initial MVP; migrate PostgreSQL to Cloud SQL before relying on multi-zone availability.
+
+The app expects these environment variables in the Kubernetes Secret:
 
 - `DATABASE_URL`
 - `SESSION_SECRET`
@@ -89,11 +108,16 @@ Deploy with:
 ```bash
 PROJECT_ID="my-gcp-project" \
 REGION="us-central1" \
+ZONE="us-central1-a" \
 CLUSTER_NAME="household-hub" \
-DATABASE_URL="postgres://user:password@host:5432/household_hub" \
 SESSION_SECRET="$(openssl rand -hex 32)" \
-DATABASE_SSL="true" \
+POSTGRES_PASSWORD="$(openssl rand -hex 24)" \
+SMTP_USER="your-brevo-smtp-login" \
+SMTP_PASS="your-brevo-smtp-key" \
+EMAIL_FROM="Household Hub <your-verified-sender@example.com>" \
 ./scripts/deploy-gke.sh
 ```
 
-The deploy script enables required Google APIs, creates the Artifact Registry repository when needed, builds and pushes the container with Cloud Build, updates the Kubernetes secret, applies `k8s/`, and waits for rollout.
+The deploy script enables required Google APIs, creates the one-node cluster and Artifact Registry repository when needed, builds and pushes the container with Cloud Build, deploys PostgreSQL, updates Kubernetes secrets, applies the app manifests, waits for rollout, and prints the external URL.
+
+Set `USE_IN_CLUSTER_POSTGRES=false` and provide `DATABASE_URL` plus `DATABASE_SSL=true` to use Cloud SQL or another managed PostgreSQL service. Set `CLUSTER_MODE=autopilot` to use a regional Autopilot cluster instead of the default zonal Standard cluster.
