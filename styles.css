@@ -798,6 +798,25 @@ main {
   gap: 0.5rem;
 }
 
+.invite-form {
+  align-items: end;
+}
+
+.invite-form label {
+  min-width: 0;
+}
+
+.invite-form label > input,
+.invite-form label > select {
+  width: 100%;
+  margin-top: 0.25rem;
+}
+
+.invite-email-status {
+  grid-column: 1 / -1;
+  margin: 0;
+}
+
 .transaction-entry-form {
   grid-template-columns: minmax(0, 1fr) 100px;
   align-items: end;

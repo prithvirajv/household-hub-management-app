@@ -8,6 +8,13 @@ services:
       SESSION_SECRET: local-compose-session-secret-change-me
       DATABASE_SSL: "false"
       PORT: "8080"
+      APP_BASE_URL: ${APP_BASE_URL:-http://localhost:4173}
+      EMAIL_FROM: ${EMAIL_FROM:-Household Hub <no-reply@householdhub.app>}
+      SMTP_HOST: ${SMTP_HOST:-}
+      SMTP_PORT: ${SMTP_PORT:-587}
+      SMTP_SECURE: ${SMTP_SECURE:-false}
+      SMTP_USER: ${SMTP_USER:-}
+      SMTP_PASS: ${SMTP_PASS:-}
     depends_on:
       postgres:
         condition: service_healthy

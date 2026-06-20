@@ -20,6 +20,7 @@ let households = [];
 let countryCatalog = [];
 let currentView = "budget";
 let autosaveTimer = null;
+let inviteEmailStatus = "";
 
 const formatterCache = new Map();
 function currencyFormatter(exact = false) {
@@ -877,7 +878,13 @@ function renderSharing() {
               ${allScopes.map((scope) => `<label class="scope-toggle"><input data-share-scope="${scope}" type="checkbox" ${sharedScopes.includes(scope) ? "checked" : ""}> <span>${scope}</span></label>`).join("")}
             </div>
           </div>
-          <form id="inviteMemberForm" class="invite-form"><input name="name" value="Taylor Carter"><input name="email" value="taylor@example.com"><select name="role">${accessRoles.map((role) => `<option value="${role}">${role}</option>`).join("")}</select><button type="submit">Add spouse</button></form>
+          <form id="inviteMemberForm" class="invite-form">
+            <label>Name<input name="name" value="Taylor Carter" required></label>
+            <label>Email<input name="email" type="email" value="taylor@example.com" required></label>
+            <label>Access<select name="role">${accessRoles.map((role) => `<option value="${role}">${role}</option>`).join("")}</select></label>
+            <button type="submit">Send invite</button>
+            <p id="inviteEmailStatus" class="form-message invite-email-status">${inviteEmailStatus}</p>
+          </form>
           ${state.household.members.map((member) => compactRow(member.name, member.email, `${member.role}${member.role.includes("Invited") ? "" : " · Active"} · ${sharedScopes.length === allScopes.length ? "Complete household" : `${sharedScopes.length} shared areas`}`)).join("")}
         </section>
       </div>
@@ -1892,12 +1899,46 @@ function bindViewEvents() {
     render();
   });
 
-  $("#inviteMemberForm")?.addEventListener("submit", (event) => {
+  $("#inviteMemberForm")?.addEventListener("submit", async (event) => {
     event.preventDefault();
     const data = Object.fromEntries(new FormData(event.currentTarget));
-    state.household.members.push({ name: data.name || "New member", email: data.email || "member@example.com", role: data.role || "Member" });
-    state.household.activity.unshift(`${data.name || "New member"} was invited to the household workspace`);
-    render();
+    const submitButton = event.currentTarget.querySelector('[type="submit"]');
+    submitButton.disabled = true;
+    inviteEmailStatus = "Sending invitation...";
+    $("#inviteEmailStatus").textContent = inviteEmailStatus;
+    try {
+      await saveStateNow();
+      const result = await api("/api/households/invitations", {
+        method: "POST",
+        body: JSON.stringify({
+          name: data.name,
+          email: data.email,
+          role: data.role,
+          scopes: state.household.sharedScopes || []
+        })
+      });
+      const invitation = result.invitation;
+      const member = state.household.members.find((item) => item.email.toLowerCase() === invitation.email.toLowerCase());
+      const invitedRole = `${invitation.role} - Invited`;
+      if (member) {
+        Object.assign(member, { name: invitation.name, email: invitation.email, role: invitedRole });
+      } else {
+        state.household.members.push({ name: invitation.name, email: invitation.email, role: invitedRole });
+      }
+      state.household.inviteCode = invitation.inviteCode;
+      state.household.activity.unshift(`${invitation.name} was invited to ${state.household.name}`);
+      inviteEmailStatus = result.email.delivered
+        ? `Invitation email sent to ${invitation.email}.`
+        : result.email.preview
+          ? `Invitation saved. SMTP is not configured, so a local email preview was created for ${invitation.email}.`
+          : `Invitation saved, but email delivery failed for ${invitation.email}.`;
+      await saveStateNow();
+      render();
+    } catch (error) {
+      inviteEmailStatus = error.message;
+      $("#inviteEmailStatus").textContent = inviteEmailStatus;
+      submitButton.disabled = false;
+    }
   });
 
   $("#refreshAdminButton")?.addEventListener("click", () => {

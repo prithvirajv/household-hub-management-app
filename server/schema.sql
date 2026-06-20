@@ -38,6 +38,24 @@ CREATE TABLE IF NOT EXISTS household_memberships (
 CREATE INDEX IF NOT EXISTS idx_household_memberships_user_id
   ON household_memberships(user_id);
 
+CREATE TABLE IF NOT EXISTS household_invitations (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  household_id UUID NOT NULL REFERENCES households(id) ON DELETE CASCADE,
+  invited_by UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  email TEXT NOT NULL,
+  name TEXT NOT NULL,
+  role TEXT NOT NULL,
+  scopes JSONB NOT NULL DEFAULT '[]'::jsonb,
+  invite_code TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'pending',
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  UNIQUE (household_id, email)
+);
+
+CREATE INDEX IF NOT EXISTS idx_household_invitations_email
+  ON household_invitations(email);
+
 CREATE TABLE IF NOT EXISTS login_events (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,

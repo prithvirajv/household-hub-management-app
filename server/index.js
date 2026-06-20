@@ -3,6 +3,7 @@ const path = require("path");
 const crypto = require("crypto");
 const express = require("express");
 const cookieParser = require("cookie-parser");
+const nodemailer = require("nodemailer");
 let bcrypt;
 try {
   bcrypt = require("bcrypt");
@@ -21,6 +22,13 @@ const DATABASE_URL = process.env.DATABASE_URL || "postgres://household_hub:house
 const DATABASE_SSL = String(process.env.DATABASE_SSL || "false").toLowerCase() === "true";
 const MEMORY_DB = String(process.env.MEMORY_DB || "false").toLowerCase() === "true";
 const ADMIN_EMAIL = String(process.env.ADMIN_EMAIL || "demo@householdhub.app").trim().toLowerCase();
+const SMTP_HOST = String(process.env.SMTP_HOST || "").trim();
+const SMTP_PORT = Number(process.env.SMTP_PORT || 587);
+const SMTP_SECURE = String(process.env.SMTP_SECURE || "false").toLowerCase() === "true";
+const SMTP_USER = String(process.env.SMTP_USER || "").trim();
+const SMTP_PASS = String(process.env.SMTP_PASS || "");
+const EMAIL_FROM = String(process.env.EMAIL_FROM || "Household Hub <no-reply@householdhub.app>").trim();
+const APP_BASE_URL = String(process.env.APP_BASE_URL || `http://localhost:${PORT}`).replace(/\/+$/, "");
 
 const pool = MEMORY_DB
   ? null
@@ -33,6 +41,7 @@ const memoryDb = {
   users: [],
   households: [],
   memberships: [],
+  invitations: [],
   loginEvents: []
 };
 
@@ -46,6 +55,63 @@ app.use(express.static(path.join(__dirname, ".."), {
     }
   }
 }));
+
+const mailTransport = SMTP_HOST
+  ? nodemailer.createTransport({
+      host: SMTP_HOST,
+      port: SMTP_PORT,
+      secure: SMTP_SECURE,
+      auth: SMTP_USER ? { user: SMTP_USER, pass: SMTP_PASS } : undefined
+    })
+  : nodemailer.createTransport({ jsonTransport: true });
+
+function escapeHtml(value) {
+  return String(value ?? "")
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll("\"", "&quot;")
+    .replaceAll("'", "&#039;");
+}
+
+async function sendTransactionalEmail({ to, subject, text, html }) {
+  try {
+    const info = await mailTransport.sendMail({ from: EMAIL_FROM, to, subject, text, html });
+    const delivery = {
+      delivered: Boolean(SMTP_HOST),
+      preview: !SMTP_HOST,
+      messageId: info.messageId || ""
+    };
+    if (!SMTP_HOST) {
+      console.log(`[email preview] ${subject} -> ${to}`);
+    }
+    return delivery;
+  } catch (error) {
+    console.error(`Email delivery failed for ${to}:`, error.message);
+    return { delivered: false, preview: false, error: "Email delivery failed" };
+  }
+}
+
+function sendWelcomeEmail({ email, name, householdName }) {
+  const safeName = escapeHtml(name);
+  const safeHousehold = escapeHtml(householdName);
+  return sendTransactionalEmail({
+    to: email,
+    subject: "Welcome to Household Hub",
+    text: `Hi ${name}, your Household Hub login has been created for ${householdName}. Open ${APP_BASE_URL} to get started.`,
+    html: `<h2>Welcome to Household Hub</h2><p>Hi ${safeName},</p><p>Your login has been created for <strong>${safeHousehold}</strong>.</p><p><a href="${escapeHtml(APP_BASE_URL)}">Open Household Hub</a> to get started.</p>`
+  });
+}
+
+function sendHouseholdInviteEmail({ email, name, inviterName, householdName, inviteCode, role, scopes }) {
+  const scopeText = scopes.length ? scopes.join(", ") : "household workspace";
+  return sendTransactionalEmail({
+    to: email,
+    subject: `${inviterName} shared ${householdName} with you`,
+    text: `Hi ${name}, ${inviterName} invited you to ${householdName} in Household Hub as ${role}. Invite code: ${inviteCode}. Shared areas: ${scopeText}. Open ${APP_BASE_URL}.`,
+    html: `<h2>You have been invited to Household Hub</h2><p>Hi ${escapeHtml(name)},</p><p><strong>${escapeHtml(inviterName)}</strong> shared <strong>${escapeHtml(householdName)}</strong> with you as ${escapeHtml(role)}.</p><p>Invite code: <strong>${escapeHtml(inviteCode)}</strong></p><p>Shared areas: ${escapeHtml(scopeText)}</p><p><a href="${escapeHtml(APP_BASE_URL)}">Open Household Hub</a></p>`
+  });
+}
 
 function publicUser(row) {
   return row ? { id: row.id, email: row.email, name: row.name, isAdmin: Boolean(row.is_admin) } : null;
@@ -416,8 +482,9 @@ app.post("/api/auth/signup", async (req, res, next) => {
     memoryDb.users.push(user);
     memoryDb.households.push(household);
     memoryDb.memberships.push({ user_id: user.id, household_id: household.id, role: "owner" });
+    const emailDelivery = await sendWelcomeEmail({ email, name, householdName });
     signSession(res, user.id);
-    return res.status(201).json({ user: publicUser(user) });
+    return res.status(201).json({ user: publicUser(user), email: emailDelivery });
   }
 
   const client = await pool.connect();
@@ -431,8 +498,9 @@ app.post("/api/auth/signup", async (req, res, next) => {
     const state = householdState(householdName, country, currency);
     await createHouseholdForUser(client, user.rows[0].id, householdName, state);
     await client.query("COMMIT");
+    const emailDelivery = await sendWelcomeEmail({ email, name, householdName });
     signSession(res, user.rows[0].id);
-    res.status(201).json({ user: publicUser(user.rows[0]) });
+    res.status(201).json({ user: publicUser(user.rows[0]), email: emailDelivery });
   } catch (error) {
     await client.query("ROLLBACK");
     if (error.code === "23505") return res.status(409).json({ error: "That email is already registered" });
@@ -742,6 +810,96 @@ app.post("/api/households/select", requireSession, async (req, res, next) => {
     if (!allowed) return res.status(404).json({ error: "Household not found" });
     selectHousehold(res, householdId);
     res.json({ ok: true });
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.post("/api/households/invitations", requireSession, async (req, res, next) => {
+  try {
+    const email = String(req.body.email || "").trim().toLowerCase();
+    const name = String(req.body.name || "Household member").trim();
+    const role = String(req.body.role || "Member").trim();
+    const scopes = Array.isArray(req.body.scopes)
+      ? req.body.scopes.map((scope) => String(scope).trim()).filter(Boolean).slice(0, 50)
+      : [];
+
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+      return res.status(400).json({ error: "Enter a valid invitation email" });
+    }
+
+    let household;
+    let inviteCode;
+
+    if (MEMORY_DB) {
+      const membership = memoryDb.memberships.find((item) =>
+        item.user_id === req.sessionUser.id && item.household_id === req.sessionUser.household_id
+      );
+      if (!membership || membership.role !== "owner") {
+        return res.status(403).json({ error: "Only the household owner can send invitations" });
+      }
+      household = memoryDb.households.find((item) => item.id === req.sessionUser.household_id);
+      if (!household) return res.status(404).json({ error: "Household not found" });
+      inviteCode = household.invite_code || makeInviteCode();
+      const existing = memoryDb.invitations.find((item) =>
+        item.household_id === household.id && item.email === email
+      );
+      const invitation = existing || { id: crypto.randomUUID(), household_id: household.id, email };
+      Object.assign(invitation, {
+        name,
+        role,
+        scopes,
+        invite_code: inviteCode,
+        status: "pending",
+        invited_by: req.sessionUser.id,
+        updated_at: new Date().toISOString()
+      });
+      if (!existing) memoryDb.invitations.push(invitation);
+    } else {
+      const result = await pool.query(
+        `SELECT h.id, h.name, h.invite_code, hm.role
+         FROM households h
+         JOIN household_memberships hm ON hm.household_id = h.id
+         WHERE h.id = $1 AND hm.user_id = $2`,
+        [req.sessionUser.household_id, req.sessionUser.id]
+      );
+      household = result.rows[0];
+      if (!household) return res.status(404).json({ error: "Household not found" });
+      if (household.role !== "owner") {
+        return res.status(403).json({ error: "Only the household owner can send invitations" });
+      }
+      inviteCode = household.invite_code;
+      await pool.query(
+        `INSERT INTO household_invitations
+          (household_id, invited_by, email, name, role, scopes, invite_code, status)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, 'pending')
+         ON CONFLICT (household_id, email)
+         DO UPDATE SET
+           invited_by = EXCLUDED.invited_by,
+           name = EXCLUDED.name,
+           role = EXCLUDED.role,
+           scopes = EXCLUDED.scopes,
+           invite_code = EXCLUDED.invite_code,
+           status = 'pending',
+           updated_at = now()`,
+        [household.id, req.sessionUser.id, email, name, role, JSON.stringify(scopes), inviteCode]
+      );
+    }
+
+    const emailDelivery = await sendHouseholdInviteEmail({
+      email,
+      name,
+      inviterName: req.sessionUser.name,
+      householdName: household.name,
+      inviteCode,
+      role,
+      scopes
+    });
+
+    res.status(201).json({
+      invitation: { email, name, role, scopes, inviteCode, status: "pending" },
+      email: emailDelivery
+    });
   } catch (error) {
     next(error);
   }

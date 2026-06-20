@@ -51,8 +51,23 @@ The Compose database uses:
 - `POST /api/auth/signup`
 - `POST /api/auth/signin`
 - `POST /api/auth/signout`
+- `POST /api/households/invitations`
 - `GET /api/state`
 - `PUT /api/state`
+
+## Transactional Email
+
+Household Hub sends a welcome email after signup and an invitation email when an owner shares a household. Configure an SMTP account with:
+
+- `APP_BASE_URL`
+- `EMAIL_FROM`
+- `SMTP_HOST`
+- `SMTP_PORT`
+- `SMTP_SECURE`
+- `SMTP_USER`
+- `SMTP_PASS`
+
+Without `SMTP_HOST`, local development uses Nodemailer's JSON preview transport. The signup or invitation still succeeds, and the server logs that an email preview was created.
 
 ## GKE Deployment
 
@@ -61,6 +76,13 @@ Create a GKE cluster and a reachable PostgreSQL database first. The app expects 
 - `DATABASE_URL`
 - `SESSION_SECRET`
 - `DATABASE_SSL`
+- `APP_BASE_URL`
+- `EMAIL_FROM`
+- `SMTP_HOST`
+- `SMTP_PORT`
+- `SMTP_SECURE`
+- `SMTP_USER`
+- `SMTP_PASS`
 
 Deploy with:
 
