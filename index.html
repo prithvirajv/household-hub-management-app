@@ -56,11 +56,29 @@
             <label>Email<input name="email" type="email" autocomplete="username" required></label>
             <label>Password<input name="password" type="password" autocomplete="current-password" required></label>
             <button type="submit">Open household</button>
+            <button id="forgotPasswordButton" class="text-button" type="button">Forgot password?</button>
             <div class="demo-access">
               <span>Exploring Household Hub?</span>
               <button id="demoLoginButton" class="ghost" type="button">Try demo</button>
             </div>
             <p id="authMessage"></p>
+          </form>
+          <form id="passwordResetRequestForm" class="auth-form secondary-form" hidden>
+            <h2>Reset password</h2>
+            <p>We will email a one-time link that expires in 30 minutes.</p>
+            <label>Email<input name="email" type="email" autocomplete="username" required></label>
+            <button type="submit">Send reset link</button>
+            <button class="text-button" data-show-signin type="button">Back to sign in</button>
+            <p class="form-message" data-reset-message></p>
+          </form>
+          <form id="passwordResetConfirmForm" class="auth-form secondary-form" hidden>
+            <h2>Choose a new password</h2>
+            <input name="email" type="hidden">
+            <input name="token" type="hidden">
+            <label>New password<input name="password" type="password" minlength="12" autocomplete="new-password" required></label>
+            <label>Confirm password<input name="passwordConfirmation" type="password" minlength="12" autocomplete="new-password" required></label>
+            <button type="submit">Reset password</button>
+            <p class="form-message" data-reset-message></p>
           </form>
           <form id="signupForm" class="auth-form secondary-form">
             <h2>Create household</h2>

@@ -32,6 +32,9 @@ const SMTP_USER = String(process.env.SMTP_USER || "").trim();
 const SMTP_PASS = String(process.env.SMTP_PASS || "");
 const EMAIL_FROM = String(process.env.EMAIL_FROM || "Household Hub <no-reply@householdhub.app>").trim();
 const APP_BASE_URL = String(process.env.APP_BASE_URL || `http://localhost:${PORT}`).replace(/\/+$/, "");
+const TEST_EXPOSE_RESET_TOKEN = process.env.NODE_ENV === "test"
+  && MEMORY_DB
+  && String(process.env.TEST_EXPOSE_RESET_TOKEN || "false").toLowerCase() === "true";
 
 const pool = MEMORY_DB
   ? null
@@ -45,10 +48,12 @@ const memoryDb = {
   households: [],
   memberships: [],
   invitations: [],
-  loginEvents: []
+  loginEvents: [],
+  passwordResetTokens: []
 };
 
 const app = express();
+app.disable("x-powered-by");
 app.use(express.json({ limit: "1mb" }));
 app.use(cookieParser(SESSION_SECRET));
 app.use(express.static(path.join(__dirname, ".."), {
@@ -113,6 +118,16 @@ function sendWelcomeEmail({ email, name, householdName }) {
   });
 }
 
+function sendPasswordResetEmail({ email, name, token }) {
+  const resetUrl = `${APP_BASE_URL}/index.html?resetToken=${encodeURIComponent(token)}&email=${encodeURIComponent(email)}`;
+  return sendTransactionalEmail({
+    to: email,
+    subject: "Reset your Household Hub password",
+    text: `Hi ${name}, use this one-time link within 30 minutes to reset your Household Hub password: ${resetUrl}`,
+    html: `<h2>Reset your Household Hub password</h2><p>Hi ${escapeHtml(name)},</p><p>This one-time link expires in 30 minutes.</p><p><a href="${escapeHtml(resetUrl)}">Reset password</a></p><p>If you did not request this, you can ignore this email.</p>`
+  });
+}
+
 function sendHouseholdInviteEmail({ email, name, inviterName, householdName, inviteCode, role, scopes }) {
   const scopeText = scopes.length ? scopes.join(", ") : "household workspace";
   return sendTransactionalEmail({
@@ -165,6 +180,10 @@ async function migrate() {
 
 function makeInviteCode() {
   return `HUB-${crypto.randomBytes(3).toString("hex").toUpperCase()}`;
+}
+
+function hashResetToken(token) {
+  return crypto.createHash("sha256").update(String(token)).digest("hex");
 }
 
 function countryCatalog() {
@@ -374,7 +393,6 @@ async function seedAdminUser() {
       memoryDb.memberships.push({ user_id: user.id, household_id: household.id, role: "owner" });
     }
     user.name = ADMIN_NAME;
-    user.password_hash = passwordHash;
     user.is_admin = true;
     user.disabled_at = null;
     return;
@@ -387,7 +405,7 @@ async function seedAdminUser() {
       `INSERT INTO users (email, password_hash, name, is_admin)
        VALUES ($1, $2, $3, true)
        ON CONFLICT (email)
-       DO UPDATE SET password_hash = EXCLUDED.password_hash, name = EXCLUDED.name, is_admin = true, disabled_at = NULL
+       DO UPDATE SET name = EXCLUDED.name, is_admin = true, disabled_at = NULL
        RETURNING id`,
       [ADMIN_EMAIL, passwordHash, ADMIN_NAME]
     );
@@ -512,6 +530,15 @@ app.get("/healthz", (_req, res) => {
   res.type("text/plain").send("ok");
 });
 
+app.get("/readyz", async (_req, res) => {
+  try {
+    if (!MEMORY_DB) await pool.query("SELECT 1");
+    res.type("text/plain").send("ready");
+  } catch (_error) {
+    res.status(503).type("text/plain").send("not ready");
+  }
+});
+
 app.get("/api/countries", (_req, res) => {
   res.json(countryCatalog());
 });
@@ -631,6 +658,142 @@ app.post("/api/auth/signin", async (req, res, next) => {
   }
 });
 
+app.post("/api/auth/password-reset/request", async (req, res, next) => {
+  try {
+    const email = String(req.body.email || "").trim().toLowerCase();
+    const response = { ok: true, message: "If that login exists, a password reset email has been queued." };
+    let user;
+    if (MEMORY_DB) {
+      user = memoryDb.users.find((item) => item.email === email && !item.disabled_at);
+    } else {
+      const result = await pool.query(
+        "SELECT id, email, name FROM users WHERE email = $1 AND disabled_at IS NULL",
+        [email]
+      );
+      user = result.rows[0];
+    }
+    if (!user) return res.status(202).json(response);
+
+    const token = crypto.randomBytes(32).toString("base64url");
+    const tokenHash = hashResetToken(token);
+    const expiresAt = new Date(Date.now() + 30 * 60 * 1000);
+    if (MEMORY_DB) {
+      const recentRequest = memoryDb.passwordResetTokens.some((item) =>
+        item.user_id === user.id && Date.now() - new Date(item.created_at).getTime() < 60 * 1000
+      );
+      if (recentRequest) return res.status(202).json(response);
+      memoryDb.passwordResetTokens.forEach((item) => {
+        if (item.user_id === user.id && !item.used_at) item.used_at = new Date().toISOString();
+      });
+      memoryDb.passwordResetTokens.push({
+        id: crypto.randomUUID(),
+        user_id: user.id,
+        token_hash: tokenHash,
+        expires_at: expiresAt.toISOString(),
+        used_at: null,
+        created_at: new Date().toISOString()
+      });
+    } else {
+      const client = await pool.connect();
+      try {
+        await client.query("BEGIN");
+        const recentRequest = await client.query(
+          "SELECT 1 FROM password_reset_tokens WHERE user_id = $1 AND created_at > now() - interval '60 seconds' LIMIT 1",
+          [user.id]
+        );
+        if (recentRequest.rowCount > 0) {
+          await client.query("ROLLBACK");
+          return res.status(202).json(response);
+        }
+        await client.query(
+          "UPDATE password_reset_tokens SET used_at = now() WHERE user_id = $1 AND used_at IS NULL",
+          [user.id]
+        );
+        await client.query(
+          "INSERT INTO password_reset_tokens (user_id, token_hash, expires_at) VALUES ($1, $2, $3)",
+          [user.id, tokenHash, expiresAt]
+        );
+        await client.query("COMMIT");
+      } catch (error) {
+        await client.query("ROLLBACK");
+        throw error;
+      } finally {
+        client.release();
+      }
+    }
+    await sendPasswordResetEmail({ email: user.email, name: user.name, token });
+    if (TEST_EXPOSE_RESET_TOKEN) response.resetToken = token;
+    return res.status(202).json(response);
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.post("/api/auth/password-reset/confirm", async (req, res, next) => {
+  try {
+    const email = String(req.body.email || "").trim().toLowerCase();
+    const tokenHash = hashResetToken(req.body.token || "");
+    const password = String(req.body.password || "");
+    if (!email || password.length < 12) {
+      return res.status(400).json({ error: "Enter the account email and a password of at least 12 characters" });
+    }
+
+    let user;
+    if (MEMORY_DB) {
+      user = memoryDb.users.find((item) => item.email === email && !item.disabled_at);
+      const resetToken = memoryDb.passwordResetTokens.find((item) =>
+        item.user_id === user?.id
+        && item.token_hash === tokenHash
+        && !item.used_at
+        && new Date(item.expires_at).getTime() > Date.now()
+      );
+      if (!user || !resetToken) return res.status(400).json({ error: "That reset link is invalid or expired" });
+      resetToken.used_at = new Date().toISOString();
+      user.password_hash = await bcrypt.hash(password, 12);
+    } else {
+      const client = await pool.connect();
+      try {
+        await client.query("BEGIN");
+        const result = await client.query(
+          `SELECT u.id
+           FROM password_reset_tokens prt
+           JOIN users u ON u.id = prt.user_id
+           WHERE u.email = $1
+             AND u.disabled_at IS NULL
+             AND prt.token_hash = $2
+             AND prt.used_at IS NULL
+             AND prt.expires_at > now()
+           FOR UPDATE`,
+          [email, tokenHash]
+        );
+        user = result.rows[0];
+        if (!user) {
+          await client.query("ROLLBACK");
+          return res.status(400).json({ error: "That reset link is invalid or expired" });
+        }
+        await client.query(
+          "UPDATE password_reset_tokens SET used_at = now() WHERE user_id = $1 AND token_hash = $2",
+          [user.id, tokenHash]
+        );
+        await client.query(
+          "UPDATE users SET password_hash = $1 WHERE id = $2",
+          [await bcrypt.hash(password, 12), user.id]
+        );
+        await client.query("COMMIT");
+      } catch (error) {
+        await client.query("ROLLBACK");
+        throw error;
+      } finally {
+        client.release();
+      }
+    }
+    clearSession(res);
+    res.json({ ok: true });
+  } catch (error) {
+    next(error);
+  }
+});
+
 app.post("/api/auth/demo", async (_req, res, next) => {
   try {
     let user;
@@ -652,6 +815,10 @@ app.post("/api/auth/demo", async (_req, res, next) => {
   } catch (error) {
     next(error);
   }
+});
+
+app.get("/api/admin/session", requireAdmin, (req, res) => {
+  res.json({ authorized: true, user: publicUser(req.sessionUser) });
 });
 
 app.get("/api/admin/stats", requireAdmin, async (_req, res, next) => {
@@ -1125,14 +1292,28 @@ app.use((error, _req, res, _next) => {
   res.status(500).json({ error: "Something went wrong" });
 });
 
+let httpServer;
+
 async function main() {
   await migrate();
   await seedDemoUser();
   await seedAdminUser();
-  app.listen(PORT, () => {
+  httpServer = app.listen(PORT, () => {
     console.log(`Household Hub listening on ${PORT}`);
   });
 }
+
+async function shutdown(signal) {
+  console.log(`${signal} received; shutting down`);
+  if (httpServer) {
+    await new Promise((resolve) => httpServer.close(resolve));
+  }
+  if (pool) await pool.end();
+  process.exit(0);
+}
+
+process.once("SIGTERM", () => shutdown("SIGTERM"));
+process.once("SIGINT", () => shutdown("SIGINT"));
 
 main().catch((error) => {
   console.error(error);

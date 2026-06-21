@@ -6,7 +6,8 @@
   "scripts": {
     "start": "node server/index.js",
     "preview": "PORT=4173 MEMORY_DB=true node server/index.js",
-    "check": "node --check server/index.js && node --check server/default-state.js && node --check app.js"
+    "check": "node --check server/index.js && node --check server/default-state.js && node --check app.js && node --check test/auth.integration.test.js",
+    "test": "node --test --test-concurrency=1 test/*.test.js"
   },
   "dependencies": {
     "bcrypt": "^6.0.0",

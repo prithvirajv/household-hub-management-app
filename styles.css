@@ -359,6 +359,26 @@ main {
   margin: 0;
 }
 
+.auth-form > p {
+  margin: 0;
+  color: var(--muted);
+}
+
+.text-button {
+  justify-self: start;
+  min-height: auto;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--blue);
+  box-shadow: none;
+}
+
+.text-button:hover {
+  background: transparent;
+  text-decoration: underline;
+}
+
 .demo-access {
   display: flex;
   align-items: center;

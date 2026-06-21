@@ -17,6 +17,8 @@ Select **Try demo** on the sign-in screen. Demo access does not expose reusable 
 
 The private administrator is provisioned separately with the `ADMIN_EMAIL`, `ADMIN_PASSWORD`, and `ADMIN_NAME` deployment secrets. Public signup cannot claim either the demo or administrator email.
 
+The deployment password initializes a new administrator but does not overwrite an existing administrator on restart. Use **Forgot password?** to issue a database-backed, one-time reset link that expires after 30 minutes. This keeps password recovery compatible with rolling restarts and multiple application replicas.
+
 ## Local Development
 
 Install dependencies and run the syntax checks:
@@ -93,6 +95,8 @@ The SMTP key is a secret. Keep it in local environment variables or the Kubernet
 ## GKE Deployment
 
 The deployment script creates a small one-node zonal GKE cluster when the named cluster does not exist. It deploys one Household Hub pod and, by default, one PostgreSQL StatefulSet with a 10 Gi persistent volume. This is suitable for an initial MVP; migrate PostgreSQL to Cloud SQL before relying on multi-zone availability.
+
+The application container runs as a non-root user with a read-only root filesystem, supports graceful termination, and uses separate liveness and database-aware readiness endpoints. The Deployment uses a rolling update strategy and can be scaled horizontally after PostgreSQL is moved to a managed, highly available service.
 
 The app expects these environment variables in the Kubernetes Secret:
 

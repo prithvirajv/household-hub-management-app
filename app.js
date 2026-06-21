@@ -2082,10 +2082,25 @@ function uniqueId(seed) {
   return String(seed || "item").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/(^-|-$)/g, "") + "-" + Math.random().toString(36).slice(2, 7);
 }
 
-nav.addEventListener("click", (event) => {
+nav.addEventListener("click", async (event) => {
   const button = event.target.closest("[data-view]");
   if (!button) return;
-  if (button.dataset.view === "admin") adminData = null;
+  if (button.dataset.view === "admin") {
+    button.disabled = true;
+    try {
+      const validation = await api("/api/admin/session");
+      sessionUser = validation.user;
+      adminData = null;
+    } catch (error) {
+      sessionUser = { ...sessionUser, isAdmin: false };
+      currentView = "budget";
+      render();
+      window.alert(error.message);
+      return;
+    } finally {
+      button.disabled = false;
+    }
+  }
   currentView = button.dataset.view;
   render();
 });
@@ -2147,6 +2162,59 @@ $("#signinForm").addEventListener("submit", async (event) => {
     await loadApp();
   } catch (error) {
     $("#authMessage").textContent = error.message;
+  }
+});
+
+function showSigninForm() {
+  $("#signinForm").hidden = false;
+  $("#signupForm").hidden = false;
+  $("#passwordResetRequestForm").hidden = true;
+  $("#passwordResetConfirmForm").hidden = true;
+}
+
+$("#forgotPasswordButton").addEventListener("click", () => {
+  $("#signinForm").hidden = true;
+  $("#signupForm").hidden = true;
+  $("#passwordResetRequestForm").hidden = false;
+});
+
+document.querySelectorAll("[data-show-signin]").forEach((button) => {
+  button.addEventListener("click", showSigninForm);
+});
+
+$("#passwordResetRequestForm").addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const message = event.currentTarget.querySelector("[data-reset-message]");
+  try {
+    const result = await api("/api/auth/password-reset/request", {
+      method: "POST",
+      body: JSON.stringify(Object.fromEntries(new FormData(event.currentTarget)))
+    });
+    message.textContent = result.message;
+  } catch (error) {
+    message.textContent = error.message;
+  }
+});
+
+$("#passwordResetConfirmForm").addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const data = Object.fromEntries(new FormData(event.currentTarget));
+  const message = event.currentTarget.querySelector("[data-reset-message]");
+  if (data.password !== data.passwordConfirmation) {
+    message.textContent = "Passwords do not match";
+    return;
+  }
+  try {
+    await api("/api/auth/password-reset/confirm", {
+      method: "POST",
+      body: JSON.stringify({ email: data.email, token: data.token, password: data.password })
+    });
+    history.replaceState({}, "", location.pathname);
+    showSigninForm();
+    $("#signinForm [name=email]").value = data.email;
+    $("#authMessage").textContent = "Password updated. Sign in with your new password.";
+  } catch (error) {
+    message.textContent = error.message;
   }
 });
 
@@ -2333,13 +2401,23 @@ async function reloadSelectedHousehold() {
 
 async function loadAdminData() {
   if (!sessionUser?.isAdmin) return;
-  const [stats, users, monthly] = await Promise.all([
-    api("/api/admin/stats"),
-    api("/api/admin/users"),
-    api("/api/admin/monthly-stats")
-  ]);
-  adminData = { stats, users, monthly };
-  render();
+  try {
+    const [validation, stats, users, monthly] = await Promise.all([
+      api("/api/admin/session"),
+      api("/api/admin/stats"),
+      api("/api/admin/users"),
+      api("/api/admin/monthly-stats")
+    ]);
+    sessionUser = validation.user;
+    adminData = { stats, users, monthly };
+    render();
+  } catch (error) {
+    sessionUser = { ...sessionUser, isAdmin: false };
+    adminData = null;
+    currentView = "budget";
+    render();
+    window.alert(error.message);
+  }
 }
 
 async function updateAdminUser(userId, patch) {
@@ -2400,6 +2478,16 @@ function downloadCsv() {
 async function initializeApp() {
   countryCatalog = await api("/api/countries");
   populateCountrySelects();
+  const resetParams = new URLSearchParams(location.search);
+  const resetToken = resetParams.get("resetToken");
+  const resetEmail = resetParams.get("email");
+  if (resetToken && resetEmail) {
+    $("#signinForm").hidden = true;
+    $("#signupForm").hidden = true;
+    $("#passwordResetConfirmForm").hidden = false;
+    $("#passwordResetConfirmForm [name=email]").value = resetEmail;
+    $("#passwordResetConfirmForm [name=token]").value = resetToken;
+  }
   await loadApp();
 }
 

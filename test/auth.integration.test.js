@@ -1,0 +1,167 @@
+const assert = require("node:assert/strict");
+const { spawn } = require("node:child_process");
+const { once } = require("node:events");
+const test = require("node:test");
+
+const port = 43000 + Math.floor(Math.random() * 1000);
+const baseUrl = `http://127.0.0.1:${port}`;
+const adminEmail = "private-admin@example.com";
+const initialPassword = "Initial-Admin-Password-123!";
+const resetPassword = "Reset-Admin-Password-456!";
+let server;
+
+async function waitForServer() {
+  for (let attempt = 0; attempt < 80; attempt += 1) {
+    try {
+      const response = await fetch(`${baseUrl}/readyz`);
+      if (response.ok) return;
+    } catch (_error) {
+      // Server is still starting.
+    }
+    await new Promise((resolve) => setTimeout(resolve, 50));
+  }
+  throw new Error("Test server did not become ready");
+}
+
+async function request(path, options = {}) {
+  const response = await fetch(`${baseUrl}${path}`, {
+    headers: { "content-type": "application/json", ...(options.headers || {}) },
+    ...options
+  });
+  const body = await response.json();
+  return {
+    status: response.status,
+    body,
+    cookie: response.headers.get("set-cookie")?.split(";")[0] || ""
+  };
+}
+
+test.before(async () => {
+  server = spawn(process.execPath, ["server/index.js"], {
+    cwd: process.cwd(),
+    env: {
+      ...process.env,
+      PORT: String(port),
+      MEMORY_DB: "true",
+      NODE_ENV: "test",
+      TEST_EXPOSE_RESET_TOKEN: "true",
+      SESSION_SECRET: "test-session-secret-with-sufficient-entropy",
+      ADMIN_EMAIL: adminEmail,
+      ADMIN_PASSWORD: initialPassword,
+      ADMIN_NAME: "Private Administrator",
+      APP_BASE_URL: baseUrl,
+      SMTP_HOST: ""
+    },
+    stdio: ["ignore", "pipe", "pipe"]
+  });
+  await waitForServer();
+});
+
+test.after(async () => {
+  if (!server || server.exitCode !== null) return;
+  server.kill("SIGTERM");
+  await once(server, "exit");
+});
+
+test("consumer demo is isolated from administrator APIs", async () => {
+  const demo = await request("/api/auth/demo", { method: "POST", body: "{}" });
+  assert.equal(demo.status, 200);
+  assert.equal(demo.body.user.isAdmin, false);
+
+  const adminAttempt = await request("/api/admin/session", {
+    headers: { cookie: demo.cookie }
+  });
+  assert.equal(adminAttempt.status, 403);
+
+  const passwordAttempt = await request("/api/auth/signin", {
+    method: "POST",
+    body: JSON.stringify({ email: "demo@householdhub.app", password: "budget123" })
+  });
+  assert.equal(passwordAttempt.status, 400);
+});
+
+test("configured private administrator can sign in and is the sole admin", async () => {
+  const signin = await request("/api/auth/signin", {
+    method: "POST",
+    body: JSON.stringify({ email: adminEmail, password: initialPassword })
+  });
+  assert.equal(signin.status, 200);
+  assert.equal(signin.body.user.isAdmin, true);
+
+  const validation = await request("/api/admin/session", {
+    headers: { cookie: signin.cookie }
+  });
+  assert.equal(validation.status, 200);
+  assert.equal(validation.body.authorized, true);
+
+  const users = await request("/api/admin/users", {
+    headers: { cookie: signin.cookie }
+  });
+  assert.equal(users.status, 200);
+  assert.deepEqual(users.body.filter((user) => user.isAdmin).map((user) => user.email), [adminEmail]);
+});
+
+test("public signup cannot claim reserved administrator or demo identities", async () => {
+  for (const email of [adminEmail, "demo@householdhub.app"]) {
+    const signup = await request("/api/auth/signup", {
+      method: "POST",
+      body: JSON.stringify({
+        email,
+        password: "Consumer-Password-123!",
+        name: "Reserved User",
+        householdName: "Reserved Household",
+        country: "US"
+      })
+    });
+    assert.equal(signup.status, 409);
+  }
+});
+
+test("password reset is generic, one-time, and preserves admin authorization", async () => {
+  const unknown = await request("/api/auth/password-reset/request", {
+    method: "POST",
+    body: JSON.stringify({ email: "unknown@example.com" })
+  });
+  assert.equal(unknown.status, 202);
+  assert.equal("resetToken" in unknown.body, false);
+
+  const resetRequest = await request("/api/auth/password-reset/request", {
+    method: "POST",
+    body: JSON.stringify({ email: adminEmail })
+  });
+  assert.equal(resetRequest.status, 202);
+  assert.ok(resetRequest.body.resetToken);
+
+  const confirmation = await request("/api/auth/password-reset/confirm", {
+    method: "POST",
+    body: JSON.stringify({
+      email: adminEmail,
+      token: resetRequest.body.resetToken,
+      password: resetPassword
+    })
+  });
+  assert.equal(confirmation.status, 200);
+
+  const reuse = await request("/api/auth/password-reset/confirm", {
+    method: "POST",
+    body: JSON.stringify({
+      email: adminEmail,
+      token: resetRequest.body.resetToken,
+      password: "Another-Password-789!"
+    })
+  });
+  assert.equal(reuse.status, 400);
+
+  const oldSignin = await request("/api/auth/signin", {
+    method: "POST",
+    body: JSON.stringify({ email: adminEmail, password: initialPassword })
+  });
+  assert.equal(oldSignin.status, 401);
+
+  const newSignin = await request("/api/auth/signin", {
+    method: "POST",
+    body: JSON.stringify({ email: adminEmail, password: resetPassword })
+  });
+  assert.equal(newSignin.status, 200);
+  assert.equal(newSignin.body.user.isAdmin, true);
+});
