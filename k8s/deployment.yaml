@@ -5,6 +5,8 @@ metadata:
   namespace: household-hub
 spec:
   replicas: 1
+  strategy:
+    type: Recreate
   selector:
     matchLabels:
       app: household-hub
@@ -21,7 +23,7 @@ spec:
             - containerPort: 8080
           resources:
             requests:
-              cpu: 100m
+              cpu: 50m
               memory: 256Mi
             limits:
               cpu: 500m
