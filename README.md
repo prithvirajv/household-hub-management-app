@@ -75,6 +75,8 @@ Without `SMTP_HOST`, local development uses Nodemailer's JSON preview transport.
 
 An SMTP success response means the provider accepted the message for delivery; it does not guarantee placement in the recipient's inbox. Production logs include the provider message ID so delivery can be traced in the SMTP provider's transactional activity.
 
+Invitation emails include a direct acceptance link and a fallback invite code. A new recipient creates a login while accepting the invitation; an existing user confirms their current password. Invitation codes are bound to the invited email and become unusable after acceptance.
+
 ### Free Brevo SMTP
 
 Brevo's free plan currently includes up to 300 email sends per day. Create a Brevo account, verify the sender address or domain, then create an SMTP key under **Transactional > Settings > SMTP & API**.

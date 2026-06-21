@@ -130,11 +130,12 @@ function sendPasswordResetEmail({ email, name, token }) {
 
 function sendHouseholdInviteEmail({ email, name, inviterName, householdName, inviteCode, role, scopes }) {
   const scopeText = scopes.length ? scopes.join(", ") : "household workspace";
+  const acceptUrl = `${APP_BASE_URL}/index.html?inviteCode=${encodeURIComponent(inviteCode)}&email=${encodeURIComponent(email)}`;
   return sendTransactionalEmail({
     to: email,
     subject: `${inviterName} shared ${householdName} with you`,
-    text: `Hi ${name}, ${inviterName} invited you to ${householdName} in Household Hub as ${role}. Invite code: ${inviteCode}. Shared areas: ${scopeText}. Open ${APP_BASE_URL}.`,
-    html: `<h2>You have been invited to Household Hub</h2><p>Hi ${escapeHtml(name)},</p><p><strong>${escapeHtml(inviterName)}</strong> shared <strong>${escapeHtml(householdName)}</strong> with you as ${escapeHtml(role)}.</p><p>Invite code: <strong>${escapeHtml(inviteCode)}</strong></p><p>Shared areas: ${escapeHtml(scopeText)}</p><p><a href="${escapeHtml(APP_BASE_URL)}">Open Household Hub</a></p>`
+    text: `Hi ${name}, ${inviterName} invited you to ${householdName} in Household Hub as ${role}. Invite code: ${inviteCode}. Shared areas: ${scopeText}. Accept the invitation: ${acceptUrl}`,
+    html: `<h2>You have been invited to Household Hub</h2><p>Hi ${escapeHtml(name)},</p><p><strong>${escapeHtml(inviterName)}</strong> shared <strong>${escapeHtml(householdName)}</strong> with you as ${escapeHtml(role)}.</p><p>Invite code: <strong>${escapeHtml(inviteCode)}</strong></p><p>Shared areas: ${escapeHtml(scopeText)}</p><p><a href="${escapeHtml(acceptUrl)}">Accept invitation</a></p>`
   });
 }
 
@@ -789,6 +790,145 @@ app.post("/api/auth/password-reset/confirm", async (req, res, next) => {
     }
     clearSession(res);
     res.json({ ok: true });
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.post("/api/auth/invitations/accept", async (req, res, next) => {
+  try {
+    const email = String(req.body.email || "").trim().toLowerCase();
+    const inviteCode = String(req.body.inviteCode || "").trim().toUpperCase();
+    const password = String(req.body.password || "");
+    const requestedName = String(req.body.name || "").trim();
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) || !inviteCode) {
+      return res.status(400).json({ error: "Enter the invited email address and invite code" });
+    }
+    if (email === DEMO_EMAIL) {
+      return res.status(400).json({ error: "The consumer demo cannot accept household invitations" });
+    }
+
+    let user;
+    let household;
+    if (MEMORY_DB) {
+      const invitation = memoryDb.invitations.find((item) =>
+        item.email === email && item.invite_code === inviteCode && item.status === "pending"
+      );
+      if (!invitation) return res.status(400).json({ error: "That invitation is invalid or has already been used" });
+      household = memoryDb.households.find((item) => item.id === invitation.household_id);
+      user = memoryDb.users.find((item) => item.email === email);
+      if (user) {
+        if (user.disabled_at) return res.status(403).json({ error: "This login has been disabled" });
+        if (!(await bcrypt.compare(password, user.password_hash))) {
+          return res.status(401).json({ error: "Enter the password for the existing account" });
+        }
+      } else {
+        if (password.length < 12) {
+          return res.status(400).json({ error: "Create a password of at least 12 characters" });
+        }
+        user = {
+          id: crypto.randomUUID(),
+          email,
+          name: requestedName || invitation.name || "Household member",
+          password_hash: await bcrypt.hash(password, 12),
+          is_admin: false,
+          login_count: 0,
+          last_login_at: null,
+          disabled_at: null,
+          created_at: new Date().toISOString()
+        };
+        memoryDb.users.push(user);
+      }
+      const membershipRole = /co-owner/i.test(invitation.role) ? "owner" : "member";
+      const membership = memoryDb.memberships.find((item) =>
+        item.user_id === user.id && item.household_id === invitation.household_id
+      );
+      if (membership) {
+        membership.role = membershipRole;
+        membership.scopes = invitation.scopes;
+      } else {
+        memoryDb.memberships.push({
+          user_id: user.id,
+          household_id: invitation.household_id,
+          role: membershipRole,
+          scopes: invitation.scopes
+        });
+      }
+      invitation.status = "accepted";
+      invitation.accepted_at = new Date().toISOString();
+    } else {
+      const client = await pool.connect();
+      try {
+        await client.query("BEGIN");
+        const invitationResult = await client.query(
+          `SELECT hi.*, h.name AS household_name
+           FROM household_invitations hi
+           JOIN households h ON h.id = hi.household_id
+           WHERE hi.email = $1 AND hi.invite_code = $2 AND hi.status = 'pending'
+           FOR UPDATE`,
+          [email, inviteCode]
+        );
+        const invitation = invitationResult.rows[0];
+        if (!invitation) {
+          await client.query("ROLLBACK");
+          return res.status(400).json({ error: "That invitation is invalid or has already been used" });
+        }
+        household = { id: invitation.household_id, name: invitation.household_name };
+        const userResult = await client.query(
+          "SELECT id, email, name, password_hash, is_admin, disabled_at FROM users WHERE email = $1",
+          [email]
+        );
+        user = userResult.rows[0];
+        if (user) {
+          if (user.disabled_at) {
+            await client.query("ROLLBACK");
+            return res.status(403).json({ error: "This login has been disabled" });
+          }
+          if (!(await bcrypt.compare(password, user.password_hash))) {
+            await client.query("ROLLBACK");
+            return res.status(401).json({ error: "Enter the password for the existing account" });
+          }
+        } else {
+          if (password.length < 12) {
+            await client.query("ROLLBACK");
+            return res.status(400).json({ error: "Create a password of at least 12 characters" });
+          }
+          const created = await client.query(
+            `INSERT INTO users (email, password_hash, name, is_admin)
+             VALUES ($1, $2, $3, false)
+             RETURNING id, email, name, is_admin, disabled_at`,
+            [email, await bcrypt.hash(password, 12), requestedName || invitation.name || "Household member"]
+          );
+          user = created.rows[0];
+        }
+        const membershipRole = /co-owner/i.test(invitation.role) ? "owner" : "member";
+        await client.query(
+          `INSERT INTO household_memberships (user_id, household_id, role, scopes)
+           VALUES ($1, $2, $3, $4)
+           ON CONFLICT (user_id, household_id)
+           DO UPDATE SET role = EXCLUDED.role, scopes = EXCLUDED.scopes`,
+          [user.id, invitation.household_id, membershipRole, JSON.stringify(invitation.scopes || [])]
+        );
+        await client.query(
+          "UPDATE household_invitations SET status = 'accepted', updated_at = now() WHERE id = $1",
+          [invitation.id]
+        );
+        await client.query("COMMIT");
+      } catch (error) {
+        await client.query("ROLLBACK");
+        throw error;
+      } finally {
+        client.release();
+      }
+    }
+
+    await recordLogin(user.id);
+    signSession(res, user.id);
+    selectHousehold(res, household.id);
+    res.json({
+      user: publicUser(user),
+      household: { id: household.id, name: household.name }
+    });
   } catch (error) {
     next(error);
   }

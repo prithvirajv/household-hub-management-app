@@ -25,8 +25,8 @@ async function waitForServer() {
 
 async function request(path, options = {}) {
   const response = await fetch(`${baseUrl}${path}`, {
-    headers: { "content-type": "application/json", ...(options.headers || {}) },
-    ...options
+    ...options,
+    headers: { "content-type": "application/json", ...(options.headers || {}) }
   });
   const body = await response.json();
   return {
@@ -115,6 +115,69 @@ test("public signup cannot claim reserved administrator or demo identities", asy
     });
     assert.equal(signup.status, 409);
   }
+});
+
+test("invitation code creates a login, joins the household, and is single-use", async () => {
+  const adminSignin = await request("/api/auth/signin", {
+    method: "POST",
+    body: JSON.stringify({ email: adminEmail, password: initialPassword })
+  });
+  assert.equal(adminSignin.status, 200);
+
+  const invitedEmail = "invited-member@example.com";
+  const invitation = await request("/api/households/invitations", {
+    method: "POST",
+    headers: { cookie: adminSignin.cookie },
+    body: JSON.stringify({
+      email: invitedEmail,
+      name: "Invited Member",
+      role: "Member",
+      scopes: ["Budget", "Calendar"]
+    })
+  });
+  assert.equal(invitation.status, 201, JSON.stringify(invitation.body));
+  assert.ok(invitation.body.invitation.inviteCode);
+
+  const wrongEmail = await request("/api/auth/invitations/accept", {
+    method: "POST",
+    body: JSON.stringify({
+      email: "different@example.com",
+      inviteCode: invitation.body.invitation.inviteCode,
+      password: "Invited-Member-Password-123!"
+    })
+  });
+  assert.equal(wrongEmail.status, 400);
+
+  const accepted = await request("/api/auth/invitations/accept", {
+    method: "POST",
+    body: JSON.stringify({
+      email: invitedEmail,
+      inviteCode: invitation.body.invitation.inviteCode,
+      password: "Invited-Member-Password-123!"
+    })
+  });
+  assert.equal(accepted.status, 200);
+  assert.equal(accepted.body.user.email, invitedEmail);
+  assert.equal(accepted.body.user.isAdmin, false);
+  assert.equal(accepted.body.household.name, "Administrator Household");
+
+  const households = await request("/api/households", {
+    headers: { cookie: accepted.cookie }
+  });
+  assert.equal(households.status, 200);
+  assert.equal(households.body.length, 1);
+  assert.equal(households.body[0].selected, true);
+  assert.equal(households.body[0].role, "member");
+
+  const reused = await request("/api/auth/invitations/accept", {
+    method: "POST",
+    body: JSON.stringify({
+      email: invitedEmail,
+      inviteCode: invitation.body.invitation.inviteCode,
+      password: "Invited-Member-Password-123!"
+    })
+  });
+  assert.equal(reused.status, 400);
 });
 
 test("password reset is generic, one-time, and preserves admin authorization", async () => {

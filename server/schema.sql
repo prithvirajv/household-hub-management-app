@@ -31,9 +31,13 @@ CREATE TABLE IF NOT EXISTS household_memberships (
   user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
   household_id UUID NOT NULL REFERENCES households(id) ON DELETE CASCADE,
   role TEXT NOT NULL DEFAULT 'owner',
+  scopes JSONB NOT NULL DEFAULT '[]'::jsonb,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   PRIMARY KEY (user_id, household_id)
 );
+
+ALTER TABLE household_memberships
+  ADD COLUMN IF NOT EXISTS scopes JSONB NOT NULL DEFAULT '[]'::jsonb;
 
 CREATE INDEX IF NOT EXISTS idx_household_memberships_user_id
   ON household_memberships(user_id);

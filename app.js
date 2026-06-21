@@ -2170,6 +2170,7 @@ function showSigninForm() {
   $("#signupForm").hidden = false;
   $("#passwordResetRequestForm").hidden = true;
   $("#passwordResetConfirmForm").hidden = true;
+  $("#invitationAcceptForm").hidden = true;
   setAuthShell("Sign in");
 }
 
@@ -2179,6 +2180,19 @@ $("#forgotPasswordButton").addEventListener("click", () => {
   $("#passwordResetRequestForm").hidden = false;
   setAuthShell("Reset password");
 });
+
+function showInvitationForm(email = "", inviteCode = "") {
+  $("#signinForm").hidden = true;
+  $("#signupForm").hidden = true;
+  $("#passwordResetRequestForm").hidden = true;
+  $("#passwordResetConfirmForm").hidden = true;
+  $("#invitationAcceptForm").hidden = false;
+  $("#invitationAcceptForm [name=email]").value = email;
+  $("#invitationAcceptForm [name=inviteCode]").value = inviteCode;
+  setAuthShell("Accept invitation");
+}
+
+$("#showInvitationButton").addEventListener("click", () => showInvitationForm());
 
 document.querySelectorAll("[data-show-signin]").forEach((button) => {
   button.addEventListener("click", showSigninForm);
@@ -2215,6 +2229,21 @@ $("#passwordResetConfirmForm").addEventListener("submit", async (event) => {
     showSigninForm();
     $("#signinForm [name=email]").value = data.email;
     $("#authMessage").textContent = "Password updated. Sign in with your new password.";
+  } catch (error) {
+    message.textContent = error.message;
+  }
+});
+
+$("#invitationAcceptForm").addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const message = event.currentTarget.querySelector("[data-invitation-message]");
+  try {
+    await api("/api/auth/invitations/accept", {
+      method: "POST",
+      body: JSON.stringify(Object.fromEntries(new FormData(event.currentTarget)))
+    });
+    history.replaceState({}, "", location.pathname);
+    await loadApp();
   } catch (error) {
     message.textContent = error.message;
   }
@@ -2492,6 +2521,7 @@ async function initializeApp() {
   const resetParams = new URLSearchParams(location.search);
   const resetToken = resetParams.get("resetToken");
   const resetEmail = resetParams.get("email");
+  const inviteCode = resetParams.get("inviteCode");
   if (resetToken && resetEmail) {
     $("#signinForm").hidden = true;
     $("#signupForm").hidden = true;
@@ -2499,6 +2529,8 @@ async function initializeApp() {
     $("#passwordResetConfirmForm [name=email]").value = resetEmail;
     $("#passwordResetConfirmForm [name=token]").value = resetToken;
     setAuthShell("Reset password");
+  } else if (inviteCode && resetEmail) {
+    showInvitationForm(resetEmail, inviteCode);
   } else {
     setAuthShell("Sign in");
   }

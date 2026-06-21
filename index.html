@@ -57,6 +57,7 @@
             <label>Password<input name="password" type="password" autocomplete="current-password" required></label>
             <button type="submit">Open household</button>
             <button id="forgotPasswordButton" class="text-button" type="button">Forgot password?</button>
+            <button id="showInvitationButton" class="text-button" type="button">Accept invitation</button>
             <div class="demo-access">
               <span>Exploring Household Hub?</span>
               <button id="demoLoginButton" class="ghost" type="button">Try demo</button>
@@ -79,6 +80,18 @@
             <label>Confirm password<input name="passwordConfirmation" type="password" minlength="12" autocomplete="new-password" required></label>
             <button type="submit">Reset password</button>
             <p class="form-message" data-reset-message></p>
+          </form>
+          <form id="invitationAcceptForm" class="auth-form secondary-form" hidden>
+            <h2>Accept invitation</h2>
+            <p>Use the invited email address and code from your Household Hub email.</p>
+            <label>Name<input name="name" autocomplete="name" placeholder="Your name"></label>
+            <label>Email<input name="email" type="email" autocomplete="username" required></label>
+            <label>Invite code<input name="inviteCode" autocomplete="one-time-code" placeholder="HUB-123ABC" required></label>
+            <label>Password<input name="password" type="password" minlength="12" autocomplete="current-password" required></label>
+            <small>Existing users enter their current password. New users create a password of at least 12 characters.</small>
+            <button type="submit">Join household</button>
+            <button class="text-button" data-show-signin type="button">Back to sign in</button>
+            <p class="form-message" data-invitation-message></p>
           </form>
           <form id="signupForm" class="auth-form secondary-form">
             <h2>Create household</h2>
