@@ -246,6 +246,15 @@ main {
   gap: 0.55rem;
 }
 
+.auth-mode .topbar-actions,
+.auth-mode .demo-card {
+  display: none;
+}
+
+.auth-mode .topbar {
+  justify-content: flex-start;
+}
+
 .eyebrow,
 .card-label {
   color: var(--muted);

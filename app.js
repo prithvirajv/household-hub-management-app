@@ -2170,12 +2170,14 @@ function showSigninForm() {
   $("#signupForm").hidden = false;
   $("#passwordResetRequestForm").hidden = true;
   $("#passwordResetConfirmForm").hidden = true;
+  setAuthShell("Sign in");
 }
 
 $("#forgotPasswordButton").addEventListener("click", () => {
   $("#signinForm").hidden = true;
   $("#signupForm").hidden = true;
   $("#passwordResetRequestForm").hidden = false;
+  setAuthShell("Reset password");
 });
 
 document.querySelectorAll("[data-show-signin]").forEach((button) => {
@@ -2251,6 +2253,7 @@ $("#signOutButton").addEventListener("click", async () => {
   $("#householdWorkspaceControl").hidden = true;
   $("#workspace").hidden = true;
   $("#authPanel").hidden = false;
+  showSigninForm();
 });
 
 $("#downloadCsvButton").addEventListener("click", () => {
@@ -2374,10 +2377,12 @@ async function loadApp() {
   if (!session.authenticated) {
     sessionUser = null;
     households = [];
+    document.body.classList.add("auth-mode");
     $("#authPanel").hidden = false;
     $("#workspace").hidden = true;
     return;
   }
+  document.body.classList.remove("auth-mode");
   sessionUser = session.user;
   [households, state] = await Promise.all([
     api("/api/households"),
@@ -2386,6 +2391,12 @@ async function loadApp() {
   $("#authPanel").hidden = true;
   $("#workspace").hidden = false;
   render();
+}
+
+function setAuthShell(title) {
+  document.body.classList.add("auth-mode");
+  $("#householdName").textContent = "Household Hub";
+  $("#viewTitle").textContent = title;
 }
 
 async function reloadSelectedHousehold() {
@@ -2487,6 +2498,9 @@ async function initializeApp() {
     $("#passwordResetConfirmForm").hidden = false;
     $("#passwordResetConfirmForm [name=email]").value = resetEmail;
     $("#passwordResetConfirmForm [name=token]").value = resetToken;
+    setAuthShell("Reset password");
+  } else {
+    setAuthShell("Sign in");
   }
   await loadApp();
 }
