@@ -80,18 +80,25 @@ function escapeHtml(value) {
 async function sendTransactionalEmail({ to, subject, text, html }) {
   try {
     const info = await mailTransport.sendMail({ from: EMAIL_FROM, to, subject, text, html });
+    const accepted = Array.isArray(info.accepted) ? info.accepted.map(String) : [];
+    const rejected = Array.isArray(info.rejected) ? info.rejected.map(String) : [];
+    const queued = Boolean(SMTP_HOST) && accepted.some((address) => address.toLowerCase() === to.toLowerCase());
     const delivery = {
-      delivered: Boolean(SMTP_HOST),
+      queued,
       preview: !SMTP_HOST,
-      messageId: info.messageId || ""
+      messageId: info.messageId || "",
+      accepted,
+      rejected
     };
     if (!SMTP_HOST) {
       console.log(`[email preview] ${subject} -> ${to}`);
+    } else {
+      console.log(`[email queued] ${subject} -> ${to}; messageId=${delivery.messageId}; response=${info.response || "accepted"}`);
     }
     return delivery;
   } catch (error) {
     console.error(`Email delivery failed for ${to}:`, error.message);
-    return { delivered: false, preview: false, error: "Email delivery failed" };
+    return { queued: false, preview: false, accepted: [], rejected: [], error: "Email delivery failed" };
   }
 }
 

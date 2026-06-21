@@ -71,6 +71,8 @@ Household Hub sends a welcome email after signup and an invitation email when an
 
 Without `SMTP_HOST`, local development uses Nodemailer's JSON preview transport. The signup or invitation still succeeds, and the server logs that an email preview was created.
 
+An SMTP success response means the provider accepted the message for delivery; it does not guarantee placement in the recipient's inbox. Production logs include the provider message ID so delivery can be traced in the SMTP provider's transactional activity.
+
 ### Free Brevo SMTP
 
 Brevo's free plan currently includes up to 300 email sends per day. Create a Brevo account, verify the sender address or domain, then create an SMTP key under **Transactional > Settings > SMTP & API**.

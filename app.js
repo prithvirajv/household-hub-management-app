@@ -1926,11 +1926,11 @@ function bindViewEvents() {
       }
       state.household.inviteCode = invitation.inviteCode;
       state.household.activity.unshift(`${invitation.name} was invited to ${state.household.name}`);
-      inviteEmailStatus = result.email.delivered
-        ? `Invitation email sent to ${invitation.email}.`
+      inviteEmailStatus = result.email.queued
+        ? `Invitation queued by the email provider for ${invitation.email}. Check Inbox, Spam, and All Mail.`
         : result.email.preview
           ? `Invitation saved. SMTP is not configured, so a local email preview was created for ${invitation.email}.`
-          : `Invitation saved, but email delivery failed for ${invitation.email}.`;
+          : `Invitation saved, but the email provider did not accept mail for ${invitation.email}.`;
       await saveStateNow();
       render();
     } catch (error) {
