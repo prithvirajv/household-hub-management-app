@@ -149,9 +149,10 @@ async function migrate() {
   if (MEMORY_DB) return;
   const schema = fs.readFileSync(path.join(__dirname, "schema.sql"), "utf8");
   await pool.query(schema);
-  await pool.query("UPDATE users SET is_admin = false WHERE email = $1", [DEMO_EMAIL]);
   if (ADMIN_EMAIL) {
-    await pool.query("UPDATE users SET is_admin = true WHERE email = $1", [ADMIN_EMAIL]);
+    await pool.query("UPDATE users SET is_admin = (email = $1)", [ADMIN_EMAIL]);
+  } else {
+    await pool.query("UPDATE users SET is_admin = false WHERE email = $1", [DEMO_EMAIL]);
   }
 }
 
@@ -765,6 +766,9 @@ app.patch("/api/admin/users/:id", requireAdmin, async (req, res, next) => {
   try {
     const userId = req.params.id;
     const { disabled, isAdmin, name, password } = req.body || {};
+    if (typeof isAdmin === "boolean") {
+      return res.status(403).json({ error: "Administrator access is managed by the private deployment secret" });
+    }
     if (userId === req.sessionUser.id && disabled === true) {
       return res.status(400).json({ error: "You cannot disable your own admin login" });
     }
@@ -776,7 +780,6 @@ app.patch("/api/admin/users/:id", requireAdmin, async (req, res, next) => {
       const user = memoryDb.users.find((item) => item.id === userId);
       if (!user) return res.status(404).json({ error: "User not found" });
       if (typeof disabled === "boolean") user.disabled_at = disabled ? new Date().toISOString() : null;
-      if (typeof isAdmin === "boolean") user.is_admin = isAdmin;
       if (typeof name === "string" && name.trim()) user.name = name.trim();
       if (typeof password === "string" && password.length >= 8) user.password_hash = await bcrypt.hash(password, 12);
       return res.json(adminUserRow(user));
@@ -787,10 +790,6 @@ app.patch("/api/admin/users/:id", requireAdmin, async (req, res, next) => {
     if (typeof disabled === "boolean") {
       values.push(disabled);
       updates.push(`disabled_at = CASE WHEN $${values.length} THEN now() ELSE NULL END`);
-    }
-    if (typeof isAdmin === "boolean") {
-      values.push(isAdmin);
-      updates.push(`is_admin = $${values.length}`);
     }
     if (typeof name === "string" && name.trim()) {
       values.push(name.trim());

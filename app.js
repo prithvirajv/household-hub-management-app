@@ -948,7 +948,6 @@ function renderAdmin() {
                 <small>${user.lastLoginAt ? formatDateTime(user.lastLoginAt) : "Never"}</small>
                 <div class="admin-actions">
                   <button class="ghost" data-admin-toggle-disabled="${user.id}" type="button">${user.disabled ? "Enable" : "Disable"}</button>
-                  <button class="ghost" data-admin-toggle-admin="${user.id}" type="button">${user.isAdmin ? "Remove admin" : "Make admin"}</button>
                   <button class="ghost" data-admin-reset-password="${user.id}" type="button">Reset password</button>
                 </div>
               </div>
@@ -1951,14 +1950,6 @@ function bindViewEvents() {
       const user = adminData?.users?.find((item) => item.id === button.dataset.adminToggleDisabled);
       if (!user) return;
       await updateAdminUser(user.id, { disabled: !user.disabled });
-    });
-  });
-
-  document.querySelectorAll("[data-admin-toggle-admin]").forEach((button) => {
-    button.addEventListener("click", async () => {
-      const user = adminData?.users?.find((item) => item.id === button.dataset.adminToggleAdmin);
-      if (!user) return;
-      await updateAdminUser(user.id, { isAdmin: !user.isAdmin });
     });
   });
 
