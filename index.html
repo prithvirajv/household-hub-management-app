@@ -3,17 +3,18 @@
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>Household Hub</title>
+    <meta name="description" content="Famelo helps households manage budgets, calendars, chores, meals, goals, and shared plans.">
+    <title>Famelo</title>
     <link rel="stylesheet" href="/styles.css?v=20260530-2">
   </head>
   <body>
     <div class="app-shell">
       <aside class="sidebar">
         <div class="brand">
-          <div class="brand-mark">HH</div>
+          <div class="brand-mark">F</div>
           <div>
-            <h1>Household Hub</h1>
-            <p>Budget, meals & family calendar</p>
+            <h1>Famelo</h1>
+            <p>Your household, working together</p>
           </div>
         </div>
         <section id="householdWorkspaceControl" class="sidebar-household" hidden>
@@ -39,7 +40,7 @@
             <button id="downloadCsvButton" class="icon-button ghost" type="button" aria-label="Download CSV">⇩</button>
             <div class="user-chip">
               <span>DU</span>
-              <div><strong id="userName">Demo User</strong><small id="userEmail">demo@householdhub.app</small></div>
+              <div><strong id="userName">Demo User</strong><small id="userEmail">demo@famelo.net</small></div>
             </div>
             <button id="signOutButton" class="ghost" type="button">Sign out</button>
           </div>
@@ -54,7 +55,7 @@
             <button id="forgotPasswordButton" class="text-button" type="button">Forgot password?</button>
             <button id="showInvitationButton" class="text-button" type="button">Accept invitation</button>
             <div class="demo-access">
-              <span>Exploring Household Hub?</span>
+              <span>Exploring Famelo?</span>
               <button id="demoLoginButton" class="ghost" type="button">Try demo</button>
             </div>
             <p id="authMessage"></p>
@@ -78,7 +79,7 @@
           </form>
           <form id="invitationAcceptForm" class="auth-form secondary-form" hidden>
             <h2>Accept invitation</h2>
-            <p>Use the invited email address and code from your Household Hub email.</p>
+            <p>Use the invited email address and code from your Famelo email.</p>
             <label>Name<input name="name" autocomplete="name" placeholder="Your name"></label>
             <label>Email<input name="email" type="email" autocomplete="username" required></label>
             <label>Invite code<input name="inviteCode" autocomplete="one-time-code" placeholder="HUB-123ABC" required></label>

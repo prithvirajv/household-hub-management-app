@@ -27,10 +27,10 @@ POSTGRES_PASSWORD="${POSTGRES_PASSWORD:-}"
 SESSION_SECRET="${SESSION_SECRET:?Set SESSION_SECRET}"
 ADMIN_EMAIL="${ADMIN_EMAIL:?Set ADMIN_EMAIL for the private administrator}"
 ADMIN_PASSWORD="${ADMIN_PASSWORD:?Set ADMIN_PASSWORD with at least 12 characters}"
-ADMIN_NAME="${ADMIN_NAME:-Household Hub Administrator}"
+ADMIN_NAME="${ADMIN_NAME:-Famelo Administrator}"
 DATABASE_SSL="${DATABASE_SSL:-true}"
 APP_BASE_URL="${APP_BASE_URL:-}"
-EMAIL_FROM="${EMAIL_FROM:-Household Hub <no-reply@householdhub.app>}"
+EMAIL_FROM="${EMAIL_FROM:-Famelo <no-reply@famelo.net>}"
 SMTP_HOST="${SMTP_HOST:-smtp-relay.brevo.com}"
 SMTP_PORT="${SMTP_PORT:-587}"
 SMTP_SECURE="${SMTP_SECURE:-false}"
@@ -86,7 +86,7 @@ if ! gcloud artifacts repositories describe "${REPOSITORY}" --location "${REGION
   gcloud artifacts repositories create "${REPOSITORY}" \
     --repository-format=docker \
     --location="${REGION}" \
-    --description="Household Hub containers" \
+    --description="Famelo application containers" \
     --project "${PROJECT_ID}"
 fi
 
@@ -167,4 +167,4 @@ if [[ -z "${APP_BASE_URL}" ]]; then
 fi
 
 kubectl -n "${NAMESPACE}" get service household-hub
-echo "Household Hub URL: ${APP_BASE_URL:-pending-load-balancer-address}"
+echo "Famelo URL: ${APP_BASE_URL:-pending-load-balancer-address}"

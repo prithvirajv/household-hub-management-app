@@ -1,6 +1,6 @@
-# Household Hub
+# Famelo
 
-Household Hub is a deployable SaaS MVP for household management: zero-based budgeting, shared notes and checklists, chores, birthdays, meals, groceries, goals, debt, net worth, and reports.
+Famelo is a deployable household management SaaS: zero-based budgeting, shared notes and checklists, chores, birthdays, meals, groceries, goals, debt, net worth, and reports.
 
 ## Stack
 
@@ -14,6 +14,8 @@ Household Hub is a deployable SaaS MVP for household management: zero-based budg
 ## Consumer Demo
 
 Select **Try demo** on the sign-in screen. Demo access does not expose reusable credentials and never receives application administrator access.
+
+Consumer documentation is available inside the application under **Help** and as [docs/consumer-guide.md](docs/consumer-guide.md).
 
 The private administrator is provisioned separately with the `ADMIN_EMAIL`, `ADMIN_PASSWORD`, and `ADMIN_NAME` deployment secrets. Public signup cannot claim either the demo or administrator email.
 
@@ -61,7 +63,7 @@ The Compose database uses:
 
 ## Transactional Email
 
-Household Hub sends a welcome email after signup and an invitation email when an owner shares a household. Configure an SMTP account with:
+Famelo sends a welcome email after signup and an invitation email when an owner shares a household. Configure an SMTP account with:
 
 - `APP_BASE_URL`
 - `EMAIL_FROM`
@@ -89,14 +91,14 @@ SMTP_PORT="587"
 SMTP_SECURE="false"
 SMTP_USER="your-brevo-smtp-login"
 SMTP_PASS="your-brevo-smtp-key"
-EMAIL_FROM="Household Hub <your-verified-sender@example.com>"
+EMAIL_FROM="Famelo <your-verified-sender@example.com>"
 ```
 
 The SMTP key is a secret. Keep it in local environment variables or the Kubernetes Secret and never commit it.
 
 ## GKE Deployment
 
-The deployment script creates a small one-node zonal GKE cluster when the named cluster does not exist. It deploys one Household Hub pod and, by default, one PostgreSQL StatefulSet with a 10 Gi persistent volume. This is suitable for an initial MVP; migrate PostgreSQL to Cloud SQL before relying on multi-zone availability.
+The deployment script creates a small one-node zonal GKE cluster when the named cluster does not exist. It deploys one Famelo pod and, by default, one PostgreSQL StatefulSet with a 10 Gi persistent volume. This is suitable for an initial MVP; migrate PostgreSQL to Cloud SQL before relying on multi-zone availability.
 
 The application container runs as a non-root user with a read-only root filesystem, supports graceful termination, and uses separate liveness and database-aware readiness endpoints. The Deployment uses a rolling update strategy and can be scaled horizontally after PostgreSQL is moved to a managed, highly available service.
 
@@ -130,7 +132,7 @@ ADMIN_NAME="Application Owner" \
 POSTGRES_PASSWORD="$(openssl rand -hex 24)" \
 SMTP_USER="your-brevo-smtp-login" \
 SMTP_PASS="your-brevo-smtp-key" \
-EMAIL_FROM="Household Hub <your-verified-sender@example.com>" \
+EMAIL_FROM="Famelo <your-verified-sender@example.com>" \
 ./scripts/deploy-gke.sh
 ```
 
@@ -140,16 +142,20 @@ Set `USE_IN_CLUSTER_POSTGRES=false` and provide `DATABASE_URL` plus `DATABASE_SS
 
 ### Production DNS and HTTPS
 
-The initial deployment uses a reserved global IP and Google-managed certificate at:
+The transition deployment keeps the existing reserved global IP and hostname available:
 
 `https://household-hub.8-233-48-73.sslip.io`
 
-For a branded domain:
+The target branded domain is:
 
-1. Purchase or use an existing domain.
-2. Create an `A` record such as `app.example.com` pointing to `8.233.48.73`.
-3. Replace the `sslip.io` hostname in `k8s/managed-certificate.yaml` and `k8s/ingress.yaml`.
-4. Set `APP_BASE_URL=https://app.example.com` in the Kubernetes Secret.
-5. Apply `k8s/` and wait for the `ManagedCertificate` status to become `Active`.
+`https://famelo.net`
+
+To activate it:
+
+1. Create an `A` record for `@` pointing to `8.233.48.73`.
+2. Create either an `A` record for `www` pointing to `8.233.48.73` or a `CNAME` from `www` to `famelo.net`.
+3. Apply `k8s/`; `famelo-certificate` provisions independently from the existing certificate.
+4. Wait for the `ManagedCertificate` status to become `Active`.
+5. Set `APP_BASE_URL=https://famelo.net` in the Kubernetes Secret so invitation and password-reset links use the branded domain.
 
 Do not remove the existing hostname until the replacement certificate is active.

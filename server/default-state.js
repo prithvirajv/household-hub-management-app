@@ -5,7 +5,7 @@ const defaultState = {
     currency: "USD",
     inviteCode: "",
     members: [
-      { name: "Alex", role: "Owner", email: "demo@householdhub.app" },
+      { name: "Alex", role: "Owner", email: "demo@famelo.net" },
       { name: "Alex Carter", role: "Co-owner - Invited", email: "alex@example.com" }
     ],
     sharedScopes: [

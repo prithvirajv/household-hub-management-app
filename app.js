@@ -10,6 +10,7 @@ const views = [
   ["wealth", "Wealth", "▥"],
   ["sharing", "Sharing", "♙"],
   ["reports", "Reports", "◷"],
+  ["help", "Help", "?"],
   ["admin", "Admin", "⚙"]
 ];
 
@@ -237,10 +238,11 @@ function renderShell() {
   const title = views.find(([key]) => key === currentView)?.[1] || "Budget";
   const isAdminView = currentView === "admin";
   const isNotesView = currentView === "notes";
-  $("#viewTitle").textContent = isAdminView ? "Application admin" : isNotesView ? "Household notes" : `${monthLabel()} plan`;
+  const isHelpView = currentView === "help";
+  $("#viewTitle").textContent = isAdminView ? "Application admin" : isHelpView ? "Help center" : isNotesView ? "Household notes" : `${monthLabel()} plan`;
   $("#householdName").textContent = title.toUpperCase();
   $("#userName").textContent = sessionUser?.name || "Demo User";
-  $("#userEmail").textContent = sessionUser?.email || "demo@householdhub.app";
+  $("#userEmail").textContent = sessionUser?.email || "demo@famelo.net";
   $("#monthPicker").value = state.budget.month;
   const isMealsView = currentView === "meals";
   $("#mealWeekHeaderControl").hidden = !isMealsView;
@@ -253,11 +255,11 @@ function renderShell() {
   $("#householdPicker").innerHTML = households.map((household) =>
     `<option value="${household.id}" ${household.selected ? "selected" : ""}>${household.name} · ${household.country}</option>`
   ).join("");
-  $("#householdWorkspaceControl").hidden = isAdminView;
+  $("#householdWorkspaceControl").hidden = isAdminView || isHelpView;
   $("#removeHouseholdButton").disabled = households.length <= 1;
-  $(".month-control").hidden = isAdminView || isNotesView;
-  $("#syncButton").hidden = isAdminView;
-  $("#downloadCsvButton").hidden = isAdminView || isNotesView;
+  $(".month-control").hidden = isAdminView || isNotesView || isHelpView;
+  $("#syncButton").hidden = isAdminView || isHelpView;
+  $("#downloadCsvButton").hidden = isAdminView || isNotesView || isHelpView;
   renderNav();
   const metrics = metricsForView();
   $("#metrics").hidden = metrics.length === 0;
@@ -279,6 +281,7 @@ function metricsForView() {
     return [["Chore rotation", String(state.calendar.chores.length), "household chores"], ["Birthday reminders", String(birthdaysThisMonth), `annual birthdays in ${monthLabel()}`], [`${monthLabel()} events`, String(upcoming), "chores, birthdays and reminders"], ["Shared calendar", "Household", "tasks in every member"]];
   }
   if (currentView === "notes") return [];
+  if (currentView === "help") return [];
   if (currentView === "meals") {
     ensureMealWeekData();
     return [["Weekly meals", `${currentMealPlans().length}/28`, `occupied slots in Week ${selectedMealWeek()}`], ["Groceries estimate", money.format(107), "can post directly to budget"], ["Planned servings", String(plannedServingsTotal()), "people or portions planned"], ["Household plan", "Shared", "meals, recipes and grocery list"]];
@@ -314,6 +317,7 @@ const renderers = {
   wealth: renderWealth,
   sharing: renderSharing,
   reports: renderReports,
+  help: renderHelp,
   admin: renderAdmin
 };
 
@@ -908,6 +912,62 @@ function renderReports() {
       <aside class="side-stack">
         <section class="card"><div class="card-label">Budget health</div><h3>Snapshot</h3><div class="snapshot-grid"><span>Pending <b>${money.format(61)}</b></span><span>Cash left <b>${money.format(remainingTotal())}</b></span><span>Savings and debt <b>${money.format(1220)}</b></span><span>Zero balance <b>${money.format(0)}</b></span></div><div class="donut"></div>${[[3460, "Essentials"], [1220, "Savings and debt"], [520, "Giving"]].map(([value, label]) => compactRow(`${label} - ${money.format(value)}`, "", "")).join("")}</section>
       </aside>
+    </section>`;
+}
+
+function renderHelp() {
+  const guides = [
+    ["Start here", "Create a household, choose its country and currency, then add income and assign every planned dollar in Budget."],
+    ["Households", "Use Current household in the sidebar to switch between homes, countries, or family workspaces. Each household keeps separate budgets and records."],
+    ["Budget and transactions", "Create categories and subcategories in Budget. Add or import transactions, then assign each transaction to the matching budget line."],
+    ["Calendar and chores", "Add events, annual birthdays, reminders, and recurring chores. Weekly chores automatically appear on future calendar dates."],
+    ["Meals and recipes", "Save recipes in Recipes, then select them in the weekly Meals planner. Planned ingredients feed the grocery list."],
+    ["Goals and wealth", "Track sinking funds in Goals. Use Wealth for debts, assets, liabilities, payoff progress, and net worth."],
+    ["Sharing", "Choose the household areas to share, send an invitation, and ask the recipient to use the exact invited email and one-time code."],
+    ["Reports and export", "Review spending and budget health in Reports. Use the download button in the header to export the selected month as CSV."]
+  ];
+  return `
+    <section class="help-layout">
+      <section class="help-intro">
+        <span class="card-label">Famelo guide</span>
+        <h3>Run the household without losing the thread</h3>
+        <p>Short guides for the workflows people use most.</p>
+      </section>
+      <section class="help-grid">
+        ${guides.map(([title, copy], index) => `
+          <article class="help-topic">
+            <span>${String(index + 1).padStart(2, "0")}</span>
+            <div><h3>${title}</h3><p>${copy}</p></div>
+          </article>
+        `).join("")}
+      </section>
+      <section class="help-columns">
+        <article>
+          <span class="card-label">Invitation help</span>
+          <h3>Joining a shared household</h3>
+          <ol>
+            <li>Open the acceptance link in the invitation email, or select <strong>Accept invitation</strong> on the sign-in screen.</li>
+            <li>Use the exact email address that received the invitation.</li>
+            <li>Enter the invite code. New users create a 12+ character password; existing users enter their current password.</li>
+            <li>Select <strong>Join household</strong>. The shared household opens automatically.</li>
+          </ol>
+          <p class="help-note">A code is single-use. Ask the household owner to resend the invitation if it was already accepted or replaced.</p>
+        </article>
+        <article>
+          <span class="card-label">Account help</span>
+          <h3>Password and sign-in</h3>
+          <ol>
+            <li>Select <strong>Forgot password?</strong> on the sign-in screen.</li>
+            <li>Open the one-time reset link sent by Famelo. It expires after 30 minutes.</li>
+            <li>Choose a password with at least 12 characters, then sign in normally.</li>
+          </ol>
+          <p class="help-note">Check Spam and All Mail if a Famelo email is not visible in the inbox.</p>
+        </article>
+      </section>
+      <section class="help-footer">
+        <div><span class="card-label">Need assistance?</span><h3>Contact the household owner first</h3></div>
+        <p>Household owners manage invitations and shared access. Application administrators manage login availability.</p>
+      </section>
     </section>`;
 }
 
@@ -2423,7 +2483,7 @@ async function loadApp() {
 
 function setAuthShell(title) {
   document.body.classList.add("auth-mode");
-  $("#householdName").textContent = "Household Hub";
+  $("#householdName").textContent = "Famelo";
   $("#viewTitle").textContent = title;
 }
 

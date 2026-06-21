@@ -1,7 +1,7 @@
 {
   "name": "household-hub",
   "version": "1.0.0",
-  "description": "Household Hub - Budget, meals & family calendar",
+  "description": "Famelo - household budgeting, meals, calendars, sharing, and planning",
   "main": "server/index.js",
   "scripts": {
     "start": "node server/index.js",

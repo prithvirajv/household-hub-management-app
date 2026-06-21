@@ -8,11 +8,11 @@ services:
       SESSION_SECRET: local-compose-session-secret-change-me
       ADMIN_EMAIL: ${ADMIN_EMAIL:-}
       ADMIN_PASSWORD: ${ADMIN_PASSWORD:-}
-      ADMIN_NAME: ${ADMIN_NAME:-Household Hub Administrator}
+      ADMIN_NAME: ${ADMIN_NAME:-Famelo Administrator}
       DATABASE_SSL: "false"
       PORT: "8080"
       APP_BASE_URL: ${APP_BASE_URL:-http://localhost:4173}
-      EMAIL_FROM: ${EMAIL_FROM:-Household Hub <no-reply@householdhub.app>}
+      EMAIL_FROM: ${EMAIL_FROM:-Famelo <no-reply@famelo.net>}
       SMTP_HOST: ${SMTP_HOST:-}
       SMTP_PORT: ${SMTP_PORT:-587}
       SMTP_SECURE: ${SMTP_SECURE:-false}

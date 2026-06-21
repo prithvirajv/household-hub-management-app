@@ -434,6 +434,104 @@ main {
   gap: 0.8rem;
 }
 
+.help-layout {
+  display: grid;
+  gap: 1rem;
+  max-width: 1180px;
+}
+
+.help-intro {
+  padding: 0.25rem 0 0.5rem;
+}
+
+.help-intro h3 {
+  max-width: 760px;
+  margin: 0.2rem 0 0.35rem;
+  font-size: 1.55rem;
+}
+
+.help-intro p,
+.help-topic p,
+.help-columns p,
+.help-footer p {
+  margin: 0;
+  color: var(--muted);
+}
+
+.help-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--panel);
+  box-shadow: var(--shadow);
+}
+
+.help-topic {
+  display: grid;
+  grid-template-columns: 42px minmax(0, 1fr);
+  gap: 0.8rem;
+  min-height: 120px;
+  padding: 1rem;
+  border-right: 1px solid var(--line);
+  border-bottom: 1px solid var(--line);
+}
+
+.help-topic:nth-child(2n) {
+  border-right: 0;
+}
+
+.help-topic:nth-last-child(-n + 2) {
+  border-bottom: 0;
+}
+
+.help-topic > span {
+  color: var(--green);
+  font-size: 0.76rem;
+  font-weight: 900;
+}
+
+.help-topic h3,
+.help-columns h3,
+.help-footer h3 {
+  margin: 0 0 0.35rem;
+}
+
+.help-columns {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 1rem;
+}
+
+.help-columns > article,
+.help-footer {
+  padding: 1rem;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--panel);
+  box-shadow: var(--shadow);
+}
+
+.help-columns ol {
+  display: grid;
+  gap: 0.55rem;
+  margin: 0.8rem 0;
+  padding-left: 1.25rem;
+}
+
+.help-note {
+  padding-top: 0.75rem;
+  border-top: 1px solid var(--line);
+}
+
+.help-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
 .metrics-grid {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
@@ -1848,6 +1946,8 @@ main {
   .metrics-grid,
   .paycheck-grid,
   .auth-panel,
+  .help-grid,
+  .help-columns,
   .mini-form,
   .paycheck-builder,
   .meal-toolbar,
@@ -1864,6 +1964,22 @@ main {
   .ledger-assign-row,
   .report-row {
     grid-template-columns: 1fr;
+  }
+
+  .help-topic,
+  .help-topic:nth-child(2n),
+  .help-topic:nth-last-child(-n + 2) {
+    border-right: 0;
+    border-bottom: 1px solid var(--line);
+  }
+
+  .help-topic:last-child {
+    border-bottom: 0;
+  }
+
+  .help-footer {
+    align-items: flex-start;
+    flex-direction: column;
   }
 
   .calendar-grid {

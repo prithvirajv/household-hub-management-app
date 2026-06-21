@@ -75,7 +75,7 @@ test("consumer demo is isolated from administrator APIs", async () => {
 
   const passwordAttempt = await request("/api/auth/signin", {
     method: "POST",
-    body: JSON.stringify({ email: "demo@householdhub.app", password: "budget123" })
+    body: JSON.stringify({ email: "demo@famelo.net", password: "budget123" })
   });
   assert.equal(passwordAttempt.status, 400);
 });
@@ -102,7 +102,7 @@ test("configured private administrator can sign in and is the sole admin", async
 });
 
 test("public signup cannot claim reserved administrator or demo identities", async () => {
-  for (const email of [adminEmail, "demo@householdhub.app"]) {
+  for (const email of [adminEmail, "demo@famelo.net"]) {
     const signup = await request("/api/auth/signup", {
       method: "POST",
       body: JSON.stringify({

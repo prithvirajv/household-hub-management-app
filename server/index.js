@@ -21,16 +21,17 @@ const SESSION_SECRET = process.env.SESSION_SECRET || "local-dev-session-secret-c
 const DATABASE_URL = process.env.DATABASE_URL || "postgres://household_hub:household_hub_dev@localhost:15432/household_hub";
 const DATABASE_SSL = String(process.env.DATABASE_SSL || "false").toLowerCase() === "true";
 const MEMORY_DB = String(process.env.MEMORY_DB || "false").toLowerCase() === "true";
-const DEMO_EMAIL = "demo@householdhub.app";
+const DEMO_EMAIL = "demo@famelo.net";
+const LEGACY_DEMO_EMAIL = "demo@householdhub.app";
 const ADMIN_EMAIL = String(process.env.ADMIN_EMAIL || "").trim().toLowerCase();
 const ADMIN_PASSWORD = String(process.env.ADMIN_PASSWORD || "");
-const ADMIN_NAME = String(process.env.ADMIN_NAME || "Household Hub Administrator").trim();
+const ADMIN_NAME = String(process.env.ADMIN_NAME || "Famelo Administrator").trim();
 const SMTP_HOST = String(process.env.SMTP_HOST || "").trim();
 const SMTP_PORT = Number(process.env.SMTP_PORT || 587);
 const SMTP_SECURE = String(process.env.SMTP_SECURE || "false").toLowerCase() === "true";
 const SMTP_USER = String(process.env.SMTP_USER || "").trim();
 const SMTP_PASS = String(process.env.SMTP_PASS || "");
-const EMAIL_FROM = String(process.env.EMAIL_FROM || "Household Hub <no-reply@householdhub.app>").trim();
+const EMAIL_FROM = String(process.env.EMAIL_FROM || "Famelo <no-reply@famelo.net>").trim();
 const APP_BASE_URL = String(process.env.APP_BASE_URL || `http://localhost:${PORT}`).replace(/\/+$/, "");
 const TEST_EXPOSE_RESET_TOKEN = process.env.NODE_ENV === "test"
   && MEMORY_DB
@@ -112,9 +113,9 @@ function sendWelcomeEmail({ email, name, householdName }) {
   const safeHousehold = escapeHtml(householdName);
   return sendTransactionalEmail({
     to: email,
-    subject: "Welcome to Household Hub",
-    text: `Hi ${name}, your Household Hub login has been created for ${householdName}. Open ${APP_BASE_URL} to get started.`,
-    html: `<h2>Welcome to Household Hub</h2><p>Hi ${safeName},</p><p>Your login has been created for <strong>${safeHousehold}</strong>.</p><p><a href="${escapeHtml(APP_BASE_URL)}">Open Household Hub</a> to get started.</p>`
+    subject: "Welcome to Famelo",
+    text: `Hi ${name}, your Famelo login has been created for ${householdName}. Open ${APP_BASE_URL} to get started.`,
+    html: `<h2>Welcome to Famelo</h2><p>Hi ${safeName},</p><p>Your login has been created for <strong>${safeHousehold}</strong>.</p><p><a href="${escapeHtml(APP_BASE_URL)}">Open Famelo</a> to get started.</p>`
   });
 }
 
@@ -122,9 +123,9 @@ function sendPasswordResetEmail({ email, name, token }) {
   const resetUrl = `${APP_BASE_URL}/index.html?resetToken=${encodeURIComponent(token)}&email=${encodeURIComponent(email)}`;
   return sendTransactionalEmail({
     to: email,
-    subject: "Reset your Household Hub password",
-    text: `Hi ${name}, use this one-time link within 30 minutes to reset your Household Hub password: ${resetUrl}`,
-    html: `<h2>Reset your Household Hub password</h2><p>Hi ${escapeHtml(name)},</p><p>This one-time link expires in 30 minutes.</p><p><a href="${escapeHtml(resetUrl)}">Reset password</a></p><p>If you did not request this, you can ignore this email.</p>`
+    subject: "Reset your Famelo password",
+    text: `Hi ${name}, use this one-time link within 30 minutes to reset your Famelo password: ${resetUrl}`,
+    html: `<h2>Reset your Famelo password</h2><p>Hi ${escapeHtml(name)},</p><p>This one-time link expires in 30 minutes.</p><p><a href="${escapeHtml(resetUrl)}">Reset password</a></p><p>If you did not request this, you can ignore this email.</p>`
   });
 }
 
@@ -134,8 +135,8 @@ function sendHouseholdInviteEmail({ email, name, inviterName, householdName, inv
   return sendTransactionalEmail({
     to: email,
     subject: `${inviterName} shared ${householdName} with you`,
-    text: `Hi ${name}, ${inviterName} invited you to ${householdName} in Household Hub as ${role}. Invite code: ${inviteCode}. Shared areas: ${scopeText}. Accept the invitation: ${acceptUrl}`,
-    html: `<h2>You have been invited to Household Hub</h2><p>Hi ${escapeHtml(name)},</p><p><strong>${escapeHtml(inviterName)}</strong> shared <strong>${escapeHtml(householdName)}</strong> with you as ${escapeHtml(role)}.</p><p>Invite code: <strong>${escapeHtml(inviteCode)}</strong></p><p>Shared areas: ${escapeHtml(scopeText)}</p><p><a href="${escapeHtml(acceptUrl)}">Accept invitation</a></p>`
+    text: `Hi ${name}, ${inviterName} invited you to ${householdName} in Famelo as ${role}. Invite code: ${inviteCode}. Shared areas: ${scopeText}. Accept the invitation: ${acceptUrl}`,
+    html: `<h2>You have been invited to Famelo</h2><p>Hi ${escapeHtml(name)},</p><p><strong>${escapeHtml(inviterName)}</strong> shared <strong>${escapeHtml(householdName)}</strong> with you as ${escapeHtml(role)}.</p><p>Invite code: <strong>${escapeHtml(inviteCode)}</strong></p><p>Shared areas: ${escapeHtml(scopeText)}</p><p><a href="${escapeHtml(acceptUrl)}">Accept invitation</a></p>`
   });
 }
 
@@ -172,6 +173,14 @@ async function migrate() {
   if (MEMORY_DB) return;
   const schema = fs.readFileSync(path.join(__dirname, "schema.sql"), "utf8");
   await pool.query(schema);
+  await pool.query(
+    "UPDATE users SET email = $1 WHERE email = $2 AND NOT EXISTS (SELECT 1 FROM users WHERE email = $1)",
+    [DEMO_EMAIL, LEGACY_DEMO_EMAIL]
+  );
+  await pool.query(
+    "UPDATE households SET app_state = replace(app_state::text, $1, $2)::jsonb WHERE app_state::text LIKE $3",
+    [LEGACY_DEMO_EMAIL, DEMO_EMAIL, `%${LEGACY_DEMO_EMAIL}%`]
+  );
   if (ADMIN_EMAIL) {
     await pool.query("UPDATE users SET is_admin = (email = $1)", [ADMIN_EMAIL]);
   } else {
@@ -569,7 +578,7 @@ app.post("/api/auth/signup", async (req, res, next) => {
   if (!email || password.length < 8 || !countryInfo) {
     return res.status(400).json({ error: "Email and an 8+ character password are required" });
   }
-  if (email === DEMO_EMAIL || (ADMIN_EMAIL && email === ADMIN_EMAIL)) {
+  if (email === DEMO_EMAIL || email === LEGACY_DEMO_EMAIL || (ADMIN_EMAIL && email === ADMIN_EMAIL)) {
     return res.status(409).json({ error: "That email is reserved" });
   }
 
@@ -1439,7 +1448,7 @@ async function main() {
   await seedDemoUser();
   await seedAdminUser();
   httpServer = app.listen(PORT, () => {
-    console.log(`Household Hub listening on ${PORT}`);
+    console.log(`Famelo listening on ${PORT}`);
   });
 }
 
