@@ -121,3 +121,19 @@ EMAIL_FROM="Household Hub <your-verified-sender@example.com>" \
 The deploy script enables required Google APIs, creates the one-node cluster and Artifact Registry repository when needed, builds and pushes the container with Cloud Build, deploys PostgreSQL, updates Kubernetes secrets, applies the app manifests, waits for rollout, and prints the external URL.
 
 Set `USE_IN_CLUSTER_POSTGRES=false` and provide `DATABASE_URL` plus `DATABASE_SSL=true` to use Cloud SQL or another managed PostgreSQL service. Set `CLUSTER_MODE=autopilot` to use a regional Autopilot cluster instead of the default zonal Standard cluster.
+
+### Production DNS and HTTPS
+
+The initial deployment uses a reserved global IP and Google-managed certificate at:
+
+`https://household-hub.8-233-48-73.sslip.io`
+
+For a branded domain:
+
+1. Purchase or use an existing domain.
+2. Create an `A` record such as `app.example.com` pointing to `8.233.48.73`.
+3. Replace the `sslip.io` hostname in `k8s/managed-certificate.yaml` and `k8s/ingress.yaml`.
+4. Set `APP_BASE_URL=https://app.example.com` in the Kubernetes Secret.
+5. Apply `k8s/` and wait for the `ManagedCertificate` status to become `Active`.
+
+Do not remove the existing hostname until the replacement certificate is active.

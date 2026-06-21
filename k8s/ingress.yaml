@@ -1,0 +1,22 @@
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: household-hub
+  namespace: household-hub
+  annotations:
+    kubernetes.io/ingress.class: gce
+    kubernetes.io/ingress.global-static-ip-name: household-hub-web
+    networking.gke.io/managed-certificates: household-hub-certificate
+    networking.gke.io/v1beta1.FrontendConfig: household-hub-frontend
+spec:
+  rules:
+    - host: household-hub.8-233-48-73.sslip.io
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: household-hub
+                port:
+                  number: 80

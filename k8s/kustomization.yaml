@@ -5,6 +5,9 @@ resources:
   - namespace.yaml
   - deployment.yaml
   - service.yaml
+  - managed-certificate.yaml
+  - frontend-config.yaml
+  - ingress.yaml
 images:
   - name: household-hub
     newName: us-central1-docker.pkg.dev/PROJECT_ID/household-hub/household-hub

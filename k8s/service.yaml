@@ -4,7 +4,7 @@ metadata:
   name: household-hub
   namespace: household-hub
 spec:
-  type: LoadBalancer
+  type: NodePort
   selector:
     app: household-hub
   ports:
