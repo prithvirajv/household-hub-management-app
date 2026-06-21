@@ -11,10 +11,11 @@ Household Hub is a deployable SaaS MVP for household management: zero-based budg
 - Local runtime: Docker Compose
 - Deployment target: GKE on GCP
 
-## Demo Account
+## Consumer Demo
 
-- Email: `demo@householdhub.app`
-- Password: `budget123`
+Select **Try demo** on the sign-in screen. Demo access does not expose reusable credentials and never receives application administrator access.
+
+The private administrator is provisioned separately with the `ADMIN_EMAIL`, `ADMIN_PASSWORD`, and `ADMIN_NAME` deployment secrets. Public signup cannot claim either the demo or administrator email.
 
 ## Local Development
 
@@ -50,6 +51,7 @@ The Compose database uses:
 - `GET /api/session`
 - `POST /api/auth/signup`
 - `POST /api/auth/signin`
+- `POST /api/auth/demo`
 - `POST /api/auth/signout`
 - `POST /api/households/invitations`
 - `GET /api/state`
@@ -94,6 +96,9 @@ The app expects these environment variables in the Kubernetes Secret:
 
 - `DATABASE_URL`
 - `SESSION_SECRET`
+- `ADMIN_EMAIL`
+- `ADMIN_PASSWORD`
+- `ADMIN_NAME`
 - `DATABASE_SSL`
 - `APP_BASE_URL`
 - `EMAIL_FROM`
@@ -111,6 +116,9 @@ REGION="us-central1" \
 ZONE="us-central1-a" \
 CLUSTER_NAME="household-hub" \
 SESSION_SECRET="$(openssl rand -hex 32)" \
+ADMIN_EMAIL="owner@example.com" \
+ADMIN_PASSWORD="$(openssl rand -base64 24)" \
+ADMIN_NAME="Application Owner" \
 POSTGRES_PASSWORD="$(openssl rand -hex 24)" \
 SMTP_USER="your-brevo-smtp-login" \
 SMTP_PASS="your-brevo-smtp-key" \

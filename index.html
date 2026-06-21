@@ -53,9 +53,13 @@
         <section id="authPanel" class="auth-panel">
           <form id="signinForm" class="auth-form">
             <h2>Sign in</h2>
-            <label>Email<input name="email" type="email" value="demo@householdhub.app" required></label>
-            <label>Password<input name="password" type="password" value="budget123" required></label>
+            <label>Email<input name="email" type="email" autocomplete="username" required></label>
+            <label>Password<input name="password" type="password" autocomplete="current-password" required></label>
             <button type="submit">Open household</button>
+            <div class="demo-access">
+              <span>Exploring Household Hub?</span>
+              <button id="demoLoginButton" class="ghost" type="button">Try demo</button>
+            </div>
             <p id="authMessage"></p>
           </form>
           <form id="signupForm" class="auth-form secondary-form">

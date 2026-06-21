@@ -25,6 +25,9 @@ DATABASE_URL="${DATABASE_URL:-}"
 USE_IN_CLUSTER_POSTGRES="${USE_IN_CLUSTER_POSTGRES:-true}"
 POSTGRES_PASSWORD="${POSTGRES_PASSWORD:-}"
 SESSION_SECRET="${SESSION_SECRET:?Set SESSION_SECRET}"
+ADMIN_EMAIL="${ADMIN_EMAIL:?Set ADMIN_EMAIL for the private administrator}"
+ADMIN_PASSWORD="${ADMIN_PASSWORD:?Set ADMIN_PASSWORD with at least 12 characters}"
+ADMIN_NAME="${ADMIN_NAME:-Household Hub Administrator}"
 DATABASE_SSL="${DATABASE_SSL:-true}"
 APP_BASE_URL="${APP_BASE_URL:-}"
 EMAIL_FROM="${EMAIL_FROM:-Household Hub <no-reply@householdhub.app>}"
@@ -49,6 +52,11 @@ fi
 if [[ "${REQUIRE_SMTP}" == "true" ]]; then
   SMTP_USER="${SMTP_USER:?Set SMTP_USER from Brevo SMTP credentials}"
   SMTP_PASS="${SMTP_PASS:?Set SMTP_PASS from Brevo SMTP credentials}"
+fi
+
+if [[ "${#ADMIN_PASSWORD}" -lt 12 ]]; then
+  echo "ADMIN_PASSWORD must contain at least 12 characters" >&2
+  exit 1
 fi
 
 gcloud services enable artifactregistry.googleapis.com cloudbuild.googleapis.com container.googleapis.com --project "${PROJECT_ID}"
@@ -102,6 +110,9 @@ fi
 kubectl -n "${NAMESPACE}" create secret generic household-hub-secrets \
   --from-literal=DATABASE_URL="${DATABASE_URL}" \
   --from-literal=SESSION_SECRET="${SESSION_SECRET}" \
+  --from-literal=ADMIN_EMAIL="${ADMIN_EMAIL}" \
+  --from-literal=ADMIN_PASSWORD="${ADMIN_PASSWORD}" \
+  --from-literal=ADMIN_NAME="${ADMIN_NAME}" \
   --from-literal=DATABASE_SSL="${DATABASE_SSL}" \
   --from-literal=APP_BASE_URL="${APP_BASE_URL}" \
   --from-literal=EMAIL_FROM="${EMAIL_FROM}" \
@@ -138,6 +149,9 @@ if [[ -z "${APP_BASE_URL}" ]]; then
     kubectl -n "${NAMESPACE}" create secret generic household-hub-secrets \
       --from-literal=DATABASE_URL="${DATABASE_URL}" \
       --from-literal=SESSION_SECRET="${SESSION_SECRET}" \
+      --from-literal=ADMIN_EMAIL="${ADMIN_EMAIL}" \
+      --from-literal=ADMIN_PASSWORD="${ADMIN_PASSWORD}" \
+      --from-literal=ADMIN_NAME="${ADMIN_NAME}" \
       --from-literal=DATABASE_SSL="${DATABASE_SSL}" \
       --from-literal=APP_BASE_URL="${APP_BASE_URL}" \
       --from-literal=EMAIL_FROM="${EMAIL_FROM}" \

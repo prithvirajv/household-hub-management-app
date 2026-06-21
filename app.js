@@ -2159,6 +2159,20 @@ $("#signinForm").addEventListener("submit", async (event) => {
   }
 });
 
+$("#demoLoginButton").addEventListener("click", async (event) => {
+  const button = event.currentTarget;
+  button.disabled = true;
+  $("#authMessage").textContent = "";
+  try {
+    await api("/api/auth/demo", { method: "POST", body: "{}" });
+    await loadApp();
+  } catch (error) {
+    $("#authMessage").textContent = error.message;
+  } finally {
+    button.disabled = false;
+  }
+});
+
 $("#signupForm").addEventListener("submit", async (event) => {
   event.preventDefault();
   try {

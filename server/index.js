@@ -21,7 +21,10 @@ const SESSION_SECRET = process.env.SESSION_SECRET || "local-dev-session-secret-c
 const DATABASE_URL = process.env.DATABASE_URL || "postgres://household_hub:household_hub_dev@localhost:15432/household_hub";
 const DATABASE_SSL = String(process.env.DATABASE_SSL || "false").toLowerCase() === "true";
 const MEMORY_DB = String(process.env.MEMORY_DB || "false").toLowerCase() === "true";
-const ADMIN_EMAIL = String(process.env.ADMIN_EMAIL || "demo@householdhub.app").trim().toLowerCase();
+const DEMO_EMAIL = "demo@householdhub.app";
+const ADMIN_EMAIL = String(process.env.ADMIN_EMAIL || "").trim().toLowerCase();
+const ADMIN_PASSWORD = String(process.env.ADMIN_PASSWORD || "");
+const ADMIN_NAME = String(process.env.ADMIN_NAME || "Household Hub Administrator").trim();
 const SMTP_HOST = String(process.env.SMTP_HOST || "").trim();
 const SMTP_PORT = Number(process.env.SMTP_PORT || 587);
 const SMTP_SECURE = String(process.env.SMTP_SECURE || "false").toLowerCase() === "true";
@@ -146,7 +149,10 @@ async function migrate() {
   if (MEMORY_DB) return;
   const schema = fs.readFileSync(path.join(__dirname, "schema.sql"), "utf8");
   await pool.query(schema);
-  await pool.query("UPDATE users SET is_admin = true WHERE email = $1", [ADMIN_EMAIL]);
+  await pool.query("UPDATE users SET is_admin = false WHERE email = $1", [DEMO_EMAIL]);
+  if (ADMIN_EMAIL) {
+    await pool.query("UPDATE users SET is_admin = true WHERE email = $1", [ADMIN_EMAIL]);
+  }
 }
 
 function makeInviteCode() {
@@ -222,17 +228,17 @@ async function createHouseholdForUser(client, userId, name, state = defaultState
 
 async function seedDemoUser() {
   if (MEMORY_DB) {
-    const existingUser = memoryDb.users.find((user) => user.email === "demo@householdhub.app");
+    const existingUser = memoryDb.users.find((user) => user.email === DEMO_EMAIL);
     if (existingUser) {
-      existingUser.is_admin = true;
+      existingUser.is_admin = false;
       return;
     }
     const user = {
       id: crypto.randomUUID(),
-      email: "demo@householdhub.app",
+      email: DEMO_EMAIL,
       name: "Demo User",
       password_hash: await bcrypt.hash("budget123", 12),
-      is_admin: true,
+      is_admin: false,
       login_count: 0,
       last_login_at: null,
       disabled_at: null,
@@ -261,7 +267,7 @@ async function seedDemoUser() {
     return;
   }
 
-  const existing = await pool.query("SELECT id FROM users WHERE email = $1", ["demo@householdhub.app"]);
+  const existing = await pool.query("SELECT id FROM users WHERE email = $1", [DEMO_EMAIL]);
   if (existing.rowCount > 0) {
     const userId = existing.rows[0].id;
     const memberships = await pool.query(
@@ -312,11 +318,83 @@ async function seedDemoUser() {
     await client.query("BEGIN");
     const hash = await bcrypt.hash("budget123", 12);
     const user = await client.query(
-      "INSERT INTO users (email, password_hash, name, is_admin) VALUES ($1, $2, $3, true) RETURNING id",
-      ["demo@householdhub.app", hash, "Demo User"]
+      "INSERT INTO users (email, password_hash, name, is_admin) VALUES ($1, $2, $3, false) RETURNING id",
+      [DEMO_EMAIL, hash, "Demo User"]
     );
     await createHouseholdForUser(client, user.rows[0].id, "US Household", householdState("US Household", "US", "USD"));
     await createHouseholdForUser(client, user.rows[0].id, "India Household", householdState("India Household", "IN", "INR"));
+    await client.query("COMMIT");
+  } catch (error) {
+    await client.query("ROLLBACK");
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
+async function seedAdminUser() {
+  if (!ADMIN_EMAIL || ADMIN_PASSWORD.length < 12) {
+    console.warn("Private admin provisioning skipped: set ADMIN_EMAIL and an ADMIN_PASSWORD of at least 12 characters");
+    return;
+  }
+
+  const passwordHash = await bcrypt.hash(ADMIN_PASSWORD, 12);
+  if (MEMORY_DB) {
+    let user = memoryDb.users.find((item) => item.email === ADMIN_EMAIL);
+    if (!user) {
+      user = {
+        id: crypto.randomUUID(),
+        email: ADMIN_EMAIL,
+        name: ADMIN_NAME,
+        password_hash: passwordHash,
+        is_admin: true,
+        login_count: 0,
+        last_login_at: null,
+        disabled_at: null,
+        created_at: new Date().toISOString()
+      };
+      const state = householdState("Administrator Household", "US", "USD");
+      const household = {
+        id: crypto.randomUUID(),
+        name: "Administrator Household",
+        invite_code: state.household.inviteCode,
+        app_state: state,
+        created_at: new Date().toISOString()
+      };
+      memoryDb.users.push(user);
+      memoryDb.households.push(household);
+      memoryDb.memberships.push({ user_id: user.id, household_id: household.id, role: "owner" });
+    }
+    user.name = ADMIN_NAME;
+    user.password_hash = passwordHash;
+    user.is_admin = true;
+    user.disabled_at = null;
+    return;
+  }
+
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+    let user = await client.query(
+      `INSERT INTO users (email, password_hash, name, is_admin)
+       VALUES ($1, $2, $3, true)
+       ON CONFLICT (email)
+       DO UPDATE SET password_hash = EXCLUDED.password_hash, name = EXCLUDED.name, is_admin = true, disabled_at = NULL
+       RETURNING id`,
+      [ADMIN_EMAIL, passwordHash, ADMIN_NAME]
+    );
+    const membership = await client.query(
+      "SELECT 1 FROM household_memberships WHERE user_id = $1 LIMIT 1",
+      [user.rows[0].id]
+    );
+    if (membership.rowCount === 0) {
+      await createHouseholdForUser(
+        client,
+        user.rows[0].id,
+        "Administrator Household",
+        householdState("Administrator Household", "US", "USD")
+      );
+    }
     await client.query("COMMIT");
   } catch (error) {
     await client.query("ROLLBACK");
@@ -455,6 +533,9 @@ app.post("/api/auth/signup", async (req, res, next) => {
   if (!email || password.length < 8 || !countryInfo) {
     return res.status(400).json({ error: "Email and an 8+ character password are required" });
   }
+  if (email === DEMO_EMAIL || (ADMIN_EMAIL && email === ADMIN_EMAIL)) {
+    return res.status(409).json({ error: "That email is reserved" });
+  }
 
   if (MEMORY_DB) {
     if (memoryDb.users.some((user) => user.email === email)) {
@@ -465,7 +546,7 @@ app.post("/api/auth/signup", async (req, res, next) => {
       email,
       name,
       password_hash: await bcrypt.hash(password, 12),
-      is_admin: email === ADMIN_EMAIL,
+      is_admin: false,
       login_count: 0,
       last_login_at: null,
       disabled_at: null,
@@ -493,7 +574,7 @@ app.post("/api/auth/signup", async (req, res, next) => {
     const hash = await bcrypt.hash(password, 12);
     const user = await client.query(
       "INSERT INTO users (email, password_hash, name, is_admin) VALUES ($1, $2, $3, $4) RETURNING id, email, name, is_admin",
-      [email, hash, name, email === ADMIN_EMAIL]
+      [email, hash, name, false]
     );
     const state = householdState(householdName, country, currency);
     await createHouseholdForUser(client, user.rows[0].id, householdName, state);
@@ -514,6 +595,9 @@ app.post("/api/auth/signin", async (req, res, next) => {
   try {
     const email = String(req.body.email || "").trim().toLowerCase();
     const password = String(req.body.password || "");
+    if (email === DEMO_EMAIL) {
+      return res.status(400).json({ error: "Use Try demo to open the consumer demo" });
+    }
     if (MEMORY_DB) {
       const user = memoryDb.users.find((item) => item.email === email);
       if (!user || !(await bcrypt.compare(password, user.password_hash))) {
@@ -531,6 +615,29 @@ app.post("/api/auth/signin", async (req, res, next) => {
       return res.status(401).json({ error: "Invalid email or password" });
     }
     if (user.disabled_at) return res.status(403).json({ error: "This login has been disabled" });
+    await recordLogin(user.id);
+    signSession(res, user.id);
+    res.json({ user: publicUser(user) });
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.post("/api/auth/demo", async (_req, res, next) => {
+  try {
+    let user;
+    if (MEMORY_DB) {
+      user = memoryDb.users.find((item) => item.email === DEMO_EMAIL);
+    } else {
+      const result = await pool.query(
+        "SELECT id, email, name, is_admin, disabled_at FROM users WHERE email = $1",
+        [DEMO_EMAIL]
+      );
+      user = result.rows[0];
+    }
+    if (!user || user.disabled_at) {
+      return res.status(503).json({ error: "Demo access is temporarily unavailable" });
+    }
     await recordLogin(user.id);
     signSession(res, user.id);
     res.json({ user: publicUser(user) });
@@ -1015,6 +1122,7 @@ app.use((error, _req, res, _next) => {
 async function main() {
   await migrate();
   await seedDemoUser();
+  await seedAdminUser();
   app.listen(PORT, () => {
     console.log(`Household Hub listening on ${PORT}`);
   });
