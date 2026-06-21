@@ -202,26 +202,6 @@ nav {
   border-color: rgba(255, 255, 255, 0.08);
 }
 
-.demo-card {
-  margin-top: auto;
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  border-radius: 8px;
-  background: rgba(255, 255, 255, 0.06);
-  padding: 0.85rem;
-  display: grid;
-  gap: 0.1rem;
-}
-
-.demo-card span,
-.demo-card small {
-  color: #aebbd2;
-}
-
-.demo-card strong {
-  color: #ffd66b;
-  font-size: 1.45rem;
-}
-
 main {
   min-width: 0;
   padding: 1.2rem 1.35rem;
@@ -246,8 +226,7 @@ main {
   gap: 0.55rem;
 }
 
-.auth-mode .topbar-actions,
-.auth-mode .demo-card {
+.auth-mode .topbar-actions {
   display: none;
 }
 
