@@ -366,9 +366,9 @@ function renderBudget() {
               <div class="category-row">
                 <div class="category-title">
                   <i style="background:${category.color}"></i>
-                  <div><strong>${category.name}</strong><small data-category-left="${categoryIndex}">${money.format(category.lines.reduce((sum, line) => sum + Number(line.planned) - spentByLine(line.id), 0))} left</small></div>
-                  <span data-category-spent="${categoryIndex}">${money.format(category.lines.reduce((sum, line) => sum + spentByLine(line.id), 0))} spent</span>
-                  <b data-category-planned="${categoryIndex}">${money.format(category.lines.reduce((sum, line) => sum + Number(line.planned), 0))} planned</b>
+                  <div class="category-name"><strong>${category.name}</strong><small data-category-left="${categoryIndex}">${money.format(category.lines.reduce((sum, line) => sum + Number(line.planned) - spentByLine(line.id), 0))} left</small></div>
+                  <span class="category-spent" data-category-spent="${categoryIndex}">${money.format(category.lines.reduce((sum, line) => sum + spentByLine(line.id), 0))} spent</span>
+                  <b class="category-planned" data-category-planned="${categoryIndex}">${money.format(category.lines.reduce((sum, line) => sum + Number(line.planned), 0))} planned</b>
                   <button class="category-add-line" data-add-line-category="${categoryIndex}" type="button">+ Add subcategory</button>
                   <button class="icon-button danger-button" data-delete-category="${categoryIndex}" type="button" aria-label="Remove ${category.name}">×</button>
                 </div>
@@ -381,10 +381,10 @@ function renderBudget() {
                     <input class="line-name-input" data-budget-line-name="${categoryIndex}:${lineIndex}" value="${line.name}">
                     <label class="due-day-field">Due date <input data-budget-due-date="${categoryIndex}:${lineIndex}" type="date" min="${monthDateMin()}" max="${monthDateMax()}" value="${dueDateValue(line.dueDay)}"></label>
                   </div>
-                  <input class="money-input" data-budget-line="${categoryIndex}:${lineIndex}" type="number" step="0.01" value="${line.planned}" min="0" aria-label="Planned amount for ${line.name}">
-                  <span>${exactMoney.format(spent)}</span>
-                  <b data-line-remaining="${categoryIndex}:${lineIndex}" class="${remaining < 0 ? "danger" : ""}">${exactMoney.format(remaining)}</b>
-                  <button class="icon-button danger-button" data-delete-line="${categoryIndex}:${lineIndex}" type="button">×</button>
+                  <label class="budget-line-value budget-line-planned"><small>Planned</small><input class="money-input" data-budget-line="${categoryIndex}:${lineIndex}" type="number" step="0.01" value="${line.planned}" min="0" aria-label="Planned amount for ${line.name}"></label>
+                  <div class="budget-line-value budget-line-spent"><small>Spent</small><span>${exactMoney.format(spent)}</span></div>
+                  <div class="budget-line-value budget-line-remaining"><small>Remaining</small><b data-line-remaining="${categoryIndex}:${lineIndex}" class="${remaining < 0 ? "danger" : ""}">${exactMoney.format(remaining)}</b></div>
+                  <button class="icon-button danger-button budget-line-delete" data-delete-line="${categoryIndex}:${lineIndex}" type="button" aria-label="Remove ${line.name}">×</button>
                 </div>`;
               }).join("")}
             `).join("")}
