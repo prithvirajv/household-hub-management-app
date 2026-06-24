@@ -44,6 +44,19 @@ const $ = (selector) => document.querySelector(selector);
 const nav = $("#nav");
 const view = $("#view");
 
+async function handleAuthExpired() {
+  state = null;
+  sessionUser = null;
+  adminData = null;
+  households = [];
+  document.body.classList.add("auth-mode");
+  $("#householdWorkspaceControl").hidden = true;
+  $("#workspace").hidden = true;
+  $("#authPanel").hidden = false;
+  showSigninForm();
+  $("#authMessage").textContent = "Your session expired. Please sign in again.";
+}
+
 function api(path, options = {}) {
   return fetch(path, {
     headers: { "Content-Type": "application/json", ...(options.headers || {}) },
@@ -52,6 +65,9 @@ function api(path, options = {}) {
   }).then(async (response) => {
     const contentType = response.headers.get("content-type") || "";
     const body = contentType.includes("application/json") ? await response.json() : await response.text();
+    if (response.status === 401 && !path.startsWith("/api/auth/")) {
+      await handleAuthExpired();
+    }
     if (!response.ok) throw new Error(body.error || body || "Request failed");
     return body;
   });

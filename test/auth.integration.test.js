@@ -46,6 +46,7 @@ test.before(async () => {
       NODE_ENV: "test",
       TEST_EXPOSE_RESET_TOKEN: "true",
       SESSION_SECRET: "test-session-secret-with-sufficient-entropy",
+      SESSION_IDLE_MS: "1500",
       ADMIN_EMAIL: adminEmail,
       ADMIN_PASSWORD: initialPassword,
       ADMIN_NAME: "Private Administrator",
@@ -99,6 +100,33 @@ test("configured private administrator can sign in and is the sole admin", async
   });
   assert.equal(users.status, 200);
   assert.deepEqual(users.body.filter((user) => user.isAdmin).map((user) => user.email), [adminEmail]);
+});
+
+test("authenticated sessions expire after the configured idle window", async () => {
+  const signin = await request("/api/auth/signin", {
+    method: "POST",
+    body: JSON.stringify({ email: adminEmail, password: initialPassword })
+  });
+  assert.equal(signin.status, 200);
+
+  const activeSession = await request("/api/session", {
+    headers: { cookie: signin.cookie }
+  });
+  assert.equal(activeSession.status, 200);
+  assert.equal(activeSession.body.authenticated, true);
+
+  await new Promise((resolve) => setTimeout(resolve, 1700));
+
+  const expiredSession = await request("/api/session", {
+    headers: { cookie: signin.cookie }
+  });
+  assert.equal(expiredSession.status, 200);
+  assert.equal(expiredSession.body.authenticated, false);
+
+  const adminAttempt = await request("/api/admin/session", {
+    headers: { cookie: signin.cookie }
+  });
+  assert.equal(adminAttempt.status, 401);
 });
 
 test("public signup cannot claim reserved administrator or demo identities", async () => {

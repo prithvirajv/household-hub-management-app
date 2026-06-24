@@ -33,6 +33,10 @@ const SMTP_USER = String(process.env.SMTP_USER || "").trim();
 const SMTP_PASS = String(process.env.SMTP_PASS || "");
 const EMAIL_FROM = String(process.env.EMAIL_FROM || "Famelo <no-reply@famelo.net>").trim();
 const APP_BASE_URL = String(process.env.APP_BASE_URL || `http://localhost:${PORT}`).replace(/\/+$/, "");
+const SESSION_IDLE_MS = Math.max(
+  1000,
+  Number(process.env.SESSION_IDLE_MS || "") || Number(process.env.SESSION_IDLE_MINUTES || 30) * 60 * 1000
+);
 const TEST_EXPOSE_RESET_TOKEN = process.env.NODE_ENV === "test"
   && MEMORY_DB
   && String(process.env.TEST_EXPOSE_RESET_TOKEN || "false").toLowerCase() === "true";
@@ -144,19 +148,44 @@ function publicUser(row) {
   return row ? { id: row.id, email: row.email, name: row.name, isAdmin: Boolean(row.is_admin) } : null;
 }
 
-function signSession(res, userId) {
-  res.cookie(SESSION_COOKIE, userId, {
+function sessionCookieOptions() {
+  return {
     httpOnly: true,
     signed: true,
     sameSite: "lax",
-    secure: process.env.NODE_ENV === "production",
-    maxAge: 1000 * 60 * 60 * 24 * 14
-  });
+    secure: process.env.NODE_ENV === "production"
+  };
+}
+
+function sessionPayload(userId, now = Date.now()) {
+  return Buffer.from(JSON.stringify({ userId, lastSeenAt: now }), "utf8").toString("base64url");
+}
+
+function readSessionPayload(req) {
+  const raw = req.signedCookies[SESSION_COOKIE];
+  if (!raw) return null;
+  try {
+    const payload = JSON.parse(Buffer.from(String(raw), "base64url").toString("utf8"));
+    const lastSeenAt = Number(payload.lastSeenAt);
+    if (!payload.userId || !Number.isFinite(lastSeenAt)) return null;
+    if (Date.now() - lastSeenAt > SESSION_IDLE_MS) return null;
+    return { userId: String(payload.userId), lastSeenAt };
+  } catch (_error) {
+    return null;
+  }
+}
+
+function signSession(res, userId) {
+  res.cookie(SESSION_COOKIE, sessionPayload(userId), sessionCookieOptions());
 }
 
 function clearSession(res) {
-  res.clearCookie(SESSION_COOKIE);
+  res.clearCookie(SESSION_COOKIE, sessionCookieOptions());
   res.clearCookie(HOUSEHOLD_COOKIE);
+}
+
+function refreshSession(res, userId) {
+  signSession(res, userId);
 }
 
 function selectHousehold(res, householdId) {
@@ -441,7 +470,8 @@ async function seedAdminUser() {
 }
 
 async function getSession(req) {
-  const userId = req.signedCookies[SESSION_COOKIE];
+  const activeSession = readSessionPayload(req);
+  const userId = activeSession?.userId;
   const selectedHouseholdId = req.signedCookies[HOUSEHOLD_COOKIE];
   if (!userId) return null;
   if (MEMORY_DB) {
@@ -469,8 +499,12 @@ async function getSession(req) {
 async function requireAdmin(req, res, next) {
   try {
     const session = await getSession(req);
-    if (!session) return res.status(401).json({ error: "Authentication required" });
+    if (!session) {
+      clearSession(res);
+      return res.status(401).json({ error: "Authentication required" });
+    }
     if (!session.is_admin) return res.status(403).json({ error: "Admin access required" });
+    refreshSession(res, session.id);
     req.sessionUser = session;
     return next();
   } catch (error) {
@@ -528,7 +562,11 @@ function recentMonthKeys(count = 12) {
 async function requireSession(req, res, next) {
   try {
     const session = await getSession(req);
-    if (!session) return res.status(401).json({ error: "Authentication required" });
+    if (!session) {
+      clearSession(res);
+      return res.status(401).json({ error: "Authentication required" });
+    }
+    refreshSession(res, session.id);
     req.sessionUser = session;
     return next();
   } catch (error) {
@@ -556,6 +594,11 @@ app.get("/api/countries", (_req, res) => {
 app.get("/api/session", async (req, res, next) => {
   try {
     const session = await getSession(req);
+    if (session) {
+      refreshSession(res, session.id);
+    } else {
+      clearSession(res);
+    }
     res.json({
       authenticated: Boolean(session),
       user: publicUser(session),
