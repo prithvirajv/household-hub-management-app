@@ -1660,9 +1660,9 @@ main {
 .note-card {
   display: grid;
   width: 100%;
-  gap: 0.55rem;
+  gap: 0.75rem;
   margin: 0;
-  padding: 0.8rem;
+  padding: 0.95rem 1rem;
   border: 1px solid #d8dee9;
   border-radius: 8px;
   box-shadow: 0 2px 8px rgba(25, 38, 61, 0.06);
@@ -1673,10 +1673,10 @@ main {
 }
 
 .note-card-head {
-  display: flex;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 34px;
   gap: 0.5rem;
   align-items: start;
-  justify-content: space-between;
 }
 
 .note-card-head strong {
@@ -1692,8 +1692,9 @@ main {
 }
 
 .note-icon-button {
-  flex: 0 0 32px;
-  min-height: 32px;
+  width: 34px;
+  min-width: 34px;
+  min-height: 34px;
   padding: 0;
   border: 0;
   background: transparent;
@@ -1717,13 +1718,16 @@ main {
 
 .note-check-item {
   display: grid;
-  grid-template-columns: 18px minmax(0, 1fr);
-  gap: 0.4rem;
-  align-items: start;
+  grid-template-columns: 22px minmax(0, 1fr);
+  gap: 0.55rem;
+  align-items: center;
+  min-height: 34px;
 }
 
 .note-check-item input {
-  margin-top: 0.15rem;
+  width: 18px;
+  height: 18px;
+  margin: 0;
 }
 
 .note-check-item span {
@@ -1736,11 +1740,13 @@ main {
 }
 
 .note-completed {
-  padding-top: 0.45rem;
+  margin-top: 0.1rem;
+  padding-top: 0.65rem;
   border-top: 1px solid rgba(107, 117, 134, 0.25);
 }
 
 .note-completed summary {
+  list-style-position: outside;
   color: var(--muted);
   cursor: pointer;
   font-size: 0.8rem;
@@ -1754,6 +1760,10 @@ main {
   flex-wrap: wrap;
 }
 
+.note-labels {
+  align-items: center;
+}
+
 .note-labels span {
   padding: 0.2rem 0.45rem;
   border-radius: 999px;
@@ -1763,13 +1773,16 @@ main {
 }
 
 .note-card-actions {
-  padding-top: 0.35rem;
+  align-items: center;
+  justify-content: flex-start;
+  margin-top: 0.1rem;
+  padding-top: 0.65rem;
   border-top: 1px solid rgba(107, 117, 134, 0.18);
 }
 
 .note-card-actions button {
   min-height: 30px;
-  padding: 0.3rem 0.55rem;
+  padding: 0.3rem 0.65rem;
   background: transparent;
   color: var(--muted);
 }
