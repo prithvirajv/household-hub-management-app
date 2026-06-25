@@ -989,21 +989,41 @@ app.post("/api/auth/invitations/accept", async (req, res, next) => {
 app.post("/api/auth/demo", async (_req, res, next) => {
   try {
     let user;
+    let household;
     if (MEMORY_DB) {
       user = memoryDb.users.find((item) => item.email === DEMO_EMAIL);
+      const memberships = memoryDb.memberships.filter((item) => item.user_id === user?.id);
+      household = memberships
+        .map((membership) => memoryDb.households.find((item) => item.id === membership.household_id))
+        .find((item) => item?.app_state?.household?.country === "US" && item?.app_state?.household?.currency === "USD");
     } else {
       const result = await pool.query(
         "SELECT id, email, name, is_admin, disabled_at FROM users WHERE email = $1",
         [DEMO_EMAIL]
       );
       user = result.rows[0];
+      if (user) {
+        const householdResult = await pool.query(
+          `SELECT h.id, h.name
+           FROM households h
+           JOIN household_memberships hm ON hm.household_id = h.id
+           WHERE hm.user_id = $1
+             AND COALESCE(h.app_state->'household'->>'country', 'US') = 'US'
+             AND COALESCE(h.app_state->'household'->>'currency', 'USD') = 'USD'
+           ORDER BY (h.name = 'US Household') DESC, hm.created_at ASC
+           LIMIT 1`,
+          [user.id]
+        );
+        household = householdResult.rows[0];
+      }
     }
-    if (!user || user.disabled_at) {
+    if (!user || user.disabled_at || !household) {
       return res.status(503).json({ error: "Demo access is temporarily unavailable" });
     }
     await recordLogin(user.id);
     signSession(res, user.id);
-    res.json({ user: publicUser(user) });
+    selectHousehold(res, household.id);
+    res.json({ user: publicUser(user), household: { id: household.id, name: household.name } });
   } catch (error) {
     next(error);
   }

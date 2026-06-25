@@ -29,10 +29,13 @@ async function request(path, options = {}) {
     headers: { "content-type": "application/json", ...(options.headers || {}) }
   });
   const body = await response.json();
+  const setCookies = typeof response.headers.getSetCookie === "function"
+    ? response.headers.getSetCookie()
+    : [response.headers.get("set-cookie")].filter(Boolean);
   return {
     status: response.status,
     body,
-    cookie: response.headers.get("set-cookie")?.split(";")[0] || ""
+    cookie: setCookies.map((cookie) => cookie.split(";")[0]).join("; ")
   };
 }
 
@@ -68,6 +71,14 @@ test("consumer demo is isolated from administrator APIs", async () => {
   const demo = await request("/api/auth/demo", { method: "POST", body: "{}" });
   assert.equal(demo.status, 200);
   assert.equal(demo.body.user.isAdmin, false);
+  assert.equal(demo.body.household.name, "US Household");
+
+  const demoState = await request("/api/state", {
+    headers: { cookie: demo.cookie }
+  });
+  assert.equal(demoState.status, 200);
+  assert.equal(demoState.body.household.country, "US");
+  assert.equal(demoState.body.household.currency, "USD");
 
   const adminAttempt = await request("/api/admin/session", {
     headers: { cookie: demo.cookie }
