@@ -337,7 +337,10 @@ async function seedDemoUser() {
   if (existing.rowCount > 0) {
     const userId = existing.rows[0].id;
     const memberships = await pool.query(
-      `SELECT h.id, h.name FROM households h
+      `SELECT h.id, h.name,
+              COALESCE(h.app_state->'household'->>'country', 'US') AS country,
+              COALESCE(h.app_state->'household'->>'currency', 'USD') AS currency
+       FROM households h
        JOIN household_memberships hm ON hm.household_id = h.id
        WHERE hm.user_id = $1`,
       [userId]
@@ -346,21 +349,25 @@ async function seedDemoUser() {
     const client = await pool.connect();
     try {
       await client.query("BEGIN");
+      for (const household of memberships.rows.filter((row) => row.name === "US Household")) {
+        if (household.country !== "US" || household.currency !== "USD") {
+          await client.query(
+            `UPDATE households
+             SET app_state = $1
+             WHERE id = $2`,
+            [householdState("US Household", "US", "USD"), household.id]
+          );
+        }
+      }
       if (!names.has("US Household")) {
         const existingHousehold = memberships.rows.find((row) => row.name !== "India Household");
         if (existingHousehold) {
           await client.query(
             `UPDATE households
              SET name = 'US Household',
-                 app_state = jsonb_set(
-                   jsonb_set(
-                     jsonb_set(app_state, '{household,name}', '"US Household"', true),
-                     '{household,country}', '"US"', true
-                   ),
-                   '{household,currency}', '"USD"', true
-                 )
-             WHERE id = $1`,
-            [existingHousehold.id]
+                 app_state = $1
+             WHERE id = $2`,
+            [householdState("US Household", "US", "USD"), existingHousehold.id]
           );
         } else {
           await createHouseholdForUser(client, userId, "US Household", householdState("US Household", "US", "USD"));
