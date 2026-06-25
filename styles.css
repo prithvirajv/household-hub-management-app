@@ -1679,16 +1679,50 @@ main {
   align-items: start;
 }
 
-.note-card-head strong {
+.note-card-head strong,
+.note-title-input {
   min-width: 0;
   overflow-wrap: anywhere;
   font-size: 1.05rem;
 }
 
-.note-card p {
+.note-card p,
+.note-body-input {
   margin: 0;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
+}
+
+.note-title-input,
+.note-body-input,
+.note-check-text,
+.note-add-item-form input {
+  min-width: 0;
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--text);
+  box-shadow: none;
+}
+
+.note-title-input {
+  min-height: 34px;
+  padding: 0;
+  font-weight: 900;
+}
+
+.note-body-input {
+  min-height: 32px;
+  padding: 0;
+  resize: vertical;
+}
+
+.note-title-input:focus,
+.note-body-input:focus,
+.note-check-text:focus,
+.note-add-item-form input:focus {
+  border-color: var(--line);
+  background: rgba(255, 255, 255, 0.72);
+  outline: 0;
 }
 
 .note-icon-button {
@@ -1737,6 +1771,50 @@ main {
 .note-check-item.done span {
   color: var(--muted);
   text-decoration: line-through;
+}
+
+.note-check-row {
+  display: grid;
+  grid-template-columns: 22px minmax(0, 1fr) 30px;
+  gap: 0.55rem;
+  align-items: center;
+  min-height: 34px;
+}
+
+.note-check-row > input[type="checkbox"] {
+  width: 18px;
+  height: 18px;
+  margin: 0;
+}
+
+.note-check-row.done .note-check-text {
+  color: var(--muted);
+  text-decoration: line-through;
+}
+
+.note-check-delete {
+  min-height: 30px;
+  padding: 0;
+  border: 0;
+  background: rgba(239, 80, 80, 0.1);
+  color: var(--coral);
+}
+
+.note-add-item-form {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 0.45rem;
+  align-items: center;
+}
+
+.note-add-item-form input {
+  min-height: 34px;
+  padding: 0.25rem 0.35rem;
+}
+
+.note-add-item-form button {
+  min-height: 34px;
+  padding: 0.25rem 0.65rem;
 }
 
 .note-completed {

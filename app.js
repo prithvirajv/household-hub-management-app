@@ -44,6 +44,15 @@ const $ = (selector) => document.querySelector(selector);
 const nav = $("#nav");
 const view = $("#view");
 
+function escapeHtml(value) {
+  return String(value ?? "")
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll("\"", "&quot;")
+    .replaceAll("'", "&#039;");
+}
+
 async function handleAuthExpired() {
   state = null;
   sessionUser = null;
@@ -637,6 +646,11 @@ function ensureNotesData() {
   state.notes.entries ||= [];
   state.notes.entries.forEach((note) => {
     note.checklist ||= [];
+    note.checklist.forEach((item) => {
+      item.id ||= uniqueId("item");
+      item.text ||= "";
+      item.done = Boolean(item.done);
+    });
     note.labels ||= [];
     note.pinned = Boolean(note.pinned);
     note.archived = Boolean(note.archived);
@@ -713,16 +727,25 @@ function renderNotes() {
 function renderNoteCard(note) {
   const completed = note.checklist.filter((item) => item.done);
   const open = note.checklist.filter((item) => !item.done);
+  const checklistRow = (item) => `<div class="note-check-row ${item.done ? "done" : ""}">
+    <input data-note-check="${note.id}:${item.id}" type="checkbox" aria-label="Complete ${escapeHtml(item.text)}" ${item.done ? "checked" : ""}>
+    <input class="note-check-text" data-note-check-text="${note.id}:${item.id}" value="${escapeHtml(item.text)}" placeholder="Checklist item" aria-label="Checklist item">
+    <button class="note-check-delete" data-delete-note-item="${note.id}:${item.id}" type="button" aria-label="Delete checklist item">×</button>
+  </div>`;
   return `<article class="note-card" data-note-id="${note.id}" style="background:${note.color}">
     <div class="note-card-head">
-      <strong>${note.title || "Untitled note"}</strong>
+      <input class="note-title-input" data-note-title="${note.id}" value="${escapeHtml(note.title || "")}" placeholder="Untitled note" aria-label="Note title">
       <button class="note-icon-button ${note.pinned ? "active" : ""}" data-pin-note="${note.id}" type="button" aria-label="${note.pinned ? "Unpin note" : "Pin note"}">⌖</button>
     </div>
-    ${note.body ? `<p>${note.body}</p>` : ""}
+    <textarea class="note-body-input" data-note-body="${note.id}" rows="${note.body ? "2" : "1"}" placeholder="Take a note..." aria-label="Note body">${escapeHtml(note.body || "")}</textarea>
     ${note.reminder ? `<div class="note-reminder">Reminder · ${formatShortDate(note.reminder)}</div>` : ""}
-    ${open.map((item) => `<label class="note-check-item"><input data-note-check="${note.id}:${item.id}" type="checkbox"> <span>${item.text}</span></label>`).join("")}
-    ${completed.length ? `<details class="note-completed"><summary>${completed.length} completed ${completed.length === 1 ? "item" : "items"}</summary>${completed.map((item) => `<label class="note-check-item done"><input data-note-check="${note.id}:${item.id}" type="checkbox" checked> <span>${item.text}</span></label>`).join("")}</details>` : ""}
-    ${note.labels.length ? `<div class="note-labels">${note.labels.map((label) => `<span>${label}</span>`).join("")}</div>` : ""}
+    ${open.map(checklistRow).join("")}
+    <form class="note-add-item-form" data-add-note-item="${note.id}">
+      <input name="item" placeholder="Add checklist item" aria-label="Add checklist item">
+      <button type="submit">Add</button>
+    </form>
+    ${completed.length ? `<details class="note-completed"><summary>${completed.length} completed ${completed.length === 1 ? "item" : "items"}</summary>${completed.map(checklistRow).join("")}</details>` : ""}
+    ${note.labels.length ? `<div class="note-labels">${note.labels.map((label) => `<span>${escapeHtml(label)}</span>`).join("")}</div>` : ""}
     <div class="note-card-actions">
       ${note.trashed ? `<button data-restore-note="${note.id}" type="button">Restore</button><button class="danger-button" data-delete-note-forever="${note.id}" type="button">Delete</button>` : `<button data-archive-note="${note.id}" type="button">${note.archived ? "Unarchive" : "Archive"}</button><button class="danger-button" data-trash-note="${note.id}" type="button">Trash</button>`}
     </div>
@@ -1406,6 +1429,24 @@ function bindViewEvents() {
     render();
   });
 
+  document.querySelectorAll("[data-note-title]").forEach((input) => {
+    input.addEventListener("input", () => {
+      const note = state.notes.entries.find((item) => item.id === input.dataset.noteTitle);
+      if (!note) return;
+      note.title = input.value;
+      autosaveState();
+    });
+  });
+
+  document.querySelectorAll("[data-note-body]").forEach((input) => {
+    input.addEventListener("input", () => {
+      const note = state.notes.entries.find((item) => item.id === input.dataset.noteBody);
+      if (!note) return;
+      note.body = input.value;
+      autosaveState();
+    });
+  });
+
   document.querySelectorAll("[data-note-check]").forEach((input) => {
     input.addEventListener("change", () => {
       const [noteId, itemId] = input.dataset.noteCheck.split(":");
@@ -1413,6 +1454,38 @@ function bindViewEvents() {
       const checklistItem = note?.checklist.find((item) => item.id === itemId);
       if (!checklistItem) return;
       checklistItem.done = input.checked;
+      render();
+    });
+  });
+
+  document.querySelectorAll("[data-note-check-text]").forEach((input) => {
+    input.addEventListener("input", () => {
+      const [noteId, itemId] = input.dataset.noteCheckText.split(":");
+      const note = state.notes.entries.find((item) => item.id === noteId);
+      const checklistItem = note?.checklist.find((item) => item.id === itemId);
+      if (!checklistItem) return;
+      checklistItem.text = input.value;
+      autosaveState();
+    });
+  });
+
+  document.querySelectorAll("[data-add-note-item]").forEach((form) => {
+    form.addEventListener("submit", (event) => {
+      event.preventDefault();
+      const note = state.notes.entries.find((item) => item.id === form.dataset.addNoteItem);
+      const text = String(new FormData(form).get("item") || "").trim();
+      if (!note || !text) return;
+      note.checklist.push({ id: uniqueId("item"), text, done: false });
+      render();
+    });
+  });
+
+  document.querySelectorAll("[data-delete-note-item]").forEach((button) => {
+    button.addEventListener("click", () => {
+      const [noteId, itemId] = button.dataset.deleteNoteItem.split(":");
+      const note = state.notes.entries.find((item) => item.id === noteId);
+      if (!note) return;
+      note.checklist = note.checklist.filter((item) => item.id !== itemId);
       render();
     });
   });
