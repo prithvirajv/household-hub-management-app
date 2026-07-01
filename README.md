@@ -140,6 +140,32 @@ The deploy script enables required Google APIs, creates the one-node cluster and
 
 Set `USE_IN_CLUSTER_POSTGRES=false` and provide `DATABASE_URL` plus `DATABASE_SSL=true` to use Cloud SQL or another managed PostgreSQL service. Set `CLUSTER_MODE=autopilot` to use a regional Autopilot cluster instead of the default zonal Standard cluster.
 
+## Lower-Cost Cloud Run Deployment
+
+For very low traffic, Cloud Run is cheaper than keeping a GKE node and GKE load balancer online. The Cloud Run script deploys the same container with `min-instances=0` and `max-instances=1`, and connects it to Cloud SQL for persistent PostgreSQL storage.
+
+Recommended migration order from the current GKE deployment:
+
+```bash
+# 1. Create/prepare the small Cloud SQL PostgreSQL instance only.
+set -a
+source .env.deploy
+set +a
+SETUP_ONLY=true ./scripts/deploy-cloud-run.sh
+
+# 2. Copy the existing in-cluster PostgreSQL data to Cloud SQL.
+./scripts/migrate-gke-postgres-to-cloud-sql.sh
+
+# 3. Deploy Famelo to Cloud Run using the migrated Cloud SQL database.
+./scripts/deploy-cloud-run.sh
+```
+
+Important notes:
+
+- Do not delete the GKE cluster until Cloud Run has been verified and DNS has been moved.
+- Cloud SQL is still an always-on database cost. If traffic stays under a few visits per day, an external free-tier PostgreSQL provider can be cheaper; set `CLOUD_SQL_CREATE=false` and deploy with provider-specific database environment variables after adapting the connection settings.
+- After Cloud Run is verified, point `famelo.net` and `www.famelo.net` to Cloud Run with a Cloud Run domain mapping or a small external HTTPS load balancer, then remove the old GKE ingress, static IP, and cluster.
+
 ### Production DNS and HTTPS
 
 The transition deployment keeps the existing reserved global IP and hostname available:

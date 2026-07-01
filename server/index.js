@@ -20,6 +20,10 @@ const HOUSEHOLD_COOKIE = "hh_household";
 const SESSION_SECRET = process.env.SESSION_SECRET || "local-dev-session-secret-change-me";
 const DATABASE_URL = process.env.DATABASE_URL || "postgres://household_hub:household_hub_dev@localhost:15432/household_hub";
 const DATABASE_SSL = String(process.env.DATABASE_SSL || "false").toLowerCase() === "true";
+const CLOUD_SQL_CONNECTION_NAME = String(process.env.CLOUD_SQL_CONNECTION_NAME || "").trim();
+const DB_USER = String(process.env.DB_USER || "").trim();
+const DB_PASSWORD = String(process.env.DB_PASSWORD || "");
+const DB_NAME = String(process.env.DB_NAME || "").trim();
 const MEMORY_DB = String(process.env.MEMORY_DB || "false").toLowerCase() === "true";
 const DEMO_EMAIL = "demo@famelo.net";
 const LEGACY_DEMO_EMAIL = "demo@householdhub.app";
@@ -43,10 +47,17 @@ const TEST_EXPOSE_RESET_TOKEN = process.env.NODE_ENV === "test"
 
 const pool = MEMORY_DB
   ? null
-  : new Pool({
-      connectionString: DATABASE_URL,
-      ssl: DATABASE_SSL ? { rejectUnauthorized: false } : false
-    });
+  : new Pool(CLOUD_SQL_CONNECTION_NAME
+      ? {
+          user: DB_USER || "household_hub",
+          password: DB_PASSWORD,
+          database: DB_NAME || "household_hub",
+          host: `/cloudsql/${CLOUD_SQL_CONNECTION_NAME}`
+        }
+      : {
+          connectionString: DATABASE_URL,
+          ssl: DATABASE_SSL ? { rejectUnauthorized: false } : false
+        });
 
 const memoryDb = {
   users: [],
