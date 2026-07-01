@@ -81,6 +81,7 @@ if ! gcloud sql instances describe "${CLOUD_SQL_INSTANCE}" --project "${PROJECT_
     --project "${PROJECT_ID}" \
     --region "${REGION}" \
     --database-version POSTGRES_16 \
+    --edition ENTERPRISE \
     --tier "${CLOUD_SQL_TIER}" \
     --availability-type zonal \
     --storage-size "${CLOUD_SQL_STORAGE_SIZE}" \
