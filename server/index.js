@@ -257,13 +257,45 @@ function countryDetails(code) {
   };
 }
 
-function householdState(name, country = "US", currency = "USD") {
+function householdState(name, country = "US", currency = "USD", seededDemo = false) {
   const state = JSON.parse(JSON.stringify(defaultState));
   state.household.name = name;
   state.household.country = country;
   state.household.currency = currency;
   state.household.inviteCode = makeInviteCode();
-  if (country === "IN") {
+  if (!seededDemo) {
+    const now = new Date();
+    state.household.members = [];
+    state.household.activity = [];
+    state.budget.month = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
+    state.budget.income = 0;
+    state.budget.categories.forEach((category) => {
+      category.lines.forEach((line) => {
+        line.planned = 0;
+      });
+    });
+    state.budgetHistory = [];
+    state.transactions = [];
+    state.paychecks = [];
+    state.calendar = { events: [], chores: [] };
+    state.notes = {
+      initialized: true,
+      activeView: "notes",
+      activeLabel: "",
+      labels: [],
+      entries: []
+    };
+    state.meals.selectedWeekByMonth = { [state.budget.month]: 1 };
+    state.meals.plannedWeek = [];
+    state.meals.recipes = [];
+    state.meals.savedWeeks = [];
+    state.goals = {
+      sinkingFunds: [],
+      debts: [],
+      debtNetWorthLinked: true,
+      netWorth: { assets: [], liabilities: [] }
+    };
+  } else if (country === "IN") {
     state.budget.income = 320000;
     state.paychecks = [
       { date: "2026-05-03", name: "Monthly salary", amount: 320000, assignedLineIds: ["rent", "power-water", "groceries"] }
@@ -348,7 +380,7 @@ async function seedDemoUser() {
       disabled_at: null,
       created_at: new Date().toISOString()
     };
-    const usState = householdState("US Household", "US", "USD");
+    const usState = householdState("US Household", "US", "USD", true);
     const household = {
       id: crypto.randomUUID(),
       name: "US Household",
@@ -356,7 +388,7 @@ async function seedDemoUser() {
       app_state: usState,
       created_at: new Date().toISOString()
     };
-    const indiaState = householdState("India Household", "IN", "INR");
+    const indiaState = householdState("India Household", "IN", "INR", true);
     const indiaHousehold = {
       id: crypto.randomUUID(),
       name: "India Household",
@@ -393,7 +425,7 @@ async function seedDemoUser() {
             `UPDATE households
              SET app_state = $1
              WHERE id = $2`,
-            [householdState("US Household", "US", "USD"), household.id]
+            [householdState("US Household", "US", "USD", true), household.id]
           );
         }
       }
@@ -405,14 +437,14 @@ async function seedDemoUser() {
              SET name = 'US Household',
                  app_state = $1
              WHERE id = $2`,
-            [householdState("US Household", "US", "USD"), existingHousehold.id]
+            [householdState("US Household", "US", "USD", true), existingHousehold.id]
           );
         } else {
-          await createHouseholdForUser(client, userId, "US Household", householdState("US Household", "US", "USD"));
+          await createHouseholdForUser(client, userId, "US Household", householdState("US Household", "US", "USD", true));
         }
       }
       if (!names.has("India Household")) {
-        await createHouseholdForUser(client, userId, "India Household", householdState("India Household", "IN", "INR"));
+        await createHouseholdForUser(client, userId, "India Household", householdState("India Household", "IN", "INR", true));
       }
       await client.query("COMMIT");
     } catch (error) {
@@ -432,8 +464,8 @@ async function seedDemoUser() {
       "INSERT INTO users (email, password_hash, name, is_admin) VALUES ($1, $2, $3, false) RETURNING id",
       [DEMO_EMAIL, hash, "Demo User"]
     );
-    await createHouseholdForUser(client, user.rows[0].id, "US Household", householdState("US Household", "US", "USD"));
-    await createHouseholdForUser(client, user.rows[0].id, "India Household", householdState("India Household", "IN", "INR"));
+    await createHouseholdForUser(client, user.rows[0].id, "US Household", householdState("US Household", "US", "USD", true));
+    await createHouseholdForUser(client, user.rows[0].id, "India Household", householdState("India Household", "IN", "INR", true));
     await client.query("COMMIT");
   } catch (error) {
     await client.query("ROLLBACK");

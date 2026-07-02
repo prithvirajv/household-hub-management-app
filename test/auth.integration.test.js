@@ -178,6 +178,25 @@ test("a user cannot create multiple households with the same currency", async ()
   });
   assert.equal(differentCurrency.status, 201);
   assert.equal(differentCurrency.body.currency, "INR");
+
+  const starterState = await request("/api/state", {
+    headers: { cookie: `${signin.cookie}; ${differentCurrency.cookie}` }
+  });
+  assert.equal(starterState.status, 200);
+  assert.equal(starterState.body.budget.income, 0);
+  assert.equal(starterState.body.transactions.length, 0);
+  assert.equal(starterState.body.paychecks.length, 0);
+  assert.equal(starterState.body.calendar.events.length, 0);
+  assert.equal(starterState.body.calendar.chores.length, 0);
+  assert.equal(starterState.body.notes.entries.length, 0);
+  assert.equal(starterState.body.meals.recipes.length, 0);
+  assert.equal(starterState.body.goals.sinkingFunds.length, 0);
+  assert.equal(starterState.body.goals.debts.length, 0);
+  assert.equal(starterState.body.goals.netWorth.assets.length, 0);
+  assert.equal(starterState.body.goals.netWorth.liabilities.length, 0);
+  assert.ok(starterState.body.budget.categories.every((category) =>
+    category.lines.every((line) => line.planned === 0)
+  ));
 });
 
 test("an existing user cannot accept an invitation for a duplicate currency", async () => {
