@@ -197,6 +197,28 @@ test("a user cannot create multiple households with the same currency", async ()
   assert.ok(starterState.body.budget.categories.every((category) =>
     category.lines.every((line) => line.planned === 0)
   ));
+
+  starterState.body.goals.netWorth.assets.push({ id: "home-asset", name: "Family home", value: 500000 });
+  starterState.body.goals.netWorth.liabilities.push({ id: "mortgage-debt", name: "Mortgage", value: 200000 });
+  starterState.body.goals.debts.push({
+    id: "mortgage-debt",
+    name: "Mortgage",
+    balance: 200000,
+    rate: 6.5,
+    minimum: 1500,
+    assetId: "home-asset"
+  });
+  const savedState = await request("/api/state", {
+    method: "PUT",
+    headers: { cookie: `${signin.cookie}; ${differentCurrency.cookie}` },
+    body: JSON.stringify(starterState.body)
+  });
+  assert.equal(savedState.status, 200);
+
+  const reloadedState = await request("/api/state", {
+    headers: { cookie: `${signin.cookie}; ${differentCurrency.cookie}` }
+  });
+  assert.equal(reloadedState.body.goals.debts[0].assetId, "home-asset");
 });
 
 test("an existing user cannot accept an invitation for a duplicate currency", async () => {

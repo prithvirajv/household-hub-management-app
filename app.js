@@ -172,11 +172,11 @@ function ensureDebtNetWorthSync() {
   state.goals.netWorth ||= { assets: [], liabilities: [] };
   state.goals.netWorth.assets ||= [];
   state.goals.netWorth.liabilities ||= [];
-  if (state.goals.debtNetWorthLinked) return false;
-
   state.goals.netWorth.assets.forEach((asset) => {
     asset.id ||= uniqueId(asset.name || "asset");
   });
+  if (state.goals.debtNetWorthLinked) return false;
+
   const linkedDebtIds = new Set();
   state.goals.netWorth.liabilities.forEach((liability) => {
     liability.id ||= uniqueId(liability.name || "liability");
@@ -207,6 +207,15 @@ function ensureDebtNetWorthSync() {
 
 function liabilityForDebt(debt) {
   return state.goals.netWorth.liabilities.find((liability) => liability.id === debt.id);
+}
+
+function debtAssetOptions(debt) {
+  return [
+    `<option value="">Unsecured / no asset</option>`,
+    ...state.goals.netWorth.assets.map((asset) =>
+      `<option value="${escapeHtml(asset.id)}" ${debt.assetId === asset.id ? "selected" : ""}>${escapeHtml(asset.name)}</option>`
+    )
+  ].join("");
 }
 
 function monthLabel() {
@@ -948,6 +957,7 @@ function renderWealth() {
               <label>Current balance<input data-debt-balance="${index}" type="number" min="0" step="0.01" inputmode="decimal" value="${Number(debt.balance || 0)}" aria-label="Current balance for ${escapeHtml(debt.name)}"></label>
               <label>Interest rate (APR %)<input data-debt-rate="${index}" type="number" min="0" step="0.01" inputmode="decimal" value="${Number(debt.rate || 0)}" aria-label="Interest rate for ${escapeHtml(debt.name)}"></label>
               <label>Minimum payment<input data-debt-minimum="${index}" type="number" min="0" step="0.01" inputmode="decimal" value="${Number(debt.minimum || 0)}" aria-label="Minimum payment for ${escapeHtml(debt.name)}"></label>
+              <label class="debt-asset-field">Secured by asset<select data-debt-asset="${index}" aria-label="Asset assigned to ${escapeHtml(debt.name)}">${debtAssetOptions(debt)}</select></label>
             </div>
             <div class="bar"><span style="width:${Math.max(4, Math.min(95, Math.round((1 - debt.balance / 15000) * 100)))}%"></span></div>
             <div class="payment-row"><label>Extra payment<input data-debt-payment="${index}" value="100" type="number" min="0"></label><button class="ghost" data-apply-debt-payment="${index}" type="button">Apply payment</button><button class="icon-button danger-button" data-delete-debt="${index}" type="button">×</button></div>
@@ -2021,10 +2031,22 @@ function bindViewEvents() {
   $("#addDebtButton")?.addEventListener("click", () => {
     const name = `New debt ${state.goals.debts.length + 1}`;
     const id = uniqueId(name);
-    state.goals.debts.push({ id, name, balance: 1000, rate: 0, minimum: 50 });
+    state.goals.debts.push({ id, name, balance: 1000, rate: 0, minimum: 50, assetId: "" });
     state.goals.netWorth.liabilities.push({ id, name, value: 1000 });
     autosaveState();
     render();
+  });
+
+  document.querySelectorAll("[data-debt-asset]").forEach((select) => {
+    select.addEventListener("change", () => {
+      const debt = state.goals.debts[Number(select.dataset.debtAsset)];
+      debt.assetId = select.value;
+      const asset = state.goals.netWorth.assets.find((item) => item.id === debt.assetId);
+      state.household.activity.unshift(asset
+        ? `Linked ${debt.name} to ${asset.name}`
+        : `Marked ${debt.name} as unsecured`);
+      autosaveState();
+    });
   });
 
   document.querySelectorAll("[data-debt-name]").forEach((input) => {
@@ -2146,6 +2168,9 @@ function bindViewEvents() {
       if (item) {
         destination.push(item);
         if (select.value === "liability") {
+          state.goals.debts.forEach((debt) => {
+            if (debt.assetId === item.id) debt.assetId = "";
+          });
           state.goals.debts.push({ id: item.id, name: item.name, balance: Number(item.value || 0), rate: 0, minimum: 0 });
         } else {
           state.goals.debts = state.goals.debts.filter((debt) => debt.id !== item.id);
@@ -2158,7 +2183,12 @@ function bindViewEvents() {
 
   document.querySelectorAll("[data-delete-asset]").forEach((button) => {
     button.addEventListener("click", () => {
-      state.goals.netWorth.assets.splice(Number(button.dataset.deleteAsset), 1);
+      const [asset] = state.goals.netWorth.assets.splice(Number(button.dataset.deleteAsset), 1);
+      if (asset) {
+        state.goals.debts.forEach((debt) => {
+          if (debt.assetId === asset.id) debt.assetId = "";
+        });
+      }
       autosaveState();
       render();
     });

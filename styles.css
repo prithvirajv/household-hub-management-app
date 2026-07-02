@@ -1476,7 +1476,8 @@ main {
   text-transform: uppercase;
 }
 
-.debt-edit-grid input {
+.debt-edit-grid input,
+.debt-edit-grid select {
   width: 100%;
   min-height: 40px;
   margin-top: 0.2rem;
@@ -1486,6 +1487,11 @@ main {
   font-size: 0.9rem;
   font-weight: 800;
   text-transform: none;
+}
+
+.debt-asset-field {
+  grid-column: 1 / -1;
+  max-width: 360px;
 }
 
 .net-worth-items {
