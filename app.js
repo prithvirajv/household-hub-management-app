@@ -752,14 +752,42 @@ function noteChecklistSuggestions() {
     .sort((a, b) => a.localeCompare(b));
 }
 
+function matchingChecklistSuggestions(query, limit = 6) {
+  const normalized = String(query || "").trim().toLowerCase();
+  if (!normalized) return [];
+  const matchRank = (text) => {
+    const candidate = text.toLowerCase();
+    if (candidate.startsWith(normalized)) return 0;
+    if (candidate.includes(normalized)) return 1;
+    if (normalized.length < 3) return 3;
+    const prefix = candidate.slice(0, normalized.length);
+    const differences = [...normalized].filter((letter, index) => letter !== prefix[index]).length;
+    return differences <= 1 ? 2 : 3;
+  };
+  return noteChecklistSuggestions()
+    .filter((text) => matchRank(text) < 3)
+    .sort((a, b) => matchRank(a) - matchRank(b) || a.localeCompare(b))
+    .slice(0, limit);
+}
+
+function addOrRestoreChecklistItem(note, text) {
+  const normalized = String(text || "").trim().toLowerCase();
+  if (!note || !normalized) return false;
+  const existing = note.checklist.find((item) => String(item.text || "").trim().toLowerCase() === normalized);
+  if (existing) {
+    existing.done = false;
+    return true;
+  }
+  const canonical = noteChecklistSuggestions().find((item) => item.toLowerCase() === normalized) || String(text).trim();
+  note.checklist.push({ id: uniqueId("item"), text: canonical, done: false });
+  return true;
+}
+
 function renderNotes() {
   ensureNotesData();
   const notes = visibleNotes();
   const pinned = notes.filter((note) => note.pinned);
   const others = notes.filter((note) => !note.pinned);
-  const checklistOptions = noteChecklistSuggestions()
-    .map((item) => `<option value="${escapeHtml(item)}"></option>`)
-    .join("");
   return `
     <section class="notes-layout">
       <aside class="notes-filter-panel">
@@ -778,7 +806,6 @@ function renderNotes() {
         <button class="${state.notes.activeView === "trash" ? "active" : ""}" data-notes-view="trash" type="button">Trash</button>
       </aside>
       <div class="notes-workspace">
-        <datalist id="noteChecklistSuggestions">${checklistOptions}</datalist>
         <div class="notes-search">
           <span aria-hidden="true">⌕</span>
           <input id="notesSearch" placeholder="Search household notes" value="${state.notes.search || ""}">
@@ -820,7 +847,10 @@ function renderNoteCard(note) {
     ${note.reminder ? `<div class="note-reminder">Reminder · ${formatShortDate(note.reminder)}</div>` : ""}
     ${open.map(checklistRow).join("")}
     <form class="note-add-item-form" data-add-note-item="${note.id}">
-      <input name="item" list="noteChecklistSuggestions" placeholder="Add checklist item" aria-label="Add checklist item" autocomplete="off">
+      <div class="note-item-combobox">
+        <input name="item" data-note-item-input="${note.id}" placeholder="Add checklist item" aria-label="Add checklist item" aria-autocomplete="list" aria-expanded="false" autocomplete="off">
+        <div class="note-item-suggestions" data-note-item-suggestions="${note.id}" role="listbox" hidden></div>
+      </div>
       <button type="submit">Add</button>
     </form>
     ${completed.length ? `<details class="note-completed"><summary>${completed.length} completed ${completed.length === 1 ? "item" : "items"}</summary>${completed.map(checklistRow).join("")}</details>` : ""}
@@ -1570,9 +1600,35 @@ function bindViewEvents() {
       event.preventDefault();
       const note = state.notes.entries.find((item) => item.id === form.dataset.addNoteItem);
       const text = String(new FormData(form).get("item") || "").trim();
-      if (!note || !text) return;
-      note.checklist.push({ id: uniqueId("item"), text, done: false });
+      if (!addOrRestoreChecklistItem(note, text)) return;
       render();
+    });
+  });
+
+  document.querySelectorAll("[data-note-item-input]").forEach((input) => {
+    const suggestions = document.querySelector(`[data-note-item-suggestions="${input.dataset.noteItemInput}"]`);
+    input.addEventListener("input", () => {
+      const matches = matchingChecklistSuggestions(input.value);
+      suggestions.innerHTML = matches.map((text) => {
+        const note = state.notes.entries.find((item) => item.id === input.dataset.noteItemInput);
+        const existing = note?.checklist.find((item) => item.text.trim().toLowerCase() === text.toLowerCase());
+        const status = existing?.done ? "Completed in this note" : existing ? "Already in this note" : "Previous checklist item";
+        return `<button type="button" role="option" data-note-item-suggestion="${escapeHtml(text)}"><span>${escapeHtml(text)}</span><small>${status}</small></button>`;
+      }).join("");
+      suggestions.hidden = matches.length === 0;
+      input.setAttribute("aria-expanded", String(matches.length > 0));
+      suggestions.querySelectorAll("[data-note-item-suggestion]").forEach((button) => {
+        button.addEventListener("click", () => {
+          const note = state.notes.entries.find((item) => item.id === input.dataset.noteItemInput);
+          if (!addOrRestoreChecklistItem(note, button.dataset.noteItemSuggestion)) return;
+          render();
+        });
+      });
+    });
+    input.addEventListener("keydown", (event) => {
+      if (event.key !== "Escape") return;
+      suggestions.hidden = true;
+      input.setAttribute("aria-expanded", "false");
     });
   });
 

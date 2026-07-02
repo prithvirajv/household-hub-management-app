@@ -1888,6 +1888,11 @@ main {
   align-items: center;
 }
 
+.note-item-combobox {
+  position: relative;
+  min-width: 0;
+}
+
 .note-add-item-form input {
   min-height: 34px;
   padding: 0.25rem 0.35rem;
@@ -1896,6 +1901,53 @@ main {
 .note-add-item-form button {
   min-height: 34px;
   padding: 0.25rem 0.65rem;
+}
+
+.note-item-suggestions {
+  position: absolute;
+  z-index: 20;
+  top: calc(100% + 4px);
+  right: 0;
+  left: 0;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: white;
+  box-shadow: 0 8px 20px rgba(25, 38, 61, 0.16);
+}
+
+.note-item-suggestions[hidden] {
+  display: none;
+}
+
+.note-item-suggestions button {
+  display: flex;
+  width: 100%;
+  min-height: 44px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.6rem;
+  border: 0;
+  border-bottom: 1px solid var(--line);
+  border-radius: 0;
+  background: white;
+  color: var(--text);
+  text-align: left;
+}
+
+.note-item-suggestions button:last-child {
+  border-bottom: 0;
+}
+
+.note-item-suggestions button:hover,
+.note-item-suggestions button:focus-visible {
+  background: var(--soft-blue);
+}
+
+.note-item-suggestions small {
+  color: var(--muted);
+  font-size: 0.68rem;
+  white-space: nowrap;
 }
 
 .note-completed {
