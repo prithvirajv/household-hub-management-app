@@ -1908,6 +1908,49 @@ main {
   font-weight: 900;
 }
 
+.note-composer-checklist {
+  display: grid;
+  gap: 0.4rem;
+  padding: 0.45rem 0.55rem 0.65rem;
+}
+
+.note-composer-check-row,
+.note-composer-add-item {
+  display: grid;
+  grid-template-columns: 22px minmax(0, 1fr) 34px;
+  gap: 0.55rem;
+  align-items: center;
+}
+
+.note-composer-check-row > input[type="checkbox"] {
+  width: 18px;
+  height: 18px;
+  margin: 0;
+}
+
+.note-composer-check-row > input[data-composer-check-text] {
+  min-height: 36px;
+  border: 0;
+  border-bottom: 1px solid var(--line);
+  border-radius: 0;
+}
+
+.note-composer-add-item {
+  grid-template-columns: minmax(0, 1fr) auto;
+  padding-left: 30px;
+}
+
+.note-composer-add-item input {
+  min-height: 38px;
+  border: 0;
+  border-bottom: 1px solid var(--line);
+  border-radius: 0;
+}
+
+.note-composer-add-item button {
+  min-width: 90px;
+}
+
 .note-composer-row {
   display: grid;
   grid-template-columns: repeat(3, minmax(120px, 1fr)) auto auto;

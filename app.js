@@ -800,7 +800,14 @@ function renderNotes() {
         <form id="noteComposer" class="note-composer">
           <input name="title" placeholder="Title">
           <textarea name="body" rows="2" placeholder="Take a note..."></textarea>
-          <textarea name="items" rows="2" placeholder="Checklist items, one per line"></textarea>
+          <div class="note-composer-checklist">
+            <div data-composer-checklist-items></div>
+            <div class="note-composer-add-item">
+              <input data-composer-item-input placeholder="Add checklist item" aria-label="Add checklist item" autocomplete="off">
+              <button data-composer-add-item type="button">Add item</button>
+            </div>
+            <input name="items" type="hidden">
+          </div>
           <div class="note-composer-row">
             <div class="note-label-picker-field"><span>Labels</span>${renderNoteLabelPicker()}</div>
             <label>Color<select name="color"><option value="#ffffff">White</option><option value="#fff7d6">Yellow</option><option value="#eef7ff">Blue</option><option value="#eaf8ef">Green</option><option value="#fff0ee">Coral</option></select></label>
@@ -861,6 +868,56 @@ function renderNoteCard(note) {
       ${note.trashed ? `<button data-restore-note="${note.id}" type="button">Restore</button><button class="danger-button" data-delete-note-forever="${note.id}" type="button">Delete</button>` : `<button data-archive-note="${note.id}" type="button">${note.archived ? "Unarchive" : "Archive"}</button><button class="danger-button" data-trash-note="${note.id}" type="button">Trash</button>`}
     </div>
   </article>`;
+}
+
+function syncNoteComposerChecklist(form) {
+  const hidden = form?.querySelector('input[name="items"]');
+  if (!hidden) return;
+  hidden.value = [...form.querySelectorAll("[data-composer-check-text]")]
+    .map((input) => input.value.trim())
+    .filter(Boolean)
+    .join("\n");
+}
+
+function addNoteComposerChecklistItem(form, text) {
+  const value = String(text || "").trim();
+  const list = form?.querySelector("[data-composer-checklist-items]");
+  if (!value || !list) return false;
+  const row = document.createElement("div");
+  row.className = "note-composer-check-row";
+  row.innerHTML = `<input type="checkbox" disabled aria-label="Checklist item not yet completed">
+    <input data-composer-check-text value="${escapeHtml(value)}" aria-label="Checklist item">
+    <button class="note-check-delete" type="button" aria-label="Remove checklist item">×</button>`;
+  row.querySelector("[data-composer-check-text]").addEventListener("input", () => syncNoteComposerChecklist(form));
+  row.querySelector("button").addEventListener("click", () => {
+    row.remove();
+    syncNoteComposerChecklist(form);
+  });
+  list.append(row);
+  syncNoteComposerChecklist(form);
+  return true;
+}
+
+function commitNoteComposerDraft(form) {
+  const input = form?.querySelector("[data-composer-item-input]");
+  if (!input || !input.value.trim()) return;
+  if (addNoteComposerChecklistItem(form, input.value)) input.value = "";
+}
+
+function setupNoteComposerChecklist() {
+  const form = $("#noteComposer");
+  if (!form) return;
+  const input = form.querySelector("[data-composer-item-input]");
+  const addButton = form.querySelector("[data-composer-add-item]");
+  addButton?.addEventListener("click", () => {
+    commitNoteComposerDraft(form);
+    input?.focus();
+  });
+  input?.addEventListener("keydown", (event) => {
+    if (event.key !== "Enter") return;
+    event.preventDefault();
+    commitNoteComposerDraft(form);
+  });
 }
 
 function renderMeals() {
@@ -1566,6 +1623,7 @@ function bindViewEvents() {
 
   $("#noteComposer")?.addEventListener("submit", (event) => {
     event.preventDefault();
+    commitNoteComposerDraft(event.currentTarget);
     const formData = new FormData(event.currentTarget);
     const data = Object.fromEntries(formData);
     const checklist = String(data.items || "").split("\n").map((item) => item.trim()).filter(Boolean);
@@ -1587,6 +1645,8 @@ function bindViewEvents() {
     state.notes.activeLabel = "";
     render();
   });
+
+  setupNoteComposerChecklist();
 
   document.querySelectorAll("[data-note-title]").forEach((input) => {
     input.addEventListener("input", () => {
