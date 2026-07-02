@@ -325,7 +325,16 @@ function renderShell() {
   const isAdminView = currentView === "admin";
   const isNotesView = currentView === "notes";
   const isHelpView = currentView === "help";
-  $("#viewTitle").textContent = isAdminView ? "Application admin" : isHelpView ? "Help center" : isNotesView ? "Household notes" : `${monthLabel()} plan`;
+  const isRecipesView = currentView === "recipes";
+  $("#viewTitle").textContent = isAdminView
+    ? "Application admin"
+    : isHelpView
+      ? "Help center"
+      : isNotesView
+        ? "Household notes"
+        : isRecipesView
+          ? "Recipe library"
+          : `${monthLabel()} plan`;
   $("#householdName").textContent = title.toUpperCase();
   $("#userName").textContent = sessionUser?.name || "Demo User";
   $("#userEmail").textContent = sessionUser?.email || "demo@famelo.net";
@@ -346,7 +355,7 @@ function renderShell() {
   const selectedHousehold = households.find((household) => household.selected);
   $("#defaultHouseholdButton").disabled = Boolean(selectedHousehold?.isDefault);
   $("#defaultHouseholdButton").textContent = selectedHousehold?.isDefault ? "Default household" : "Set as default";
-  $(".month-control").hidden = isAdminView || isNotesView || isHelpView;
+  $(".month-control").hidden = isAdminView || isNotesView || isHelpView || isRecipesView;
   $("#syncButton").hidden = isAdminView || isHelpView;
   $("#downloadCsvButton").hidden = isAdminView || isNotesView || isHelpView;
   renderNav();
