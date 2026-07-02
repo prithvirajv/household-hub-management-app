@@ -27,6 +27,9 @@ CREATE TABLE IF NOT EXISTS households (
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
+ALTER TABLE users
+  ADD COLUMN IF NOT EXISTS default_household_id UUID;
+
 CREATE TABLE IF NOT EXISTS household_memberships (
   user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
   household_id UUID NOT NULL REFERENCES households(id) ON DELETE CASCADE,
@@ -38,6 +41,16 @@ CREATE TABLE IF NOT EXISTS household_memberships (
 
 ALTER TABLE household_memberships
   ADD COLUMN IF NOT EXISTS scopes JSONB NOT NULL DEFAULT '[]'::jsonb;
+
+UPDATE users u
+SET default_household_id = (
+  SELECT hm.household_id
+  FROM household_memberships hm
+  WHERE hm.user_id = u.id
+  ORDER BY hm.created_at ASC
+  LIMIT 1
+)
+WHERE u.default_household_id IS NULL;
 
 CREATE INDEX IF NOT EXISTS idx_household_memberships_user_id
   ON household_memberships(user_id);

@@ -177,6 +177,15 @@ nav {
   color: #fecaca;
 }
 
+.sidebar-household-actions .default-household-button {
+  grid-column: 1 / -1;
+}
+
+.sidebar-household-actions .default-household-button:disabled {
+  color: #a7f3d0;
+  opacity: 1;
+}
+
 .nav-button {
   width: 100%;
   display: flex;

@@ -359,6 +359,10 @@ async function createHouseholdForUser(client, userId, name, state = defaultState
     "INSERT INTO household_memberships (user_id, household_id, role) VALUES ($1, $2, 'owner')",
     [userId, household.rows[0].id]
   );
+  await client.query(
+    "UPDATE users SET default_household_id = COALESCE(default_household_id, $2) WHERE id = $1",
+    [userId, household.rows[0].id]
+  );
   return household.rows[0];
 }
 
@@ -400,6 +404,7 @@ async function seedDemoUser() {
     memoryDb.households.push(household, indiaHousehold);
     memoryDb.memberships.push({ user_id: user.id, household_id: household.id, role: "owner" });
     memoryDb.memberships.push({ user_id: user.id, household_id: indiaHousehold.id, role: "owner" });
+    user.default_household_id = household.id;
     return;
   }
 
@@ -511,6 +516,7 @@ async function seedAdminUser() {
     user.name = ADMIN_NAME;
     user.is_admin = true;
     user.disabled_at = null;
+    user.default_household_id ||= memoryDb.memberships.find((item) => item.user_id === user.id)?.household_id;
     return;
   }
 
@@ -554,19 +560,22 @@ async function getSession(req) {
   if (MEMORY_DB) {
     const user = memoryDb.users.find((item) => item.id === userId);
     const memberships = memoryDb.memberships.filter((item) => item.user_id === userId);
-    const membership = memberships.find((item) => item.household_id === selectedHouseholdId) || memberships[0];
+    const membership = memberships.find((item) => item.household_id === selectedHouseholdId)
+      || memberships.find((item) => item.household_id === user?.default_household_id)
+      || memberships[0];
     const household = memoryDb.households.find((item) => item.id === membership?.household_id);
     if (!user || !household) return null;
     return { ...user, household_id: household.id, household_name: household.name };
   }
 
   const result = await pool.query(
-    `SELECT u.id, u.email, u.name, u.is_admin, u.disabled_at, h.id AS household_id, h.name AS household_name
+    `SELECT u.id, u.email, u.name, u.is_admin, u.disabled_at, u.default_household_id,
+            h.id AS household_id, h.name AS household_name
      FROM users u
      JOIN household_memberships hm ON hm.user_id = u.id
      JOIN households h ON h.id = hm.household_id
      WHERE u.id = $1
-     ORDER BY (h.id::text = $2) DESC, hm.created_at ASC
+     ORDER BY (h.id::text = $2) DESC, (h.id = u.default_household_id) DESC, hm.created_at ASC
      LIMIT 1`,
     [userId, selectedHouseholdId || ""]
   );
@@ -728,8 +737,10 @@ app.post("/api/auth/signup", async (req, res, next) => {
     memoryDb.users.push(user);
     memoryDb.households.push(household);
     memoryDb.memberships.push({ user_id: user.id, household_id: household.id, role: "owner" });
+    user.default_household_id = household.id;
     const emailDelivery = await sendWelcomeEmail({ email, name, householdName });
     signSession(res, user.id);
+    selectHousehold(res, household.id);
     return res.status(201).json({ user: publicUser(user), email: emailDelivery });
   }
 
@@ -742,10 +753,11 @@ app.post("/api/auth/signup", async (req, res, next) => {
       [email, hash, name, false]
     );
     const state = householdState(householdName, country, currency);
-    await createHouseholdForUser(client, user.rows[0].id, householdName, state);
+    const household = await createHouseholdForUser(client, user.rows[0].id, householdName, state);
     await client.query("COMMIT");
     const emailDelivery = await sendWelcomeEmail({ email, name, householdName });
     signSession(res, user.rows[0].id);
+    selectHousehold(res, household.id);
     res.status(201).json({ user: publicUser(user.rows[0]), email: emailDelivery });
   } catch (error) {
     await client.query("ROLLBACK");
@@ -771,10 +783,13 @@ app.post("/api/auth/signin", async (req, res, next) => {
       if (user.disabled_at) return res.status(403).json({ error: "This login has been disabled" });
       await recordLogin(user.id);
       signSession(res, user.id);
+      const defaultHouseholdId = user.default_household_id
+        || memoryDb.memberships.find((membership) => membership.user_id === user.id)?.household_id;
+      if (defaultHouseholdId) selectHousehold(res, defaultHouseholdId);
       return res.json({ user: publicUser(user) });
     }
 
-    const result = await pool.query("SELECT id, email, name, password_hash, is_admin, disabled_at FROM users WHERE email = $1", [email]);
+    const result = await pool.query("SELECT id, email, name, password_hash, is_admin, disabled_at, default_household_id FROM users WHERE email = $1", [email]);
     const user = result.rows[0];
     if (!user || !(await bcrypt.compare(password, user.password_hash))) {
       return res.status(401).json({ error: "Invalid email or password" });
@@ -782,6 +797,15 @@ app.post("/api/auth/signin", async (req, res, next) => {
     if (user.disabled_at) return res.status(403).json({ error: "This login has been disabled" });
     await recordLogin(user.id);
     signSession(res, user.id);
+    const defaultResult = await pool.query(
+      `SELECT hm.household_id
+       FROM household_memberships hm
+       WHERE hm.user_id = $1
+       ORDER BY (hm.household_id = $2) DESC, hm.created_at ASC
+       LIMIT 1`,
+      [user.id, user.default_household_id]
+    );
+    if (defaultResult.rows[0]) selectHousehold(res, defaultResult.rows[0].household_id);
     res.json({ user: publicUser(user) });
   } catch (error) {
     next(error);
@@ -987,6 +1011,7 @@ app.post("/api/auth/invitations/accept", async (req, res, next) => {
           scopes: invitation.scopes
         });
       }
+      user.default_household_id ||= invitation.household_id;
       invitation.status = "accepted";
       invitation.accepted_at = new Date().toISOString();
     } else {
@@ -1051,6 +1076,10 @@ app.post("/api/auth/invitations/accept", async (req, res, next) => {
            ON CONFLICT (user_id, household_id)
            DO UPDATE SET role = EXCLUDED.role, scopes = EXCLUDED.scopes`,
           [user.id, invitation.household_id, membershipRole, JSON.stringify(invitation.scopes || [])]
+        );
+        await client.query(
+          "UPDATE users SET default_household_id = COALESCE(default_household_id, $2) WHERE id = $1",
+          [user.id, invitation.household_id]
         );
         await client.query(
           "UPDATE household_invitations SET status = 'accepted', updated_at = now() WHERE id = $1",
@@ -1308,24 +1337,27 @@ app.get("/api/households", requireSession, async (req, res, next) => {
             role: membership.role,
             country: household.app_state?.household?.country || "US",
             currency: household.app_state?.household?.currency || "USD",
-            selected: household.id === req.sessionUser.household_id
+            selected: household.id === req.sessionUser.household_id,
+            isDefault: household.id === req.sessionUser.default_household_id
           };
         });
       return res.json(households);
     }
 
     const result = await pool.query(
-      `SELECT h.id, h.name, hm.role,
+      `SELECT h.id, h.name, hm.role, (h.id = u.default_household_id) AS is_default,
               COALESCE(h.app_state->'household'->>'country', 'US') AS country,
               COALESCE(h.app_state->'household'->>'currency', 'USD') AS currency
        FROM households h
        JOIN household_memberships hm ON hm.household_id = h.id
+       JOIN users u ON u.id = hm.user_id
        WHERE hm.user_id = $1
        ORDER BY hm.created_at ASC`,
       [req.sessionUser.id]
     );
     res.json(result.rows.map((household) => ({
       ...household,
+      isDefault: household.is_default,
       selected: household.id === req.sessionUser.household_id
     })));
   } catch (error) {
@@ -1401,6 +1433,38 @@ app.post("/api/households/select", requireSession, async (req, res, next) => {
     if (!allowed) return res.status(404).json({ error: "Household not found" });
     selectHousehold(res, householdId);
     res.json({ ok: true });
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.post("/api/households/default", requireSession, async (req, res, next) => {
+  try {
+    const householdId = String(req.body.householdId || "");
+    let allowed = false;
+    if (MEMORY_DB) {
+      allowed = memoryDb.memberships.some((membership) =>
+        membership.user_id === req.sessionUser.id && membership.household_id === householdId
+      );
+      if (allowed) {
+        const user = memoryDb.users.find((item) => item.id === req.sessionUser.id);
+        user.default_household_id = householdId;
+      }
+    } else {
+      const result = await pool.query(
+        `UPDATE users u
+         SET default_household_id = $2
+         WHERE u.id = $1
+           AND EXISTS (
+             SELECT 1 FROM household_memberships hm
+             WHERE hm.user_id = u.id AND hm.household_id::text = $2
+           )`,
+        [req.sessionUser.id, householdId]
+      );
+      allowed = result.rowCount > 0;
+    }
+    if (!allowed) return res.status(404).json({ error: "Household not found" });
+    res.json({ ok: true, defaultHouseholdId: householdId });
   } catch (error) {
     next(error);
   }
@@ -1510,6 +1574,8 @@ app.delete("/api/households/:id", requireSession, async (req, res, next) => {
       memoryDb.memberships = memoryDb.memberships.filter((item) => item.household_id !== householdId);
       memoryDb.households = memoryDb.households.filter((item) => item.id !== householdId);
       const nextHouseholdId = memoryDb.memberships.find((item) => item.user_id === req.sessionUser.id)?.household_id;
+      const user = memoryDb.users.find((item) => item.id === req.sessionUser.id);
+      if (user.default_household_id === householdId) user.default_household_id = nextHouseholdId;
       selectHousehold(res, nextHouseholdId);
       return res.json({ ok: true, selectedHouseholdId: nextHouseholdId });
     }
@@ -1546,6 +1612,10 @@ app.delete("/api/households/:id", requireSession, async (req, res, next) => {
       const nextResult = await client.query(
         "SELECT household_id FROM household_memberships WHERE user_id = $1 ORDER BY created_at ASC LIMIT 1",
         [req.sessionUser.id]
+      );
+      await client.query(
+        "UPDATE users SET default_household_id = $2 WHERE id = $1 AND default_household_id::text = $3",
+        [req.sessionUser.id, nextResult.rows[0].household_id, householdId]
       );
       await client.query("COMMIT");
       const nextHouseholdId = nextResult.rows[0].household_id;

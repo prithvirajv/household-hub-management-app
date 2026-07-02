@@ -219,6 +219,35 @@ test("a user cannot create multiple households with the same currency", async ()
     headers: { cookie: `${signin.cookie}; ${differentCurrency.cookie}` }
   });
   assert.equal(reloadedState.body.goals.debts[0].assetId, "home-asset");
+
+  const householdList = await request("/api/households", {
+    headers: { cookie: `${signin.cookie}; ${differentCurrency.cookie}` }
+  });
+  const usdHousehold = householdList.body.find((household) => household.currency === "USD");
+  const inrHousehold = householdList.body.find((household) => household.currency === "INR");
+  const setIndiaDefault = await request("/api/households/default", {
+    method: "POST",
+    headers: { cookie: `${signin.cookie}; ${differentCurrency.cookie}` },
+    body: JSON.stringify({ householdId: inrHousehold.id })
+  });
+  assert.equal(setIndiaDefault.status, 200);
+
+  const freshSignin = await request("/api/auth/signin", {
+    method: "POST",
+    body: JSON.stringify({ email: adminEmail, password: initialPassword })
+  });
+  const defaultHouseholds = await request("/api/households", {
+    headers: { cookie: freshSignin.cookie }
+  });
+  assert.equal(defaultHouseholds.body.find((household) => household.selected).id, inrHousehold.id);
+  assert.equal(defaultHouseholds.body.find((household) => household.isDefault).id, inrHousehold.id);
+
+  const restoreDefault = await request("/api/households/default", {
+    method: "POST",
+    headers: { cookie: freshSignin.cookie },
+    body: JSON.stringify({ householdId: usdHousehold.id })
+  });
+  assert.equal(restoreDefault.status, 200);
 });
 
 test("an existing user cannot accept an invitation for a duplicate currency", async () => {

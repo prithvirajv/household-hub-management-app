@@ -339,10 +339,13 @@ function renderShell() {
     ).join("");
   }
   $("#householdPicker").innerHTML = households.map((household) =>
-    `<option value="${household.id}" ${household.selected ? "selected" : ""}>${household.name} · ${household.country}</option>`
+    `<option value="${household.id}" ${household.selected ? "selected" : ""}>${household.name} · ${household.country}${household.isDefault ? " · Default" : ""}</option>`
   ).join("");
   $("#householdWorkspaceControl").hidden = isAdminView || isHelpView;
   $("#removeHouseholdButton").disabled = households.length <= 1;
+  const selectedHousehold = households.find((household) => household.selected);
+  $("#defaultHouseholdButton").disabled = Boolean(selectedHousehold?.isDefault);
+  $("#defaultHouseholdButton").textContent = selectedHousehold?.isDefault ? "Default household" : "Set as default";
   $(".month-control").hidden = isAdminView || isNotesView || isHelpView;
   $("#syncButton").hidden = isAdminView || isHelpView;
   $("#downloadCsvButton").hidden = isAdminView || isNotesView || isHelpView;
@@ -2788,6 +2791,24 @@ $("#householdPicker").addEventListener("change", async (event) => {
     body: JSON.stringify({ householdId: event.target.value })
   });
   await reloadSelectedHousehold();
+});
+
+$("#defaultHouseholdButton").addEventListener("click", async () => {
+  const selected = households.find((household) => household.selected);
+  if (!selected || selected.isDefault) return;
+  const button = $("#defaultHouseholdButton");
+  button.disabled = true;
+  try {
+    await api("/api/households/default", {
+      method: "POST",
+      body: JSON.stringify({ householdId: selected.id })
+    });
+    households.forEach((household) => {
+      household.isDefault = household.id === selected.id;
+    });
+  } finally {
+    renderShell();
+  }
 });
 
 $("#addHouseholdButton").addEventListener("click", () => {
