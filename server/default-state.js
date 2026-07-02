@@ -266,9 +266,9 @@ const defaultState = {
   },
   goals: {
     sinkingFunds: [
-      { name: "Starter emergency fund", target: 1000, saved: 650 },
-      { name: "Vacation fund", target: 2500, saved: 900 },
-      { name: "Auto repair buffer", target: 1200, saved: 420 }
+      { name: "Starter emergency fund", target: 1000, saved: 650, targetDate: "2026-12-31" },
+      { name: "Vacation fund", target: 2500, saved: 900, targetDate: "2026-11-15" },
+      { name: "Auto repair buffer", target: 1200, saved: 420, targetDate: "2026-09-01" }
     ],
     debts: [
       { name: "Credit card", balance: 8200, rate: 18.9, minimum: 220 },

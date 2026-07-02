@@ -449,6 +449,110 @@ main {
   max-width: 1180px;
 }
 
+.help-visual-hero {
+  min-height: 310px;
+  display: flex;
+  align-items: flex-end;
+  overflow: hidden;
+  border-radius: 8px;
+  background-color: rgba(15, 31, 57, 0.62);
+  background-image: url("assets/famelo-help-household-planning.jpg");
+  background-blend-mode: multiply;
+  background-position: center;
+  background-size: cover;
+  box-shadow: var(--shadow);
+}
+
+.help-visual-hero > div {
+  max-width: 560px;
+  padding: 2rem;
+  color: white;
+}
+
+.help-visual-hero .card-label {
+  color: #86efac;
+}
+
+.help-visual-hero h3 {
+  margin: 0.35rem 0;
+  font-size: 2rem;
+}
+
+.help-visual-hero p {
+  margin: 0;
+  color: #e2e8f0;
+}
+
+.help-journey {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: white;
+}
+
+.help-journey article {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 0.7rem;
+  padding: 0.9rem 1rem;
+  border-right: 1px solid var(--line);
+}
+
+.help-journey article:last-child {
+  border-right: 0;
+}
+
+.help-journey article > span,
+.empty-symbol {
+  width: 38px;
+  height: 38px;
+  flex: 0 0 38px;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  background: #e8f8f0;
+  color: var(--green);
+  font-weight: 900;
+}
+
+.help-journey small {
+  display: block;
+  margin-top: 0.15rem;
+  color: var(--muted);
+}
+
+.help-visual-feature {
+  display: grid;
+  grid-template-columns: minmax(0, 1.2fr) minmax(280px, 0.8fr);
+  align-items: center;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: white;
+  box-shadow: var(--shadow);
+}
+
+.help-visual-feature img {
+  width: 100%;
+  height: 280px;
+  object-fit: cover;
+}
+
+.help-visual-feature > div {
+  padding: 1.4rem;
+}
+
+.help-visual-feature h3 {
+  margin: 0.3rem 0 0.5rem;
+}
+
+.help-visual-feature p {
+  margin: 0;
+  color: var(--muted);
+}
+
 .help-intro {
   padding: 0.25rem 0 0.5rem;
 }
@@ -499,6 +603,94 @@ main {
   color: var(--green);
   font-size: 0.76rem;
   font-weight: 900;
+}
+
+.help-topic .help-topic-icon {
+  width: 36px;
+  height: 36px;
+  display: grid;
+  place-items: center;
+  border-radius: 7px;
+  background: var(--soft-blue);
+  font-size: 1rem;
+}
+
+.onboarding-empty {
+  min-height: 360px;
+  display: grid;
+  place-items: center;
+  align-content: center;
+  gap: 0.65rem;
+  padding: 2rem;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: white;
+  text-align: center;
+  box-shadow: var(--shadow);
+}
+
+.onboarding-empty h3,
+.onboarding-empty p {
+  margin: 0;
+}
+
+.onboarding-empty p {
+  max-width: 520px;
+  color: var(--muted);
+}
+
+.compact-onboarding {
+  min-height: 220px;
+  box-shadow: none;
+}
+
+.onboarding-graphic {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+}
+
+.onboarding-graphic span {
+  width: 54px;
+  height: 68px;
+  display: grid;
+  place-items: center;
+  border: 2px solid #cbd5e1;
+  border-radius: 7px;
+  background: #f8fafc;
+  color: var(--muted);
+  font-weight: 900;
+}
+
+.onboarding-graphic span:nth-child(2) {
+  border-color: var(--green);
+  color: var(--green);
+  transform: translateY(-8px);
+}
+
+.goal-edit-grid {
+  display: grid;
+  grid-template-columns: minmax(170px, 1.3fr) repeat(3, minmax(120px, 0.8fr)) 38px;
+  gap: 0.6rem;
+  align-items: end;
+}
+
+.goal-edit-grid label {
+  min-width: 0;
+  color: var(--muted);
+  font-size: 0.7rem;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+
+.goal-edit-grid input {
+  width: 100%;
+  min-height: 40px;
+  margin-top: 0.2rem;
+  background: white;
+  color: var(--text);
+  font-weight: 800;
+  text-transform: none;
 }
 
 .help-topic h3,
@@ -590,6 +782,10 @@ main {
 
 .transactions-grid {
   grid-template-columns: minmax(0, 1fr) minmax(340px, 440px);
+}
+
+.wealth-layout {
+  grid-template-columns: minmax(0, 1.5fr) minmax(420px, 0.8fr);
 }
 
 .calendar-layout {
@@ -1510,7 +1706,7 @@ main {
 
 .net-worth-item {
   display: grid;
-  grid-template-columns: minmax(130px, 1.2fr) minmax(92px, 0.7fr) minmax(115px, 0.9fr) auto;
+  grid-template-columns: minmax(0, 1.25fr) minmax(88px, 0.7fr) minmax(100px, 0.85fr) 38px;
   align-items: end;
   gap: 0.55rem;
   border-left: 5px solid var(--green);
@@ -2213,6 +2409,7 @@ main {
 @media (max-width: 1120px) {
   .work-grid,
   .transactions-grid,
+  .wealth-layout,
   .calendar-layout,
   .notes-layout {
     grid-template-columns: 1fr;
@@ -2327,6 +2524,29 @@ main {
   .ledger-assign-row,
   .report-row {
     grid-template-columns: 1fr;
+  }
+
+  .help-journey,
+  .help-visual-feature,
+  .goal-edit-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .help-journey article {
+    border-right: 0;
+    border-bottom: 1px solid var(--line);
+  }
+
+  .help-journey article:last-child {
+    border-bottom: 0;
+  }
+
+  .help-visual-feature img {
+    height: 220px;
+  }
+
+  .goal-edit-grid .icon-button {
+    width: 100%;
   }
 
   .section-head {

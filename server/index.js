@@ -269,11 +269,8 @@ function householdState(name, country = "US", currency = "USD", seededDemo = fal
     state.household.activity = [];
     state.budget.month = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
     state.budget.income = 0;
-    state.budget.categories.forEach((category) => {
-      category.lines.forEach((line) => {
-        line.planned = 0;
-      });
-    });
+    state.budget.categories = [];
+    state.budget.setupStarted = false;
     state.budgetHistory = [];
     state.transactions = [];
     state.paychecks = [];

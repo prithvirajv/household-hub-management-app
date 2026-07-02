@@ -326,6 +326,8 @@ function renderShell() {
   const isNotesView = currentView === "notes";
   const isHelpView = currentView === "help";
   const isRecipesView = currentView === "recipes";
+  const isGoalsView = currentView === "goals";
+  const isWealthView = currentView === "wealth";
   $("#viewTitle").textContent = isAdminView
     ? "Application admin"
     : isHelpView
@@ -334,6 +336,10 @@ function renderShell() {
         ? "Household notes"
         : isRecipesView
           ? "Recipe library"
+          : isGoalsView
+            ? "Financial goals"
+            : isWealthView
+              ? "Household wealth"
           : `${monthLabel()} plan`;
   $("#householdName").textContent = title.toUpperCase();
   $("#userName").textContent = sessionUser?.name || "Demo User";
@@ -355,7 +361,7 @@ function renderShell() {
   const selectedHousehold = households.find((household) => household.selected);
   $("#defaultHouseholdButton").disabled = Boolean(selectedHousehold?.isDefault);
   $("#defaultHouseholdButton").textContent = selectedHousehold?.isDefault ? "Default household" : "Set as default";
-  $(".month-control").hidden = isAdminView || isNotesView || isHelpView || isRecipesView;
+  $(".month-control").hidden = isAdminView || isNotesView || isHelpView || isRecipesView || isGoalsView || isWealthView;
   $("#syncButton").hidden = isAdminView || isHelpView;
   $("#downloadCsvButton").hidden = isAdminView || isNotesView || isHelpView;
   renderNav();
@@ -420,6 +426,16 @@ const renderers = {
 };
 
 function renderBudget() {
+  const setupStarted = state.budget.setupStarted ?? (state.paychecks.length > 0 || state.budget.categories.length > 0);
+  if (!setupStarted) {
+    return `<section class="onboarding-empty budget-onboarding">
+      <div class="onboarding-graphic" aria-hidden="true"><span>1</span><span>2</span><span>3</span></div>
+      <span class="card-label">A clean monthly plan</span>
+      <h3>Start your ${monthLabel()} budget</h3>
+      <p>Add only the income and categories that belong to this household. Nothing is prefilled.</p>
+      <button id="startBudgetButton" type="button">Start planning</button>
+    </section>`;
+  }
   const previousBudgets = availablePreviousBudgets();
   return `
     <section class="work-grid transactions-grid">
@@ -641,20 +657,21 @@ function renderCalendar() {
         </section>
       </div>
       <aside class="side-stack">
-        <section class="card"><div class="card-label">Daily planner</div><h3>Upcoming schedule</h3>${scheduleItems().map((item) => compactRow(item.title, item.date, item.label || item.type)).join("")}</section>
+        <section class="card"><div class="card-label">Daily planner</div><h3>Upcoming schedule</h3>${scheduleItems().length ? scheduleItems().map((item) => compactRow(item.title, item.date, item.label || item.type, "", `data-delete-calendar-item="${item.sourceKind}:${item.sourceId}" aria-label="Remove ${escapeHtml(item.title)}"`)).join("") : `<div class="empty-inline">No events scheduled this month</div>`}</section>
         <section class="card">
           <div class="section-head"><div><span class="card-label">What to do</span><h3>Chore rotation</h3></div><button id="sideAddChoreButton" class="ghost" type="button">Add chore</button></div>
-          ${state.calendar.chores.map((chore, index) => {
+          ${state.calendar.chores.length ? state.calendar.chores.map((chore, index) => {
             const occurrence = nextChoreOccurrenceInMonth(chore);
             return `<div class="compact-row">
               <div><strong>${chore.title}</strong><small>${occurrence?.date || "No occurrence this month"} · ${chore.assignee} · ${choreCadenceLabel(chore)}</small></div>
               ${occurrence ? `<button class="ghost chore-complete-button" data-complete-chore="${index}:${occurrence.date}" type="button">Complete</button>` : `<span class="pill">Recurring</span>`}
+              <button class="icon-button danger-button" data-delete-calendar-item="chore:${chore.id}" type="button" aria-label="Remove ${escapeHtml(chore.title)}">×</button>
             </div>`;
-          }).join("")}
+          }).join("") : `<div class="empty-inline">No recurring chores</div>`}
         </section>
         <section class="card">
           <div class="section-head"><div><span class="card-label">Birthdays</span><h3>Birthday reminders</h3></div><button id="sideAddBirthdayButton" class="ghost" type="button">Add birthday</button></div>
-          ${state.calendar.events.filter((event) => event.type === "birthday").map((event) => compactRow(birthdayDisplayTitle(event), `${formatBirthdayMonthDay(event)} · every year · ${Number(event.reminderDays || 0)} days before`, "Annual")).join("")}
+          ${state.calendar.events.filter((event) => event.type === "birthday").length ? state.calendar.events.filter((event) => event.type === "birthday").map((event) => compactRow(birthdayDisplayTitle(event), `${formatBirthdayMonthDay(event)} · every year · ${Number(event.reminderDays || 0)} days before`, "Annual", "", `data-delete-calendar-item="event:${event.id}" aria-label="Remove ${escapeHtml(birthdayDisplayTitle(event))}"`)).join("") : `<div class="empty-inline">No birthdays added</div>`}
         </section>
       </aside>
     </section>`;
@@ -663,54 +680,8 @@ function renderCalendar() {
 function ensureNotesData() {
   state.notes ||= { activeView: "notes", activeLabel: "", labels: [], entries: [], initialized: false };
   if (!state.notes.initialized) {
-    state.notes.labels = ["Birthday", "House warming", "Groceries"];
-    state.notes.entries = [
-      {
-        id: uniqueId("weekend-todo"),
-        title: "Weekend ToDo",
-        body: "",
-        checklist: [
-          { id: uniqueId("item"), text: "Organize the garage", done: false },
-          { id: uniqueId("item"), text: "Confirm dinner plans", done: false },
-          { id: uniqueId("item"), text: "Buy birthday card", done: true }
-        ],
-        labels: ["House warming"],
-        pinned: true,
-        archived: false,
-        trashed: false,
-        color: "#fff7d6",
-        createdAt: new Date().toISOString()
-      },
-      {
-        id: uniqueId("grocery-stops"),
-        title: "Grocery stops",
-        body: "",
-        checklist: [
-          { id: uniqueId("item"), text: "Milk", done: false },
-          { id: uniqueId("item"), text: "Marinara sauce", done: false },
-          { id: uniqueId("item"), text: "Grapes", done: false },
-          { id: uniqueId("item"), text: "Bread", done: true }
-        ],
-        labels: ["Groceries"],
-        pinned: false,
-        archived: false,
-        trashed: false,
-        color: "#ffffff",
-        createdAt: new Date(Date.now() - 1000).toISOString()
-      },
-      {
-        id: uniqueId("birthday-ideas"),
-        title: "Birthday ideas",
-        body: "Call the bakery and confirm the guest list.",
-        checklist: [],
-        labels: ["Birthday"],
-        pinned: false,
-        archived: false,
-        trashed: false,
-        color: "#eef7ff",
-        createdAt: new Date(Date.now() - 2000).toISOString()
-      }
-    ];
+    state.notes.labels = [];
+    state.notes.entries = [];
     state.notes.initialized = true;
   }
   state.notes.activeView ||= "notes";
@@ -990,13 +961,19 @@ function renderGoals() {
     <section class="narrow-layout">
       <section class="card">
         <div class="section-head"><div><span class="card-label">Funding</span><h3>Sinking funds and goals</h3></div><button id="addGoalButton" type="button">+ Add goal</button></div>
-        ${state.goals.sinkingFunds.map((fund, index) => `
+        ${state.goals.sinkingFunds.length ? state.goals.sinkingFunds.map((fund, index) => `
           <article class="goal-card">
-            <div class="section-head"><div><strong>${fund.name}</strong><small>${money.format(fund.target)} target</small></div><button class="icon-button danger-button" data-delete-goal="${index}" type="button">×</button></div>
+            <div class="goal-edit-grid">
+              <label class="goal-name-field">Goal name<input data-goal-name="${index}" value="${escapeHtml(fund.name || "")}" placeholder="Emergency fund"></label>
+              <label>Target amount<input data-goal-target="${index}" type="number" min="0" step="0.01" value="${Number(fund.target || 0)}"></label>
+              <label>Saved so far<input data-goal-saved="${index}" type="number" min="0" step="0.01" value="${Number(fund.saved || 0)}"></label>
+              <label>Target date<input data-goal-date="${index}" type="date" value="${fund.targetDate || ""}"></label>
+              <button class="icon-button danger-button" data-delete-goal="${index}" type="button" aria-label="Remove ${escapeHtml(fund.name || "goal")}">×</button>
+            </div>
             ${progressBlock("Progress", fund.saved, fund.target)}
-            <div class="split-stat"><span>${Math.round((fund.saved / fund.target) * 100)}%</span><b>${money.format(fund.target - fund.saved)} remaining</b></div>
+            <div class="split-stat"><span>${Math.round((fund.saved / Math.max(fund.target, 1)) * 100)}%</span><b>${money.format(fund.target - fund.saved)} remaining</b></div>
           </article>
-        `).join("")}
+        `).join("") : `<div class="onboarding-empty compact-onboarding"><div class="empty-symbol" aria-hidden="true">◎</div><h3>Create your first goal</h3><p>Give it a target amount and date, then update the saved balance as you make progress.</p><button id="emptyAddGoalButton" type="button">Add a goal</button></div>`}
       </section>
     </section>`;
 }
@@ -1004,11 +981,11 @@ function renderGoals() {
 function renderWealth() {
   if (ensureDebtNetWorthSync()) autosaveState();
   return `
-    <section class="work-grid">
+    <section class="work-grid wealth-layout">
       <div class="main-stack">
         <section class="card">
           <div class="section-head"><div><span class="card-label">Debt snowball</span><h3>Debt payoff tracker</h3></div><button id="addDebtButton" type="button">+ Add debt</button></div>
-          ${state.goals.debts.map((debt, index) => `<article class="debt-card">
+          ${state.goals.debts.length ? state.goals.debts.map((debt, index) => `<article class="debt-card">
             <div class="debt-edit-grid">
               <label class="debt-name-field">Debt name<input data-debt-name="${index}" value="${escapeHtml(debt.name)}" aria-label="Debt name"></label>
               <label>Current balance<input data-debt-balance="${index}" type="number" min="0" step="0.01" inputmode="decimal" value="${Number(debt.balance || 0)}" aria-label="Current balance for ${escapeHtml(debt.name)}"></label>
@@ -1018,10 +995,10 @@ function renderWealth() {
             </div>
             <div class="bar"><span style="width:${Math.max(4, Math.min(95, Math.round((1 - debt.balance / 15000) * 100)))}%"></span></div>
             <div class="payment-row"><label>Extra payment<input data-debt-payment="${index}" value="100" type="number" min="0"></label><button class="ghost" data-apply-debt-payment="${index}" type="button">Apply payment</button><button class="icon-button danger-button" data-delete-debt="${index}" type="button">×</button></div>
-          </article>`).join("")}
+          </article>`).join("") : `<div class="onboarding-empty compact-onboarding"><div class="empty-symbol" aria-hidden="true">↓</div><h3>Add a debt when you are ready</h3><p>Track its balance, rate, payment, and the asset it secures.</p></div>`}
         </section>
       </div>
-      <aside class="side-stack"><section class="card"><div class="section-head"><div><span class="card-label">Net worth</span><h3>Assets and liabilities</h3></div><button id="addNetWorthItemButton" type="button">+ Add item</button></div><div class="net-worth-strip"><strong data-net-worth-total>${money.format(netWorth().total)}</strong><span>Assets <b data-net-worth-assets>${money.format(netWorth().assets)}</b> Liabilities <b data-net-worth-liabilities>${money.format(netWorth().liabilities)}</b></span></div><div class="net-worth-items">${state.goals.netWorth.assets.map((asset, index) => netWorthItemRow(asset, "asset", index)).join("")}${state.goals.netWorth.liabilities.map((item, index) => netWorthItemRow(item, "liability", index)).join("")}</div></section></aside>
+      <aside class="side-stack"><section class="card"><div class="section-head"><div><span class="card-label">Net worth</span><h3>Assets and liabilities</h3></div><button id="addNetWorthItemButton" type="button">+ Add item</button></div><div class="net-worth-strip"><strong data-net-worth-total>${money.format(netWorth().total)}</strong><span>Assets <b data-net-worth-assets>${money.format(netWorth().assets)}</b> Liabilities <b data-net-worth-liabilities>${money.format(netWorth().liabilities)}</b></span></div><div class="net-worth-items">${state.goals.netWorth.assets.map((asset, index) => netWorthItemRow(asset, "asset", index)).join("")}${state.goals.netWorth.liabilities.map((item, index) => netWorthItemRow(item, "liability", index)).join("")}</div>${state.goals.netWorth.assets.length || state.goals.netWorth.liabilities.length ? "" : `<div class="empty-inline">No assets or liabilities yet</div>`}</section></aside>
     </section>`;
 }
 
@@ -1074,8 +1051,8 @@ function renderSharing() {
             </div>
           </div>
           <form id="inviteMemberForm" class="invite-form">
-            <label>Name<input name="name" value="Taylor Carter" required></label>
-            <label>Email<input name="email" type="email" value="taylor@example.com" required></label>
+            <label>Name<input name="name" placeholder="Household member" required></label>
+            <label>Email<input name="email" type="email" placeholder="name@example.com" required></label>
             <label>Access<select name="role">${accessRoles.map((role) => `<option value="${role}">${role}</option>`).join("")}</select></label>
             <button type="submit">Send invite</button>
             <p id="inviteEmailStatus" class="form-message invite-email-status">${inviteEmailStatus}</p>
@@ -1120,18 +1097,29 @@ function renderHelp() {
   ];
   return `
     <section class="help-layout">
-      <section class="help-intro">
-        <span class="card-label">Famelo guide</span>
-        <h3>Run the household without losing the thread</h3>
-        <p>Short guides for the workflows people use most.</p>
+      <section class="help-visual-hero">
+        <div>
+          <span class="card-label">Famelo guide</span>
+          <h3>One household plan, shared clearly</h3>
+          <p>Follow practical steps for money, meals, schedules, notes, and family access.</p>
+        </div>
+      </section>
+      <section class="help-journey" aria-label="Getting started workflow">
+        <article><span>1</span><div><strong>Choose a household</strong><small>Keep currencies and records separate.</small></div></article>
+        <article><span>2</span><div><strong>Add what is real</strong><small>Start empty and enter only your data.</small></div></article>
+        <article><span>3</span><div><strong>Review together</strong><small>Share access and revisit the plan.</small></div></article>
       </section>
       <section class="help-grid">
         ${guides.map(([title, copy], index) => `
           <article class="help-topic">
-            <span>${String(index + 1).padStart(2, "0")}</span>
+            <span class="help-topic-icon">${["⌂", "◇", "$", "□", "♨", "◎", "↗", "◷"][index]}</span>
             <div><h3>${title}</h3><p>${copy}</p></div>
           </article>
         `).join("")}
+      </section>
+      <section class="help-visual-feature">
+        <img src="assets/famelo-help-calendar-meals.jpg" alt="A shared weekly calendar, meal plan, and grocery checklist">
+        <div><span class="card-label">Plan once, use it everywhere</span><h3>Connect the weekly details</h3><p>Add recurring chores in Calendar, save reusable recipes, then plan meals and groceries for the selected week. Each area stays editable by the household.</p></div>
       </section>
       <section class="help-columns">
         <article>
@@ -1247,29 +1235,26 @@ function scheduleItems() {
   const selectedMonth = state.budget.month;
   const oneTimeEvents = state.calendar.events
     .filter((event) => event.type !== "birthday" && event.date?.startsWith(selectedMonth))
-    .map((event) => ({ title: event.title, date: event.date.slice(5), type: event.type }));
+    .map((event) => ({ title: event.title, date: event.date.slice(5), type: event.type, sourceKind: "event", sourceId: event.id }));
   const chores = state.calendar.chores.flatMap((chore) =>
     choreOccurrencesForMonth(chore).map((occurrence) => ({
       title: chore.title,
       date: occurrence.date.slice(5),
       type: "Chore",
       label: `${choreCadenceLabel(chore)} chore`,
-      eventType: "chore"
+      eventType: "chore",
+      sourceKind: "chore",
+      sourceId: chore.id
     }))
   );
   const annualBirthdays = birthdayScheduleItems();
-  const builtInReminders = selectedMonth === "2026-05"
-    ? [
-        { title: "Plan next month", date: "05-28", type: "Reminder" },
-        { title: "Move money to emergency fund", date: "05-30", type: "Reminder" }
-      ]
-    : [];
-  return [...oneTimeEvents, ...chores, ...annualBirthdays, ...builtInReminders]
+  return [...oneTimeEvents, ...chores, ...annualBirthdays]
     .sort((a, b) => a.date.localeCompare(b.date));
 }
 
 function ensureChoreRecurrenceData() {
   state.calendar.chores.forEach((chore) => {
+    chore.id ||= uniqueId("chore");
     chore.startDate ||= chore.nextDue;
     chore.recurrence ||= String(chore.cadence || "Once").toLowerCase() === "weekly" ? "weekly" : "once";
     chore.cadence = choreCadenceLabel(chore);
@@ -1337,6 +1322,7 @@ function nextChoreOccurrenceInMonth(chore) {
 
 function ensureBirthdayRecurrenceData() {
   state.calendar.events.forEach((event) => {
+    event.id ||= uniqueId("event");
     if (event.type !== "birthday") return;
     event.monthDay ||= event.date?.slice(5);
     event.annual = true;
@@ -1374,10 +1360,10 @@ function birthdayScheduleItems() {
       const birthdayTitle = birthdayDisplayTitle(event);
       const items = [];
       if (dateKey(birthdayDate).startsWith(state.budget.month)) {
-        items.push({ title: birthdayTitle, date: dateKey(birthdayDate).slice(5), type: "birthday", label: "Birthday", eventType: "birthday" });
+        items.push({ title: birthdayTitle, date: dateKey(birthdayDate).slice(5), type: "birthday", label: "Birthday", eventType: "birthday", sourceKind: "event", sourceId: event.id });
       }
       if (Number(event.reminderDays || 0) > 0 && dateKey(reminderDate).startsWith(state.budget.month)) {
-        items.push({ title: `${birthdayTitle} reminder`, date: dateKey(reminderDate).slice(5), type: "birthday-reminder", label: "Birthday reminder", eventType: "birthday-reminder" });
+        items.push({ title: `${birthdayTitle} reminder`, date: dateKey(reminderDate).slice(5), type: "birthday-reminder", label: "Birthday reminder", eventType: "birthday-reminder", sourceKind: "event", sourceId: event.id });
       }
       return items;
     });
@@ -1502,6 +1488,12 @@ function transactionInboxItems() {
 }
 
 function bindViewEvents() {
+  $("#startBudgetButton")?.addEventListener("click", () => {
+    state.budget.setupStarted = true;
+    autosaveState();
+    render();
+  });
+
   $("#notesSearch")?.addEventListener("input", (event) => {
     const query = event.currentTarget.value.trim().toLowerCase();
     state.notes.search = event.currentTarget.value;
@@ -2114,9 +2106,28 @@ function bindViewEvents() {
     });
   });
 
-  $("#addGoalButton")?.addEventListener("click", () => {
-    state.goals.sinkingFunds.push({ name: `New goal ${state.goals.sinkingFunds.length + 1}`, target: 1000, saved: 0 });
+  const addGoal = () => {
+    state.goals.sinkingFunds.push({ name: "", target: 0, saved: 0, targetDate: "" });
+    autosaveState();
     render();
+    document.querySelector(`[data-goal-name="${state.goals.sinkingFunds.length - 1}"]`)?.focus();
+  };
+  $("#addGoalButton")?.addEventListener("click", addGoal);
+  $("#emptyAddGoalButton")?.addEventListener("click", addGoal);
+
+  document.querySelectorAll("[data-goal-name], [data-goal-target], [data-goal-saved], [data-goal-date]").forEach((input) => {
+    input.addEventListener("input", () => {
+      const datasetKey = Object.keys(input.dataset).find((key) => key.startsWith("goal"));
+      const index = Number(input.dataset[datasetKey]);
+      const fund = state.goals.sinkingFunds[index];
+      if (!fund) return;
+      if (datasetKey === "goalName") fund.name = input.value;
+      if (datasetKey === "goalTarget") fund.target = Math.max(0, Number(input.value || 0));
+      if (datasetKey === "goalSaved") fund.saved = Math.max(0, Number(input.value || 0));
+      if (datasetKey === "goalDate") fund.targetDate = input.value;
+      autosaveState();
+    });
+    input.addEventListener("change", () => render());
   });
 
   document.querySelectorAll("[data-delete-goal]").forEach((button) => {
@@ -2307,6 +2318,7 @@ function bindViewEvents() {
     if (data.type === "chore") {
       const recurrence = data.recurrence || "once";
       state.calendar.chores.push({
+        id: uniqueId("chore"),
         title: data.title,
         assignee: data.owner || "Demo User",
         cadence: choreCadenceLabel({ recurrence }),
@@ -2318,6 +2330,7 @@ function bindViewEvents() {
     } else {
       const isBirthday = data.type === "birthday";
       state.calendar.events.push({
+        id: uniqueId("event"),
         title: data.title,
         date: data.date,
         monthDay: isBirthday ? data.date.slice(5) : undefined,
@@ -2342,6 +2355,17 @@ function bindViewEvents() {
       chore.completedDates ||= [];
       if (!chore.completedDates.includes(occurrenceDate)) chore.completedDates.push(occurrenceDate);
       state.household.activity.unshift(`Completed ${chore.title} for ${occurrenceDate}`);
+      render();
+    });
+  });
+
+  document.querySelectorAll("[data-delete-calendar-item]").forEach((button) => {
+    button.addEventListener("click", () => {
+      const separator = button.dataset.deleteCalendarItem.indexOf(":");
+      const kind = button.dataset.deleteCalendarItem.slice(0, separator);
+      const id = button.dataset.deleteCalendarItem.slice(separator + 1);
+      if (kind === "event") state.calendar.events = state.calendar.events.filter((event) => event.id !== id);
+      if (kind === "chore") state.calendar.chores = state.calendar.chores.filter((chore) => chore.id !== id);
       render();
     });
   });
