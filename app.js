@@ -638,26 +638,29 @@ function renderCalendar() {
             <div class="button-row"><button id="addChoreButton" class="ghost" type="button">+ Add chore</button><button id="addBirthdayButton" type="button">+ Add birthday</button></div>
           </div>
           <form id="calendarQuickAdd" class="calendar-quick-add">
+            <input name="editingKind" type="hidden">
+            <input name="editingId" type="hidden">
             <label>Type<select name="type"><option value="chore">Chore</option><option value="birthday">Birthday reminder</option><option value="reminder">Reminder</option></select></label>
             <label>Title<input name="title" placeholder="Mom birthday reminder" required></label>
             <label>Date<input name="date" type="date" value="${state.budget.month}-01" required></label>
             <label>Owner<input name="owner" placeholder="Demo User"></label>
             <label data-chore-recurrence-field>Repeat<select name="recurrence"><option value="once">Once</option><option value="weekly" selected>Weekly</option><option value="biweekly">Every 2 weeks</option><option value="monthly">Monthly</option></select></label>
             <label data-birthday-reminder-field hidden>Remind before<select name="reminderDays"><option value="0">Same day</option><option value="1">1 day</option><option value="3">3 days</option><option value="7" selected>7 days</option><option value="14">14 days</option></select></label>
-            <button type="submit">Add</button>
+            <button data-calendar-submit type="submit">Add</button>
+            <button data-calendar-cancel class="ghost" type="button" hidden>Cancel</button>
           </form>
           <div class="calendar-grid">
             ${["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"].map((day) => `<div class="calendar-weekday">${day}</div>`).join("")}
             ${calendarCells().map((cell) => `
             <div class="day-cell ${cell.muted ? "muted-cell" : ""} ${cell.currentMonth ? "" : "outside-month"}">
               <b>${cell.day}</b>
-              ${cell.items.map((item) => `<span class="event ${item.eventType || item.type}">${item.title}</span>`).join("")}
+              ${cell.items.map((item) => `<button class="event ${item.eventType || item.type}" data-edit-calendar-item="${item.sourceKind}:${item.sourceId}" type="button" title="Edit ${escapeHtml(item.title)}">${escapeHtml(item.title)}</button>`).join("")}
             </div>
           `).join("")}</div>
         </section>
       </div>
       <aside class="side-stack">
-        <section class="card"><div class="card-label">Daily planner</div><h3>Upcoming schedule</h3>${scheduleItems().length ? scheduleItems().map((item) => compactRow(item.title, item.date, item.label || item.type, "", `data-delete-calendar-item="${item.sourceKind}:${item.sourceId}" aria-label="Remove ${escapeHtml(item.title)}"`)).join("") : `<div class="empty-inline">No events scheduled this month</div>`}</section>
+        <section class="card"><div class="card-label">Daily planner</div><h3>Upcoming schedule</h3>${scheduleItems().length ? scheduleItems().map((item) => calendarManageRow(item.title, item.date, item.label || item.type, item.sourceKind, item.sourceId)).join("") : `<div class="empty-inline">No events scheduled this month</div>`}</section>
         <section class="card">
           <div class="section-head"><div><span class="card-label">What to do</span><h3>Chore rotation</h3></div><button id="sideAddChoreButton" class="ghost" type="button">Add chore</button></div>
           ${state.calendar.chores.length ? state.calendar.chores.map((chore, index) => {
@@ -665,13 +668,14 @@ function renderCalendar() {
             return `<div class="compact-row">
               <div><strong>${chore.title}</strong><small>${occurrence?.date || "No occurrence this month"} · ${chore.assignee} · ${choreCadenceLabel(chore)}</small></div>
               ${occurrence ? `<button class="ghost chore-complete-button" data-complete-chore="${index}:${occurrence.date}" type="button">Complete</button>` : `<span class="pill">Recurring</span>`}
+              <button class="icon-button" data-edit-calendar-item="chore:${chore.id}" type="button" aria-label="Edit ${escapeHtml(chore.title)}">✎</button>
               <button class="icon-button danger-button" data-delete-calendar-item="chore:${chore.id}" type="button" aria-label="Remove ${escapeHtml(chore.title)}">×</button>
             </div>`;
           }).join("") : `<div class="empty-inline">No recurring chores</div>`}
         </section>
         <section class="card">
           <div class="section-head"><div><span class="card-label">Birthdays</span><h3>Birthday reminders</h3></div><button id="sideAddBirthdayButton" class="ghost" type="button">Add birthday</button></div>
-          ${state.calendar.events.filter((event) => event.type === "birthday").length ? state.calendar.events.filter((event) => event.type === "birthday").map((event) => compactRow(birthdayDisplayTitle(event), `${formatBirthdayMonthDay(event)} · every year · ${Number(event.reminderDays || 0)} days before`, "Annual", "", `data-delete-calendar-item="event:${event.id}" aria-label="Remove ${escapeHtml(birthdayDisplayTitle(event))}"`)).join("") : `<div class="empty-inline">No birthdays added</div>`}
+          ${state.calendar.events.filter((event) => event.type === "birthday").length ? state.calendar.events.filter((event) => event.type === "birthday").map((event) => calendarManageRow(birthdayDisplayTitle(event), `${formatBirthdayMonthDay(event)} · every year · ${Number(event.reminderDays || 0)} days before`, "Annual", "event", event.id)).join("") : `<div class="empty-inline">No birthdays added</div>`}
         </section>
       </aside>
     </section>`;
@@ -1218,6 +1222,15 @@ function renderAdmin() {
 
 function compactRow(title, detail, badge, tone = "", actionAttrs = "") {
   return `<div class="compact-row ${tone}"><div><strong>${title}</strong>${detail ? `<small>${detail}</small>` : ""}</div>${badge ? `<span class="pill">${badge}</span>` : ""}${actionAttrs ? `<button class="icon-button danger-button" ${actionAttrs} type="button">×</button>` : ""}</div>`;
+}
+
+function calendarManageRow(title, detail, badge, kind, id) {
+  return `<div class="compact-row">
+    <div><strong>${escapeHtml(title)}</strong>${detail ? `<small>${escapeHtml(detail)}</small>` : ""}</div>
+    ${badge ? `<span class="pill">${escapeHtml(badge)}</span>` : ""}
+    <button class="icon-button" data-edit-calendar-item="${kind}:${id}" type="button" aria-label="Edit ${escapeHtml(title)}">✎</button>
+    <button class="icon-button danger-button" data-delete-calendar-item="${kind}:${id}" type="button" aria-label="Remove ${escapeHtml(title)}">×</button>
+  </div>`;
 }
 
 function progressBlock(label, value, target) {
@@ -2315,29 +2328,43 @@ function bindViewEvents() {
   $("#calendarQuickAdd")?.addEventListener("submit", (event) => {
     event.preventDefault();
     const data = Object.fromEntries(new FormData(event.currentTarget));
+    const editingKind = data.editingKind;
+    const editingId = data.editingId;
+    if (editingKind === "event" && data.type === "chore") {
+      state.calendar.events = state.calendar.events.filter((item) => item.id !== editingId);
+    }
+    if (editingKind === "chore" && data.type !== "chore") {
+      state.calendar.chores = state.calendar.chores.filter((item) => item.id !== editingId);
+    }
     if (data.type === "chore") {
       const recurrence = data.recurrence || "once";
-      state.calendar.chores.push({
-        id: uniqueId("chore"),
+      const existing = editingKind === "chore" ? state.calendar.chores.find((chore) => chore.id === editingId) : null;
+      const chore = {
+        id: existing?.id || uniqueId("chore"),
         title: data.title,
         assignee: data.owner || "Demo User",
         cadence: choreCadenceLabel({ recurrence }),
         recurrence,
         startDate: data.date,
         nextDue: data.date,
-        completedDates: []
-      });
+        completedDates: existing?.completedDates || []
+      };
+      if (existing) Object.assign(existing, chore);
+      else state.calendar.chores.push(chore);
     } else {
       const isBirthday = data.type === "birthday";
-      state.calendar.events.push({
-        id: uniqueId("event"),
+      const existing = editingKind === "event" ? state.calendar.events.find((item) => item.id === editingId) : null;
+      const calendarEvent = {
+        id: existing?.id || uniqueId("event"),
         title: data.title,
         date: data.date,
         monthDay: isBirthday ? data.date.slice(5) : undefined,
         type: isBirthday ? "birthday" : "reminder",
         annual: isBirthday,
         reminderDays: isBirthday ? Number(data.reminderDays || 7) : undefined
-      });
+      };
+      if (existing) Object.assign(existing, calendarEvent);
+      else state.calendar.events.push(calendarEvent);
     }
     render();
   });
@@ -2369,6 +2396,12 @@ function bindViewEvents() {
       render();
     });
   });
+
+  document.querySelectorAll("[data-edit-calendar-item]").forEach((button) => {
+    button.addEventListener("click", () => editCalendarItem(button.dataset.editCalendarItem));
+  });
+
+  $("[data-calendar-cancel]")?.addEventListener("click", resetCalendarEditor);
 
   $("#addChoreButton")?.addEventListener("click", () => focusCalendarType("chore"));
   $("#sideAddChoreButton")?.addEventListener("click", () => focusCalendarType("chore"));
@@ -2465,9 +2498,48 @@ function bindViewEvents() {
 function focusCalendarType(type) {
   const form = $("#calendarQuickAdd");
   if (!form) return;
+  resetCalendarEditor();
   form.type.value = type;
   updateCalendarQuickAddFields();
   form.title.focus();
+}
+
+function editCalendarItem(reference) {
+  const form = $("#calendarQuickAdd");
+  if (!form || !reference) return;
+  const separator = reference.indexOf(":");
+  const kind = reference.slice(0, separator);
+  const id = reference.slice(separator + 1);
+  const item = kind === "chore"
+    ? state.calendar.chores.find((chore) => chore.id === id)
+    : state.calendar.events.find((event) => event.id === id);
+  if (!item) return;
+
+  form.editingKind.value = kind;
+  form.editingId.value = id;
+  form.type.value = kind === "chore" ? "chore" : item.type === "birthday" ? "birthday" : "reminder";
+  form.title.value = item.title || "";
+  form.date.value = kind === "chore" ? item.startDate || item.nextDue || `${state.budget.month}-01` : item.date || `${state.budget.month}-01`;
+  form.owner.value = kind === "chore" ? item.assignee || "" : item.owner || "";
+  form.recurrence.value = kind === "chore" ? item.recurrence || "once" : "once";
+  form.reminderDays.value = kind === "event" && item.type === "birthday" ? String(item.reminderDays ?? 7) : "7";
+  form.querySelector("[data-calendar-submit]").textContent = "Save changes";
+  form.querySelector("[data-calendar-cancel]").hidden = false;
+  updateCalendarQuickAddFields();
+  form.scrollIntoView({ behavior: "smooth", block: "center" });
+  form.title.focus();
+}
+
+function resetCalendarEditor() {
+  const form = $("#calendarQuickAdd");
+  if (!form) return;
+  form.reset();
+  form.editingKind.value = "";
+  form.editingId.value = "";
+  form.date.value = `${state.budget.month}-01`;
+  form.querySelector("[data-calendar-submit]").textContent = "Add";
+  form.querySelector("[data-calendar-cancel]").hidden = true;
+  updateCalendarQuickAddFields();
 }
 
 function updateCalendarQuickAddFields() {

@@ -1093,7 +1093,7 @@ main {
 
 .compact-row {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(0, auto) auto;
+  grid-template-columns: minmax(0, 1fr) minmax(0, auto) auto auto;
   align-items: center;
   gap: 0.65rem;
   padding: 0.65rem;
@@ -1364,14 +1364,25 @@ main {
 
 .event {
   display: block;
+  width: 100%;
   margin-top: 0.32rem;
+  border: 0;
   border-radius: 4px;
   padding: 0.18rem 0.25rem;
   background: #eaf2ff;
   color: var(--blue);
   font-size: 0.68rem;
   font-weight: 800;
+  line-height: 1.2;
+  text-align: left;
   overflow-wrap: anywhere;
+  cursor: pointer;
+}
+
+.event:hover,
+.event:focus-visible {
+  outline: 2px solid currentColor;
+  outline-offset: 1px;
 }
 
 .event.birthday {
