@@ -156,6 +156,71 @@ test("public signup cannot claim reserved administrator or demo identities", asy
   }
 });
 
+test("a user cannot create multiple households with the same currency", async () => {
+  const signin = await request("/api/auth/signin", {
+    method: "POST",
+    body: JSON.stringify({ email: adminEmail, password: initialPassword })
+  });
+  assert.equal(signin.status, 200);
+
+  const duplicateUsd = await request("/api/households", {
+    method: "POST",
+    headers: { cookie: signin.cookie },
+    body: JSON.stringify({ name: "Second USD Household", country: "EC" })
+  });
+  assert.equal(duplicateUsd.status, 409);
+  assert.equal(duplicateUsd.body.error, "You already belong to a household using USD");
+
+  const differentCurrency = await request("/api/households", {
+    method: "POST",
+    headers: { cookie: signin.cookie },
+    body: JSON.stringify({ name: "India Household", country: "IN" })
+  });
+  assert.equal(differentCurrency.status, 201);
+  assert.equal(differentCurrency.body.currency, "INR");
+});
+
+test("an existing user cannot accept an invitation for a duplicate currency", async () => {
+  const signup = await request("/api/auth/signup", {
+    method: "POST",
+    body: JSON.stringify({
+      email: "existing-usd-user@example.com",
+      password: "Existing-User-Password-123!",
+      name: "Existing User",
+      householdName: "Existing USD Household",
+      country: "US"
+    })
+  });
+  assert.equal(signup.status, 201);
+
+  const adminSignin = await request("/api/auth/signin", {
+    method: "POST",
+    body: JSON.stringify({ email: adminEmail, password: initialPassword })
+  });
+  const invitation = await request("/api/households/invitations", {
+    method: "POST",
+    headers: { cookie: adminSignin.cookie },
+    body: JSON.stringify({
+      email: "existing-usd-user@example.com",
+      name: "Existing User",
+      role: "Member",
+      scopes: ["Budget"]
+    })
+  });
+  assert.equal(invitation.status, 201);
+
+  const accepted = await request("/api/auth/invitations/accept", {
+    method: "POST",
+    body: JSON.stringify({
+      email: "existing-usd-user@example.com",
+      inviteCode: invitation.body.invitation.inviteCode,
+      password: "Existing-User-Password-123!"
+    })
+  });
+  assert.equal(accepted.status, 409);
+  assert.equal(accepted.body.error, "You already belong to a household using USD");
+});
+
 test("invitation code creates a login, joins the household, and is single-use", async () => {
   const adminSignin = await request("/api/auth/signin", {
     method: "POST",

@@ -157,6 +157,58 @@ function netWorth() {
   return { assets, liabilities, total: assets - liabilities };
 }
 
+function refreshNetWorthTotals() {
+  const totals = netWorth();
+  const total = document.querySelector("[data-net-worth-total]");
+  const assets = document.querySelector("[data-net-worth-assets]");
+  const liabilities = document.querySelector("[data-net-worth-liabilities]");
+  if (total) total.textContent = money.format(totals.total);
+  if (assets) assets.textContent = money.format(totals.assets);
+  if (liabilities) liabilities.textContent = money.format(totals.liabilities);
+}
+
+function ensureDebtNetWorthSync() {
+  state.goals.debts ||= [];
+  state.goals.netWorth ||= { assets: [], liabilities: [] };
+  state.goals.netWorth.assets ||= [];
+  state.goals.netWorth.liabilities ||= [];
+  if (state.goals.debtNetWorthLinked) return false;
+
+  state.goals.netWorth.assets.forEach((asset) => {
+    asset.id ||= uniqueId(asset.name || "asset");
+  });
+  const linkedDebtIds = new Set();
+  state.goals.netWorth.liabilities.forEach((liability) => {
+    liability.id ||= uniqueId(liability.name || "liability");
+    const debt = state.goals.debts.find((item) =>
+      item.id === liability.id || String(item.name).trim().toLowerCase() === String(liability.name).trim().toLowerCase()
+    );
+    if (debt) {
+      debt.id = liability.id;
+      debt.name = liability.name;
+      debt.balance = Math.max(0, Number(liability.value || 0));
+      debt.rate = Math.max(0, Number(debt.rate || 0));
+      debt.minimum = Math.max(0, Number(debt.minimum || 0));
+    } else {
+      state.goals.debts.push({
+        id: liability.id,
+        name: liability.name,
+        balance: Math.max(0, Number(liability.value || 0)),
+        rate: 0,
+        minimum: 0
+      });
+    }
+    linkedDebtIds.add(liability.id);
+  });
+  state.goals.debts = state.goals.debts.filter((debt) => linkedDebtIds.has(debt.id));
+  state.goals.debtNetWorthLinked = true;
+  return true;
+}
+
+function liabilityForDebt(debt) {
+  return state.goals.netWorth.liabilities.find((liability) => liability.id === debt.id);
+}
+
 function monthLabel() {
   return formatMonth(state.budget.month);
 }
@@ -677,11 +729,28 @@ function visibleNotes() {
   }).sort((a, b) => Number(b.pinned) - Number(a.pinned) || String(b.createdAt).localeCompare(String(a.createdAt)));
 }
 
+function noteChecklistSuggestions() {
+  ensureNotesData();
+  const seen = new Set();
+  return state.notes.entries.flatMap((note) => note.checklist || [])
+    .map((item) => String(item.text || "").trim())
+    .filter((text) => {
+      const key = text.toLowerCase();
+      if (!text || seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    })
+    .sort((a, b) => a.localeCompare(b));
+}
+
 function renderNotes() {
   ensureNotesData();
   const notes = visibleNotes();
   const pinned = notes.filter((note) => note.pinned);
   const others = notes.filter((note) => !note.pinned);
+  const checklistOptions = noteChecklistSuggestions()
+    .map((item) => `<option value="${escapeHtml(item)}"></option>`)
+    .join("");
   return `
     <section class="notes-layout">
       <aside class="notes-filter-panel">
@@ -700,6 +769,7 @@ function renderNotes() {
         <button class="${state.notes.activeView === "trash" ? "active" : ""}" data-notes-view="trash" type="button">Trash</button>
       </aside>
       <div class="notes-workspace">
+        <datalist id="noteChecklistSuggestions">${checklistOptions}</datalist>
         <div class="notes-search">
           <span aria-hidden="true">⌕</span>
           <input id="notesSearch" placeholder="Search household notes" value="${state.notes.search || ""}">
@@ -741,7 +811,7 @@ function renderNoteCard(note) {
     ${note.reminder ? `<div class="note-reminder">Reminder · ${formatShortDate(note.reminder)}</div>` : ""}
     ${open.map(checklistRow).join("")}
     <form class="note-add-item-form" data-add-note-item="${note.id}">
-      <input name="item" placeholder="Add checklist item" aria-label="Add checklist item">
+      <input name="item" list="noteChecklistSuggestions" placeholder="Add checklist item" aria-label="Add checklist item" autocomplete="off">
       <button type="submit">Add</button>
     </form>
     ${completed.length ? `<details class="note-completed"><summary>${completed.length} completed ${completed.length === 1 ? "item" : "items"}</summary>${completed.map(checklistRow).join("")}</details>` : ""}
@@ -866,20 +936,36 @@ function renderGoals() {
 }
 
 function renderWealth() {
+  if (ensureDebtNetWorthSync()) autosaveState();
   return `
     <section class="work-grid">
       <div class="main-stack">
         <section class="card">
           <div class="section-head"><div><span class="card-label">Debt snowball</span><h3>Debt payoff tracker</h3></div><button id="addDebtButton" type="button">+ Add debt</button></div>
           ${state.goals.debts.map((debt, index) => `<article class="debt-card">
-            <div class="section-head"><div><strong>${index === 0 ? "Next: " : ""}${debt.name}</strong><small>${money.format(debt.minimum)} minimum · ${debt.rate}% APR</small></div><b>${money.format(debt.balance)}</b></div>
+            <div class="debt-edit-grid">
+              <label class="debt-name-field">Debt name<input data-debt-name="${index}" value="${escapeHtml(debt.name)}" aria-label="Debt name"></label>
+              <label>Current balance<input data-debt-balance="${index}" type="number" min="0" step="0.01" inputmode="decimal" value="${Number(debt.balance || 0)}" aria-label="Current balance for ${escapeHtml(debt.name)}"></label>
+              <label>Interest rate (APR %)<input data-debt-rate="${index}" type="number" min="0" step="0.01" inputmode="decimal" value="${Number(debt.rate || 0)}" aria-label="Interest rate for ${escapeHtml(debt.name)}"></label>
+              <label>Minimum payment<input data-debt-minimum="${index}" type="number" min="0" step="0.01" inputmode="decimal" value="${Number(debt.minimum || 0)}" aria-label="Minimum payment for ${escapeHtml(debt.name)}"></label>
+            </div>
             <div class="bar"><span style="width:${Math.max(4, Math.min(95, Math.round((1 - debt.balance / 15000) * 100)))}%"></span></div>
             <div class="payment-row"><label>Extra payment<input data-debt-payment="${index}" value="100" type="number" min="0"></label><button class="ghost" data-apply-debt-payment="${index}" type="button">Apply payment</button><button class="icon-button danger-button" data-delete-debt="${index}" type="button">×</button></div>
           </article>`).join("")}
         </section>
       </div>
-      <aside class="side-stack"><section class="card"><div class="section-head"><div><span class="card-label">Net worth</span><h3>Assets and liabilities</h3></div><button id="addNetWorthItemButton" type="button">+ Add item</button></div><div class="net-worth-strip"><strong>${money.format(netWorth().total)}</strong><span>Assets ${money.format(netWorth().assets)} Liabilities ${money.format(netWorth().liabilities)}</span></div>${state.goals.netWorth.assets.map((asset, index) => compactRow(asset.name, "Asset", money.format(asset.value), "", `data-delete-asset="${index}"`)).join("")}${state.goals.netWorth.liabilities.map((item, index) => compactRow(item.name, "Liability", money.format(item.value), "danger", `data-delete-liability="${index}"`)).join("")}</section></aside>
+      <aside class="side-stack"><section class="card"><div class="section-head"><div><span class="card-label">Net worth</span><h3>Assets and liabilities</h3></div><button id="addNetWorthItemButton" type="button">+ Add item</button></div><div class="net-worth-strip"><strong data-net-worth-total>${money.format(netWorth().total)}</strong><span>Assets <b data-net-worth-assets>${money.format(netWorth().assets)}</b> Liabilities <b data-net-worth-liabilities>${money.format(netWorth().liabilities)}</b></span></div><div class="net-worth-items">${state.goals.netWorth.assets.map((asset, index) => netWorthItemRow(asset, "asset", index)).join("")}${state.goals.netWorth.liabilities.map((item, index) => netWorthItemRow(item, "liability", index)).join("")}</div></section></aside>
     </section>`;
+}
+
+function netWorthItemRow(item, type, index) {
+  const isLiability = type === "liability";
+  return `<div class="net-worth-item ${isLiability ? "liability" : ""}">
+    <label class="net-worth-name">Name<input data-net-worth-name="${type}:${index}" value="${escapeHtml(item.name)}" aria-label="${isLiability ? "Liability" : "Asset"} name"></label>
+    <label>Type<select data-net-worth-type="${type}:${index}" aria-label="Item type"><option value="asset" ${isLiability ? "" : "selected"}>Asset</option><option value="liability" ${isLiability ? "selected" : ""}>Liability</option></select></label>
+    <label>Amount<input data-net-worth-value="${type}:${index}" type="number" min="0" step="0.01" inputmode="decimal" value="${Number(item.value || 0)}" aria-label="${isLiability ? "Liability" : "Asset"} amount"></label>
+    <button class="icon-button danger-button" data-delete-${type}="${index}" type="button" aria-label="Remove ${escapeHtml(item.name)}">×</button>
+  </div>`;
 }
 
 function renderSharing() {
@@ -1933,8 +2019,51 @@ function bindViewEvents() {
   });
 
   $("#addDebtButton")?.addEventListener("click", () => {
-    state.goals.debts.push({ name: `New debt ${state.goals.debts.length + 1}`, balance: 1000, rate: 0, minimum: 50 });
+    const name = `New debt ${state.goals.debts.length + 1}`;
+    const id = uniqueId(name);
+    state.goals.debts.push({ id, name, balance: 1000, rate: 0, minimum: 50 });
+    state.goals.netWorth.liabilities.push({ id, name, value: 1000 });
+    autosaveState();
     render();
+  });
+
+  document.querySelectorAll("[data-debt-name]").forEach((input) => {
+    input.addEventListener("input", () => {
+      const debt = state.goals.debts[Number(input.dataset.debtName)];
+      debt.name = input.value;
+      const liability = liabilityForDebt(debt);
+      if (liability) liability.name = input.value;
+      autosaveState();
+    });
+    input.addEventListener("change", () => {
+      const debt = state.goals.debts[Number(input.dataset.debtName)];
+      debt.name = input.value.trim() || "Untitled debt";
+      const liability = liabilityForDebt(debt);
+      if (liability) liability.name = debt.name;
+      input.value = debt.name;
+      autosaveState();
+    });
+  });
+
+  [
+    ["debtBalance", "balance"],
+    ["debtRate", "rate"],
+    ["debtMinimum", "minimum"]
+  ].forEach(([datasetKey, property]) => {
+    document.querySelectorAll(`[data-${datasetKey.replace(/[A-Z]/g, (letter) => `-${letter.toLowerCase()}`)}]`).forEach((input) => {
+      input.addEventListener("input", () => {
+        const index = Number(input.dataset[datasetKey]);
+        const debt = state.goals.debts[index];
+        debt[property] = Math.max(0, Number(input.value || 0));
+        if (property === "balance") {
+          const liability = liabilityForDebt(debt);
+          if (liability) liability.value = debt.balance;
+          refreshNetWorthTotals();
+        }
+        autosaveState();
+      });
+      input.addEventListener("change", () => render());
+    });
   });
 
   document.querySelectorAll("[data-apply-debt-payment]").forEach((button) => {
@@ -1942,33 +2071,104 @@ function bindViewEvents() {
       const index = Number(button.dataset.applyDebtPayment);
       const amount = Number(document.querySelector(`[data-debt-payment="${index}"]`)?.value || 0);
       state.goals.debts[index].balance = Math.max(0, state.goals.debts[index].balance - amount);
+      const liability = liabilityForDebt(state.goals.debts[index]);
+      if (liability) liability.value = state.goals.debts[index].balance;
       state.household.activity.unshift(`Applied ${money.format(amount)} to ${state.goals.debts[index].name}`);
+      autosaveState();
       render();
     });
   });
 
   document.querySelectorAll("[data-delete-debt]").forEach((button) => {
     button.addEventListener("click", () => {
-      state.goals.debts.splice(Number(button.dataset.deleteDebt), 1);
+      const [debt] = state.goals.debts.splice(Number(button.dataset.deleteDebt), 1);
+      if (debt) state.goals.netWorth.liabilities = state.goals.netWorth.liabilities.filter((liability) => liability.id !== debt.id);
+      autosaveState();
       render();
     });
   });
 
   $("#addNetWorthItemButton")?.addEventListener("click", () => {
-    state.goals.netWorth.assets.push({ name: `New asset ${state.goals.netWorth.assets.length + 1}`, value: 0 });
+    const name = `New asset ${state.goals.netWorth.assets.length + 1}`;
+    state.goals.netWorth.assets.push({ id: uniqueId(name), name, value: 0 });
+    autosaveState();
     render();
+  });
+
+  document.querySelectorAll("[data-net-worth-name]").forEach((input) => {
+    input.addEventListener("input", () => {
+      const [type, indexValue] = input.dataset.netWorthName.split(":");
+      const collection = type === "asset" ? state.goals.netWorth.assets : state.goals.netWorth.liabilities;
+      const item = collection[Number(indexValue)];
+      item.name = input.value;
+      if (type === "liability") {
+        const debt = state.goals.debts.find((entry) => entry.id === item.id);
+        if (debt) debt.name = input.value;
+      }
+      autosaveState();
+    });
+    input.addEventListener("change", () => {
+      if (!input.value.trim()) input.value = "Untitled item";
+      const [type, indexValue] = input.dataset.netWorthName.split(":");
+      const collection = type === "asset" ? state.goals.netWorth.assets : state.goals.netWorth.liabilities;
+      const item = collection[Number(indexValue)];
+      item.name = input.value.trim();
+      if (type === "liability") {
+        const debt = state.goals.debts.find((entry) => entry.id === item.id);
+        if (debt) debt.name = item.name;
+      }
+      autosaveState();
+    });
+  });
+
+  document.querySelectorAll("[data-net-worth-value]").forEach((input) => {
+    input.addEventListener("input", () => {
+      const [type, indexValue] = input.dataset.netWorthValue.split(":");
+      const collection = type === "asset" ? state.goals.netWorth.assets : state.goals.netWorth.liabilities;
+      const item = collection[Number(indexValue)];
+      item.value = Math.max(0, Number(input.value || 0));
+      if (type === "liability") {
+        const debt = state.goals.debts.find((entry) => entry.id === item.id);
+        if (debt) debt.balance = item.value;
+      }
+      refreshNetWorthTotals();
+      autosaveState();
+    });
+  });
+
+  document.querySelectorAll("[data-net-worth-type]").forEach((select) => {
+    select.addEventListener("change", () => {
+      const [type, indexValue] = select.dataset.netWorthType.split(":");
+      if (select.value === type) return;
+      const source = type === "asset" ? state.goals.netWorth.assets : state.goals.netWorth.liabilities;
+      const destination = select.value === "asset" ? state.goals.netWorth.assets : state.goals.netWorth.liabilities;
+      const [item] = source.splice(Number(indexValue), 1);
+      if (item) {
+        destination.push(item);
+        if (select.value === "liability") {
+          state.goals.debts.push({ id: item.id, name: item.name, balance: Number(item.value || 0), rate: 0, minimum: 0 });
+        } else {
+          state.goals.debts = state.goals.debts.filter((debt) => debt.id !== item.id);
+        }
+      }
+      autosaveState();
+      render();
+    });
   });
 
   document.querySelectorAll("[data-delete-asset]").forEach((button) => {
     button.addEventListener("click", () => {
       state.goals.netWorth.assets.splice(Number(button.dataset.deleteAsset), 1);
+      autosaveState();
       render();
     });
   });
 
   document.querySelectorAll("[data-delete-liability]").forEach((button) => {
     button.addEventListener("click", () => {
-      state.goals.netWorth.liabilities.splice(Number(button.dataset.deleteLiability), 1);
+      const [liability] = state.goals.netWorth.liabilities.splice(Number(button.dataset.deleteLiability), 1);
+      if (liability) state.goals.debts = state.goals.debts.filter((debt) => debt.id !== liability.id);
+      autosaveState();
       render();
     });
   });
@@ -2504,6 +2704,11 @@ $("#householdForm").addEventListener("submit", async (event) => {
   submitButton.disabled = true;
   $("#householdDialogMessage").textContent = "";
   try {
+    const selectedCountry = countryCatalog.find((country) => country.code === data.country);
+    const duplicateCurrency = households.find((household) => household.currency === selectedCountry?.currency);
+    if (duplicateCurrency) {
+      throw new Error(`You already belong to a household using ${selectedCountry.currency}`);
+    }
     await saveStateNow();
     await api("/api/households", {
       method: "POST",

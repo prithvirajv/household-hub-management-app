@@ -1457,6 +1457,81 @@ main {
   font-weight: 800;
 }
 
+.net-worth-strip span b {
+  color: inherit;
+}
+
+.debt-edit-grid {
+  display: grid;
+  grid-template-columns: minmax(150px, 1.35fr) repeat(3, minmax(110px, 0.75fr));
+  gap: 0.65rem;
+  align-items: end;
+}
+
+.debt-edit-grid label {
+  min-width: 0;
+  color: var(--muted);
+  font-size: 0.7rem;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+
+.debt-edit-grid input {
+  width: 100%;
+  min-height: 40px;
+  margin-top: 0.2rem;
+  border-color: var(--line);
+  background: white;
+  color: var(--text);
+  font-size: 0.9rem;
+  font-weight: 800;
+  text-transform: none;
+}
+
+.net-worth-items {
+  display: grid;
+  gap: 0.65rem;
+}
+
+.net-worth-item {
+  display: grid;
+  grid-template-columns: minmax(130px, 1.2fr) minmax(92px, 0.7fr) minmax(115px, 0.9fr) auto;
+  align-items: end;
+  gap: 0.55rem;
+  border-left: 5px solid var(--green);
+  border-radius: 7px;
+  background: var(--soft-blue);
+  padding: 0.7rem;
+}
+
+.net-worth-item.liability {
+  border-left-color: var(--coral);
+}
+
+.net-worth-item label {
+  min-width: 0;
+  color: var(--muted);
+  font-size: 0.68rem;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+
+.net-worth-item input,
+.net-worth-item select {
+  width: 100%;
+  min-height: 38px;
+  margin-top: 0.2rem;
+  background: white;
+  color: var(--text);
+  font-size: 0.84rem;
+  font-weight: 800;
+  text-transform: none;
+}
+
+.net-worth-item .icon-button {
+  min-height: 38px;
+}
+
 .donut {
   width: 170px;
   aspect-ratio: 1;
@@ -2302,5 +2377,40 @@ main {
 
   .notes-board {
     grid-template-columns: 1fr;
+  }
+
+  .net-worth-item {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) 38px;
+    grid-template-areas:
+      "name name delete"
+      "type amount delete";
+    align-items: end;
+  }
+
+  .net-worth-name {
+    grid-area: name;
+  }
+
+  .net-worth-item label:nth-of-type(2) {
+    grid-area: type;
+  }
+
+  .net-worth-item label:nth-of-type(3) {
+    grid-area: amount;
+  }
+
+  .net-worth-item .icon-button {
+    grid-area: delete;
+    align-self: stretch;
+    width: 38px;
+    min-width: 38px;
+  }
+
+  .debt-edit-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .debt-name-field {
+    grid-column: 1 / -1;
   }
 }

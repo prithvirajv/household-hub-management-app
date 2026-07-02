@@ -289,6 +289,33 @@ function householdState(name, country = "US", currency = "USD") {
   return state;
 }
 
+function duplicateCurrencyMessage(currency) {
+  return `You already belong to a household using ${currency}`;
+}
+
+function memoryUserHasCurrency(userId, currency, excludeHouseholdId = "") {
+  return memoryDb.memberships
+    .filter((membership) => membership.user_id === userId && membership.household_id !== excludeHouseholdId)
+    .some((membership) => {
+      const household = memoryDb.households.find((item) => item.id === membership.household_id);
+      return (household?.app_state?.household?.currency || "USD") === currency;
+    });
+}
+
+async function databaseUserHasCurrency(client, userId, currency, excludeHouseholdId = "") {
+  const result = await client.query(
+    `SELECT 1
+     FROM household_memberships hm
+     JOIN households h ON h.id = hm.household_id
+     WHERE hm.user_id = $1
+       AND COALESCE(h.app_state->'household'->>'currency', 'USD') = $2
+       AND ($3 = '' OR h.id::text <> $3)
+     LIMIT 1`,
+    [userId, currency, excludeHouseholdId]
+  );
+  return result.rowCount > 0;
+}
+
 async function createHouseholdForUser(client, userId, name, state = defaultState) {
   const inviteCode = makeInviteCode();
   state.household.inviteCode = inviteCode;
@@ -892,6 +919,10 @@ app.post("/api/auth/invitations/accept", async (req, res, next) => {
         if (!(await bcrypt.compare(password, user.password_hash))) {
           return res.status(401).json({ error: "Enter the password for the existing account" });
         }
+        const invitedCurrency = household?.app_state?.household?.currency || "USD";
+        if (memoryUserHasCurrency(user.id, invitedCurrency, invitation.household_id)) {
+          return res.status(409).json({ error: duplicateCurrencyMessage(invitedCurrency) });
+        }
       } else {
         if (password.length < 12) {
           return res.status(400).json({ error: "Create a password of at least 12 characters" });
@@ -957,6 +988,16 @@ app.post("/api/auth/invitations/accept", async (req, res, next) => {
           if (!(await bcrypt.compare(password, user.password_hash))) {
             await client.query("ROLLBACK");
             return res.status(401).json({ error: "Enter the password for the existing account" });
+          }
+          const currencyResult = await client.query(
+            "SELECT COALESCE(app_state->'household'->>'currency', 'USD') AS currency FROM households WHERE id = $1",
+            [invitation.household_id]
+          );
+          const invitedCurrency = currencyResult.rows[0]?.currency || "USD";
+          await client.query("SELECT pg_advisory_xact_lock(hashtextextended($1, 0))", [user.id]);
+          if (await databaseUserHasCurrency(client, user.id, invitedCurrency, String(invitation.household_id))) {
+            await client.query("ROLLBACK");
+            return res.status(409).json({ error: duplicateCurrencyMessage(invitedCurrency) });
           }
         } else {
           if (password.length < 12) {
@@ -1271,6 +1312,9 @@ app.post("/api/households", requireSession, async (req, res, next) => {
     const state = householdState(name, country, currency);
 
     if (MEMORY_DB) {
+      if (memoryUserHasCurrency(req.sessionUser.id, currency)) {
+        return res.status(409).json({ error: duplicateCurrencyMessage(currency) });
+      }
       const household = {
         id: crypto.randomUUID(),
         name,
@@ -1287,6 +1331,11 @@ app.post("/api/households", requireSession, async (req, res, next) => {
     const client = await pool.connect();
     try {
       await client.query("BEGIN");
+      await client.query("SELECT pg_advisory_xact_lock(hashtextextended($1, 0))", [req.sessionUser.id]);
+      if (await databaseUserHasCurrency(client, req.sessionUser.id, currency)) {
+        await client.query("ROLLBACK");
+        return res.status(409).json({ error: duplicateCurrencyMessage(currency) });
+      }
       const household = await createHouseholdForUser(client, req.sessionUser.id, name, state);
       await client.query("COMMIT");
       selectHousehold(res, household.id);
