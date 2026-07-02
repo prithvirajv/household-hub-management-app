@@ -1701,7 +1701,9 @@ main {
   border-top: 1px solid var(--line);
 }
 
-.note-composer-row label {
+.note-composer-row > label,
+.note-label-picker-field,
+.note-card-label-editor {
   min-width: 0;
   color: var(--muted);
   font-size: 0.72rem;
@@ -1721,6 +1723,82 @@ main {
   gap: 0.4rem;
   color: var(--text);
   white-space: nowrap;
+}
+
+.note-label-picker {
+  position: relative;
+  margin-top: 0.25rem;
+  color: var(--text);
+  font-size: 0.82rem;
+  text-transform: none;
+}
+
+.note-label-picker summary {
+  display: flex;
+  min-height: 42px;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.45rem 0.65rem;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: white;
+  cursor: pointer;
+  list-style: none;
+}
+
+.note-label-picker summary::-webkit-details-marker {
+  display: none;
+}
+
+.note-label-picker summary::after {
+  content: "▾";
+  color: var(--muted);
+}
+
+.note-label-picker[open] summary::after {
+  content: "▴";
+}
+
+.note-label-picker-options {
+  position: absolute;
+  z-index: 25;
+  top: calc(100% + 4px);
+  right: 0;
+  left: 0;
+  display: grid;
+  overflow-y: auto;
+  max-height: 220px;
+  padding: 0.35rem;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: white;
+  box-shadow: 0 8px 20px rgba(25, 38, 61, 0.16);
+}
+
+.note-label-picker-options label {
+  display: flex;
+  min-height: 38px;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.35rem 0.45rem;
+  border-radius: 5px;
+  color: var(--text);
+  cursor: pointer;
+}
+
+.note-label-picker-options label:hover {
+  background: var(--soft-blue);
+}
+
+.note-label-picker-options input {
+  width: 18px;
+  height: 18px;
+  margin: 0;
+}
+
+.note-label-picker-options small {
+  padding: 0.5rem;
+  color: var(--muted);
 }
 
 .notes-result-section {
@@ -1969,6 +2047,14 @@ main {
   display: flex;
   gap: 0.35rem;
   flex-wrap: wrap;
+}
+
+.note-labels:empty {
+  display: none;
+}
+
+.note-card-label-editor {
+  max-width: 220px;
 }
 
 .note-labels {

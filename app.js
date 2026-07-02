@@ -815,7 +815,7 @@ function renderNotes() {
           <textarea name="body" rows="2" placeholder="Take a note..."></textarea>
           <textarea name="items" rows="2" placeholder="Checklist items, one per line"></textarea>
           <div class="note-composer-row">
-            <label>Label<select name="label"><option value="">No label</option>${state.notes.labels.map((label) => `<option value="${label}">${label}</option>`).join("")}</select></label>
+            <div class="note-label-picker-field"><span>Labels</span>${renderNoteLabelPicker()}</div>
             <label>Color<select name="color"><option value="#ffffff">White</option><option value="#fff7d6">Yellow</option><option value="#eef7ff">Blue</option><option value="#eaf8ef">Green</option><option value="#fff0ee">Coral</option></select></label>
             <label>Reminder<input name="reminder" type="date"></label>
             <label class="note-pin-toggle"><input name="pinned" type="checkbox"> Pin</label>
@@ -828,6 +828,20 @@ function renderNotes() {
         ` : `<div class="notes-empty">No notes match this view.</div>`}
       </div>
     </section>`;
+}
+
+function renderNoteLabelPicker(note = null) {
+  const selected = new Set(note?.labels || []);
+  const count = selected.size;
+  return `<details class="note-label-picker">
+    <summary>${count ? `${count} selected` : "No labels"}</summary>
+    <div class="note-label-picker-options">
+      ${state.notes.labels.length ? state.notes.labels.map((label) => `<label>
+        <input type="checkbox" ${note ? `data-note-label-toggle="${note.id}"` : `name="labels"`} value="${escapeHtml(label)}" ${selected.has(label) ? "checked" : ""}>
+        <span>${escapeHtml(label)}</span>
+      </label>`).join("") : `<small>No labels created yet</small>`}
+    </div>
+  </details>`;
 }
 
 function renderNoteCard(note) {
@@ -854,7 +868,8 @@ function renderNoteCard(note) {
       <button type="submit">Add</button>
     </form>
     ${completed.length ? `<details class="note-completed"><summary>${completed.length} completed ${completed.length === 1 ? "item" : "items"}</summary>${completed.map(checklistRow).join("")}</details>` : ""}
-    ${note.labels.length ? `<div class="note-labels">${note.labels.map((label) => `<span>${escapeHtml(label)}</span>`).join("")}</div>` : ""}
+    <div class="note-labels" data-note-label-list="${note.id}">${note.labels.map((label) => `<span>${escapeHtml(label)}</span>`).join("")}</div>
+    <div class="note-card-label-editor"><span>Labels</span>${renderNoteLabelPicker(note)}</div>
     <div class="note-card-actions">
       ${note.trashed ? `<button data-restore-note="${note.id}" type="button">Restore</button><button class="danger-button" data-delete-note-forever="${note.id}" type="button">Delete</button>` : `<button data-archive-note="${note.id}" type="button">${note.archived ? "Unarchive" : "Archive"}</button><button class="danger-button" data-trash-note="${note.id}" type="button">Trash</button>`}
     </div>
@@ -1534,7 +1549,8 @@ function bindViewEvents() {
 
   $("#noteComposer")?.addEventListener("submit", (event) => {
     event.preventDefault();
-    const data = Object.fromEntries(new FormData(event.currentTarget));
+    const formData = new FormData(event.currentTarget);
+    const data = Object.fromEntries(formData);
     const checklist = String(data.items || "").split("\n").map((item) => item.trim()).filter(Boolean);
     if (!String(data.title || "").trim() && !String(data.body || "").trim() && checklist.length === 0) return;
     state.notes.entries.unshift({
@@ -1542,7 +1558,7 @@ function bindViewEvents() {
       title: String(data.title || "").trim(),
       body: String(data.body || "").trim(),
       checklist: checklist.map((text) => ({ id: uniqueId("item"), text, done: false })),
-      labels: data.label ? [data.label] : [],
+      labels: formData.getAll("labels"),
       reminder: data.reminder || "",
       color: data.color || "#ffffff",
       pinned: data.pinned === "on",
@@ -1591,6 +1607,20 @@ function bindViewEvents() {
       const checklistItem = note?.checklist.find((item) => item.id === itemId);
       if (!checklistItem) return;
       checklistItem.text = input.value;
+      autosaveState();
+    });
+  });
+
+  document.querySelectorAll("[data-note-label-toggle]").forEach((input) => {
+    input.addEventListener("change", () => {
+      const note = state.notes.entries.find((item) => item.id === input.dataset.noteLabelToggle);
+      if (!note) return;
+      if (input.checked && !note.labels.includes(input.value)) note.labels.push(input.value);
+      if (!input.checked) note.labels = note.labels.filter((label) => label !== input.value);
+      const list = document.querySelector(`[data-note-label-list="${note.id}"]`);
+      if (list) list.innerHTML = note.labels.map((label) => `<span>${escapeHtml(label)}</span>`).join("");
+      const summary = input.closest(".note-label-picker")?.querySelector("summary");
+      if (summary) summary.textContent = note.labels.length ? `${note.labels.length} selected` : "No labels";
       autosaveState();
     });
   });
