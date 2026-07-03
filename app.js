@@ -811,7 +811,6 @@ function renderNotes() {
             <div data-composer-checklist-items></div>
             <div class="note-composer-add-item">
               <input data-composer-item-input placeholder="Add checklist item" aria-label="Add checklist item" autocomplete="off">
-              <button data-composer-add-item type="button">Add item</button>
             </div>
             <input name="items" type="hidden">
           </div>
@@ -819,7 +818,8 @@ function renderNotes() {
             <div class="note-label-picker-field"><span>Labels</span>${renderNoteLabelPicker()}</div>
             <label>Color<select name="color"><option value="#ffffff">White</option><option value="#fff7d6">Yellow</option><option value="#eef7ff">Blue</option><option value="#eaf8ef">Green</option><option value="#fff0ee">Coral</option></select></label>
             ${state.notes.activeView === "reminders" ? `<label>Reminder date<input name="reminder" type="date" required></label>` : ""}
-            <label class="note-pin-toggle"><input name="pinned" type="checkbox"> Pin</label>
+            <input name="pinned" type="checkbox" hidden>
+            <button class="note-pin-toggle" data-composer-pin type="button" aria-label="Pin note" aria-pressed="false" title="Pin note">⌖</button>
             <button id="closeNoteComposerButton" class="ghost" type="button">Close</button>
             <button type="submit">${state.notes.activeView === "reminders" ? "Add reminder" : "Add note"}</button>
           </div>
@@ -898,7 +898,6 @@ function renderNoteCard(note) {
         <input name="item" data-note-item-input="${note.id}" placeholder="Add checklist item" aria-label="Add checklist item" aria-autocomplete="list" aria-expanded="false" autocomplete="off">
         <div class="note-item-suggestions" data-note-item-suggestions="${note.id}" role="listbox" hidden></div>
       </div>
-      <button type="submit">Add</button>
     </form>` : ""}
     ${note.showChecklist && completed.length ? `<details class="note-completed"><summary>${completed.length} completed ${completed.length === 1 ? "item" : "items"}</summary>${completed.map(checklistRow).join("")}</details>` : ""}
     <div class="note-labels" data-note-label-list="${note.id}">${note.labels.map((label) => `<span>${escapeHtml(label)}</span>`).join("")}</div>
@@ -954,15 +953,19 @@ function setupNoteComposerChecklist() {
   const form = $("#noteComposer");
   if (!form) return;
   const input = form.querySelector("[data-composer-item-input]");
-  const addButton = form.querySelector("[data-composer-add-item]");
-  addButton?.addEventListener("click", () => {
-    commitNoteComposerDraft(form);
-    input?.focus();
-  });
   input?.addEventListener("keydown", (event) => {
     if (event.key !== "Enter") return;
     event.preventDefault();
     commitNoteComposerDraft(form);
+  });
+  const pinButton = form.querySelector("[data-composer-pin]");
+  const pinInput = form.querySelector('input[name="pinned"]');
+  pinButton?.addEventListener("click", () => {
+    pinInput.checked = !pinInput.checked;
+    pinButton.classList.toggle("active", pinInput.checked);
+    pinButton.setAttribute("aria-pressed", String(pinInput.checked));
+    pinButton.setAttribute("aria-label", pinInput.checked ? "Unpin note" : "Pin note");
+    pinButton.title = pinInput.checked ? "Unpin note" : "Pin note";
   });
 }
 
@@ -1841,9 +1844,16 @@ function bindViewEvents() {
       });
     });
     input.addEventListener("keydown", (event) => {
-      if (event.key !== "Escape") return;
-      suggestions.hidden = true;
-      input.setAttribute("aria-expanded", "false");
+      if (event.key === "Enter") {
+        event.preventDefault();
+        const note = state.notes.entries.find((item) => item.id === input.dataset.noteItemInput);
+        if (addOrRestoreChecklistItem(note, input.value)) render();
+        return;
+      }
+      if (event.key === "Escape") {
+        suggestions.hidden = true;
+        input.setAttribute("aria-expanded", "false");
+      }
     });
   });
 
