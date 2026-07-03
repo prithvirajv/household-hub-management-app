@@ -781,14 +781,8 @@ function renderNotes() {
         <button class="${state.notes.activeView === "notes" ? "active" : ""}" data-notes-view="notes" type="button">Notes</button>
         <button class="${state.notes.activeView === "reminders" ? "active" : ""}" data-notes-view="reminders" type="button">Reminders</button>
         <div class="notes-filter-label">Labels</div>
-        ${state.notes.labels.map((label) => `<div class="notes-label-row">
-          <button class="${state.notes.activeView === "label" && state.notes.activeLabel === label ? "active" : ""}" data-notes-label="${label}" type="button">${label}</button>
-          <button class="note-label-delete" data-delete-note-label="${label}" type="button" aria-label="Delete ${label} label">×</button>
-        </div>`).join("")}
-        <form id="noteLabelForm" class="note-label-form">
-          <input name="label" placeholder="New label" aria-label="New label">
-          <button type="submit" aria-label="Add label">+</button>
-        </form>
+        ${state.notes.labels.map((label) => `<button class="${state.notes.activeView === "label" && state.notes.activeLabel === label ? "active" : ""}" data-notes-label="${escapeHtml(label)}" type="button">${escapeHtml(label)}</button>`).join("")}
+        <button id="editNoteLabelsButton" class="notes-edit-labels" type="button">Edit labels</button>
         <button class="${state.notes.activeView === "archive" ? "active" : ""}" data-notes-view="archive" type="button">Archive</button>
         <button class="${state.notes.activeView === "trash" ? "active" : ""}" data-notes-view="trash" type="button">Trash</button>
       </aside>
@@ -821,7 +815,33 @@ function renderNotes() {
           ${others.length ? `<section class="notes-result-section"><div class="notes-section-label">${pinned.length ? "Others" : "Notes"}</div><div class="notes-board">${others.map(renderNoteCard).join("")}</div></section>` : ""}
         ` : `<div class="notes-empty">No notes match this view.</div>`}
       </div>
+      <dialog id="noteLabelsDialog" class="app-dialog note-labels-dialog">
+        <div class="note-labels-dialog-content">
+          <div class="section-head">
+            <h2>Edit labels</h2>
+            <button id="closeNoteLabelsDialogButton" class="icon-button ghost" type="button" aria-label="Close label editor">×</button>
+          </div>
+          <form id="noteLabelForm" class="note-label-create-form">
+            <input name="label" placeholder="Create new label" aria-label="Create new label" required>
+            <button type="submit" aria-label="Add new label">✓</button>
+          </form>
+          <div class="note-label-manager-list">
+            ${state.notes.labels.length ? state.notes.labels.map((label, index) => `<form class="note-label-manager-row" data-rename-note-label="${index}">
+              <span aria-hidden="true">◆</span>
+              <input name="label" value="${escapeHtml(label)}" aria-label="Rename ${escapeHtml(label)} label" required>
+              <button type="submit" class="icon-button ghost" aria-label="Save ${escapeHtml(label)} label">✓</button>
+              <button type="button" class="icon-button danger-button" data-delete-note-label="${index}" aria-label="Delete ${escapeHtml(label)} label">×</button>
+            </form>`).join("") : `<p class="note-label-manager-empty">No labels created yet.</p>`}
+          </div>
+          <div class="dialog-actions"><button id="doneNoteLabelsButton" type="button">Done</button></div>
+        </div>
+      </dialog>
     </section>`;
+}
+
+function reopenNoteLabelsDialog() {
+  render();
+  $("#noteLabelsDialog")?.showModal();
 }
 
 function renderNoteLabelPicker(note = null) {
@@ -1599,19 +1619,39 @@ function bindViewEvents() {
     });
   });
 
+  $("#editNoteLabelsButton")?.addEventListener("click", () => $("#noteLabelsDialog")?.showModal());
+  $("#closeNoteLabelsDialogButton")?.addEventListener("click", () => $("#noteLabelsDialog")?.close());
+  $("#doneNoteLabelsButton")?.addEventListener("click", () => $("#noteLabelsDialog")?.close());
+
   $("#noteLabelForm")?.addEventListener("submit", (event) => {
     event.preventDefault();
     const label = String(new FormData(event.currentTarget).get("label") || "").trim();
     if (!label || state.notes.labels.some((item) => item.toLowerCase() === label.toLowerCase())) return;
     state.notes.labels.push(label);
-    state.notes.activeView = "label";
-    state.notes.activeLabel = label;
-    render();
+    reopenNoteLabelsDialog();
+  });
+
+  document.querySelectorAll("[data-rename-note-label]").forEach((form) => {
+    form.addEventListener("submit", (event) => {
+      event.preventDefault();
+      const index = Number(form.dataset.renameNoteLabel);
+      const previousLabel = state.notes.labels[index];
+      const nextLabel = String(new FormData(form).get("label") || "").trim();
+      if (!previousLabel || !nextLabel) return;
+      if (state.notes.labels.some((label, labelIndex) => labelIndex !== index && label.toLowerCase() === nextLabel.toLowerCase())) return;
+      state.notes.labels[index] = nextLabel;
+      state.notes.entries.forEach((note) => {
+        note.labels = note.labels.map((label) => label === previousLabel ? nextLabel : label);
+      });
+      if (state.notes.activeLabel === previousLabel) state.notes.activeLabel = nextLabel;
+      reopenNoteLabelsDialog();
+    });
   });
 
   document.querySelectorAll("[data-delete-note-label]").forEach((button) => {
     button.addEventListener("click", () => {
-      const label = button.dataset.deleteNoteLabel;
+      const label = state.notes.labels[Number(button.dataset.deleteNoteLabel)];
+      if (!label) return;
       state.notes.labels = state.notes.labels.filter((item) => item !== label);
       state.notes.entries.forEach((note) => {
         note.labels = note.labels.filter((item) => item !== label);
@@ -1620,7 +1660,7 @@ function bindViewEvents() {
         state.notes.activeView = "notes";
         state.notes.activeLabel = "";
       }
-      render();
+      reopenNoteLabelsDialog();
     });
   });
 

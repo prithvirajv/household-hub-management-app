@@ -1789,8 +1789,7 @@ main {
   background: white;
 }
 
-.notes-filter-panel > button,
-.notes-label-row > button:first-child {
+.notes-filter-panel > button {
   width: 100%;
   min-height: 40px;
   justify-content: flex-start;
@@ -1817,39 +1816,67 @@ main {
   padding: 0.65rem 0.65rem 0.2rem;
 }
 
-.notes-label-row {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) 32px;
-  gap: 0.2rem;
+.notes-filter-panel .notes-edit-labels {
+  margin-bottom: 0.5rem;
+  color: var(--muted);
 }
 
-.notes-label-row .note-label-delete {
-  min-height: 32px;
+.note-labels-dialog-content {
+  display: grid;
+  gap: 1rem;
+  padding: 1.1rem;
+}
+
+.note-label-create-form,
+.note-label-manager-row {
+  display: grid;
+  grid-template-columns: 28px minmax(0, 1fr) 36px 36px;
+  gap: 0.45rem;
+  align-items: center;
+}
+
+.app-dialog .note-label-create-form,
+.app-dialog .note-label-manager-row {
+  gap: 0.45rem;
   padding: 0;
-  border: 0;
-  background: transparent;
-  color: var(--coral);
 }
 
-.note-label-form {
-  display: grid;
+.note-label-create-form {
   grid-template-columns: minmax(0, 1fr) 36px;
-  gap: 0.3rem;
-  margin: 0.2rem 0 0.5rem;
-}
-
-.note-label-form input,
-.note-label-form button {
-  min-height: 36px;
-}
-
-.note-label-form input {
-  min-width: 0;
-  padding: 0.45rem 0.55rem;
-}
-
-.note-label-form button {
   padding: 0;
+}
+
+.note-label-create-form input,
+.note-label-manager-row input {
+  min-width: 0;
+  border: 0;
+  border-bottom: 1px solid var(--line);
+  border-radius: 0;
+}
+
+.note-label-create-form button,
+.note-label-manager-row button {
+  min-width: 36px;
+  min-height: 36px;
+  padding: 0;
+}
+
+.note-label-manager-list {
+  display: grid;
+  gap: 0.5rem;
+}
+
+.note-label-manager-row {
+  padding: 0.25rem 0;
+}
+
+.note-label-manager-row > span {
+  color: var(--muted);
+  text-align: center;
+}
+
+.note-label-manager-empty {
+  color: var(--muted);
 }
 
 .notes-workspace {
@@ -2485,7 +2512,7 @@ main {
   }
 
   .notes-filter-label,
-  .note-label-form {
+  .notes-edit-labels {
     grid-column: 1 / -1;
   }
 
@@ -2806,10 +2833,6 @@ main {
   .notes-filter-panel,
   .note-composer-row {
     grid-template-columns: 1fr;
-  }
-
-  .notes-label-row {
-    grid-template-columns: minmax(0, 1fr) 32px;
   }
 
   .notes-board {
