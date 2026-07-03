@@ -827,10 +827,12 @@ function renderNotes() {
           </form>
           <div class="note-label-manager-list">
             ${state.notes.labels.length ? state.notes.labels.map((label, index) => `<form class="note-label-manager-row" data-rename-note-label="${index}">
-              <span aria-hidden="true">◆</span>
+              <span class="note-label-row-leading">
+                <span class="note-label-tag-icon" aria-hidden="true">◆</span>
+                <button type="button" class="icon-button danger-button note-label-hover-delete" data-delete-note-label="${index}" aria-label="Delete ${escapeHtml(label)} label" title="Delete label">×</button>
+              </span>
               <input name="label" value="${escapeHtml(label)}" aria-label="Rename ${escapeHtml(label)} label" required>
               <button type="submit" class="icon-button ghost" aria-label="Save ${escapeHtml(label)} label">✓</button>
-              <button type="button" class="icon-button danger-button" data-delete-note-label="${index}" aria-label="Delete ${escapeHtml(label)} label">×</button>
             </form>`).join("") : `<p class="note-label-manager-empty">No labels created yet.</p>`}
           </div>
           <div class="dialog-actions"><button id="doneNoteLabelsButton" type="button">Done</button></div>

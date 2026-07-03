@@ -1830,7 +1830,7 @@ main {
 .note-label-create-form,
 .note-label-manager-row {
   display: grid;
-  grid-template-columns: 28px minmax(0, 1fr) 36px 36px;
+  grid-template-columns: 36px minmax(0, 1fr) 36px;
   gap: 0.45rem;
   align-items: center;
 }
@@ -1870,9 +1870,47 @@ main {
   padding: 0.25rem 0;
 }
 
-.note-label-manager-row > span {
+.note-label-row-leading {
+  position: relative;
+  display: grid;
+  width: 36px;
+  height: 36px;
+  place-items: center;
+}
+
+.note-label-tag-icon {
   color: var(--muted);
   text-align: center;
+}
+
+.note-label-hover-delete {
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 120ms ease;
+}
+
+.note-label-manager-row:hover .note-label-tag-icon,
+.note-label-manager-row:focus-within .note-label-tag-icon {
+  opacity: 0;
+}
+
+.note-label-manager-row:hover .note-label-hover-delete,
+.note-label-manager-row:focus-within .note-label-hover-delete {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+@media (hover: none) {
+  .note-label-tag-icon {
+    display: none;
+  }
+
+  .note-label-hover-delete {
+    opacity: 1;
+    pointer-events: auto;
+  }
 }
 
 .note-label-manager-empty {
