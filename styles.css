@@ -2199,6 +2199,15 @@ main {
   min-height: 34px;
 }
 
+.note-check-combobox {
+  position: relative;
+  min-width: 0;
+}
+
+.note-check-combobox .note-check-text {
+  width: 100%;
+}
+
 .note-check-row > input[type="checkbox"] {
   width: 18px;
   height: 18px;
@@ -2321,10 +2330,11 @@ main {
 }
 
 .note-labels span {
-  padding: 0.2rem 0.45rem;
+  padding: 0.25rem 0.55rem;
   border-radius: 999px;
-  background: rgba(25, 38, 61, 0.08);
-  font-size: 0.7rem;
+  background: #e2f6ee;
+  color: #087453;
+  font-size: 0.75rem;
   font-weight: 900;
 }
 

@@ -811,9 +811,9 @@ function renderNotes() {
           <div class="note-composer-row">
             <div class="note-label-picker-field"><span>Labels</span>${renderNoteLabelPicker()}</div>
             <label>Color<select name="color"><option value="#ffffff">White</option><option value="#fff7d6">Yellow</option><option value="#eef7ff">Blue</option><option value="#eaf8ef">Green</option><option value="#fff0ee">Coral</option></select></label>
-            <label>Reminder<input name="reminder" type="date"></label>
+            ${state.notes.activeView === "reminders" ? `<label>Reminder date<input name="reminder" type="date" required></label>` : ""}
             <label class="note-pin-toggle"><input name="pinned" type="checkbox"> Pin</label>
-            <button type="submit">Add note</button>
+            <button type="submit">${state.notes.activeView === "reminders" ? "Add reminder" : "Add note"}</button>
           </div>
         </form>
         ${notes.length ? `
@@ -843,7 +843,10 @@ function renderNoteCard(note) {
   const open = note.checklist.filter((item) => !item.done);
   const checklistRow = (item) => `<div class="note-check-row ${item.done ? "done" : ""}">
     <input data-note-check="${note.id}:${item.id}" type="checkbox" aria-label="Complete ${escapeHtml(item.text)}" ${item.done ? "checked" : ""}>
-    <input class="note-check-text" data-note-check-text="${note.id}:${item.id}" value="${escapeHtml(item.text)}" placeholder="Checklist item" aria-label="Checklist item">
+    <div class="note-check-combobox">
+      <input class="note-check-text" data-note-check-text="${note.id}:${item.id}" value="${escapeHtml(item.text)}" placeholder="Checklist item" aria-label="Checklist item" aria-autocomplete="list" aria-expanded="false" autocomplete="off">
+      <div class="note-item-suggestions" data-note-check-suggestions="${note.id}:${item.id}" role="listbox" hidden></div>
+    </div>
     <button class="note-check-delete" data-delete-note-item="${note.id}:${item.id}" type="button" aria-label="Delete checklist item">×</button>
   </div>`;
   return `<article class="note-card" data-note-id="${note.id}" style="background:${note.color}">
@@ -1684,7 +1687,32 @@ function bindViewEvents() {
       const checklistItem = note?.checklist.find((item) => item.id === itemId);
       if (!checklistItem) return;
       checklistItem.text = input.value;
+      const suggestions = document.querySelector(`[data-note-check-suggestions="${input.dataset.noteCheckText}"]`);
+      const matches = matchingChecklistSuggestions(input.value)
+        .filter((text) => text.toLowerCase() !== input.value.trim().toLowerCase());
+      suggestions.innerHTML = matches.map((text) => `<button type="button" role="option" data-note-check-suggestion="${escapeHtml(text)}">${escapeHtml(text)}</button>`).join("");
+      suggestions.hidden = matches.length === 0;
+      input.setAttribute("aria-expanded", String(matches.length > 0));
+      suggestions.querySelectorAll("[data-note-check-suggestion]").forEach((button) => {
+        button.addEventListener("click", () => {
+          const selectedText = button.dataset.noteCheckSuggestion;
+          const duplicate = note.checklist.find((item) => item.id !== itemId && item.text.trim().toLowerCase() === selectedText.toLowerCase());
+          if (duplicate) {
+            duplicate.done = false;
+            note.checklist = note.checklist.filter((item) => item.id !== itemId);
+          } else {
+            checklistItem.text = selectedText;
+          }
+          render();
+        });
+      });
       autosaveState();
+    });
+    input.addEventListener("keydown", (event) => {
+      if (event.key !== "Escape") return;
+      const suggestions = document.querySelector(`[data-note-check-suggestions="${input.dataset.noteCheckText}"]`);
+      suggestions.hidden = true;
+      input.setAttribute("aria-expanded", "false");
     });
   });
 
