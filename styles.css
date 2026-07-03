@@ -2256,10 +2256,12 @@ main {
 
 .note-card-toolbar {
   position: relative;
-  display: flex;
+  display: grid;
+  grid-template-columns: repeat(5, 34px);
   min-height: 36px;
   align-items: center;
-  gap: 0.25rem;
+  justify-content: space-between;
+  gap: 0;
   margin-top: 0.15rem;
   padding-top: 0.45rem;
   border-top: 1px solid rgba(107, 117, 134, 0.18);
@@ -2299,6 +2301,10 @@ main {
   min-width: 34px;
   min-height: 34px;
   place-items: center;
+}
+
+.note-card-toolbar .note-more-menu {
+  margin-left: 0;
 }
 
 .meal-slot-open {
