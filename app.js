@@ -153,8 +153,13 @@ function remainingTotal() {
   return state.budget.income - spentTotal();
 }
 
+function assetValue(item) {
+  if (item.assetClass === "stock") return Math.max(0, Number(item.shares || 0)) * Math.max(0, Number(item.price || 0));
+  return Math.max(0, Number(item.value || 0));
+}
+
 function netWorth() {
-  const assets = state.goals.netWorth.assets.reduce((sum, item) => sum + Number(item.value || 0), 0);
+  const assets = state.goals.netWorth.assets.reduce((sum, item) => sum + assetValue(item), 0);
   const liabilities = state.goals.netWorth.liabilities.reduce((sum, item) => sum + Number(item.value || 0), 0);
   return { assets, liabilities, total: assets - liabilities };
 }
@@ -176,6 +181,14 @@ function ensureDebtNetWorthSync() {
   state.goals.netWorth.liabilities ||= [];
   state.goals.netWorth.assets.forEach((asset) => {
     asset.id ||= uniqueId(asset.name || "asset");
+    asset.assetClass ||= "other";
+    if (asset.assetClass === "stock") asset.value = assetValue(asset);
+  });
+  state.goals.debts.forEach((debt) => {
+    debt.rate = Math.max(0, Number(debt.rate || 0));
+    debt.minimum = Math.max(0, Number(debt.minimum || 0));
+    debt.termMonths = Math.max(0, Math.round(Number(debt.termMonths || 0)));
+    debt.payments ||= [];
   });
   if (state.goals.debtNetWorthLinked) return false;
 
@@ -197,7 +210,9 @@ function ensureDebtNetWorthSync() {
         name: liability.name,
         balance: Math.max(0, Number(liability.value || 0)),
         rate: 0,
-        minimum: 0
+        minimum: 0,
+        termMonths: 0,
+        payments: []
       });
     }
     linkedDebtIds.add(liability.id);
@@ -205,6 +220,35 @@ function ensureDebtNetWorthSync() {
   state.goals.debts = state.goals.debts.filter((debt) => linkedDebtIds.has(debt.id));
   state.goals.debtNetWorthLinked = true;
   return true;
+}
+
+function suggestedEmi(debt) {
+  const balance = Math.max(0, Number(debt.balance || 0));
+  const months = Math.max(0, Math.round(Number(debt.termMonths || 0)));
+  if (!balance || !months) return 0;
+  const monthlyRate = Math.max(0, Number(debt.rate || 0)) / 1200;
+  if (!monthlyRate) return balance / months;
+  return balance * monthlyRate * ((1 + monthlyRate) ** months) / (((1 + monthlyRate) ** months) - 1);
+}
+
+function payoffMonths(debt) {
+  const balance = Math.max(0, Number(debt.balance || 0));
+  const payment = Math.max(0, Number(debt.minimum || 0));
+  if (!balance) return 0;
+  if (!payment) return null;
+  const monthlyRate = Math.max(0, Number(debt.rate || 0)) / 1200;
+  if (!monthlyRate) return Math.ceil(balance / payment);
+  if (payment <= balance * monthlyRate) return Infinity;
+  return Math.ceil(-Math.log(1 - (monthlyRate * balance / payment)) / Math.log(1 + monthlyRate));
+}
+
+function termLabel(months) {
+  if (months === null) return "Set an EMI to calculate payoff";
+  if (!Number.isFinite(months)) return "EMI does not cover monthly interest";
+  if (months === 0) return "Paid off";
+  const years = Math.floor(months / 12);
+  const remainder = months % 12;
+  return [years ? `${years} ${years === 1 ? "year" : "years"}` : "", remainder ? `${remainder} ${remainder === 1 ? "month" : "months"}` : ""].filter(Boolean).join(" ");
 }
 
 function liabilityForDebt(debt) {
@@ -1115,24 +1159,29 @@ function renderWealth() {
               <label class="debt-name-field">Debt name<input data-debt-name="${index}" value="${escapeHtml(debt.name)}" aria-label="Debt name"></label>
               <label>Current balance<input data-debt-balance="${index}" type="number" min="0" step="0.01" inputmode="decimal" value="${Number(debt.balance || 0)}" aria-label="Current balance for ${escapeHtml(debt.name)}"></label>
               <label>Interest rate (APR %)<input data-debt-rate="${index}" type="number" min="0" step="0.01" inputmode="decimal" value="${Number(debt.rate || 0)}" aria-label="Interest rate for ${escapeHtml(debt.name)}"></label>
-              <label>Minimum payment<input data-debt-minimum="${index}" type="number" min="0" step="0.01" inputmode="decimal" value="${Number(debt.minimum || 0)}" aria-label="Minimum payment for ${escapeHtml(debt.name)}"></label>
+              <label>Monthly EMI<input data-debt-minimum="${index}" type="number" min="0" step="0.01" inputmode="decimal" value="${Number(debt.minimum || 0)}" aria-label="Monthly EMI for ${escapeHtml(debt.name)}"></label>
+              <label>Loan term (months)<input data-debt-term="${index}" type="number" min="0" step="1" inputmode="numeric" value="${Number(debt.termMonths || 0)}" aria-label="Loan term for ${escapeHtml(debt.name)}"></label>
               <label class="debt-asset-field">Secured by asset<select data-debt-asset="${index}" aria-label="Asset assigned to ${escapeHtml(debt.name)}">${debtAssetOptions(debt)}</select></label>
             </div>
+            <div class="debt-payoff-summary"><span><b>Estimated payoff</b>${termLabel(payoffMonths(debt))}</span><span><b>Suggested EMI</b>${debt.termMonths ? money.format(suggestedEmi(debt)) : "Set a loan term"}</span>${debt.termMonths ? `<button class="ghost" data-use-suggested-emi="${index}" type="button">Use suggested EMI</button>` : ""}</div>
             <div class="bar"><span style="width:${Math.max(4, Math.min(95, Math.round((1 - debt.balance / 15000) * 100)))}%"></span></div>
-            <div class="payment-row"><label>Extra payment<input data-debt-payment="${index}" value="100" type="number" min="0"></label><button class="ghost" data-apply-debt-payment="${index}" type="button">Apply payment</button><button class="icon-button danger-button" data-delete-debt="${index}" type="button">×</button></div>
+            <div class="payment-row"><label>Additional payment<input data-debt-payment="${index}" value="0" type="number" min="0" step="0.01"></label><button class="ghost" data-apply-debt-payment="${index}" type="button" ${Number(debt.minimum || 0) <= 0 ? "disabled" : ""}>Record EMI payment</button><button class="icon-button danger-button" data-delete-debt="${index}" type="button" aria-label="Delete ${escapeHtml(debt.name)}">×</button></div>
+            ${debt.payments?.length ? `<details class="payment-history"><summary>Payment history (${debt.payments.length})</summary>${debt.payments.slice(0, 8).map((payment) => `<div><span>${formatShortDate(payment.date)}</span><span>${money.format(payment.amount)} paid</span><span>${money.format(payment.principal)} principal</span><span>${money.format(payment.interest)} interest</span></div>`).join("")}</details>` : ""}
           </article>`).join("") : `<div class="onboarding-empty compact-onboarding"><div class="empty-symbol" aria-hidden="true">↓</div><h3>Add a debt when you are ready</h3><p>Track its balance, rate, payment, and the asset it secures.</p></div>`}
         </section>
       </div>
-      <aside class="side-stack"><section class="card"><div class="section-head"><div><span class="card-label">Net worth</span><h3>Assets and liabilities</h3></div><button id="addNetWorthItemButton" type="button">+ Add item</button></div><div class="net-worth-strip"><strong data-net-worth-total>${money.format(netWorth().total)}</strong><span>Assets <b data-net-worth-assets>${money.format(netWorth().assets)}</b> Liabilities <b data-net-worth-liabilities>${money.format(netWorth().liabilities)}</b></span></div><div class="net-worth-items">${state.goals.netWorth.assets.map((asset, index) => netWorthItemRow(asset, "asset", index)).join("")}${state.goals.netWorth.liabilities.map((item, index) => netWorthItemRow(item, "liability", index)).join("")}</div>${state.goals.netWorth.assets.length || state.goals.netWorth.liabilities.length ? "" : `<div class="empty-inline">No assets or liabilities yet</div>`}</section></aside>
+      <section class="card wealth-holdings"><div class="section-head"><div><span class="card-label">Net worth</span><h3>Assets, investments and liabilities</h3></div><button id="addNetWorthItemButton" type="button">+ Add holding</button></div><div class="net-worth-strip"><strong data-net-worth-total>${money.format(netWorth().total)}</strong><span>Assets <b data-net-worth-assets>${money.format(netWorth().assets)}</b> Liabilities <b data-net-worth-liabilities>${money.format(netWorth().liabilities)}</b></span></div><div class="net-worth-items">${state.goals.netWorth.assets.map((asset, index) => netWorthItemRow(asset, "asset", index)).join("")}${state.goals.netWorth.liabilities.map((item, index) => netWorthItemRow(item, "liability", index)).join("")}</div>${state.goals.netWorth.assets.length || state.goals.netWorth.liabilities.length ? "" : `<div class="empty-inline">No assets, investments or liabilities yet</div>`}</section>
     </section>`;
 }
 
 function netWorthItemRow(item, type, index) {
   const isLiability = type === "liability";
-  return `<div class="net-worth-item ${isLiability ? "liability" : ""}">
+  const isStock = !isLiability && item.assetClass === "stock";
+  return `<div class="net-worth-item ${isLiability ? "liability" : ""} ${isStock ? "stock" : ""}">
     <label class="net-worth-name">Name<input data-net-worth-name="${type}:${index}" value="${escapeHtml(item.name)}" aria-label="${isLiability ? "Liability" : "Asset"} name"></label>
     <label>Type<select data-net-worth-type="${type}:${index}" aria-label="Item type"><option value="asset" ${isLiability ? "" : "selected"}>Asset</option><option value="liability" ${isLiability ? "selected" : ""}>Liability</option></select></label>
-    <label>Amount<input data-net-worth-value="${type}:${index}" type="number" min="0" step="0.01" inputmode="decimal" value="${Number(item.value || 0)}" aria-label="${isLiability ? "Liability" : "Asset"} amount"></label>
+    ${isLiability ? "" : `<label>Asset class<select data-asset-class="${index}" aria-label="Asset class for ${escapeHtml(item.name)}"><option value="other" ${item.assetClass === "other" ? "selected" : ""}>Other asset</option><option value="cash" ${item.assetClass === "cash" ? "selected" : ""}>Cash</option><option value="property" ${item.assetClass === "property" ? "selected" : ""}>Property</option><option value="retirement" ${item.assetClass === "retirement" ? "selected" : ""}>Retirement</option><option value="stock" ${isStock ? "selected" : ""}>Stock</option></select></label>`}
+    ${isStock ? `<label>Symbol<input data-stock-symbol="${index}" value="${escapeHtml(item.symbol || "")}" placeholder="AAPL" aria-label="Stock symbol for ${escapeHtml(item.name)}"></label><label>Shares<input data-stock-shares="${index}" type="number" min="0" step="0.0001" inputmode="decimal" value="${Number(item.shares || 0)}" aria-label="Number of shares for ${escapeHtml(item.name)}"></label><label>Price per share<input data-stock-price="${index}" type="number" min="0" step="0.01" inputmode="decimal" value="${Number(item.price || 0)}" aria-label="Share price for ${escapeHtml(item.name)}"></label><div class="stock-market-value"><span>Market value</span><strong data-stock-market-value="${index}">${money.format(assetValue(item))}</strong></div>` : `<label>Amount<input data-net-worth-value="${type}:${index}" type="number" min="0" step="0.01" inputmode="decimal" value="${Number(item.value || 0)}" aria-label="${isLiability ? "Liability" : "Asset"} amount"></label>`}
     <button class="icon-button danger-button" data-delete-${type}="${index}" type="button" aria-label="Remove ${escapeHtml(item.name)}">×</button>
   </div>`;
 }
@@ -2460,7 +2509,7 @@ function bindViewEvents() {
   $("#addDebtButton")?.addEventListener("click", () => {
     const name = `New debt ${state.goals.debts.length + 1}`;
     const id = uniqueId(name);
-    state.goals.debts.push({ id, name, balance: 1000, rate: 0, minimum: 50, assetId: "" });
+    state.goals.debts.push({ id, name, balance: 1000, rate: 0, minimum: 0, termMonths: 12, assetId: "", payments: [] });
     state.goals.netWorth.liabilities.push({ id, name, value: 1000 });
     autosaveState();
     render();
@@ -2499,13 +2548,16 @@ function bindViewEvents() {
   [
     ["debtBalance", "balance"],
     ["debtRate", "rate"],
-    ["debtMinimum", "minimum"]
+    ["debtMinimum", "minimum"],
+    ["debtTerm", "termMonths"]
   ].forEach(([datasetKey, property]) => {
     document.querySelectorAll(`[data-${datasetKey.replace(/[A-Z]/g, (letter) => `-${letter.toLowerCase()}`)}]`).forEach((input) => {
       input.addEventListener("input", () => {
         const index = Number(input.dataset[datasetKey]);
         const debt = state.goals.debts[index];
-        debt[property] = Math.max(0, Number(input.value || 0));
+        debt[property] = property === "termMonths"
+          ? Math.max(0, Math.round(Number(input.value || 0)))
+          : Math.max(0, Number(input.value || 0));
         if (property === "balance") {
           const liability = liabilityForDebt(debt);
           if (liability) liability.value = debt.balance;
@@ -2517,14 +2569,31 @@ function bindViewEvents() {
     });
   });
 
+  document.querySelectorAll("[data-use-suggested-emi]").forEach((button) => {
+    button.addEventListener("click", () => {
+      const debt = state.goals.debts[Number(button.dataset.useSuggestedEmi)];
+      debt.minimum = Math.round(suggestedEmi(debt) * 100) / 100;
+      autosaveState();
+      render();
+    });
+  });
+
   document.querySelectorAll("[data-apply-debt-payment]").forEach((button) => {
     button.addEventListener("click", () => {
       const index = Number(button.dataset.applyDebtPayment);
-      const amount = Number(document.querySelector(`[data-debt-payment="${index}"]`)?.value || 0);
-      state.goals.debts[index].balance = Math.max(0, state.goals.debts[index].balance - amount);
-      const liability = liabilityForDebt(state.goals.debts[index]);
-      if (liability) liability.value = state.goals.debts[index].balance;
-      state.household.activity.unshift(`Applied ${money.format(amount)} to ${state.goals.debts[index].name}`);
+      const debt = state.goals.debts[index];
+      const extra = Math.max(0, Number(document.querySelector(`[data-debt-payment="${index}"]`)?.value || 0));
+      const emi = Math.max(0, Number(debt.minimum || 0));
+      if (!emi || !debt.balance) return;
+      const interest = Math.min(debt.balance, debt.balance * Math.max(0, Number(debt.rate || 0)) / 1200);
+      const amount = Math.min(debt.balance + interest, emi + extra);
+      const principal = Math.max(0, amount - interest);
+      debt.balance = Math.max(0, debt.balance - principal);
+      debt.payments ||= [];
+      debt.payments.unshift({ id: uniqueId("payment"), date: new Date().toISOString().slice(0, 10), amount, principal, interest, extra, balance: debt.balance });
+      const liability = liabilityForDebt(debt);
+      if (liability) liability.value = debt.balance;
+      state.household.activity.unshift(`Recorded ${money.format(amount)} EMI payment for ${debt.name}`);
       autosaveState();
       render();
     });
@@ -2541,7 +2610,7 @@ function bindViewEvents() {
 
   $("#addNetWorthItemButton")?.addEventListener("click", () => {
     const name = `New asset ${state.goals.netWorth.assets.length + 1}`;
-    state.goals.netWorth.assets.push({ id: uniqueId(name), name, value: 0 });
+    state.goals.netWorth.assets.push({ id: uniqueId(name), name, value: 0, assetClass: "other" });
     autosaveState();
     render();
   });
@@ -2587,6 +2656,51 @@ function bindViewEvents() {
     });
   });
 
+  document.querySelectorAll("[data-asset-class]").forEach((select) => {
+    select.addEventListener("change", () => {
+      const asset = state.goals.netWorth.assets[Number(select.dataset.assetClass)];
+      asset.assetClass = select.value;
+      if (select.value === "stock") {
+        asset.symbol ||= "";
+        asset.shares ||= 0;
+        asset.price ||= 0;
+        asset.value = assetValue(asset);
+      }
+      autosaveState();
+      render();
+    });
+  });
+
+  const refreshStockValue = (index) => {
+    const asset = state.goals.netWorth.assets[index];
+    asset.value = assetValue(asset);
+    const marketValue = document.querySelector(`[data-stock-market-value="${index}"]`);
+    if (marketValue) marketValue.textContent = money.format(asset.value);
+    refreshNetWorthTotals();
+    autosaveState();
+  };
+  document.querySelectorAll("[data-stock-symbol]").forEach((input) => {
+    input.addEventListener("input", () => {
+      const index = Number(input.dataset.stockSymbol);
+      state.goals.netWorth.assets[index].symbol = input.value.toUpperCase();
+      autosaveState();
+    });
+  });
+  document.querySelectorAll("[data-stock-shares]").forEach((input) => {
+    input.addEventListener("input", () => {
+      const index = Number(input.dataset.stockShares);
+      state.goals.netWorth.assets[index].shares = Math.max(0, Number(input.value || 0));
+      refreshStockValue(index);
+    });
+  });
+  document.querySelectorAll("[data-stock-price]").forEach((input) => {
+    input.addEventListener("input", () => {
+      const index = Number(input.dataset.stockPrice);
+      state.goals.netWorth.assets[index].price = Math.max(0, Number(input.value || 0));
+      refreshStockValue(index);
+    });
+  });
+
   document.querySelectorAll("[data-net-worth-type]").forEach((select) => {
     select.addEventListener("change", () => {
       const [type, indexValue] = select.dataset.netWorthType.split(":");
@@ -2600,7 +2714,7 @@ function bindViewEvents() {
           state.goals.debts.forEach((debt) => {
             if (debt.assetId === item.id) debt.assetId = "";
           });
-          state.goals.debts.push({ id: item.id, name: item.name, balance: Number(item.value || 0), rate: 0, minimum: 0 });
+          state.goals.debts.push({ id: item.id, name: item.name, balance: Number(item.value || 0), rate: 0, minimum: 0, termMonths: 0, payments: [] });
         } else {
           state.goals.debts = state.goals.debts.filter((debt) => debt.id !== item.id);
         }

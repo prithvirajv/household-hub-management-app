@@ -271,14 +271,14 @@ const defaultState = {
       { name: "Auto repair buffer", target: 1200, saved: 420, targetDate: "2026-09-01" }
     ],
     debts: [
-      { name: "Credit card", balance: 8200, rate: 18.9, minimum: 220 },
-      { name: "Car loan", balance: 7800, rate: 5.9, minimum: 310 }
+      { name: "Credit card", balance: 8200, rate: 18.9, minimum: 220, termMonths: 60, payments: [] },
+      { name: "Car loan", balance: 7800, rate: 5.9, minimum: 310, termMonths: 30, payments: [] }
     ],
     netWorth: {
       assets: [
-        { name: "Checking", value: 2380 },
-        { name: "Emergency savings", value: 650 },
-        { name: "401(k)", value: 18500 }
+        { name: "Checking", value: 2380, assetClass: "cash" },
+        { name: "Emergency savings", value: 650, assetClass: "cash" },
+        { name: "401(k)", value: 18500, assetClass: "retirement" }
       ],
       liabilities: [
         { name: "Credit card", value: 4280 },

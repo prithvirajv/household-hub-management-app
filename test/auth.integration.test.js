@@ -212,7 +212,8 @@ test("a user cannot create multiple households with the same currency", async ()
     category.lines.every((line) => line.planned === 0)
   ));
 
-  starterState.body.goals.netWorth.assets.push({ id: "home-asset", name: "Family home", value: 500000 });
+  starterState.body.goals.netWorth.assets.push({ id: "home-asset", name: "Family home", value: 500000, assetClass: "property" });
+  starterState.body.goals.netWorth.assets.push({ id: "stock-asset", name: "Apple shares", value: 2000, assetClass: "stock", symbol: "AAPL", shares: 10, price: 200 });
   starterState.body.goals.netWorth.liabilities.push({ id: "mortgage-debt", name: "Mortgage", value: 200000 });
   starterState.body.goals.debts.push({
     id: "mortgage-debt",
@@ -220,6 +221,8 @@ test("a user cannot create multiple households with the same currency", async ()
     balance: 200000,
     rate: 6.5,
     minimum: 1500,
+    termMonths: 240,
+    payments: [{ id: "payment-1", date: "2026-07-01", amount: 1500, interest: 1083.33, principal: 416.67, extra: 0 }],
     assetId: "home-asset"
   });
   starterState.body.notes.entries.push({ id: "shared-note", title: "Shared packing list", items: [] });
@@ -237,6 +240,10 @@ test("a user cannot create multiple households with the same currency", async ()
     headers: { cookie: combineCookies(signin.cookie, differentCurrency.cookie) }
   });
   assert.equal(reloadedState.body.goals.debts[0].assetId, "home-asset");
+  assert.equal(reloadedState.body.goals.debts[0].termMonths, 240);
+  assert.equal(reloadedState.body.goals.debts[0].payments[0].principal, 416.67);
+  assert.equal(reloadedState.body.goals.netWorth.assets.find((item) => item.id === "stock-asset").shares, 10);
+  assert.equal(reloadedState.body.goals.netWorth.assets.find((item) => item.id === "stock-asset").price, 200);
 
   const householdList = await request("/api/households", {
     headers: { cookie: combineCookies(signin.cookie, differentCurrency.cookie) }
@@ -257,6 +264,7 @@ test("a user cannot create multiple households with the same currency", async ()
   assert.equal(usdState.body.calendar.events.some((item) => item.id === "shared-event"), true);
   assert.equal(usdState.body.goals.sinkingFunds.some((item) => item.id === "shared-goal"), false);
   assert.equal(usdState.body.goals.netWorth.assets.some((item) => item.id === "home-asset"), false);
+  assert.equal(usdState.body.goals.netWorth.assets.some((item) => item.id === "stock-asset"), false);
 
   const setIndiaDefault = await request("/api/households/default", {
     method: "POST",

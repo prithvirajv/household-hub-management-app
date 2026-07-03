@@ -785,7 +785,7 @@ main {
 }
 
 .wealth-layout {
-  grid-template-columns: minmax(0, 1.5fr) minmax(420px, 0.8fr);
+  grid-template-columns: 1fr;
 }
 
 .calendar-layout {
@@ -1341,10 +1341,10 @@ main {
 
 .payment-row {
   display: grid;
-  grid-template-columns: 120px auto 34px;
+  grid-template-columns: minmax(160px, 220px) minmax(180px, 260px) 42px;
   gap: 0.5rem;
   align-items: end;
-  max-width: 360px;
+  max-width: 560px;
 }
 
 .mini-tags {
@@ -1739,7 +1739,7 @@ main {
 
 .debt-edit-grid {
   display: grid;
-  grid-template-columns: minmax(150px, 1.35fr) repeat(3, minmax(110px, 0.75fr));
+  grid-template-columns: minmax(180px, 1.35fr) repeat(4, minmax(120px, 0.75fr));
   gap: 0.65rem;
   align-items: end;
 }
@@ -1767,7 +1767,50 @@ main {
 
 .debt-asset-field {
   grid-column: 1 / -1;
-  max-width: 360px;
+  max-width: 520px;
+}
+
+.debt-payoff-summary {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(180px, 260px)) auto;
+  gap: 0.6rem;
+  align-items: stretch;
+}
+
+.debt-payoff-summary span {
+  display: grid;
+  gap: 0.15rem;
+  border-radius: 7px;
+  background: white;
+  padding: 0.65rem 0.75rem;
+  color: var(--muted);
+  font-size: 0.82rem;
+}
+
+.debt-payoff-summary b {
+  color: var(--text);
+  font-size: 0.72rem;
+  text-transform: uppercase;
+}
+
+.payment-history {
+  border-top: 1px solid var(--line);
+  padding-top: 0.55rem;
+}
+
+.payment-history summary {
+  cursor: pointer;
+  color: var(--muted);
+  font-weight: 800;
+}
+
+.payment-history > div {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(110px, 1fr));
+  gap: 0.5rem;
+  padding: 0.5rem 0;
+  border-bottom: 1px solid var(--line);
+  font-size: 0.78rem;
 }
 
 .net-worth-items {
@@ -1784,6 +1827,35 @@ main {
   border-radius: 7px;
   background: var(--soft-blue);
   padding: 0.7rem;
+}
+
+.net-worth-item:not(.liability):not(.stock) {
+  grid-template-columns: minmax(160px, 1.25fr) minmax(100px, 0.6fr) minmax(130px, 0.8fr) minmax(130px, 0.8fr) 42px;
+}
+
+.net-worth-item.stock {
+  grid-template-columns: minmax(150px, 1.1fr) 100px 130px 110px 110px 130px minmax(130px, 0.85fr) 42px;
+}
+
+.stock-market-value {
+  display: grid;
+  gap: 0.2rem;
+  align-self: end;
+  min-height: 38px;
+  border-radius: 6px;
+  background: var(--green-soft);
+  padding: 0.45rem 0.65rem;
+}
+
+.stock-market-value span {
+  color: var(--muted);
+  font-size: 0.64rem;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+
+.stock-market-value strong {
+  color: var(--green);
 }
 
 .net-worth-item.liability {
@@ -3203,5 +3275,39 @@ main {
 
   .debt-name-field {
     grid-column: 1 / -1;
+  }
+
+  .debt-payoff-summary,
+  .payment-history > div {
+    grid-template-columns: 1fr;
+  }
+
+  .debt-payoff-summary button {
+    width: 100%;
+  }
+
+  .net-worth-item,
+  .net-worth-item:not(.liability):not(.stock),
+  .net-worth-item.stock {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    grid-template-areas: none;
+  }
+
+  .net-worth-item > *,
+  .net-worth-name,
+  .net-worth-item label:nth-of-type(2),
+  .net-worth-item label:nth-of-type(3),
+  .net-worth-item .icon-button {
+    grid-area: auto;
+  }
+
+  .net-worth-name,
+  .stock-market-value {
+    grid-column: 1 / -1;
+  }
+
+  .net-worth-item .icon-button {
+    grid-column: 2;
+    width: 100%;
   }
 }
