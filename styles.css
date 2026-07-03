@@ -1926,13 +1926,50 @@ main {
 }
 
 .notes-search,
-.note-composer {
+.note-composer,
+.note-composer-compact {
   width: 100%;
   margin: 0;
   border: 1px solid var(--line);
   border-radius: 8px;
   background: white;
   box-shadow: var(--shadow);
+}
+
+.note-composer-compact {
+  min-height: 52px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.7rem 1rem;
+  background: white;
+  color: var(--muted);
+  font-size: 0.95rem;
+  font-weight: 700;
+  text-align: left;
+}
+
+.note-composer-compact span:last-child {
+  color: var(--text);
+  font-size: 1.2rem;
+}
+
+.notes-trash-banner {
+  display: flex;
+  min-height: 46px;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 1rem;
+  padding: 0.6rem 0.75rem;
+  color: var(--muted);
+  font-size: 0.82rem;
+  font-style: italic;
+}
+
+.notes-trash-banner button {
+  min-height: 34px;
+  background: transparent;
+  color: var(--blue);
 }
 
 .notes-search {
@@ -2141,6 +2178,7 @@ main {
 }
 
 .note-card {
+  position: relative;
   display: grid;
   width: 100%;
   gap: 0.75rem;
@@ -2149,6 +2187,155 @@ main {
   border: 1px solid #d8dee9;
   border-radius: 8px;
   box-shadow: 0 2px 8px rgba(25, 38, 61, 0.06);
+}
+
+.note-card-toolbar {
+  position: relative;
+  display: flex;
+  min-height: 36px;
+  align-items: center;
+  gap: 0.25rem;
+  margin-top: 0.15rem;
+  padding-top: 0.45rem;
+  border-top: 1px solid rgba(107, 117, 134, 0.18);
+  opacity: 0.65;
+  transition: opacity 120ms ease;
+}
+
+.note-card:hover .note-card-toolbar,
+.note-card:focus-within .note-card-toolbar {
+  opacity: 1;
+}
+
+.note-card-toolbar > button,
+.note-card-toolbar summary,
+.note-color-control {
+  width: 34px;
+  min-width: 34px;
+  min-height: 34px;
+  display: grid;
+  place-items: center;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+  list-style: none;
+}
+
+.note-card-toolbar summary::-webkit-details-marker {
+  display: none;
+}
+
+.note-card-toolbar > button:hover,
+.note-card-toolbar summary:hover,
+.note-color-control:hover {
+  background: rgba(25, 38, 61, 0.08);
+  color: var(--text);
+}
+
+.note-color-control {
+  position: relative;
+  overflow: hidden;
+}
+
+.note-color-control select {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  opacity: 0;
+  cursor: pointer;
+}
+
+.note-toolbar-popover,
+.note-more-menu,
+.note-toolbar-labels {
+  position: relative;
+}
+
+.note-toolbar-popover-panel,
+.note-more-menu-panel {
+  position: absolute;
+  z-index: 35;
+  bottom: calc(100% + 6px);
+  left: 0;
+  min-width: 210px;
+  padding: 0.65rem;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: white;
+  box-shadow: 0 10px 28px rgba(25, 38, 61, 0.18);
+}
+
+.note-toolbar-popover-panel label {
+  display: grid;
+  gap: 0.35rem;
+  color: var(--muted);
+  font-size: 0.72rem;
+  font-weight: 800;
+}
+
+.note-more-menu {
+  margin-left: auto;
+}
+
+.note-more-menu-panel {
+  right: 0;
+  left: auto;
+  display: grid;
+  padding: 0.3rem;
+}
+
+.note-more-menu-panel button {
+  width: 100%;
+  min-height: 38px;
+  justify-content: flex-start;
+  border: 0;
+  background: white;
+  color: var(--text);
+  text-align: left;
+}
+
+.note-more-menu-panel button:hover {
+  background: var(--soft-blue);
+}
+
+.note-toolbar-labels .note-label-picker {
+  margin: 0;
+}
+
+.note-toolbar-labels .note-label-picker summary {
+  width: 34px;
+  min-width: 34px;
+  min-height: 34px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  font-size: 0;
+}
+
+.note-toolbar-labels .note-label-picker summary::before {
+  content: "◇";
+  font-size: 1rem;
+}
+
+.note-toolbar-labels .note-label-picker summary::after {
+  display: none;
+}
+
+.note-toolbar-labels .note-label-picker-options {
+  top: auto;
+  right: 0;
+  bottom: calc(100% + 6px);
+  left: auto;
+  width: 220px;
+}
+
+@media (hover: none) {
+  .note-card-toolbar {
+    opacity: 1;
+  }
 }
 
 .note-card[hidden] {

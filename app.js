@@ -690,8 +690,11 @@ function ensureNotesData() {
   }
   state.notes.activeView ||= "notes";
   state.notes.activeLabel ||= "";
+  state.notes.composerOpen = Boolean(state.notes.composerOpen);
   state.notes.labels ||= [];
   state.notes.entries ||= [];
+  const trashCutoff = Date.now() - (7 * 24 * 60 * 60 * 1000);
+  state.notes.entries = state.notes.entries.filter((note) => !note.trashed || !note.trashedAt || new Date(note.trashedAt).getTime() > trashCutoff);
   state.notes.entries.forEach((note) => {
     note.checklist ||= [];
     note.checklist.forEach((item) => {
@@ -703,6 +706,8 @@ function ensureNotesData() {
     note.pinned = Boolean(note.pinned);
     note.archived = Boolean(note.archived);
     note.trashed = Boolean(note.trashed);
+    if (note.trashed && !note.trashedAt) note.trashedAt = new Date().toISOString();
+    note.showChecklist = note.showChecklist !== false;
     note.color ||= "#ffffff";
     note.createdAt ||= new Date().toISOString();
   });
@@ -775,6 +780,12 @@ function renderNotes() {
   const notes = visibleNotes();
   const pinned = notes.filter((note) => note.pinned);
   const others = notes.filter((note) => !note.pinned);
+  const canCompose = !["archive", "trash"].includes(state.notes.activeView);
+  const emptyMessage = state.notes.activeView === "reminders"
+    ? "Notes with upcoming reminders appear here."
+    : state.notes.activeView === "trash"
+      ? "Trash is empty."
+      : "No notes match this view.";
   return `
     <section class="notes-layout">
       <aside class="notes-filter-panel">
@@ -791,7 +802,9 @@ function renderNotes() {
           <span aria-hidden="true">⌕</span>
           <input id="notesSearch" placeholder="Search household notes" value="${state.notes.search || ""}">
         </div>
-        <form id="noteComposer" class="note-composer">
+        ${state.notes.activeView === "trash" ? `<div class="notes-trash-banner"><span>Notes in Trash are permanently deleted after 7 days.</span><button id="emptyNotesTrashButton" type="button" ${notes.length ? "" : "disabled"}>Empty Trash</button></div>` : ""}
+        ${canCompose && !state.notes.composerOpen ? `<button id="openNoteComposerButton" class="note-composer-compact" type="button"><span>Take a note...</span><span aria-hidden="true">☑</span></button>` : ""}
+        ${canCompose && state.notes.composerOpen ? `<form id="noteComposer" class="note-composer">
           <input name="title" placeholder="Title">
           <textarea name="body" rows="2" placeholder="Take a note..."></textarea>
           <div class="note-composer-checklist">
@@ -807,13 +820,14 @@ function renderNotes() {
             <label>Color<select name="color"><option value="#ffffff">White</option><option value="#fff7d6">Yellow</option><option value="#eef7ff">Blue</option><option value="#eaf8ef">Green</option><option value="#fff0ee">Coral</option></select></label>
             ${state.notes.activeView === "reminders" ? `<label>Reminder date<input name="reminder" type="date" required></label>` : ""}
             <label class="note-pin-toggle"><input name="pinned" type="checkbox"> Pin</label>
+            <button id="closeNoteComposerButton" class="ghost" type="button">Close</button>
             <button type="submit">${state.notes.activeView === "reminders" ? "Add reminder" : "Add note"}</button>
           </div>
-        </form>
+        </form>` : ""}
         ${notes.length ? `
           ${pinned.length ? `<section class="notes-result-section"><div class="notes-section-label">Pinned</div><div class="notes-board">${pinned.map(renderNoteCard).join("")}</div></section>` : ""}
           ${others.length ? `<section class="notes-result-section"><div class="notes-section-label">${pinned.length ? "Others" : "Notes"}</div><div class="notes-board">${others.map(renderNoteCard).join("")}</div></section>` : ""}
-        ` : `<div class="notes-empty">No notes match this view.</div>`}
+        ` : `<div class="notes-empty">${emptyMessage}</div>`}
       </div>
       <dialog id="noteLabelsDialog" class="app-dialog note-labels-dialog">
         <div class="note-labels-dialog-content">
@@ -878,20 +892,27 @@ function renderNoteCard(note) {
     </div>
     <textarea class="note-body-input" data-note-body="${note.id}" rows="${note.body ? "2" : "1"}" placeholder="Take a note..." aria-label="Note body">${escapeHtml(note.body || "")}</textarea>
     ${note.reminder ? `<div class="note-reminder">Reminder · ${formatShortDate(note.reminder)}</div>` : ""}
-    ${open.map(checklistRow).join("")}
-    <form class="note-add-item-form" data-add-note-item="${note.id}">
+    ${note.showChecklist ? open.map(checklistRow).join("") : ""}
+    ${note.showChecklist ? `<form class="note-add-item-form" data-add-note-item="${note.id}">
       <div class="note-item-combobox">
         <input name="item" data-note-item-input="${note.id}" placeholder="Add checklist item" aria-label="Add checklist item" aria-autocomplete="list" aria-expanded="false" autocomplete="off">
         <div class="note-item-suggestions" data-note-item-suggestions="${note.id}" role="listbox" hidden></div>
       </div>
       <button type="submit">Add</button>
-    </form>
-    ${completed.length ? `<details class="note-completed"><summary>${completed.length} completed ${completed.length === 1 ? "item" : "items"}</summary>${completed.map(checklistRow).join("")}</details>` : ""}
+    </form>` : ""}
+    ${note.showChecklist && completed.length ? `<details class="note-completed"><summary>${completed.length} completed ${completed.length === 1 ? "item" : "items"}</summary>${completed.map(checklistRow).join("")}</details>` : ""}
     <div class="note-labels" data-note-label-list="${note.id}">${note.labels.map((label) => `<span>${escapeHtml(label)}</span>`).join("")}</div>
-    <div class="note-card-label-editor"><span>Labels</span>${renderNoteLabelPicker(note)}</div>
-    <div class="note-card-actions">
-      ${note.trashed ? `<button data-restore-note="${note.id}" type="button">Restore</button><button class="danger-button" data-delete-note-forever="${note.id}" type="button">Delete</button>` : `<button data-archive-note="${note.id}" type="button">${note.archived ? "Unarchive" : "Archive"}</button><button class="danger-button" data-trash-note="${note.id}" type="button">Trash</button>`}
-    </div>
+    ${note.trashed ? `<div class="note-card-actions"><button data-restore-note="${note.id}" type="button">Restore</button><button class="danger-button" data-delete-note-forever="${note.id}" type="button">Delete permanently</button></div>` : `<div class="note-card-toolbar">
+      <label class="note-color-control" title="Change color"><span aria-hidden="true">◉</span><select data-note-color="${note.id}" aria-label="Change note color"><option value="#ffffff" ${note.color === "#ffffff" ? "selected" : ""}>White</option><option value="#fff7d6" ${note.color === "#fff7d6" ? "selected" : ""}>Yellow</option><option value="#eef7ff" ${note.color === "#eef7ff" ? "selected" : ""}>Blue</option><option value="#eaf8ef" ${note.color === "#eaf8ef" ? "selected" : ""}>Green</option><option value="#fff0ee" ${note.color === "#fff0ee" ? "selected" : ""}>Coral</option></select></label>
+      <details class="note-toolbar-popover"><summary title="Set reminder" aria-label="Set reminder">◷</summary><div class="note-toolbar-popover-panel"><label>Reminder date<input type="date" data-note-reminder="${note.id}" value="${escapeHtml(note.reminder || "")}"></label></div></details>
+      <div class="note-toolbar-labels" title="Add label">${renderNoteLabelPicker(note)}</div>
+      <button data-archive-note="${note.id}" type="button" title="${note.archived ? "Unarchive" : "Archive"}" aria-label="${note.archived ? "Unarchive note" : "Archive note"}">⇩</button>
+      <details class="note-more-menu"><summary title="More actions" aria-label="More actions">⋮</summary><div class="note-more-menu-panel">
+        <button data-duplicate-note="${note.id}" type="button">Make a copy</button>
+        <button data-toggle-note-checklist="${note.id}" type="button">${note.showChecklist ? "Hide checkboxes" : "Show checkboxes"}</button>
+        <button class="danger-button" data-trash-note="${note.id}" type="button">Delete note</button>
+      </div></details>
+    </div>`}
   </article>`;
 }
 
@@ -1621,6 +1642,21 @@ function bindViewEvents() {
     });
   });
 
+  $("#openNoteComposerButton")?.addEventListener("click", () => {
+    state.notes.composerOpen = true;
+    render();
+  });
+
+  $("#closeNoteComposerButton")?.addEventListener("click", () => {
+    state.notes.composerOpen = false;
+    render();
+  });
+
+  $("#emptyNotesTrashButton")?.addEventListener("click", () => {
+    state.notes.entries = state.notes.entries.filter((note) => !note.trashed);
+    render();
+  });
+
   $("#editNoteLabelsButton")?.addEventListener("click", () => $("#noteLabelsDialog")?.showModal());
   $("#closeNoteLabelsDialogButton")?.addEventListener("click", () => $("#noteLabelsDialog")?.close());
   $("#doneNoteLabelsButton")?.addEventListener("click", () => $("#noteLabelsDialog")?.close());
@@ -1684,8 +1720,10 @@ function bindViewEvents() {
       pinned: data.pinned === "on",
       archived: false,
       trashed: false,
+      showChecklist: true,
       createdAt: new Date().toISOString()
     });
+    state.notes.composerOpen = false;
     state.notes.activeView = "notes";
     state.notes.activeLabel = "";
     render();
@@ -1834,6 +1872,54 @@ function bindViewEvents() {
       if (!note) return;
       note.archived = !note.archived;
       note.trashed = false;
+      note.trashedAt = "";
+      render();
+    });
+  });
+
+  document.querySelectorAll("[data-note-reminder]").forEach((input) => {
+    input.addEventListener("change", () => {
+      const note = state.notes.entries.find((item) => item.id === input.dataset.noteReminder);
+      if (!note) return;
+      note.reminder = input.value;
+      render();
+    });
+  });
+
+  document.querySelectorAll("[data-note-color]").forEach((select) => {
+    select.addEventListener("change", () => {
+      const note = state.notes.entries.find((item) => item.id === select.dataset.noteColor);
+      if (!note) return;
+      note.color = select.value;
+      render();
+    });
+  });
+
+  document.querySelectorAll("[data-duplicate-note]").forEach((button) => {
+    button.addEventListener("click", () => {
+      const note = state.notes.entries.find((item) => item.id === button.dataset.duplicateNote);
+      if (!note) return;
+      state.notes.entries.unshift({
+        ...note,
+        id: uniqueId("note"),
+        title: `${note.title || "Untitled note"} copy`,
+        checklist: note.checklist.map((item) => ({ ...item, id: uniqueId("item") })),
+        labels: [...note.labels],
+        pinned: false,
+        archived: false,
+        trashed: false,
+        trashedAt: "",
+        createdAt: new Date().toISOString()
+      });
+      render();
+    });
+  });
+
+  document.querySelectorAll("[data-toggle-note-checklist]").forEach((button) => {
+    button.addEventListener("click", () => {
+      const note = state.notes.entries.find((item) => item.id === button.dataset.toggleNoteChecklist);
+      if (!note) return;
+      note.showChecklist = !note.showChecklist;
       render();
     });
   });
@@ -1843,6 +1929,7 @@ function bindViewEvents() {
       const note = state.notes.entries.find((item) => item.id === button.dataset.trashNote);
       if (!note) return;
       note.trashed = true;
+      note.trashedAt = new Date().toISOString();
       note.archived = false;
       note.pinned = false;
       render();
@@ -1854,6 +1941,7 @@ function bindViewEvents() {
       const note = state.notes.entries.find((item) => item.id === button.dataset.restoreNote);
       if (!note) return;
       note.trashed = false;
+      note.trashedAt = "";
       render();
     });
   });
