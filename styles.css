@@ -1253,6 +1253,15 @@ main {
   min-width: 90px;
 }
 
+.calendar-form-status {
+  grid-column: 1 / -1;
+  min-height: 1rem;
+  margin: 0;
+  color: var(--green);
+  font-size: 0.78rem;
+  font-weight: 800;
+}
+
 .chore-complete-button {
   min-width: 88px;
   color: var(--green);

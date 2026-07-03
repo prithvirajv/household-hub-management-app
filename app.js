@@ -647,7 +647,9 @@ function renderCalendar() {
             <label data-chore-recurrence-field>Repeat<select name="recurrence"><option value="once">Once</option><option value="weekly" selected>Weekly</option><option value="biweekly">Every 2 weeks</option><option value="monthly">Monthly</option></select></label>
             <label data-birthday-reminder-field hidden>Remind before<select name="reminderDays"><option value="0">Same day</option><option value="1">1 day</option><option value="3">3 days</option><option value="7" selected>7 days</option><option value="14">14 days</option></select></label>
             <button data-calendar-submit type="submit">Add</button>
+            <button data-calendar-delete class="danger-button" type="button" hidden>Delete</button>
             <button data-calendar-cancel class="ghost" type="button" hidden>Cancel</button>
+            <p class="calendar-form-status" role="status">${escapeHtml(state.calendar.feedback || "")}</p>
           </form>
           <div class="calendar-grid">
             ${["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"].map((day) => `<div class="calendar-weekday">${day}</div>`).join("")}
@@ -2558,6 +2560,7 @@ function bindViewEvents() {
     const data = Object.fromEntries(new FormData(event.currentTarget));
     const editingKind = data.editingKind;
     const editingId = data.editingId;
+    const wasEditing = Boolean(editingKind && editingId);
     if (editingKind === "event" && data.type === "chore") {
       state.calendar.events = state.calendar.events.filter((item) => item.id !== editingId);
     }
@@ -2594,6 +2597,7 @@ function bindViewEvents() {
       if (existing) Object.assign(existing, calendarEvent);
       else state.calendar.events.push(calendarEvent);
     }
+    state.calendar.feedback = `${data.type === "chore" ? "Chore" : data.type === "birthday" ? "Birthday" : "Reminder"} ${wasEditing ? "updated" : "added"}.`;
     render();
   });
 
@@ -2630,6 +2634,17 @@ function bindViewEvents() {
   });
 
   $("[data-calendar-cancel]")?.addEventListener("click", resetCalendarEditor);
+
+  $("[data-calendar-delete]")?.addEventListener("click", () => {
+    const form = $("#calendarQuickAdd");
+    const kind = form?.editingKind.value;
+    const id = form?.editingId.value;
+    if (!kind || !id) return;
+    if (kind === "event") state.calendar.events = state.calendar.events.filter((item) => item.id !== id);
+    if (kind === "chore") state.calendar.chores = state.calendar.chores.filter((item) => item.id !== id);
+    state.calendar.feedback = "Calendar item deleted.";
+    render();
+  });
 
   $("#addChoreButton")?.addEventListener("click", () => focusCalendarType("chore"));
   $("#sideAddChoreButton")?.addEventListener("click", () => focusCalendarType("chore"));
@@ -2752,7 +2767,11 @@ function editCalendarItem(reference) {
   form.recurrence.value = kind === "chore" ? item.recurrence || "once" : "once";
   form.reminderDays.value = kind === "event" && item.type === "birthday" ? String(item.reminderDays ?? 7) : "7";
   form.querySelector("[data-calendar-submit]").textContent = "Save changes";
+  form.querySelector("[data-calendar-delete]").textContent = `Delete ${form.type.value === "chore" ? "chore" : form.type.value === "birthday" ? "birthday" : "reminder"}`;
+  form.querySelector("[data-calendar-delete]").hidden = false;
   form.querySelector("[data-calendar-cancel]").hidden = false;
+  state.calendar.feedback = "";
+  form.querySelector(".calendar-form-status").textContent = "";
   updateCalendarQuickAddFields();
   form.scrollIntoView({ behavior: "smooth", block: "center" });
   form.title.focus();
@@ -2766,7 +2785,10 @@ function resetCalendarEditor() {
   form.editingId.value = "";
   form.date.value = `${state.budget.month}-01`;
   form.querySelector("[data-calendar-submit]").textContent = "Add";
+  form.querySelector("[data-calendar-delete]").hidden = true;
   form.querySelector("[data-calendar-cancel]").hidden = true;
+  state.calendar.feedback = "";
+  form.querySelector(".calendar-form-status").textContent = "";
   updateCalendarQuickAddFields();
 }
 
@@ -2778,6 +2800,8 @@ function updateCalendarQuickAddFields() {
   const reminderField = form.querySelector("[data-birthday-reminder-field]");
   if (recurrenceField) recurrenceField.hidden = type !== "chore";
   if (reminderField) reminderField.hidden = type !== "birthday";
+  const deleteButton = form.querySelector("[data-calendar-delete]");
+  if (deleteButton && !deleteButton.hidden) deleteButton.textContent = `Delete ${type === "chore" ? "chore" : type === "birthday" ? "birthday" : "reminder"}`;
 }
 
 function refreshBudgetTotals(categoryIndex, lineIndex) {
