@@ -39,6 +39,17 @@ async function request(path, options = {}) {
   };
 }
 
+function combineCookies(...cookieHeaders) {
+  const cookies = new Map();
+  cookieHeaders.filter(Boolean).forEach((header) => {
+    header.split(";").map((item) => item.trim()).filter(Boolean).forEach((cookie) => {
+      const separator = cookie.indexOf("=");
+      cookies.set(cookie.slice(0, separator), cookie.slice(separator + 1));
+    });
+  });
+  return [...cookies].map(([name, value]) => `${name}=${value}`).join("; ");
+}
+
 test.before(async () => {
   server = spawn(process.execPath, ["server/index.js"], {
     cwd: process.cwd(),
@@ -180,7 +191,7 @@ test("a user cannot create multiple households with the same currency", async ()
   assert.equal(differentCurrency.body.currency, "INR");
 
   const starterState = await request("/api/state", {
-    headers: { cookie: `${signin.cookie}; ${differentCurrency.cookie}` }
+    headers: { cookie: combineCookies(signin.cookie, differentCurrency.cookie) }
   });
   assert.equal(starterState.status, 200);
   assert.equal(starterState.body.budget.income, 0);
@@ -211,26 +222,43 @@ test("a user cannot create multiple households with the same currency", async ()
     minimum: 1500,
     assetId: "home-asset"
   });
+  starterState.body.notes.entries.push({ id: "shared-note", title: "Shared packing list", items: [] });
+  starterState.body.meals.recipes.push({ id: "shared-recipe", name: "Family pasta", ingredients: ["pasta"] });
+  starterState.body.goals.sinkingFunds.push({ id: "shared-goal", name: "Family vacation", target: 5000, saved: 250 });
   const savedState = await request("/api/state", {
     method: "PUT",
-    headers: { cookie: `${signin.cookie}; ${differentCurrency.cookie}` },
+    headers: { cookie: combineCookies(signin.cookie, differentCurrency.cookie) },
     body: JSON.stringify(starterState.body)
   });
   assert.equal(savedState.status, 200);
 
   const reloadedState = await request("/api/state", {
-    headers: { cookie: `${signin.cookie}; ${differentCurrency.cookie}` }
+    headers: { cookie: combineCookies(signin.cookie, differentCurrency.cookie) }
   });
   assert.equal(reloadedState.body.goals.debts[0].assetId, "home-asset");
 
   const householdList = await request("/api/households", {
-    headers: { cookie: `${signin.cookie}; ${differentCurrency.cookie}` }
+    headers: { cookie: combineCookies(signin.cookie, differentCurrency.cookie) }
   });
   const usdHousehold = householdList.body.find((household) => household.currency === "USD");
   const inrHousehold = householdList.body.find((household) => household.currency === "INR");
+  const selectUsd = await request("/api/households/select", {
+    method: "POST",
+    headers: { cookie: combineCookies(signin.cookie, differentCurrency.cookie) },
+    body: JSON.stringify({ householdId: usdHousehold.id })
+  });
+  assert.equal(selectUsd.status, 200);
+  const usdState = await request("/api/state", {
+    headers: { cookie: combineCookies(signin.cookie, selectUsd.cookie) }
+  });
+  assert.equal(usdState.body.notes.entries.some((item) => item.id === "shared-note"), true);
+  assert.equal(usdState.body.meals.recipes.some((item) => item.id === "shared-recipe"), true);
+  assert.equal(usdState.body.goals.sinkingFunds.some((item) => item.id === "shared-goal"), true);
+  assert.equal(usdState.body.goals.netWorth.assets.some((item) => item.id === "home-asset"), false);
+
   const setIndiaDefault = await request("/api/households/default", {
     method: "POST",
-    headers: { cookie: `${signin.cookie}; ${differentCurrency.cookie}` },
+    headers: { cookie: combineCookies(signin.cookie, differentCurrency.cookie) },
     body: JSON.stringify({ householdId: inrHousehold.id })
   });
   assert.equal(setIndiaDefault.status, 200);
@@ -355,6 +383,47 @@ test("invitation code creates a login, joins the household, and is single-use", 
     })
   });
   assert.equal(reused.status, 400);
+});
+
+test("the primary owner can revoke household access and the removed user loses access", async () => {
+  const ownerSignin = await request("/api/auth/signin", {
+    method: "POST",
+    body: JSON.stringify({ email: adminEmail, password: initialPassword })
+  });
+  const invitedEmail = "revoked-member@example.com";
+  const invitation = await request("/api/households/invitations", {
+    method: "POST",
+    headers: { cookie: ownerSignin.cookie },
+    body: JSON.stringify({ email: invitedEmail, name: "Revoked Member", role: "Member", scopes: ["Notes"] })
+  });
+  assert.equal(invitation.status, 201);
+  const accepted = await request("/api/auth/invitations/accept", {
+    method: "POST",
+    body: JSON.stringify({
+      email: invitedEmail,
+      inviteCode: invitation.body.invitation.inviteCode,
+      password: "Revoked-Member-Password-123!"
+    })
+  });
+  assert.equal(accepted.status, 200);
+
+  const accessBefore = await request("/api/households/access", { headers: { cookie: ownerSignin.cookie } });
+  assert.equal(accessBefore.status, 200);
+  assert.equal(accessBefore.body.canManage, true);
+  assert.equal(accessBefore.body.members.some((member) => member.email === invitedEmail), true);
+
+  const revoked = await request("/api/households/access", {
+    method: "DELETE",
+    headers: { cookie: ownerSignin.cookie },
+    body: JSON.stringify({ email: invitedEmail })
+  });
+  assert.equal(revoked.status, 200);
+  assert.equal(revoked.body.email.preview, true);
+
+  const removedAccess = await request("/api/state", { headers: { cookie: accepted.cookie } });
+  assert.equal(removedAccess.status, 401);
+  const accessAfter = await request("/api/households/access", { headers: { cookie: ownerSignin.cookie } });
+  assert.equal(accessAfter.body.members.some((member) => member.email === invitedEmail), false);
 });
 
 test("password reset is generic, one-time, and preserves admin authorization", async () => {

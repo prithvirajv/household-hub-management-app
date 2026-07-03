@@ -35,7 +35,7 @@ const SMTP_PORT = Number(process.env.SMTP_PORT || 587);
 const SMTP_SECURE = String(process.env.SMTP_SECURE || "false").toLowerCase() === "true";
 const SMTP_USER = String(process.env.SMTP_USER || "").trim();
 const SMTP_PASS = String(process.env.SMTP_PASS || "");
-const EMAIL_FROM = String(process.env.EMAIL_FROM || "Famelo <no-reply@famelo.net>").trim();
+const EMAIL_FROM = String(process.env.EMAIL_FROM || "Famelo <no_reply@famelo.net>").trim();
 const APP_BASE_URL = String(process.env.APP_BASE_URL || `http://localhost:${PORT}`).replace(/\/+$/, "");
 const SESSION_IDLE_MS = Math.max(
   1000,
@@ -64,6 +64,7 @@ const memoryDb = {
   households: [],
   memberships: [],
   invitations: [],
+  sharedModules: [],
   loginEvents: [],
   passwordResetTokens: []
 };
@@ -153,6 +154,52 @@ function sendHouseholdInviteEmail({ email, name, inviterName, householdName, inv
     text: `Hi ${name}, ${inviterName} invited you to ${householdName} in Famelo as ${role}. Invite code: ${inviteCode}. Shared areas: ${scopeText}. Accept the invitation: ${acceptUrl}`,
     html: `<h2>You have been invited to Famelo</h2><p>Hi ${escapeHtml(name)},</p><p><strong>${escapeHtml(inviterName)}</strong> shared <strong>${escapeHtml(householdName)}</strong> with you as ${escapeHtml(role)}.</p><p>Invite code: <strong>${escapeHtml(inviteCode)}</strong></p><p>Shared areas: ${escapeHtml(scopeText)}</p><p><a href="${escapeHtml(acceptUrl)}">Accept invitation</a></p>`
   });
+}
+
+function sendHouseholdAccessRevokedEmail({ email, name, ownerName, householdName }) {
+  return sendTransactionalEmail({
+    to: email,
+    subject: `Your access to ${householdName} was removed`,
+    text: `Hi ${name}, ${ownerName} removed your access to ${householdName} in Famelo. Contact the household owner if you believe this was a mistake.`,
+    html: `<h2>Household access removed</h2><p>Hi ${escapeHtml(name)},</p><p><strong>${escapeHtml(ownerName)}</strong> removed your access to <strong>${escapeHtml(householdName)}</strong> in Famelo.</p><p>Contact the household owner if you believe this was a mistake.</p>`
+  });
+}
+
+function cloneJson(value) {
+  return JSON.parse(JSON.stringify(value ?? null));
+}
+
+function sharedModulesFromState(appState) {
+  return {
+    notes: cloneJson(appState?.notes || {}),
+    meals: cloneJson(appState?.meals || {}),
+    sinkingFunds: cloneJson(appState?.goals?.sinkingFunds || [])
+  };
+}
+
+function applySharedModules(appState, sharedModules) {
+  const merged = cloneJson(appState || {});
+  if (sharedModules?.notes) merged.notes = cloneJson(sharedModules.notes);
+  if (sharedModules?.meals) merged.meals = cloneJson(sharedModules.meals);
+  merged.goals ||= {};
+  if (sharedModules?.sinkingFunds) merged.goals.sinkingFunds = cloneJson(sharedModules.sinkingFunds);
+  return merged;
+}
+
+function memoryPrimaryOwnerId(householdId) {
+  return memoryDb.memberships.find((item) => item.household_id === householdId && item.role === "owner")?.user_id
+    || memoryDb.memberships.find((item) => item.household_id === householdId)?.user_id;
+}
+
+async function databasePrimaryOwnerId(client, householdId) {
+  const result = await client.query(
+    `SELECT user_id FROM household_memberships
+     WHERE household_id = $1
+     ORDER BY (role = 'owner') DESC, created_at ASC
+     LIMIT 1`,
+    [householdId]
+  );
+  return result.rows[0]?.user_id;
 }
 
 function publicUser(row) {
@@ -1557,6 +1604,154 @@ app.post("/api/households/invitations", requireSession, async (req, res, next) =
   }
 });
 
+app.get("/api/households/access", requireSession, async (req, res, next) => {
+  try {
+    if (MEMORY_DB) {
+      const ownerId = memoryPrimaryOwnerId(req.sessionUser.household_id);
+      const activeMembers = memoryDb.memberships
+        .filter((item) => item.household_id === req.sessionUser.household_id)
+        .map((membership) => {
+          const user = memoryDb.users.find((item) => item.id === membership.user_id);
+          return {
+            name: user?.name || "Household member",
+            email: user?.email || "",
+            role: membership.role,
+            status: "active",
+            isOwner: membership.user_id === ownerId
+          };
+        });
+      const activeEmails = new Set(activeMembers.map((member) => member.email));
+      const pendingMembers = memoryDb.invitations
+        .filter((item) => item.household_id === req.sessionUser.household_id && item.status === "pending" && !activeEmails.has(item.email))
+        .map((item) => ({ name: item.name, email: item.email, role: item.role, status: "pending", isOwner: false }));
+      return res.json({ canManage: req.sessionUser.id === ownerId, members: [...activeMembers, ...pendingMembers] });
+    }
+
+    const ownerId = await databasePrimaryOwnerId(pool, req.sessionUser.household_id);
+    const [activeResult, pendingResult] = await Promise.all([
+      pool.query(
+        `SELECT u.name, u.email, hm.role, hm.user_id
+         FROM household_memberships hm
+         JOIN users u ON u.id = hm.user_id
+         WHERE hm.household_id = $1
+         ORDER BY hm.created_at ASC`,
+        [req.sessionUser.household_id]
+      ),
+      pool.query(
+        `SELECT hi.name, hi.email, hi.role
+         FROM household_invitations hi
+         WHERE hi.household_id = $1 AND hi.status = 'pending'
+           AND NOT EXISTS (
+             SELECT 1 FROM household_memberships hm
+             JOIN users u ON u.id = hm.user_id
+             WHERE hm.household_id = hi.household_id AND lower(u.email) = lower(hi.email)
+           )
+         ORDER BY hi.created_at ASC`,
+        [req.sessionUser.household_id]
+      )
+    ]);
+    res.json({
+      canManage: req.sessionUser.id === ownerId,
+      members: [
+        ...activeResult.rows.map((item) => ({ ...item, status: "active", isOwner: item.user_id === ownerId })),
+        ...pendingResult.rows.map((item) => ({ ...item, status: "pending", isOwner: false }))
+      ]
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.delete("/api/households/access", requireSession, async (req, res, next) => {
+  try {
+    const email = String(req.body.email || "").trim().toLowerCase();
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return res.status(400).json({ error: "Enter a valid email" });
+    let removedName = "Household member";
+    let householdName = "your household";
+
+    if (MEMORY_DB) {
+      const ownerId = memoryPrimaryOwnerId(req.sessionUser.household_id);
+      if (req.sessionUser.id !== ownerId) return res.status(403).json({ error: "Only the household owner can revoke access" });
+      const targetUser = memoryDb.users.find((item) => item.email === email);
+      if (targetUser?.id === ownerId) return res.status(400).json({ error: "The household owner's access cannot be revoked" });
+      const household = memoryDb.households.find((item) => item.id === req.sessionUser.household_id);
+      householdName = household?.name || householdName;
+      const membershipIndex = targetUser
+        ? memoryDb.memberships.findIndex((item) => item.user_id === targetUser.id && item.household_id === req.sessionUser.household_id)
+        : -1;
+      const invitation = memoryDb.invitations.find((item) => item.household_id === req.sessionUser.household_id && item.email === email && ["pending", "accepted"].includes(item.status));
+      if (membershipIndex < 0 && !invitation) return res.status(404).json({ error: "Household access not found" });
+      if (membershipIndex >= 0) memoryDb.memberships.splice(membershipIndex, 1);
+      if (invitation) invitation.status = "revoked";
+      removedName = targetUser?.name || invitation?.name || removedName;
+      if (targetUser?.default_household_id === req.sessionUser.household_id) {
+        targetUser.default_household_id = memoryDb.memberships.find((item) => item.user_id === targetUser.id)?.household_id || null;
+      }
+    } else {
+      const client = await pool.connect();
+      try {
+        await client.query("BEGIN");
+        const ownerId = await databasePrimaryOwnerId(client, req.sessionUser.household_id);
+        if (req.sessionUser.id !== ownerId) {
+          await client.query("ROLLBACK");
+          return res.status(403).json({ error: "Only the household owner can revoke access" });
+        }
+        const householdResult = await client.query("SELECT name FROM households WHERE id = $1", [req.sessionUser.household_id]);
+        householdName = householdResult.rows[0]?.name || householdName;
+        const userResult = await client.query("SELECT id, name FROM users WHERE lower(email) = $1", [email]);
+        const targetUser = userResult.rows[0];
+        if (targetUser?.id === ownerId) {
+          await client.query("ROLLBACK");
+          return res.status(400).json({ error: "The household owner's access cannot be revoked" });
+        }
+        let membershipRemoved = false;
+        if (targetUser) {
+          const deleted = await client.query(
+            "DELETE FROM household_memberships WHERE household_id = $1 AND user_id = $2 RETURNING user_id",
+            [req.sessionUser.household_id, targetUser.id]
+          );
+          membershipRemoved = deleted.rowCount > 0;
+          if (membershipRemoved) {
+            await client.query(
+              `UPDATE users SET default_household_id = (
+                 SELECT household_id FROM household_memberships WHERE user_id = $1 ORDER BY created_at ASC LIMIT 1
+               ) WHERE id = $1 AND default_household_id = $2`,
+              [targetUser.id, req.sessionUser.household_id]
+            );
+          }
+        }
+        const revoked = await client.query(
+          `UPDATE household_invitations SET status = 'revoked', updated_at = now()
+           WHERE household_id = $1 AND lower(email) = $2 AND status IN ('pending', 'accepted')
+           RETURNING name`,
+          [req.sessionUser.household_id, email]
+        );
+        if (!membershipRemoved && revoked.rowCount === 0) {
+          await client.query("ROLLBACK");
+          return res.status(404).json({ error: "Household access not found" });
+        }
+        removedName = targetUser?.name || revoked.rows[0]?.name || removedName;
+        await client.query("COMMIT");
+      } catch (error) {
+        await client.query("ROLLBACK");
+        throw error;
+      } finally {
+        client.release();
+      }
+    }
+
+    const emailDelivery = await sendHouseholdAccessRevokedEmail({
+      email,
+      name: removedName,
+      ownerName: req.sessionUser.name,
+      householdName
+    });
+    res.json({ ok: true, email: emailDelivery });
+  } catch (error) {
+    next(error);
+  }
+});
+
 app.delete("/api/households/:id", requireSession, async (req, res, next) => {
   try {
     const householdId = String(req.params.id || "");
@@ -1633,11 +1828,27 @@ app.get("/api/state", requireSession, async (req, res, next) => {
   try {
     if (MEMORY_DB) {
       const household = memoryDb.households.find((item) => item.id === req.sessionUser.household_id);
-      return res.json(household.app_state);
+      const ownerId = memoryPrimaryOwnerId(req.sessionUser.household_id);
+      let shared = memoryDb.sharedModules.find((item) => item.owner_user_id === ownerId);
+      if (!shared) {
+        shared = { owner_user_id: ownerId, app_state: sharedModulesFromState(household.app_state) };
+        memoryDb.sharedModules.push(shared);
+      }
+      return res.json(applySharedModules(household.app_state, shared.app_state));
     }
 
     const result = await pool.query("SELECT app_state FROM households WHERE id = $1", [req.sessionUser.household_id]);
-    res.json(result.rows[0].app_state);
+    const ownerId = await databasePrimaryOwnerId(pool, req.sessionUser.household_id);
+    let sharedResult = await pool.query("SELECT app_state FROM user_shared_modules WHERE owner_user_id = $1", [ownerId]);
+    if (sharedResult.rowCount === 0) {
+      sharedResult = await pool.query(
+        `INSERT INTO user_shared_modules (owner_user_id, app_state) VALUES ($1, $2)
+         ON CONFLICT (owner_user_id) DO UPDATE SET owner_user_id = EXCLUDED.owner_user_id
+         RETURNING app_state`,
+        [ownerId, sharedModulesFromState(result.rows[0].app_state)]
+      );
+    }
+    res.json(applySharedModules(result.rows[0].app_state, sharedResult.rows[0].app_state));
   } catch (error) {
     next(error);
   }
@@ -1648,13 +1859,22 @@ app.put("/api/state", requireSession, async (req, res, next) => {
     if (MEMORY_DB) {
       const household = memoryDb.households.find((item) => item.id === req.sessionUser.household_id);
       household.app_state = req.body;
+      const ownerId = memoryPrimaryOwnerId(req.sessionUser.household_id);
+      const shared = memoryDb.sharedModules.find((item) => item.owner_user_id === ownerId);
+      if (shared) shared.app_state = sharedModulesFromState(req.body);
+      else memoryDb.sharedModules.push({ owner_user_id: ownerId, app_state: sharedModulesFromState(req.body) });
       return res.json({ ok: true });
     }
 
-    await pool.query(
-      "UPDATE households SET app_state = $1, updated_at = now() WHERE id = $2",
-      [req.body, req.sessionUser.household_id]
-    );
+    const ownerId = await databasePrimaryOwnerId(pool, req.sessionUser.household_id);
+    await Promise.all([
+      pool.query("UPDATE households SET app_state = $1, updated_at = now() WHERE id = $2", [req.body, req.sessionUser.household_id]),
+      pool.query(
+        `INSERT INTO user_shared_modules (owner_user_id, app_state, updated_at) VALUES ($1, $2, now())
+         ON CONFLICT (owner_user_id) DO UPDATE SET app_state = EXCLUDED.app_state, updated_at = now()`,
+        [ownerId, sharedModulesFromState(req.body)]
+      )
+    ]);
     res.json({ ok: true });
   } catch (error) {
     next(error);

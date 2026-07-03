@@ -1151,6 +1151,49 @@ main {
   margin-top: 0.25rem;
 }
 
+.sharing-member-list {
+  display: grid;
+  gap: 10px;
+  margin-top: 14px;
+}
+
+.sharing-member-row {
+  display: grid;
+  grid-template-columns: minmax(180px, 1fr) auto auto;
+  align-items: center;
+  gap: 12px;
+  padding: 14px 16px;
+  border-radius: 6px;
+  background: var(--soft-blue);
+}
+
+.sharing-member-row strong,
+.sharing-member-row small {
+  display: block;
+}
+
+.sharing-member-row small {
+  margin-top: 3px;
+  color: var(--muted);
+}
+
+.revoke-access-button {
+  min-height: 42px;
+  white-space: nowrap;
+}
+
+@media (max-width: 720px) {
+  .sharing-member-row {
+    grid-template-columns: minmax(0, 1fr);
+    align-items: stretch;
+  }
+
+  .sharing-member-row .pill,
+  .revoke-access-button {
+    justify-self: start;
+  }
+}
+
 .invite-email-status {
   grid-column: 1 / -1;
   margin: 0;

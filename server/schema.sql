@@ -73,6 +73,12 @@ CREATE TABLE IF NOT EXISTS household_invitations (
 CREATE INDEX IF NOT EXISTS idx_household_invitations_email
   ON household_invitations(email);
 
+CREATE TABLE IF NOT EXISTS user_shared_modules (
+  owner_user_id UUID PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+  app_state JSONB NOT NULL DEFAULT '{}'::jsonb,
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
 CREATE TABLE IF NOT EXISTS login_events (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,

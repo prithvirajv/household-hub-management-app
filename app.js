@@ -17,6 +17,7 @@ const views = [
 let state = null;
 let sessionUser = null;
 let adminData = null;
+let sharingAccess = null;
 let households = [];
 let countryCatalog = [];
 let currentView = "budget";
@@ -57,6 +58,7 @@ async function handleAuthExpired() {
   state = null;
   sessionUser = null;
   adminData = null;
+  sharingAccess = null;
   households = [];
   document.body.classList.add("auth-mode");
   $("#householdWorkspaceControl").hidden = true;
@@ -391,7 +393,7 @@ function metricsForView() {
     return [["Weekly meals", `${currentMealPlans().length}/28`, `occupied slots in Week ${selectedMealWeek()}`], ["Groceries estimate", money.format(107), "can post directly to budget"], ["Planned servings", String(plannedServingsTotal()), "people or portions planned"], ["Household plan", "Shared", "meals, recipes and grocery list"]];
   }
   if (currentView === "recipes") return [["Saved recipes", String(state.meals.recipes.length), "available to meal plans"], ["Ingredients", String(new Set(state.meals.recipes.flatMap((recipe) => recipe.ingredients)).size), "unique grocery items"], ["Average protein", `${Math.round(state.meals.recipes.reduce((sum, recipe) => sum + Number(recipe.protein || 0), 0) / Math.max(state.meals.recipes.length, 1))}g`, "per recipe"], ["Household library", "Shared", "available to every member"]];
-  if (currentView === "sharing") return [["Invite status", state.household.inviteCode || "Ready", "household invite"], ["Members", String(state.household.members.length), "active household users"], ["Shared scopes", String(state.household.sharedScopes.length), "workspace modules"], ["Activity", String(state.household.activity.length), "recent household changes"]];
+  if (currentView === "sharing") return [["Invite status", state.household.inviteCode || "Ready", "household invite"], ["Members", String(sharingAccess?.members.length ?? state.household.members.length), "active and invited users"], ["Shared scopes", String(state.household.sharedScopes.length), "workspace modules"], ["Activity", String(state.household.activity.length), "recent household changes"]];
   if (currentView === "reports") return [["Spending", money.format(spentTotal()), "posted transactions"], ["Budget health", money.format(margin), "zero balance target"], ["Savings and debt", money.format(1220), "planned allocation"], ["Cash left", money.format(remainingTotal()), "after ledger"]];
   if (currentView === "goals") return [["Active goals", String(state.goals.sinkingFunds.length), "sinking funds"], ["Saved", money.format(state.goals.sinkingFunds.reduce((sum, fund) => sum + fund.saved, 0)), "across goals"], ["Remaining", money.format(state.goals.sinkingFunds.reduce((sum, fund) => sum + fund.target - fund.saved, 0)), "to targets"]];
   if (currentView === "wealth") return [["Assets", money.format(netWorth().assets), "tracked"], ["Liabilities", money.format(netWorth().liabilities), "tracked"], ["Net worth", money.format(netWorth().total), "current estimate"], ["Debt accounts", String(state.goals.debts.length), "payoff plan"]];
@@ -406,6 +408,7 @@ function render() {
   view.innerHTML = (renderers[currentView] || renderers.budget)();
   bindViewEvents();
   if (currentView === "admin" && !adminData) loadAdminData();
+  if (currentView === "sharing" && !sharingAccess) loadSharingAccess();
   autosaveState();
 }
 
@@ -1144,6 +1147,11 @@ function renderSharing() {
     "Reports"
   ];
   const sharedScopes = state.household.sharedScopes || [];
+  const members = sharingAccess?.members || state.household.members.map((member, index) => ({
+    ...member,
+    status: member.role.includes("Invited") ? "pending" : "active",
+    isOwner: index === 0
+  }));
   return `
     <section class="work-grid">
       <div class="main-stack">
@@ -1169,7 +1177,13 @@ function renderSharing() {
             <button type="submit">Send invite</button>
             <p id="inviteEmailStatus" class="form-message invite-email-status">${inviteEmailStatus}</p>
           </form>
-          ${state.household.members.map((member) => compactRow(member.name, member.email, `${member.role}${member.role.includes("Invited") ? "" : " · Active"} · ${sharedScopes.length === allScopes.length ? "Complete household" : `${sharedScopes.length} shared areas`}`)).join("")}
+          <div class="sharing-member-list">
+            ${members.map((member) => `<div class="sharing-member-row">
+              <div><strong>${escapeHtml(member.name)}</strong><small>${escapeHtml(member.email)}</small></div>
+              <span class="pill">${escapeHtml(member.role)} · ${member.status === "pending" ? "Invited" : "Active"}${member.isOwner ? " · Owner" : ""}</span>
+              ${sharingAccess?.canManage && !member.isOwner ? `<button class="danger-button revoke-access-button" data-revoke-household-access="${escapeHtml(member.email)}" type="button">Revoke access</button>` : ""}
+            </div>`).join("")}
+          </div>
         </section>
       </div>
       <aside class="side-stack">
@@ -2708,12 +2722,43 @@ function bindViewEvents() {
           ? `Invitation saved. SMTP is not configured, so a local email preview was created for ${invitation.email}.`
           : `Invitation saved, but the email provider did not accept mail for ${invitation.email}.`;
       await saveStateNow();
+      sharingAccess = null;
+      await loadSharingAccess(false);
       render();
     } catch (error) {
       inviteEmailStatus = error.message;
       $("#inviteEmailStatus").textContent = inviteEmailStatus;
       submitButton.disabled = false;
     }
+  });
+
+  document.querySelectorAll("[data-revoke-household-access]").forEach((button) => {
+    button.addEventListener("click", async () => {
+      const email = button.dataset.revokeHouseholdAccess;
+      if (!window.confirm(`Revoke household access for ${email}?`)) return;
+      button.disabled = true;
+      try {
+        const result = await api("/api/households/access", {
+          method: "DELETE",
+          body: JSON.stringify({ email })
+        });
+        state.household.members = state.household.members.filter((member) => member.email.toLowerCase() !== email.toLowerCase());
+        state.household.activity.unshift(`Access revoked for ${email}`);
+        inviteEmailStatus = result.email.queued
+          ? `Access revoked and an email was queued for ${email}.`
+          : result.email.preview
+            ? `Access revoked. SMTP is not configured, so a local email preview was created for ${email}.`
+            : `Access revoked, but the email provider did not accept mail for ${email}.`;
+        await saveStateNow();
+        sharingAccess = null;
+        await loadSharingAccess(false);
+        render();
+      } catch (error) {
+        inviteEmailStatus = error.message;
+        button.disabled = false;
+        render();
+      }
+    });
   });
 
   $("#refreshAdminButton")?.addEventListener("click", () => {
@@ -3102,6 +3147,7 @@ $("#signOutButton").addEventListener("click", async () => {
   state = null;
   sessionUser = null;
   adminData = null;
+  sharingAccess = null;
   households = [];
   $("#householdWorkspaceControl").hidden = true;
   $("#workspace").hidden = true;
@@ -3147,6 +3193,7 @@ $("#householdPicker").addEventListener("change", async (event) => {
     method: "POST",
     body: JSON.stringify({ householdId: event.target.value })
   });
+  sharingAccess = null;
   await reloadSelectedHousehold();
 });
 
@@ -3260,6 +3307,7 @@ async function loadApp() {
   }
   document.body.classList.remove("auth-mode");
   sessionUser = session.user;
+  sharingAccess = null;
   [households, state] = await Promise.all([
     api("/api/households"),
     api("/api/state")
@@ -3283,7 +3331,20 @@ async function reloadSelectedHousehold() {
     api("/api/state")
   ]);
   adminData = null;
+  sharingAccess = null;
   render();
+}
+
+async function loadSharingAccess(shouldRender = true) {
+  if (!sessionUser) return;
+  try {
+    sharingAccess = await api("/api/households/access");
+    if (shouldRender && currentView === "sharing") render();
+  } catch (error) {
+    inviteEmailStatus = error.message;
+    sharingAccess = { canManage: false, members: [] };
+    if (shouldRender && currentView === "sharing") render();
+  }
 }
 
 async function loadAdminData() {
