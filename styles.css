@@ -1205,8 +1205,16 @@ main {
 }
 
 .meal-toolbar {
-  grid-template-columns: 120px 120px minmax(190px, 1fr) 90px auto auto;
+  grid-template-columns: 120px 120px minmax(180px, 1fr) 90px;
   align-items: end;
+}
+
+.meal-toolbar #addMealRecipeButton {
+  grid-column: 3;
+}
+
+.meal-toolbar #planMealButton {
+  grid-column: 4;
 }
 
 .meal-recipe-combobox {
@@ -2279,6 +2287,49 @@ main {
   color: var(--muted);
   cursor: pointer;
   list-style: none;
+  font-family: Arial, sans-serif;
+  font-size: 1rem;
+  line-height: 1;
+}
+
+.note-card-toolbar > details,
+.note-card-toolbar > .note-toolbar-labels {
+  display: grid;
+  width: 34px;
+  min-width: 34px;
+  min-height: 34px;
+  place-items: center;
+}
+
+.meal-slot-open {
+  width: 100%;
+  min-height: 76px;
+  display: grid;
+  align-content: center;
+  justify-items: start;
+  gap: 0.2rem;
+  color: var(--text);
+  text-align: left;
+}
+
+.meal-slot-open:hover,
+.meal-slot-open:focus-visible,
+.meal-slot-planned:hover,
+.meal-slot-planned:focus-visible {
+  border-color: var(--green);
+  background: var(--green-soft);
+}
+
+.meal-slot-planned {
+  cursor: pointer;
+}
+
+.meal-feedback {
+  min-height: 1.25rem;
+  margin: 0.2rem 0 0.5rem;
+  color: var(--green);
+  font-size: 0.78rem;
+  font-weight: 800;
 }
 
 .note-card-toolbar summary::-webkit-details-marker {

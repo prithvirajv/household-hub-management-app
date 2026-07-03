@@ -225,6 +225,7 @@ test("a user cannot create multiple households with the same currency", async ()
   starterState.body.notes.entries.push({ id: "shared-note", title: "Shared packing list", items: [] });
   starterState.body.meals.recipes.push({ id: "shared-recipe", name: "Family pasta", ingredients: ["pasta"] });
   starterState.body.goals.sinkingFunds.push({ id: "shared-goal", name: "Family vacation", target: 5000, saved: 250 });
+  starterState.body.calendar.events.push({ id: "shared-event", title: "Family meeting", date: "2026-07-10", type: "reminder" });
   const savedState = await request("/api/state", {
     method: "PUT",
     headers: { cookie: combineCookies(signin.cookie, differentCurrency.cookie) },
@@ -253,7 +254,8 @@ test("a user cannot create multiple households with the same currency", async ()
   });
   assert.equal(usdState.body.notes.entries.some((item) => item.id === "shared-note"), true);
   assert.equal(usdState.body.meals.recipes.some((item) => item.id === "shared-recipe"), true);
-  assert.equal(usdState.body.goals.sinkingFunds.some((item) => item.id === "shared-goal"), true);
+  assert.equal(usdState.body.calendar.events.some((item) => item.id === "shared-event"), true);
+  assert.equal(usdState.body.goals.sinkingFunds.some((item) => item.id === "shared-goal"), false);
   assert.equal(usdState.body.goals.netWorth.assets.some((item) => item.id === "home-asset"), false);
 
   const setIndiaDefault = await request("/api/households/default", {

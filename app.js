@@ -408,7 +408,7 @@ function render() {
   view.innerHTML = (renderers[currentView] || renderers.budget)();
   bindViewEvents();
   if (currentView === "admin" && !adminData) loadAdminData();
-  if (currentView === "sharing" && !sharingAccess) loadSharingAccess();
+  if (["sharing", "calendar"].includes(currentView) && !sharingAccess) loadSharingAccess();
   autosaveState();
 }
 
@@ -632,6 +632,12 @@ function renderPaychecks() {
 }
 
 function renderCalendar() {
+  const calendarMembers = (sharingAccess?.members || [])
+    .filter((member) => member.status === "active")
+    .map((member) => ({ name: member.name, email: member.email }));
+  if (!calendarMembers.some((member) => member.email === sessionUser?.email)) {
+    calendarMembers.unshift({ name: sessionUser?.name || "Household owner", email: sessionUser?.email || "" });
+  }
   return `
     <section class="work-grid calendar-layout">
       <div class="main-stack">
@@ -646,7 +652,7 @@ function renderCalendar() {
             <label>Type<select name="type"><option value="chore">Chore</option><option value="birthday">Birthday reminder</option><option value="reminder">Reminder</option></select></label>
             <label>Title<input name="title" placeholder="Mom birthday reminder" required></label>
             <label>Date<input name="date" type="date" value="${state.budget.month}-01" required></label>
-            <label>Owner<input name="owner" placeholder="Demo User"></label>
+            <label>Assign to<select name="owner">${calendarMembers.map((member) => `<option value="${escapeHtml(member.email || member.name)}">${escapeHtml(member.name)}${member.email ? ` · ${escapeHtml(member.email)}` : ""}</option>`).join("")}</select></label>
             <label data-chore-recurrence-field>Repeat<select name="recurrence"><option value="once">Once</option><option value="weekly" selected>Weekly</option><option value="biweekly">Every 2 weeks</option><option value="monthly">Monthly</option></select></label>
             <label data-birthday-reminder-field hidden>Remind before<select name="reminderDays"><option value="0">Same day</option><option value="1">1 day</option><option value="3">3 days</option><option value="7" selected>7 days</option><option value="14">14 days</option></select></label>
             <button data-calendar-submit type="submit">Add</button>
@@ -671,7 +677,7 @@ function renderCalendar() {
           ${state.calendar.chores.length ? state.calendar.chores.map((chore, index) => {
             const occurrence = nextChoreOccurrenceInMonth(chore);
             return `<div class="compact-row">
-              <div><strong>${chore.title}</strong><small>${occurrence?.date || "No occurrence this month"} · ${chore.assignee} · ${choreCadenceLabel(chore)}</small></div>
+              <div><strong>${chore.title}</strong><small>${occurrence?.date || "No occurrence this month"} · ${chore.assigneeName || chore.assignee} · ${choreCadenceLabel(chore)}</small></div>
               ${occurrence ? `<button class="ghost chore-complete-button" data-complete-chore="${index}:${occurrence.date}" type="button">Complete</button>` : `<span class="pill">Recurring</span>`}
               <button class="icon-button" data-edit-calendar-item="chore:${chore.id}" type="button" aria-label="Edit ${escapeHtml(chore.title)}">✎</button>
               <button class="icon-button danger-button" data-delete-calendar-item="chore:${chore.id}" type="button" aria-label="Remove ${escapeHtml(chore.title)}">×</button>
@@ -989,6 +995,7 @@ function renderMeals() {
         <div class="main-stack">
           <section class="card">
             <div class="section-head"><div><span class="card-label">Meal plan</span><h3>Household meal plan</h3></div><div class="button-row"><button id="saveMealWeekButton" class="ghost" type="button">Save week</button><button id="postGroceriesButton" class="ghost" type="button">Post groceries</button></div></div>
+            <p class="meal-feedback" role="status">${escapeHtml(state.meals.feedback || "")}</p>
             <form id="mealPlanForm" class="meal-toolbar">
               <label>Day<select name="day">${days.map((day) => `<option value="${day}">${day}</option>`).join("")}</select></label>
               <label>Meal<select name="slot">${meals.map((meal) => `<option value="${meal}">${meal}</option>`).join("")}</select></label>
@@ -1001,28 +1008,31 @@ function renderMeals() {
               </label>
               <label>Servings<input name="servings" type="number" min="1" max="99" step="1" value="3" required></label>
               <button id="addMealRecipeButton" class="ghost" type="button">Add recipe</button>
-              <button type="submit">Plan meal</button>
+              <button id="planMealButton" type="button">Plan meal</button>
             </form>
             <div class="meal-week-caption"><strong>Week ${selectedWeek}</strong><span>${selectedWeekInfo.label} · ${monthLabel()}</span></div>
             <div class="meal-grid">
               ${days.map((day, dayIndex) => `<div class="meal-day"><h4>${day}<span>${dayIndex < 5 ? "Planned" : "Weekend"}</span></h4>${meals.map((meal) => {
-                const planned = plannedMeal(day, meal);
-                const plannedIndex = planned ? state.meals.plannedWeek.indexOf(planned) : -1;
-                return `<div class="meal-slot">
-                  <div class="meal-slot-head">
-                    <small>${meal}</small>
-                    ${planned ? `<button class="meal-remove-button" data-remove-planned-meal="${plannedIndex}" type="button" aria-label="Remove ${meal} from ${day}">×</button>` : ""}
-                  </div>
-                  <strong>${planned?.meal || "Open"}</strong>
-                  ${planned ? `<em>${recipeIngredients(planned.recipeId).slice(0, 2).join(", ")}</em>` : ""}
-                  ${planned ? `<label class="meal-servings-field">Servings<input data-meal-servings="${plannedIndex}" type="number" min="1" max="99" step="1" value="${planned.servings || 1}"></label>` : ""}
-                </div>`;
+                const plannedItems = plannedMeals(day, meal);
+                const slots = plannedItems.map((planned) => {
+                  const plannedIndex = state.meals.plannedWeek.indexOf(planned);
+                  return `<div class="meal-slot meal-slot-planned" data-edit-planned-meal="${plannedIndex}" role="button" tabindex="0" aria-label="Edit ${escapeHtml(planned.meal)} for ${day} ${meal}">
+                    <div class="meal-slot-head"><small>${meal}</small><button class="meal-remove-button" data-remove-planned-meal="${plannedIndex}" type="button" aria-label="Remove ${meal} from ${day}">×</button></div>
+                    <strong>${escapeHtml(planned.meal)}</strong>
+                    <em>${escapeHtml(recipeIngredients(planned.recipeId).slice(0, 2).join(", "))}</em>
+                    <label class="meal-servings-field">Servings<input data-meal-servings="${plannedIndex}" type="number" min="1" max="99" step="1" value="${planned.servings || 1}"></label>
+                  </div>`;
+                }).join("");
+                const openSlot = meal === "Snack" || plannedItems.length === 0
+                  ? `<button class="meal-slot meal-slot-open" data-open-meal="${day}:${meal}" type="button"><small>${meal}</small><strong>Open</strong></button>`
+                  : "";
+                return `${slots}${openSlot}`;
               }).join("")}</div>`).join("")}
             </div>
           </section>
         </div>
         <aside class="side-stack">
-          <section class="card"><div class="card-label">Nutrition</div><h3>Calories and protein goals</h3>${progressBlock("Daily calories", 1780, state.meals.nutritionGoals.calories)}${progressBlock("Daily protein", 130, state.meals.nutritionGoals.protein)}</section>
+          <section class="card"><div class="card-label">Nutrition</div><h3>Calories and protein goals</h3>${progressNumberBlock("Daily calories", 1780, state.meals.nutritionGoals.calories, "kcal")}${progressNumberBlock("Daily protein", 130, state.meals.nutritionGoals.protein, "g")}</section>
           <section class="card"><div class="card-label">Smart grocery list</div><h3>Auto-built from meals</h3>${groceryList().slice(0, 10).map((item) => compactRow(item, "from meal plan", "1x")).join("")}</section>
         </aside>
       </div>
@@ -1360,6 +1370,11 @@ function progressBlock(label, value, target) {
   return `<div class="progress-block"><div><span>${label}</span><b>${money.format(value)} / ${money.format(target)}</b></div><div class="bar"><span style="width:${pct}%"></span></div></div>`;
 }
 
+function progressNumberBlock(label, value, target, unit) {
+  const pct = Math.min(100, Math.round((Number(value || 0) / Math.max(Number(target || 0), 1)) * 100));
+  return `<div class="progress-block"><div><span>${label}</span><b>${Number(value || 0).toLocaleString()}${unit ? ` ${unit}` : ""} / ${Number(target || 0).toLocaleString()}${unit ? ` ${unit}` : ""}</b></div><div class="bar"><span style="width:${pct}%"></span></div></div>`;
+}
+
 function dueDateRows() {
   return allLines().sort((a, b) => (a.dueDay || 31) - (b.dueDay || 31)).map((line) => ({ name: line.name, date: `${String(line.dueDay || 28).padStart(2, "0")} · Bill ${money.format(line.planned)}`, type: line.dueDay % 2 ? "Pay" : "Due" }));
 }
@@ -1547,8 +1562,11 @@ function groceryList() {
 }
 
 function plannedMeal(day, slot) {
-  return currentMealPlans().find((planned) => planned.day === day && planned.slot === slot)
-    || currentMealPlans().find((planned) => planned.day === day && !planned.slot && slot === "Dinner");
+  return plannedMeals(day, slot)[0];
+}
+
+function plannedMeals(day, slot) {
+  return currentMealPlans().filter((planned) => planned.day === day && (planned.slot === slot || (!planned.slot && slot === "Dinner")));
 }
 
 function ensureMealWeekData() {
@@ -1576,6 +1594,35 @@ function currentMealPlans() {
 
 function plannedServingsTotal() {
   return currentMealPlans().reduce((sum, planned) => sum + Number(planned.servings || 1), 0);
+}
+
+function planMealFromCurrentForm() {
+  const form = $("#mealPlanForm");
+  if (!form) return;
+  const data = {
+    day: form.querySelector('[name="day"]')?.value || "Monday",
+    slot: form.querySelector('[name="slot"]')?.value || "Dinner",
+    servings: form.querySelector('[name="servings"]')?.value || "3",
+    recipeId: $("#mealRecipeId")?.value || ""
+  };
+  const recipe = recipeById(data.recipeId);
+  if (!recipe) {
+    state.meals.feedback = "Choose a saved recipe before planning the meal.";
+    render();
+    return;
+  }
+  const week = selectedMealWeek();
+  const existing = data.slot === "Snack" ? null : state.meals.plannedWeek.find((planned) =>
+    planned.month === state.budget.month
+    && Number(planned.week || 1) === week
+    && planned.day === data.day
+    && (planned.slot === data.slot || (!planned.slot && data.slot === "Dinner"))
+  );
+  const planned = { month: state.budget.month, week, day: data.day, slot: data.slot, meal: recipe.name, recipeId: recipe.id, servings: Number(data.servings || 1) };
+  if (existing) Object.assign(existing, planned);
+  else state.meals.plannedWeek.push(planned);
+  state.meals.feedback = `${recipe.name} planned for ${data.day} ${data.slot}.`;
+  render();
 }
 
 function mealWeeksForMonth(monthValue) {
@@ -2203,9 +2250,18 @@ function bindViewEvents() {
     render();
   });
 
-  $("#postGroceriesButton")?.addEventListener("click", () => {
-    state.transactions.unshift(makeTransaction({ date: new Date().toISOString().slice(0, 10), payee: "Meal plan groceries", lineId: "groceries", amount: 185, memo: "Posted from grocery list" }));
-    currentView = "transactions";
+  $("#postGroceriesButton")?.addEventListener("click", async () => {
+    const groceryLine = allLines().find((line) => line.name.toLowerCase().includes("grocer"));
+    if (!groceryLine) {
+      state.meals.feedback = "Add a Groceries subcategory in Budget before posting the grocery list.";
+      render();
+      return;
+    }
+    const amount = Math.max(0, Number(state.meals.groceryEstimate || 185));
+    state.transactions.unshift(makeTransaction({ date: new Date().toISOString().slice(0, 10), payee: "Meal plan groceries", lineId: groceryLine.id, amount, memo: `Posted from Week ${selectedMealWeek()} grocery list` }));
+    state.meals.feedback = `${exactMoney.format(amount)} posted to ${groceryLine.category} · ${groceryLine.name}.`;
+    state.household.activity.unshift(state.meals.feedback);
+    await saveStateNow();
     render();
   });
 
@@ -2248,28 +2304,33 @@ function bindViewEvents() {
     render();
   });
 
-  $("#mealPlanForm")?.addEventListener("submit", (event) => {
-    event.preventDefault();
-    const data = Object.fromEntries(new FormData(event.currentTarget));
-    const recipe = recipeById(data.recipeId);
-    if (!recipe) {
-      $("#mealRecipeName")?.focus();
-      return;
-    }
-    const week = selectedMealWeek();
-    const existing = state.meals.plannedWeek.find((planned) =>
-      planned.month === state.budget.month
-      && Number(planned.week || 1) === week
-      && planned.day === data.day
-      && (planned.slot === data.slot || (!planned.slot && data.slot === "Dinner"))
-    );
-    const planned = { month: state.budget.month, week, day: data.day, slot: data.slot, meal: recipe.name, recipeId: recipe.id, servings: Number(data.servings || 1) };
-    if (existing) {
-      Object.assign(existing, planned);
-    } else {
-      state.meals.plannedWeek.push(planned);
-    }
-    render();
+  document.querySelectorAll("[data-open-meal]").forEach((button) => {
+    button.addEventListener("click", () => {
+      const separator = button.dataset.openMeal.indexOf(":");
+      const form = $("#mealPlanForm");
+      form.day.value = button.dataset.openMeal.slice(0, separator);
+      form.slot.value = button.dataset.openMeal.slice(separator + 1);
+      form.scrollIntoView({ behavior: "smooth", block: "center" });
+    });
+  });
+
+  document.querySelectorAll("[data-edit-planned-meal]").forEach((slot) => {
+    const openEditor = (event) => {
+      if (event.target.closest("button, input")) return;
+      const planned = state.meals.plannedWeek[Number(slot.dataset.editPlannedMeal)];
+      const form = $("#mealPlanForm");
+      if (!planned || !form) return;
+      form.day.value = planned.day;
+      form.slot.value = planned.slot || "Dinner";
+      form.servings.value = planned.servings || 3;
+      $("#mealRecipeId").value = planned.recipeId || "";
+      $("#mealRecipeName").value = planned.meal || "";
+      form.scrollIntoView({ behavior: "smooth", block: "center" });
+    };
+    slot.addEventListener("click", openEditor);
+    slot.addEventListener("keydown", (event) => {
+      if (event.key === "Enter" || event.key === " ") openEditor(event);
+    });
   });
 
   document.querySelectorAll("[data-remove-planned-meal]").forEach((button) => {
@@ -2291,10 +2352,12 @@ function bindViewEvents() {
     });
   });
 
-  $("#saveMealWeekButton")?.addEventListener("click", () => {
+  $("#saveMealWeekButton")?.addEventListener("click", async () => {
     const label = `${monthLabel()} · Week ${selectedMealWeek()}`;
-    state.meals.savedWeeks.push(label);
+    if (!state.meals.savedWeeks.includes(label)) state.meals.savedWeeks.push(label);
+    state.meals.feedback = `${label} saved.`;
     state.household.activity.unshift(`Saved meal week: ${label}`);
+    await saveStateNow();
     render();
   });
 
@@ -2572,6 +2635,7 @@ function bindViewEvents() {
   $("#calendarQuickAdd")?.addEventListener("submit", (event) => {
     event.preventDefault();
     const data = Object.fromEntries(new FormData(event.currentTarget));
+    const assignedMember = sharingAccess?.members.find((member) => (member.email || member.name) === data.owner);
     const editingKind = data.editingKind;
     const editingId = data.editingId;
     const wasEditing = Boolean(editingKind && editingId);
@@ -2587,7 +2651,8 @@ function bindViewEvents() {
       const chore = {
         id: existing?.id || uniqueId("chore"),
         title: data.title,
-        assignee: data.owner || "Demo User",
+        assignee: data.owner || sessionUser?.email || "Household owner",
+        assigneeName: assignedMember?.name || sessionUser?.name || data.owner || "Household owner",
         cadence: choreCadenceLabel({ recurrence }),
         recurrence,
         startDate: data.date,
@@ -2606,7 +2671,9 @@ function bindViewEvents() {
         monthDay: isBirthday ? data.date.slice(5) : undefined,
         type: isBirthday ? "birthday" : "reminder",
         annual: isBirthday,
-        reminderDays: isBirthday ? Number(data.reminderDays || 7) : undefined
+        reminderDays: isBirthday ? Number(data.reminderDays || 7) : undefined,
+        owner: data.owner || sessionUser?.email || "",
+        ownerName: assignedMember?.name || sessionUser?.name || data.owner || ""
       };
       if (existing) Object.assign(existing, calendarEvent);
       else state.calendar.events.push(calendarEvent);
@@ -2809,6 +2876,7 @@ function editCalendarItem(reference) {
   form.title.value = item.title || "";
   form.date.value = kind === "chore" ? item.startDate || item.nextDue || `${state.budget.month}-01` : item.date || `${state.budget.month}-01`;
   form.owner.value = kind === "chore" ? item.assignee || "" : item.owner || "";
+  if (![...form.owner.options].some((option) => option.value === form.owner.value)) form.owner.value = sessionUser?.email || form.owner.options[0]?.value || "";
   form.recurrence.value = kind === "chore" ? item.recurrence || "once" : "once";
   form.reminderDays.value = kind === "event" && item.type === "birthday" ? String(item.reminderDays ?? 7) : "7";
   form.querySelector("[data-calendar-submit]").textContent = "Save changes";
@@ -2950,6 +3018,10 @@ function refreshMealRecipeMenu() {
 function uniqueId(seed) {
   return String(seed || "item").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/(^-|-$)/g, "") + "-" + Math.random().toString(36).slice(2, 7);
 }
+
+view.addEventListener("click", (event) => {
+  if (event.target.closest("#planMealButton")) planMealFromCurrentForm();
+});
 
 nav.addEventListener("click", async (event) => {
   const button = event.target.closest("[data-view]");
@@ -3339,11 +3411,11 @@ async function loadSharingAccess(shouldRender = true) {
   if (!sessionUser) return;
   try {
     sharingAccess = await api("/api/households/access");
-    if (shouldRender && currentView === "sharing") render();
+    if (shouldRender && ["sharing", "calendar"].includes(currentView)) render();
   } catch (error) {
     inviteEmailStatus = error.message;
     sharingAccess = { canManage: false, members: [] };
-    if (shouldRender && currentView === "sharing") render();
+    if (shouldRender && ["sharing", "calendar"].includes(currentView)) render();
   }
 }
 

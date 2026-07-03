@@ -173,7 +173,7 @@ function sharedModulesFromState(appState) {
   return {
     notes: cloneJson(appState?.notes || {}),
     meals: cloneJson(appState?.meals || {}),
-    sinkingFunds: cloneJson(appState?.goals?.sinkingFunds || [])
+    calendar: cloneJson(appState?.calendar || { events: [], chores: [] })
   };
 }
 
@@ -181,8 +181,7 @@ function applySharedModules(appState, sharedModules) {
   const merged = cloneJson(appState || {});
   if (sharedModules?.notes) merged.notes = cloneJson(sharedModules.notes);
   if (sharedModules?.meals) merged.meals = cloneJson(sharedModules.meals);
-  merged.goals ||= {};
-  if (sharedModules?.sinkingFunds) merged.goals.sinkingFunds = cloneJson(sharedModules.sinkingFunds);
+  if (sharedModules?.calendar) merged.calendar = cloneJson(sharedModules.calendar);
   return merged;
 }
 
