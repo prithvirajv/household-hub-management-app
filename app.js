@@ -975,11 +975,14 @@ function reopenNoteLabelsDialog() {
   $("#noteLabelsDialog")?.showModal();
 }
 
-function renderNoteLabelPicker(note = null) {
+function renderNoteLabelPicker(note = null, compact = false) {
   const selected = new Set(note?.labels || []);
   const count = selected.size;
-  return `<details class="note-label-picker">
-    <summary>${count ? `${count} selected` : "No labels"}</summary>
+  const summary = compact
+    ? `<summary title="Add label" aria-label="${count ? `${count} labels selected` : "Add label"}">◇</summary>`
+    : `<summary>${count ? `${count} selected` : "No labels"}</summary>`;
+  return `<details class="note-label-picker ${compact ? "note-label-picker-compact" : ""}">
+    ${summary}
     <div class="note-label-picker-options">
       ${state.notes.labels.length ? state.notes.labels.map((label) => `<label>
         <input type="checkbox" ${note ? `data-note-label-toggle="${note.id}"` : `name="labels"`} value="${escapeHtml(label)}" ${selected.has(label) ? "checked" : ""}>
@@ -1020,7 +1023,7 @@ function renderNoteCard(note) {
     ${note.trashed ? `<div class="note-card-actions"><button data-restore-note="${note.id}" type="button">Restore</button><button class="danger-button" data-delete-note-forever="${note.id}" type="button">Delete permanently</button></div>` : `<div class="note-card-toolbar">
       <label class="note-color-control" title="Change color"><span aria-hidden="true">◉</span><select data-note-color="${note.id}" aria-label="Change note color"><option value="#ffffff" ${note.color === "#ffffff" ? "selected" : ""}>White</option><option value="#fff7d6" ${note.color === "#fff7d6" ? "selected" : ""}>Yellow</option><option value="#eef7ff" ${note.color === "#eef7ff" ? "selected" : ""}>Blue</option><option value="#eaf8ef" ${note.color === "#eaf8ef" ? "selected" : ""}>Green</option><option value="#fff0ee" ${note.color === "#fff0ee" ? "selected" : ""}>Coral</option></select></label>
       <details class="note-toolbar-popover"><summary title="Set reminder" aria-label="Set reminder">◷</summary><div class="note-toolbar-popover-panel"><label>Reminder date and time<input type="datetime-local" data-note-reminder="${note.id}" value="${escapeHtml(note.reminder || "")}"></label></div></details>
-      <div class="note-toolbar-labels" title="Add label">${renderNoteLabelPicker(note)}</div>
+      <div class="note-toolbar-labels">${renderNoteLabelPicker(note, true)}</div>
       <button data-archive-note="${note.id}" type="button" title="${note.archived ? "Unarchive" : "Archive"}" aria-label="${note.archived ? "Unarchive note" : "Archive note"}">↓</button>
       <details class="note-more-menu"><summary title="More actions" aria-label="More actions">⋮</summary><div class="note-more-menu-panel">
         <button data-duplicate-note="${note.id}" type="button">Make a copy</button>
@@ -1121,7 +1124,7 @@ function renderMeals() {
                 const dayDate = new Date(selectedWeekInfo.start);
                 dayDate.setDate(dayDate.getDate() + dayIndex);
                 const dayDateLabel = dayDate.toLocaleDateString("en-US", { month: "short", day: "numeric" });
-                return `<div class="meal-day"><h4><span class="meal-day-heading">${day} <small>${dayDateLabel}</small></span><span>${dayIndex < 5 ? "Planned" : "Weekend"}</span></h4>${meals.map((meal) => {
+                return `<div class="meal-day"><h4><span>${day}</span><span>${dayIndex < 5 ? "Planned" : "Weekend"}</span></h4><div class="meal-day-date">${dayDateLabel}</div>${meals.map((meal) => {
                 const plannedItems = plannedMeals(day, meal);
                 const slots = plannedItems.map((planned) => {
                   const plannedIndex = state.meals.plannedWeek.indexOf(planned);
@@ -1750,26 +1753,6 @@ function planMealFromCurrentForm() {
   render();
 }
 
-function mealWeeksForMonth(monthValue) {
-  const [year, month] = monthValue.split("-").map(Number);
-  const firstDay = new Date(year, month - 1, 1);
-  const lastDay = new Date(year, month, 0);
-  const firstMonday = new Date(firstDay);
-  const mondayOffset = (firstDay.getDay() + 6) % 7;
-  firstMonday.setDate(firstDay.getDate() - mondayOffset);
-  const weeks = [];
-  for (let cursor = new Date(firstMonday), number = 1; cursor <= lastDay; number += 1, cursor.setDate(cursor.getDate() + 7)) {
-    const end = new Date(cursor);
-    end.setDate(end.getDate() + 6);
-    const visibleStart = cursor < firstDay ? firstDay : cursor;
-    const visibleEnd = end > lastDay ? lastDay : end;
-    const startLabel = visibleStart.toLocaleDateString("en-US", { month: "short", day: "numeric" });
-    const endLabel = visibleEnd.toLocaleDateString("en-US", { month: "short", day: "numeric" });
-    weeks.push({ number, label: `${startLabel}–${endLabel}`, start: new Date(cursor) });
-  }
-  return weeks;
-}
-
 function recipeById(recipeId) {
   return state.meals.recipes.find((recipe) => recipe.id === recipeId);
 }
@@ -1945,14 +1928,8 @@ function bindViewEvents() {
     input.addEventListener("change", () => {
       const [noteId, itemId] = input.dataset.noteCheck.split(":");
       const note = state.notes.entries.find((item) => item.id === noteId);
-      const checklistItem = note?.checklist.find((item) => item.id === itemId);
-      if (!checklistItem) return;
-      checklistItem.done = input.checked;
-      if (checklistItem.parentId) {
-        const parent = note.checklist.find((item) => item.id === checklistItem.parentId);
-        const siblings = note.checklist.filter((item) => item.parentId === checklistItem.parentId);
-        if (parent) parent.done = siblings.length > 0 && siblings.every((item) => item.done);
-      }
+      if (!note) return;
+      note.checklist = applyChecklistToggle(note.checklist, itemId, input.checked);
       render();
     });
   });

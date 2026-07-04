@@ -1522,12 +1522,13 @@ main {
   justify-content: space-between;
 }
 
-.meal-day h4 span {
+.meal-day h4 span:last-child {
   color: var(--green);
   font-size: 0.66rem;
 }
 
-.meal-day-heading small {
+.meal-day-date {
+  margin-top: -0.3rem;
   color: var(--muted);
   font-weight: 600;
   font-size: 0.66rem;
@@ -2536,23 +2537,11 @@ main {
   margin: 0;
 }
 
-.note-toolbar-labels .note-label-picker summary {
-  width: 34px;
-  min-width: 34px;
-  min-height: 34px;
-  padding: 0;
-  border: 0;
-  border-radius: 50%;
-  font-size: 0;
+.note-label-picker-compact summary {
   justify-content: normal;
 }
 
-.note-toolbar-labels .note-label-picker summary::before {
-  content: "◇";
-  font-size: 1rem;
-}
-
-.note-toolbar-labels .note-label-picker summary::after {
+.note-label-picker-compact summary::after {
   display: none;
 }
 
