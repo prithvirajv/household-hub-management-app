@@ -1300,6 +1300,45 @@ main {
   padding: 0.7rem;
 }
 
+.calendar-member-filter {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  margin: 0.5rem 0;
+}
+
+.member-chip {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  padding: 0.3rem 0.65rem;
+  background: white;
+  color: var(--muted);
+  font-size: 0.72rem;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.member-chip.active {
+  border-color: var(--navy);
+  background: var(--soft-blue);
+  color: var(--text);
+}
+
+.member-dot {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex: none;
+}
+
+.compact-row .member-dot {
+  margin-right: 0.4rem;
+}
+
 .calendar-quick-add > button {
   min-width: 90px;
 }

@@ -24,6 +24,7 @@ let countryCatalog = [];
 let currentView = "budget";
 let autosaveTimer = null;
 let inviteEmailStatus = "";
+let calendarFilterOwner = "";
 
 function currentMonthKey() {
   const now = new Date();
@@ -722,6 +723,15 @@ function calendarAssigneeOptions() {
   return members;
 }
 
+const memberColorPalette = ["#2f6fed", "#e05252", "#13936d", "#d99a24", "#8a5cf6", "#0891b2", "#c2410c", "#be185d"];
+function memberColor(ownerKey) {
+  const key = String(ownerKey || "").trim().toLowerCase();
+  if (!key) return "#9aa5b1";
+  let hash = 0;
+  for (let index = 0; index < key.length; index += 1) hash = (hash * 31 + key.charCodeAt(index)) >>> 0;
+  return memberColorPalette[hash % memberColorPalette.length];
+}
+
 function renderCalendar() {
   const calendarMembers = calendarAssigneeOptions();
   return `
@@ -731,6 +741,13 @@ function renderCalendar() {
           <div class="section-head">
             <div><span class="card-label">Household calendar</span><h3>Chores, birthdays and reminders</h3></div>
             <div class="button-row"><button id="addChoreButton" class="ghost" type="button">+ Add chore</button><button id="addBirthdayButton" class="ghost" type="button">+ Add birthday</button><button id="addReminderButton" type="button">+ Add reminder</button></div>
+          </div>
+          <div class="calendar-member-filter" role="group" aria-label="Filter calendar by person">
+            <button type="button" class="member-chip ${calendarFilterOwner ? "" : "active"}" data-calendar-filter-owner="">All people</button>
+            ${calendarMembers.map((member) => {
+              const key = member.email || member.name;
+              return `<button type="button" class="member-chip ${calendarFilterOwner === key ? "active" : ""}" data-calendar-filter-owner="${escapeHtml(key)}"><span class="member-dot" style="background:${memberColor(key)}" aria-hidden="true"></span>${escapeHtml(member.name)}</button>`;
+            }).join("")}
           </div>
           <form id="calendarQuickAdd" class="calendar-quick-add">
             <input name="editingKind" type="hidden">
@@ -751,13 +768,13 @@ function renderCalendar() {
             ${calendarCells().map((cell) => `
             <div class="day-cell ${cell.muted ? "muted-cell" : ""} ${cell.currentMonth ? "" : "outside-month"}">
               <b>${cell.day}</b>
-              ${cell.items.map((item) => `<button class="event ${item.eventType || item.type}" data-edit-calendar-item="${item.sourceKind}:${item.sourceId}" type="button" title="Edit ${escapeHtml(item.title)}">${escapeHtml(item.title)}</button>`).join("")}
+              ${cell.items.map((item) => `<button class="event ${item.eventType || item.type}" style="border-left:3px solid ${memberColor(item.owner)}" data-edit-calendar-item="${item.sourceKind}:${item.sourceId}" type="button" title="Edit ${escapeHtml(item.title)}${item.ownerName ? ` · ${escapeHtml(item.ownerName)}` : ""}">${escapeHtml(item.title)}</button>`).join("")}
             </div>
           `).join("")}</div>
         </section>
       </div>
       <aside class="side-stack">
-        <section class="card"><div class="card-label">Daily planner</div><h3>Upcoming schedule</h3>${scheduleItems().length ? scheduleItems().map((item) => calendarManageRow(item.title, item.displayDate || item.date, item.label || item.type, item.sourceKind, item.sourceId)).join("") : `<div class="empty-inline">No events scheduled this month</div>`}</section>
+        <section class="card"><div class="card-label">Daily planner</div><h3>Upcoming schedule</h3>${visibleScheduleItems().length ? visibleScheduleItems().map((item) => calendarManageRow(item.title, item.displayDate || item.date, item.label || item.type, item.sourceKind, item.sourceId, item.owner, item.ownerName)).join("") : `<div class="empty-inline">No events scheduled this month</div>`}</section>
         <section class="card">
           <div class="section-head"><div><span class="card-label">What to do</span><h3>Chore rotation</h3></div><button id="sideAddChoreButton" class="ghost" type="button">Add chore</button></div>
           ${state.calendar.chores.length ? state.calendar.chores.map((chore, index) => {
@@ -1454,9 +1471,10 @@ function compactRow(title, detail, badge, tone = "", actionAttrs = "") {
   return `<div class="compact-row ${tone}"><div><strong>${title}</strong>${detail ? `<small>${detail}</small>` : ""}</div>${badge ? `<span class="pill">${badge}</span>` : ""}${actionAttrs ? `<button class="icon-button danger-button" ${actionAttrs} type="button">×</button>` : ""}</div>`;
 }
 
-function calendarManageRow(title, detail, badge, kind, id) {
+function calendarManageRow(title, detail, badge, kind, id, owner, ownerName) {
+  const dot = owner ? `<span class="member-dot" style="background:${memberColor(owner)}" title="${escapeHtml(ownerName || owner)}" aria-hidden="true"></span>` : "";
   return `<div class="compact-row">
-    <div><strong>${escapeHtml(title)}</strong>${detail ? `<small>${escapeHtml(detail)}</small>` : ""}</div>
+    <div>${dot}<strong>${escapeHtml(title)}</strong>${detail ? `<small>${escapeHtml(detail)}</small>` : ""}</div>
     ${badge ? `<span class="pill">${escapeHtml(badge)}</span>` : ""}
     <button class="icon-button" data-edit-calendar-item="${kind}:${id}" type="button" aria-label="Edit ${escapeHtml(title)}">✎</button>
     <button class="icon-button danger-button" data-delete-calendar-item="${kind}:${id}" type="button" aria-label="Remove ${escapeHtml(title)}">×</button>
@@ -1483,7 +1501,7 @@ function scheduleItems() {
   const selectedMonth = state.budget.month;
   const oneTimeEvents = state.calendar.events
     .filter((event) => event.type !== "birthday" && event.date?.startsWith(selectedMonth))
-    .map((event) => ({ title: event.title, date: event.date.slice(5), displayDate: `${event.date.slice(5)}${event.dateTime ? ` · ${formatReminderTime(event.dateTime)}` : ""}`, type: event.type, sourceKind: "event", sourceId: event.id }));
+    .map((event) => ({ title: event.title, date: event.date.slice(5), displayDate: `${event.date.slice(5)}${event.dateTime ? ` · ${formatReminderTime(event.dateTime)}` : ""}`, type: event.type, sourceKind: "event", sourceId: event.id, owner: event.owner || "", ownerName: event.ownerName || event.owner || "" }));
   const chores = state.calendar.chores.flatMap((chore) =>
     choreOccurrencesForMonth(chore).map((occurrence) => ({
       title: chore.title,
@@ -1492,7 +1510,9 @@ function scheduleItems() {
       label: `${choreCadenceLabel(chore)} chore`,
       eventType: "chore",
       sourceKind: "chore",
-      sourceId: chore.id
+      sourceId: chore.id,
+      owner: chore.assignee || "",
+      ownerName: chore.assigneeName || chore.assignee || ""
     }))
   );
   const annualBirthdays = birthdayScheduleItems();
@@ -1609,10 +1629,10 @@ function birthdayScheduleItems() {
       const birthdayTitle = birthdayDisplayTitle(event);
       const items = [];
       if (dateKey(birthdayDate).startsWith(state.budget.month)) {
-        items.push({ title: birthdayTitle, date: dateKey(birthdayDate).slice(5), type: "birthday", label: "Birthday", eventType: "birthday", sourceKind: "event", sourceId: event.id });
+        items.push({ title: birthdayTitle, date: dateKey(birthdayDate).slice(5), type: "birthday", label: "Birthday", eventType: "birthday", sourceKind: "event", sourceId: event.id, owner: event.owner || "", ownerName: event.ownerName || event.owner || "" });
       }
       if (Number(event.reminderDays || 0) > 0 && dateKey(reminderDate).startsWith(state.budget.month)) {
-        items.push({ title: `${birthdayTitle} reminder`, date: dateKey(reminderDate).slice(5), type: "birthday-reminder", label: "Birthday reminder", eventType: "birthday-reminder", sourceKind: "event", sourceId: event.id });
+        items.push({ title: `${birthdayTitle} reminder`, date: dateKey(reminderDate).slice(5), type: "birthday-reminder", label: "Birthday reminder", eventType: "birthday-reminder", sourceKind: "event", sourceId: event.id, owner: event.owner || "", ownerName: event.ownerName || event.owner || "" });
       }
       return items;
     });
@@ -1628,9 +1648,15 @@ function formatBirthdayMonthDay(event) {
   return date.toLocaleDateString("en-US", { month: "long", day: "numeric" });
 }
 
+function visibleScheduleItems() {
+  const items = scheduleItems();
+  if (!calendarFilterOwner) return items;
+  return items.filter((item) => item.owner === calendarFilterOwner);
+}
+
 function calendarCells() {
   const eventMap = new Map();
-  scheduleItems().forEach((item) => {
+  visibleScheduleItems().forEach((item) => {
     const day = Number(item.date.split("-")[1]);
     eventMap.set(day, [...(eventMap.get(day) || []), item]);
   });
@@ -2937,6 +2963,14 @@ function bindViewEvents() {
   $("#addBirthdayButton")?.addEventListener("click", () => focusCalendarType("birthday"));
   $("#sideAddBirthdayButton")?.addEventListener("click", () => focusCalendarType("birthday"));
   $("#addReminderButton")?.addEventListener("click", () => focusCalendarType("reminder"));
+
+  document.querySelectorAll("[data-calendar-filter-owner]").forEach((button) => {
+    button.addEventListener("click", () => {
+      const key = button.dataset.calendarFilterOwner;
+      calendarFilterOwner = calendarFilterOwner === key ? "" : key;
+      render();
+    });
+  });
 
   document.querySelectorAll("[data-share-scope]").forEach((input) => {
     input.addEventListener("change", () => {
