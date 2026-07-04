@@ -185,6 +185,17 @@ function refreshNetWorthTotals() {
   if (total) total.textContent = money.format(totals.total);
   if (assets) assets.textContent = money.format(totals.assets);
   if (liabilities) liabilities.textContent = money.format(totals.liabilities);
+
+  const metrics = $("#metrics");
+  if (metrics) {
+    metrics.innerHTML = metricsForView().map(([label, value, note]) => `
+      <article class="metric">
+        <span>${label}</span>
+        <strong>${value}</strong>
+        ${note ? `<small>${note}</small>` : ""}
+      </article>
+    `).join("");
+  }
 }
 
 function ensureDebtNetWorthSync() {
@@ -2068,11 +2079,16 @@ function bindViewEvents() {
     button.addEventListener("click", () => {
       const note = state.notes.entries.find((item) => item.id === button.dataset.duplicateNote);
       if (!note) return;
+      const idMap = new Map(note.checklist.map((item) => [item.id, uniqueId("item")]));
       state.notes.entries.unshift({
         ...note,
         id: uniqueId("note"),
         title: `${note.title || "Untitled note"} copy`,
-        checklist: note.checklist.map((item) => ({ ...item, id: uniqueId("item") })),
+        checklist: note.checklist.map((item) => ({
+          ...item,
+          id: idMap.get(item.id),
+          parentId: item.parentId && idMap.has(item.parentId) ? idMap.get(item.parentId) : ""
+        })),
         labels: [...note.labels],
         pinned: false,
         archived: false,

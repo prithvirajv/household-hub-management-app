@@ -38,6 +38,9 @@ const SMTP_PASS = String(process.env.SMTP_PASS || "");
 const EMAIL_FROM = String(process.env.EMAIL_FROM || "Famelo <no_reply@famelo.net>").trim();
 const APP_BASE_URL = String(process.env.APP_BASE_URL || `http://localhost:${PORT}`).replace(/\/+$/, "");
 const NOTIFICATION_SECRET = String(process.env.NOTIFICATION_SECRET || "").trim();
+const NOTIFICATION_LEASE_MS = Math.max(50, Number(process.env.NOTIFICATION_LEASE_MS || "") || 10 * 60 * 1000);
+const NOTIFICATION_MAX_ATTEMPTS = Math.max(1, Number(process.env.NOTIFICATION_MAX_ATTEMPTS || "") || 5);
+const EXPO_PUSH_URL = String(process.env.NOTIFICATION_TEST_EXPO_URL || "").trim() || "https://exp.host/--/api/v2/push/send";
 const SESSION_IDLE_MS = Math.max(
   1000,
   Number(process.env.SESSION_IDLE_MS || "") || Number(process.env.SESSION_IDLE_MINUTES || 30) * 60 * 1000
@@ -45,6 +48,12 @@ const SESSION_IDLE_MS = Math.max(
 const TEST_EXPOSE_RESET_TOKEN = process.env.NODE_ENV === "test"
   && MEMORY_DB
   && String(process.env.TEST_EXPOSE_RESET_TOKEN || "false").toLowerCase() === "true";
+const TEST_EXPOSE_NOTIFICATIONS = process.env.NODE_ENV === "test"
+  && MEMORY_DB
+  && String(process.env.TEST_EXPOSE_NOTIFICATIONS || "false").toLowerCase() === "true";
+const TEST_FORCE_EMAIL_FAILURE = process.env.NODE_ENV === "test"
+  && MEMORY_DB
+  && String(process.env.NOTIFICATION_TEST_FORCE_EMAIL_FAILURE || "false").toLowerCase() === "true";
 
 const pool = MEMORY_DB
   ? null
@@ -150,7 +159,7 @@ async function syncNotificationJobs({ householdId, appState, user }) {
     memoryDb.notificationJobs = memoryDb.notificationJobs.filter((job) => job.household_id !== householdId || job.sent_at);
     for (const item of candidates) {
       const recipient = memoryDb.users.find((candidate) => candidate.email.toLowerCase() === item.email.toLowerCase());
-      memoryDb.notificationJobs.push({ id: crypto.randomUUID(), household_id: householdId, user_id: recipient?.id || null, source_type: item.sourceType, source_id: item.sourceId, title: item.title, recipient_email: item.email, due_at: item.dueAt, sent_at: null });
+      memoryDb.notificationJobs.push({ id: crypto.randomUUID(), household_id: householdId, user_id: recipient?.id || null, source_type: item.sourceType, source_id: item.sourceId, title: item.title, recipient_email: item.email, due_at: item.dueAt, sent_at: null, claimed_at: null, attempts: 0, last_error: null });
     }
     return;
   }
@@ -176,12 +185,135 @@ async function syncNotificationJobs({ householdId, appState, user }) {
 }
 
 async function sendExpoPush(tokens, title) {
+  if (!tokens.length) return { sentCount: 0, invalidTokens: [] };
+  try {
+    const response = await fetch(EXPO_PUSH_URL, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(tokens.map((token) => ({ to: token, title: "Famelo reminder", body: title, sound: "default" })))
+    });
+    const body = await response.json().catch(() => ({}));
+    const tickets = Array.isArray(body.data) ? body.data : [];
+    let sentCount = 0;
+    const invalidTokens = [];
+    tokens.forEach((token, index) => {
+      const ticket = tickets[index];
+      if (ticket?.status === "ok") sentCount += 1;
+      else if (ticket?.details?.error === "DeviceNotRegistered") invalidTokens.push(token);
+    });
+    return { sentCount, invalidTokens };
+  } catch (error) {
+    console.error("Expo push send failed:", error.message);
+    return { sentCount: 0, invalidTokens: [] };
+  }
+}
+
+async function prunePushDevices(tokens) {
   if (!tokens.length) return;
-  await fetch("https://exp.host/--/api/v2/push/send", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(tokens.map((token) => ({ to: token, title: "Famelo reminder", body: title, sound: "default" })))
+  if (MEMORY_DB) {
+    memoryDb.pushDevices = memoryDb.pushDevices.filter((device) => !tokens.includes(device.token));
+    return;
+  }
+  await pool.query("DELETE FROM push_devices WHERE token = ANY($1)", [tokens]);
+}
+
+function sendReminderEmail({ email, title, dueAt }) {
+  if (TEST_FORCE_EMAIL_FAILURE) {
+    return Promise.resolve({ queued: false, preview: false, accepted: [], rejected: [], error: "Forced test failure" });
+  }
+  const dueLabel = new Date(dueAt).toLocaleString("en-US", { dateStyle: "medium", timeStyle: "short" });
+  return sendTransactionalEmail({
+    to: email,
+    subject: `Reminder: ${title}`,
+    text: `Famelo reminder: ${title}, due ${dueLabel}. Open ${APP_BASE_URL} for details.`,
+    html: `<h2>Famelo reminder</h2><p>${escapeHtml(title)}</p><p>Due ${escapeHtml(dueLabel)}</p><p><a href="${escapeHtml(APP_BASE_URL)}">Open Famelo</a></p>`
   });
+}
+
+function claimDueNotificationJobsMemory(limit) {
+  const now = Date.now();
+  const eligible = memoryDb.notificationJobs.filter((job) => {
+    if (job.sent_at) return false;
+    if (new Date(job.due_at).getTime() > now) return false;
+    if (!job.claimed_at) return true;
+    return new Date(job.claimed_at).getTime() < now - NOTIFICATION_LEASE_MS;
+  });
+  eligible.sort((a, b) => new Date(a.due_at).getTime() - new Date(b.due_at).getTime());
+  const claimed = eligible.slice(0, limit);
+  const claimedAtIso = new Date(now).toISOString();
+  claimed.forEach((job) => {
+    job.claimed_at = claimedAtIso;
+    job.attempts = Number(job.attempts || 0) + 1;
+  });
+  return claimed;
+}
+
+async function claimDueNotificationJobsDb(limit) {
+  const result = await pool.query(
+    `UPDATE notification_jobs
+     SET claimed_at = now(), attempts = attempts + 1
+     WHERE id = ANY(
+       SELECT id FROM notification_jobs
+       WHERE due_at <= now() AND sent_at IS NULL
+         AND (claimed_at IS NULL OR claimed_at < now() - ($1 || ' milliseconds')::interval)
+       ORDER BY due_at ASC
+       LIMIT $2
+       FOR UPDATE SKIP LOCKED
+     )
+     RETURNING id, household_id, user_id, source_type, source_id, title, recipient_email, due_at, attempts`,
+    [String(NOTIFICATION_LEASE_MS), limit]
+  );
+  return result.rows;
+}
+
+async function markNotificationJobSent(jobId) {
+  if (MEMORY_DB) {
+    const job = memoryDb.notificationJobs.find((item) => item.id === jobId);
+    if (job) job.sent_at = new Date().toISOString();
+    return;
+  }
+  await pool.query("UPDATE notification_jobs SET sent_at = now() WHERE id = $1", [jobId]);
+}
+
+async function markNotificationJobGivenUp(jobId, errorMessage) {
+  if (MEMORY_DB) {
+    const job = memoryDb.notificationJobs.find((item) => item.id === jobId);
+    if (job) {
+      job.sent_at = new Date().toISOString();
+      job.last_error = errorMessage;
+    }
+    return;
+  }
+  await pool.query("UPDATE notification_jobs SET sent_at = now(), last_error = $2 WHERE id = $1", [jobId, errorMessage]);
+}
+
+async function recordNotificationJobError(jobId, errorMessage) {
+  if (MEMORY_DB) {
+    const job = memoryDb.notificationJobs.find((item) => item.id === jobId);
+    if (job) job.last_error = errorMessage;
+    return;
+  }
+  await pool.query("UPDATE notification_jobs SET last_error = $2 WHERE id = $1", [jobId, errorMessage]);
+}
+
+function timingSafeEqualStrings(a, b) {
+  const bufA = Buffer.from(String(a));
+  const bufB = Buffer.from(String(b));
+  if (bufA.length !== bufB.length) {
+    crypto.timingSafeEqual(bufA, bufA);
+    return false;
+  }
+  return crypto.timingSafeEqual(bufA, bufB);
+}
+
+function requireNotificationSecret(req, res, next) {
+  if (!NOTIFICATION_SECRET) return res.status(503).json({ error: "Notification worker is not configured" });
+  const header = String(req.headers.authorization || "");
+  const token = header.startsWith("Bearer ") ? header.slice(7) : "";
+  if (!token || !timingSafeEqualStrings(token, NOTIFICATION_SECRET)) {
+    return res.status(401).json({ error: "Unauthorized" });
+  }
+  next();
 }
 
 function sendWelcomeEmail({ email, name, householdName }) {
@@ -1971,6 +2103,107 @@ app.put("/api/state", requireSession, async (req, res, next) => {
     next(error);
   }
 });
+
+app.post("/api/push-devices", requireSession, async (req, res, next) => {
+  try {
+    const token = String(req.body?.token || "").trim();
+    const platform = String(req.body?.platform || "unknown").trim() || "unknown";
+    if (!token) return res.status(400).json({ error: "A push token is required" });
+
+    if (MEMORY_DB) {
+      const existing = memoryDb.pushDevices.find((device) => device.token === token);
+      if (existing) {
+        existing.user_id = req.sessionUser.id;
+        existing.platform = platform;
+        existing.updated_at = new Date().toISOString();
+      } else {
+        memoryDb.pushDevices.push({ id: crypto.randomUUID(), user_id: req.sessionUser.id, token, platform, updated_at: new Date().toISOString() });
+      }
+      return res.json({ ok: true });
+    }
+
+    await pool.query(
+      `INSERT INTO push_devices (user_id, token, platform, updated_at)
+       VALUES ($1, $2, $3, now())
+       ON CONFLICT (token) DO UPDATE SET user_id = EXCLUDED.user_id, platform = EXCLUDED.platform, updated_at = now()`,
+      [req.sessionUser.id, token, platform]
+    );
+    res.json({ ok: true });
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.post("/api/internal/notifications/process", requireNotificationSecret, async (req, res, next) => {
+  try {
+    const limit = Math.min(500, Math.max(1, Number(req.body?.limit) || 200));
+    const jobs = MEMORY_DB ? claimDueNotificationJobsMemory(limit) : await claimDueNotificationJobsDb(limit);
+
+    const jobsByUser = new Map();
+    for (const job of jobs) {
+      if (!job.user_id) continue;
+      if (!jobsByUser.has(job.user_id)) jobsByUser.set(job.user_id, []);
+      jobsByUser.get(job.user_id).push(job);
+    }
+
+    const pushTokensByUser = new Map();
+    if (jobsByUser.size) {
+      const userIds = [...jobsByUser.keys()];
+      const devices = MEMORY_DB
+        ? memoryDb.pushDevices.filter((device) => userIds.includes(device.user_id))
+        : (await pool.query("SELECT user_id, token FROM push_devices WHERE user_id = ANY($1)", [userIds])).rows;
+      for (const device of devices) {
+        if (!pushTokensByUser.has(device.user_id)) pushTokensByUser.set(device.user_id, []);
+        pushTokensByUser.get(device.user_id).push(device.token);
+      }
+    }
+
+    let pushSent = 0;
+    const allInvalidTokens = new Set();
+    for (const [userId, userJobs] of jobsByUser) {
+      const tokens = pushTokensByUser.get(userId) || [];
+      if (!tokens.length) continue;
+      const title = userJobs.length === 1 ? userJobs[0].title : `${userJobs.length} Famelo reminders`;
+      const { sentCount, invalidTokens } = await sendExpoPush(tokens, title);
+      pushSent += sentCount;
+      invalidTokens.forEach((token) => allInvalidTokens.add(token));
+    }
+    if (allInvalidTokens.size) await prunePushDevices([...allInvalidTokens]);
+
+    let sent = 0;
+    let failed = 0;
+    let retried = 0;
+    for (const job of jobs) {
+      try {
+        const delivery = await sendReminderEmail({ email: job.recipient_email, title: job.title, dueAt: job.due_at });
+        if (delivery.error) throw new Error(delivery.error);
+        await markNotificationJobSent(job.id);
+        sent += 1;
+      } catch (error) {
+        if (Number(job.attempts || 1) >= NOTIFICATION_MAX_ATTEMPTS) {
+          await markNotificationJobGivenUp(job.id, error.message);
+          failed += 1;
+        } else {
+          await recordNotificationJobError(job.id, error.message);
+          retried += 1;
+        }
+      }
+    }
+
+    res.json({ processed: jobs.length, sent, failed, retried, pushSent, pushPruned: allInvalidTokens.size });
+  } catch (error) {
+    next(error);
+  }
+});
+
+if (TEST_EXPOSE_NOTIFICATIONS) {
+  app.get("/api/test/notification-jobs", (_req, res) => {
+    res.json(memoryDb.notificationJobs);
+  });
+  app.get("/api/test/push-devices", (_req, res) => {
+    res.json(memoryDb.pushDevices);
+  });
+}
 
 app.get("/", (_req, res) => {
   res.sendFile(path.join(__dirname, "..", "index.html"));

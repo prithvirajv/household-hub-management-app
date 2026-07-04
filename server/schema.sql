@@ -123,6 +123,11 @@ CREATE TABLE IF NOT EXISTS notification_jobs (
 CREATE INDEX IF NOT EXISTS idx_notification_jobs_due
   ON notification_jobs(due_at) WHERE sent_at IS NULL;
 
+ALTER TABLE notification_jobs
+  ADD COLUMN IF NOT EXISTS claimed_at TIMESTAMPTZ,
+  ADD COLUMN IF NOT EXISTS attempts INTEGER NOT NULL DEFAULT 0,
+  ADD COLUMN IF NOT EXISTS last_error TEXT;
+
 CREATE TABLE IF NOT EXISTS push_devices (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
