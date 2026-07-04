@@ -1100,7 +1100,11 @@ function renderMeals() {
             </form>
             <div class="meal-week-caption"><strong>Week ${selectedWeek}</strong><span>${selectedWeekInfo.label} · ${monthLabel()}</span></div>
             <div class="meal-grid">
-              ${days.map((day, dayIndex) => `<div class="meal-day"><h4>${day}<span>${dayIndex < 5 ? "Planned" : "Weekend"}</span></h4>${meals.map((meal) => {
+              ${days.map((day, dayIndex) => {
+                const dayDate = new Date(selectedWeekInfo.start);
+                dayDate.setDate(dayDate.getDate() + dayIndex);
+                const dayDateLabel = dayDate.toLocaleDateString("en-US", { month: "short", day: "numeric" });
+                return `<div class="meal-day"><h4><span class="meal-day-heading">${day} <small>${dayDateLabel}</small></span><span>${dayIndex < 5 ? "Planned" : "Weekend"}</span></h4>${meals.map((meal) => {
                 const plannedItems = plannedMeals(day, meal);
                 const slots = plannedItems.map((planned) => {
                   const plannedIndex = state.meals.plannedWeek.indexOf(planned);
@@ -1115,7 +1119,8 @@ function renderMeals() {
                   ? `<button class="meal-slot meal-slot-open" data-open-meal="${day}:${meal}" type="button"><small>${meal}</small><strong>Open</strong></button>`
                   : "";
                 return `${slots}${openSlot}`;
-              }).join("")}</div>`).join("")}
+              }).join("")}</div>`;
+              }).join("")}
             </div>
           </section>
         </div>
@@ -1734,7 +1739,7 @@ function mealWeeksForMonth(monthValue) {
     const visibleEnd = end > lastDay ? lastDay : end;
     const startLabel = visibleStart.toLocaleDateString("en-US", { month: "short", day: "numeric" });
     const endLabel = visibleEnd.toLocaleDateString("en-US", { month: "short", day: "numeric" });
-    weeks.push({ number, label: `${startLabel}–${endLabel}` });
+    weeks.push({ number, label: `${startLabel}–${endLabel}`, start: new Date(cursor) });
   }
   return weeks;
 }
@@ -1917,6 +1922,11 @@ function bindViewEvents() {
       const checklistItem = note?.checklist.find((item) => item.id === itemId);
       if (!checklistItem) return;
       checklistItem.done = input.checked;
+      if (checklistItem.parentId) {
+        const parent = note.checklist.find((item) => item.id === checklistItem.parentId);
+        const siblings = note.checklist.filter((item) => item.parentId === checklistItem.parentId);
+        if (parent) parent.done = siblings.length > 0 && siblings.every((item) => item.done);
+      }
       render();
     });
   });

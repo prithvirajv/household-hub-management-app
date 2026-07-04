@@ -1488,6 +1488,12 @@ main {
   font-size: 0.66rem;
 }
 
+.meal-day-heading small {
+  color: var(--muted);
+  font-weight: 600;
+  font-size: 0.66rem;
+}
+
 .meal-slot {
   border-radius: 6px;
   background: white;
@@ -2499,6 +2505,7 @@ main {
   border: 0;
   border-radius: 50%;
   font-size: 0;
+  justify-content: normal;
 }
 
 .note-toolbar-labels .note-label-picker summary::before {
