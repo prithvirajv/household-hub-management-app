@@ -707,20 +707,30 @@ function renderPaychecks() {
     </section>`;
 }
 
-function renderCalendar() {
-  const calendarMembers = (sharedCalendarMembers.length ? sharedCalendarMembers : sharingAccess?.members || [])
-    .filter((member) => member.status === "active")
-    .map((member) => ({ name: member.name, email: member.email }));
-  if (!calendarMembers.some((member) => member.email === sessionUser?.email)) {
-    calendarMembers.unshift({ name: sessionUser?.name || "Household owner", email: sessionUser?.email || "" });
+function calendarAssigneeOptions() {
+  const members = [];
+  const seen = new Set();
+  for (const member of [...sharedCalendarMembers, ...(sharingAccess?.members || [])]) {
+    const key = (member.email || member.name || "").toLowerCase();
+    if (!key || seen.has(key)) continue;
+    seen.add(key);
+    members.push({ name: member.name, email: member.email, status: member.status || "active" });
   }
+  if (!members.some((member) => member.email === sessionUser?.email)) {
+    members.unshift({ name: sessionUser?.name || "Household owner", email: sessionUser?.email || "", status: "active" });
+  }
+  return members;
+}
+
+function renderCalendar() {
+  const calendarMembers = calendarAssigneeOptions();
   return `
     <section class="work-grid calendar-layout">
       <div class="main-stack">
         <section class="card calendar-main-card">
           <div class="section-head">
             <div><span class="card-label">Household calendar</span><h3>Chores, birthdays and reminders</h3></div>
-            <div class="button-row"><button id="addChoreButton" class="ghost" type="button">+ Add chore</button><button id="addBirthdayButton" type="button">+ Add birthday</button></div>
+            <div class="button-row"><button id="addChoreButton" class="ghost" type="button">+ Add chore</button><button id="addBirthdayButton" class="ghost" type="button">+ Add birthday</button><button id="addReminderButton" type="button">+ Add reminder</button></div>
           </div>
           <form id="calendarQuickAdd" class="calendar-quick-add">
             <input name="editingKind" type="hidden">
@@ -728,7 +738,7 @@ function renderCalendar() {
             <label>Type<select name="type"><option value="chore">Chore</option><option value="birthday">Birthday reminder</option><option value="reminder">Reminder</option></select></label>
             <label>Title<input name="title" placeholder="Mom birthday reminder" required></label>
             <label>Date and time<input name="date" type="datetime-local" value="${state.budget.month}-01T09:00" required></label>
-            <label>Assign to<select name="owner">${calendarMembers.map((member) => `<option value="${escapeHtml(member.email || member.name)}">${escapeHtml(member.name)}${member.email ? ` · ${escapeHtml(member.email)}` : ""}</option>`).join("")}</select></label>
+            <label>Assign to<select name="owner">${calendarMembers.map((member) => `<option value="${escapeHtml(member.email || member.name)}">${escapeHtml(member.name)}${member.email ? ` · ${escapeHtml(member.email)}` : ""}${member.status && member.status !== "active" ? " (invited)" : ""}</option>`).join("")}</select></label>
             <label data-chore-recurrence-field>Repeat<select name="recurrence"><option value="once">Once</option><option value="weekly" selected>Weekly</option><option value="biweekly">Every 2 weeks</option><option value="triweekly">Every 3 weeks</option><option value="monthly">Monthly</option></select></label>
             <label data-birthday-reminder-field hidden>Remind before<select name="reminderDays"><option value="0">Same day</option><option value="1">1 day</option><option value="3">3 days</option><option value="7" selected>7 days</option><option value="14">14 days</option></select></label>
             <button data-calendar-submit type="submit">Add</button>
@@ -2812,7 +2822,7 @@ function bindViewEvents() {
   $("#calendarQuickAdd")?.addEventListener("submit", (event) => {
     event.preventDefault();
     const data = Object.fromEntries(new FormData(event.currentTarget));
-    const assignedMember = (sharedCalendarMembers.length ? sharedCalendarMembers : sharingAccess?.members || []).find((member) => (member.email || member.name) === data.owner);
+    const assignedMember = calendarAssigneeOptions().find((member) => (member.email || member.name) === data.owner);
     const selectedDateTime = String(data.date || "");
     const selectedDate = selectedDateTime.slice(0, 10);
     const editingKind = data.editingKind;
@@ -2916,6 +2926,7 @@ function bindViewEvents() {
   $("#sideAddChoreButton")?.addEventListener("click", () => focusCalendarType("chore"));
   $("#addBirthdayButton")?.addEventListener("click", () => focusCalendarType("birthday"));
   $("#sideAddBirthdayButton")?.addEventListener("click", () => focusCalendarType("birthday"));
+  $("#addReminderButton")?.addEventListener("click", () => focusCalendarType("reminder"));
 
   document.querySelectorAll("[data-share-scope]").forEach((input) => {
     input.addEventListener("change", () => {
