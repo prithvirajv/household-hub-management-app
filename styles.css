@@ -2631,10 +2631,24 @@ main {
 
 .note-check-row {
   display: grid;
-  grid-template-columns: 22px minmax(0, 1fr) 30px;
+  grid-template-columns: 22px minmax(0, 1fr) 30px 30px;
   gap: 0.55rem;
   align-items: center;
   min-height: 34px;
+}
+
+.note-check-row.child-item {
+  margin-left: 1.75rem;
+  padding-left: 0.65rem;
+  border-left: 2px solid var(--border);
+}
+
+.note-check-level {
+  min-height: 30px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--muted);
 }
 
 .note-check-combobox {

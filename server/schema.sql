@@ -105,3 +105,28 @@ CREATE INDEX IF NOT EXISTS idx_password_reset_tokens_user_id
 
 CREATE INDEX IF NOT EXISTS idx_password_reset_tokens_expires_at
   ON password_reset_tokens(expires_at);
+
+CREATE TABLE IF NOT EXISTS notification_jobs (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  household_id UUID NOT NULL REFERENCES households(id) ON DELETE CASCADE,
+  user_id UUID REFERENCES users(id) ON DELETE CASCADE,
+  source_type TEXT NOT NULL,
+  source_id TEXT NOT NULL,
+  title TEXT NOT NULL,
+  recipient_email TEXT NOT NULL,
+  due_at TIMESTAMPTZ NOT NULL,
+  sent_at TIMESTAMPTZ,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  UNIQUE (household_id, source_type, source_id, recipient_email, due_at)
+);
+
+CREATE INDEX IF NOT EXISTS idx_notification_jobs_due
+  ON notification_jobs(due_at) WHERE sent_at IS NULL;
+
+CREATE TABLE IF NOT EXISTS push_devices (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  token TEXT NOT NULL UNIQUE,
+  platform TEXT NOT NULL DEFAULT 'unknown',
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);

@@ -37,6 +37,7 @@ const SMTP_USER = String(process.env.SMTP_USER || "").trim();
 const SMTP_PASS = String(process.env.SMTP_PASS || "");
 const EMAIL_FROM = String(process.env.EMAIL_FROM || "Famelo <no_reply@famelo.net>").trim();
 const APP_BASE_URL = String(process.env.APP_BASE_URL || `http://localhost:${PORT}`).replace(/\/+$/, "");
+const NOTIFICATION_SECRET = String(process.env.NOTIFICATION_SECRET || "").trim();
 const SESSION_IDLE_MS = Math.max(
   1000,
   Number(process.env.SESSION_IDLE_MS || "") || Number(process.env.SESSION_IDLE_MINUTES || 30) * 60 * 1000
@@ -66,7 +67,9 @@ const memoryDb = {
   invitations: [],
   sharedModules: [],
   loginEvents: [],
-  passwordResetTokens: []
+  passwordResetTokens: [],
+  notificationJobs: [],
+  pushDevices: []
 };
 
 const app = express();
@@ -122,6 +125,63 @@ async function sendTransactionalEmail({ to, subject, text, html }) {
     console.error(`Email delivery failed for ${to}:`, error.message);
     return { queued: false, preview: false, accepted: [], rejected: [], error: "Email delivery failed" };
   }
+}
+
+function notificationCandidates(appState, fallbackEmail) {
+  const candidates = [];
+  for (const event of appState?.calendar?.events || []) {
+    if (!event.notifyAt || !event.id) continue;
+    candidates.push({ sourceType: `calendar-${event.type || "event"}`, sourceId: event.id, title: event.title || "Calendar reminder", email: event.owner || fallbackEmail, dueAt: event.notifyAt });
+  }
+  for (const chore of appState?.calendar?.chores || []) {
+    if (!chore.notifyAt || !chore.id) continue;
+    candidates.push({ sourceType: "calendar-chore", sourceId: chore.id, title: chore.title || "Chore reminder", email: chore.assignee || fallbackEmail, dueAt: chore.notifyAt });
+  }
+  for (const note of appState?.notes?.entries || []) {
+    if (!note.reminderAt || !note.id || note.trashed) continue;
+    candidates.push({ sourceType: "note", sourceId: note.id, title: note.title || "Note reminder", email: fallbackEmail, dueAt: note.reminderAt });
+  }
+  return candidates.filter((item) => item.email && !Number.isNaN(new Date(item.dueAt).getTime()));
+}
+
+async function syncNotificationJobs({ householdId, appState, user }) {
+  const candidates = notificationCandidates(appState, user.email);
+  if (MEMORY_DB) {
+    memoryDb.notificationJobs = memoryDb.notificationJobs.filter((job) => job.household_id !== householdId || job.sent_at);
+    for (const item of candidates) {
+      const recipient = memoryDb.users.find((candidate) => candidate.email.toLowerCase() === item.email.toLowerCase());
+      memoryDb.notificationJobs.push({ id: crypto.randomUUID(), household_id: householdId, user_id: recipient?.id || null, source_type: item.sourceType, source_id: item.sourceId, title: item.title, recipient_email: item.email, due_at: item.dueAt, sent_at: null });
+    }
+    return;
+  }
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+    await client.query("DELETE FROM notification_jobs WHERE household_id = $1 AND sent_at IS NULL", [householdId]);
+    for (const item of candidates) {
+      await client.query(
+        `INSERT INTO notification_jobs (household_id, user_id, source_type, source_id, title, recipient_email, due_at)
+         VALUES ($1, (SELECT id FROM users WHERE lower(email) = lower($2) LIMIT 1), $3, $4, $5, $2, $6)
+         ON CONFLICT (household_id, source_type, source_id, recipient_email, due_at) DO NOTHING`,
+        [householdId, item.email, item.sourceType, item.sourceId, item.title, item.dueAt]
+      );
+    }
+    await client.query("COMMIT");
+  } catch (error) {
+    await client.query("ROLLBACK");
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
+async function sendExpoPush(tokens, title) {
+  if (!tokens.length) return;
+  await fetch("https://exp.host/--/api/v2/push/send", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(tokens.map((token) => ({ to: token, title: "Famelo reminder", body: title, sound: "default" })))
+  });
 }
 
 function sendWelcomeEmail({ email, name, householdName }) {
@@ -1661,6 +1721,36 @@ app.get("/api/households/access", requireSession, async (req, res, next) => {
   }
 });
 
+app.get("/api/calendar/members", requireSession, async (req, res, next) => {
+  try {
+    if (MEMORY_DB) {
+      const householdIds = new Set(memoryDb.memberships
+        .filter((membership) => membership.user_id === req.sessionUser.id)
+        .map((membership) => membership.household_id));
+      const seen = new Set();
+      const members = memoryDb.memberships
+        .filter((membership) => householdIds.has(membership.household_id))
+        .map((membership) => memoryDb.users.find((user) => user.id === membership.user_id))
+        .filter((user) => user && !user.disabled_at && !seen.has(user.email) && seen.add(user.email))
+        .map((user) => ({ id: user.id, name: user.name, email: user.email, status: "active" }));
+      return res.json(members);
+    }
+
+    const result = await pool.query(
+      `SELECT DISTINCT u.id, u.name, u.email
+       FROM household_memberships visible
+       JOIN household_memberships mine ON mine.household_id = visible.household_id
+       JOIN users u ON u.id = visible.user_id
+       WHERE mine.user_id = $1 AND u.disabled_at IS NULL
+       ORDER BY u.name, u.email`,
+      [req.sessionUser.id]
+    );
+    res.json(result.rows.map((user) => ({ ...user, status: "active" })));
+  } catch (error) {
+    next(error);
+  }
+});
+
 app.delete("/api/households/access", requireSession, async (req, res, next) => {
   try {
     const email = String(req.body.email || "").trim().toLowerCase();
@@ -1862,6 +1952,7 @@ app.put("/api/state", requireSession, async (req, res, next) => {
       const shared = memoryDb.sharedModules.find((item) => item.owner_user_id === ownerId);
       if (shared) shared.app_state = sharedModulesFromState(req.body);
       else memoryDb.sharedModules.push({ owner_user_id: ownerId, app_state: sharedModulesFromState(req.body) });
+      await syncNotificationJobs({ householdId: req.sessionUser.household_id, appState: req.body, user: req.sessionUser });
       return res.json({ ok: true });
     }
 
@@ -1874,6 +1965,7 @@ app.put("/api/state", requireSession, async (req, res, next) => {
         [ownerId, sharedModulesFromState(req.body)]
       )
     ]);
+    await syncNotificationJobs({ householdId: req.sessionUser.household_id, appState: req.body, user: req.sessionUser });
     res.json({ ok: true });
   } catch (error) {
     next(error);

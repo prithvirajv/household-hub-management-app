@@ -18,11 +18,24 @@ let state = null;
 let sessionUser = null;
 let adminData = null;
 let sharingAccess = null;
+let sharedCalendarMembers = [];
 let households = [];
 let countryCatalog = [];
 let currentView = "budget";
 let autosaveTimer = null;
 let inviteEmailStatus = "";
+
+function currentMonthKey() {
+  const now = new Date();
+  return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
+}
+
+function migrateInitialMonth() {
+  if (!state?.budget || state.budget.monthPreferenceSet) return false;
+  state.budget.month = currentMonthKey();
+  state.budget.monthPreferenceSet = true;
+  return true;
+}
 
 const formatterCache = new Map();
 function currencyFormatter(exact = false) {
@@ -358,6 +371,12 @@ function formatDateTime(value) {
   return date.toLocaleString("en-US", { month: "short", day: "numeric", year: "numeric", hour: "numeric", minute: "2-digit" });
 }
 
+function formatReminderTime(value) {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "";
+  return date.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" });
+}
+
 function renderNav() {
   nav.innerHTML = views.filter(([key]) => key !== "admin" || sessionUser?.isAdmin).map(([key, label, icon]) => `
     <button class="nav-button ${key === currentView ? "active" : ""}" data-view="${key}" type="button">
@@ -448,11 +467,13 @@ function metricsForView() {
 function render() {
   if (!state) return;
   if (currentView === "admin" && !sessionUser?.isAdmin) currentView = "budget";
+  if (currentView === "wealth") ensureDebtNetWorthSync();
   renderShell();
   view.innerHTML = (renderers[currentView] || renderers.budget)();
   bindViewEvents();
   if (currentView === "admin" && !adminData) loadAdminData();
   if (["sharing", "calendar"].includes(currentView) && !sharingAccess) loadSharingAccess();
+  if (currentView === "calendar" && sharedCalendarMembers.length === 0) loadCalendarMembers();
   autosaveState();
 }
 
@@ -676,7 +697,7 @@ function renderPaychecks() {
 }
 
 function renderCalendar() {
-  const calendarMembers = (sharingAccess?.members || [])
+  const calendarMembers = (sharedCalendarMembers.length ? sharedCalendarMembers : sharingAccess?.members || [])
     .filter((member) => member.status === "active")
     .map((member) => ({ name: member.name, email: member.email }));
   if (!calendarMembers.some((member) => member.email === sessionUser?.email)) {
@@ -695,9 +716,9 @@ function renderCalendar() {
             <input name="editingId" type="hidden">
             <label>Type<select name="type"><option value="chore">Chore</option><option value="birthday">Birthday reminder</option><option value="reminder">Reminder</option></select></label>
             <label>Title<input name="title" placeholder="Mom birthday reminder" required></label>
-            <label>Date<input name="date" type="date" value="${state.budget.month}-01" required></label>
+            <label>Date and time<input name="date" type="datetime-local" value="${state.budget.month}-01T09:00" required></label>
             <label>Assign to<select name="owner">${calendarMembers.map((member) => `<option value="${escapeHtml(member.email || member.name)}">${escapeHtml(member.name)}${member.email ? ` · ${escapeHtml(member.email)}` : ""}</option>`).join("")}</select></label>
-            <label data-chore-recurrence-field>Repeat<select name="recurrence"><option value="once">Once</option><option value="weekly" selected>Weekly</option><option value="biweekly">Every 2 weeks</option><option value="monthly">Monthly</option></select></label>
+            <label data-chore-recurrence-field>Repeat<select name="recurrence"><option value="once">Once</option><option value="weekly" selected>Weekly</option><option value="biweekly">Every 2 weeks</option><option value="triweekly">Every 3 weeks</option><option value="monthly">Monthly</option></select></label>
             <label data-birthday-reminder-field hidden>Remind before<select name="reminderDays"><option value="0">Same day</option><option value="1">1 day</option><option value="3">3 days</option><option value="7" selected>7 days</option><option value="14">14 days</option></select></label>
             <button data-calendar-submit type="submit">Add</button>
             <button data-calendar-delete class="danger-button" type="button" hidden>Delete</button>
@@ -715,7 +736,7 @@ function renderCalendar() {
         </section>
       </div>
       <aside class="side-stack">
-        <section class="card"><div class="card-label">Daily planner</div><h3>Upcoming schedule</h3>${scheduleItems().length ? scheduleItems().map((item) => calendarManageRow(item.title, item.date, item.label || item.type, item.sourceKind, item.sourceId)).join("") : `<div class="empty-inline">No events scheduled this month</div>`}</section>
+        <section class="card"><div class="card-label">Daily planner</div><h3>Upcoming schedule</h3>${scheduleItems().length ? scheduleItems().map((item) => calendarManageRow(item.title, item.displayDate || item.date, item.label || item.type, item.sourceKind, item.sourceId)).join("") : `<div class="empty-inline">No events scheduled this month</div>`}</section>
         <section class="card">
           <div class="section-head"><div><span class="card-label">What to do</span><h3>Chore rotation</h3></div><button id="sideAddChoreButton" class="ghost" type="button">Add chore</button></div>
           ${state.calendar.chores.length ? state.calendar.chores.map((chore, index) => {
@@ -756,6 +777,7 @@ function ensureNotesData() {
       item.id ||= uniqueId("item");
       item.text ||= "";
       item.done = Boolean(item.done);
+      if (item.parentId && !note.checklist.some((candidate) => candidate.id === item.parentId)) item.parentId = "";
     });
     note.labels ||= [];
     note.pinned = Boolean(note.pinned);
@@ -872,7 +894,7 @@ function renderNotes() {
           <div class="note-composer-row">
             <div class="note-label-picker-field"><span>Labels</span>${renderNoteLabelPicker()}</div>
             <label>Color<select name="color"><option value="#ffffff">White</option><option value="#fff7d6">Yellow</option><option value="#eef7ff">Blue</option><option value="#eaf8ef">Green</option><option value="#fff0ee">Coral</option></select></label>
-            ${state.notes.activeView === "reminders" ? `<label>Reminder date<input name="reminder" type="date" required></label>` : ""}
+            ${state.notes.activeView === "reminders" ? `<label>Reminder date and time<input name="reminder" type="datetime-local" required></label>` : ""}
             <input name="pinned" type="checkbox" hidden>
             <button class="note-pin-toggle" data-composer-pin type="button" aria-label="Pin note" aria-pressed="false" title="Pin note">⌖</button>
             <button id="closeNoteComposerButton" class="ghost" type="button">Close</button>
@@ -932,12 +954,13 @@ function renderNoteLabelPicker(note = null) {
 function renderNoteCard(note) {
   const completed = note.checklist.filter((item) => item.done);
   const open = note.checklist.filter((item) => !item.done);
-  const checklistRow = (item) => `<div class="note-check-row ${item.done ? "done" : ""}">
+  const checklistRow = (item) => `<div class="note-check-row ${item.done ? "done" : ""} ${item.parentId ? "child-item" : ""}">
     <input data-note-check="${note.id}:${item.id}" type="checkbox" aria-label="Complete ${escapeHtml(item.text)}" ${item.done ? "checked" : ""}>
     <div class="note-check-combobox">
       <input class="note-check-text" data-note-check-text="${note.id}:${item.id}" value="${escapeHtml(item.text)}" placeholder="Checklist item" aria-label="Checklist item" aria-autocomplete="list" aria-expanded="false" autocomplete="off">
       <div class="note-item-suggestions" data-note-check-suggestions="${note.id}:${item.id}" role="listbox" hidden></div>
     </div>
+    <button class="note-check-level" data-indent-note-item="${note.id}:${item.id}" type="button" aria-label="${item.parentId ? "Move checklist item to top level" : "Make checklist item a sub-item"}" title="${item.parentId ? "Move to top level" : "Make sub-item"}">${item.parentId ? "←" : "→"}</button>
     <button class="note-check-delete" data-delete-note-item="${note.id}:${item.id}" type="button" aria-label="Delete checklist item">×</button>
   </div>`;
   return `<article class="note-card" data-note-id="${note.id}" style="background:${note.color}">
@@ -946,7 +969,7 @@ function renderNoteCard(note) {
       <button class="note-icon-button ${note.pinned ? "active" : ""}" data-pin-note="${note.id}" type="button" aria-label="${note.pinned ? "Unpin note" : "Pin note"}">⌖</button>
     </div>
     <textarea class="note-body-input" data-note-body="${note.id}" rows="${note.body ? "2" : "1"}" placeholder="Take a note..." aria-label="Note body">${escapeHtml(note.body || "")}</textarea>
-    ${note.reminder ? `<div class="note-reminder">Reminder · ${formatShortDate(note.reminder)}</div>` : ""}
+    ${note.reminder ? `<div class="note-reminder">Reminder · ${formatDateTime(note.reminder)}</div>` : ""}
     ${note.showChecklist ? open.map(checklistRow).join("") : ""}
     ${note.showChecklist ? `<form class="note-add-item-form" data-add-note-item="${note.id}">
       <div class="note-item-combobox">
@@ -958,7 +981,7 @@ function renderNoteCard(note) {
     <div class="note-labels" data-note-label-list="${note.id}">${note.labels.map((label) => `<span>${escapeHtml(label)}</span>`).join("")}</div>
     ${note.trashed ? `<div class="note-card-actions"><button data-restore-note="${note.id}" type="button">Restore</button><button class="danger-button" data-delete-note-forever="${note.id}" type="button">Delete permanently</button></div>` : `<div class="note-card-toolbar">
       <label class="note-color-control" title="Change color"><span aria-hidden="true">◉</span><select data-note-color="${note.id}" aria-label="Change note color"><option value="#ffffff" ${note.color === "#ffffff" ? "selected" : ""}>White</option><option value="#fff7d6" ${note.color === "#fff7d6" ? "selected" : ""}>Yellow</option><option value="#eef7ff" ${note.color === "#eef7ff" ? "selected" : ""}>Blue</option><option value="#eaf8ef" ${note.color === "#eaf8ef" ? "selected" : ""}>Green</option><option value="#fff0ee" ${note.color === "#fff0ee" ? "selected" : ""}>Coral</option></select></label>
-      <details class="note-toolbar-popover"><summary title="Set reminder" aria-label="Set reminder">◷</summary><div class="note-toolbar-popover-panel"><label>Reminder date<input type="date" data-note-reminder="${note.id}" value="${escapeHtml(note.reminder || "")}"></label></div></details>
+      <details class="note-toolbar-popover"><summary title="Set reminder" aria-label="Set reminder">◷</summary><div class="note-toolbar-popover-panel"><label>Reminder date and time<input type="datetime-local" data-note-reminder="${note.id}" value="${escapeHtml(note.reminder || "")}"></label></div></details>
       <div class="note-toolbar-labels" title="Add label">${renderNoteLabelPicker(note)}</div>
       <button data-archive-note="${note.id}" type="button" title="${note.archived ? "Unarchive" : "Archive"}" aria-label="${note.archived ? "Unarchive note" : "Archive note"}">↓</button>
       <details class="note-more-menu"><summary title="More actions" aria-label="More actions">⋮</summary><div class="note-more-menu-panel">
@@ -1434,7 +1457,7 @@ function scheduleItems() {
   const selectedMonth = state.budget.month;
   const oneTimeEvents = state.calendar.events
     .filter((event) => event.type !== "birthday" && event.date?.startsWith(selectedMonth))
-    .map((event) => ({ title: event.title, date: event.date.slice(5), type: event.type, sourceKind: "event", sourceId: event.id }));
+    .map((event) => ({ title: event.title, date: event.date.slice(5), displayDate: `${event.date.slice(5)}${event.dateTime ? ` · ${formatReminderTime(event.dateTime)}` : ""}`, type: event.type, sourceKind: "event", sourceId: event.id }));
   const chores = state.calendar.chores.flatMap((chore) =>
     choreOccurrencesForMonth(chore).map((occurrence) => ({
       title: chore.title,
@@ -1467,6 +1490,7 @@ function choreCadenceLabel(chore) {
     once: "Once",
     weekly: "Weekly",
     biweekly: "Every 2 weeks",
+    triweekly: "Every 3 weeks",
     monthly: "Monthly"
   }[recurrence] || "Once";
 }
@@ -1500,7 +1524,7 @@ function choreOccurrencesForMonth(chore) {
     return dates;
   }
 
-  const intervalDays = chore.recurrence === "biweekly" ? 14 : 7;
+  const intervalDays = chore.recurrence === "triweekly" ? 21 : chore.recurrence === "biweekly" ? 14 : 7;
   const cursor = new Date(start);
   if (cursor < monthStart) {
     const daysUntilMonth = Math.floor((monthStart - cursor) / 86400000);
@@ -1831,6 +1855,7 @@ function bindViewEvents() {
       checklist: checklist.map((text) => ({ id: uniqueId("item"), text, done: false })),
       labels: formData.getAll("labels"),
       reminder: data.reminder || "",
+      reminderAt: data.reminder ? new Date(data.reminder).toISOString() : "",
       color: data.color || "#ffffff",
       pinned: data.pinned === "on",
       archived: false,
@@ -1975,6 +2000,27 @@ function bindViewEvents() {
       const note = state.notes.entries.find((item) => item.id === noteId);
       if (!note) return;
       note.checklist = note.checklist.filter((item) => item.id !== itemId);
+      note.checklist.forEach((item) => {
+        if (item.parentId === itemId) item.parentId = "";
+      });
+      render();
+    });
+  });
+
+  document.querySelectorAll("[data-indent-note-item]").forEach((button) => {
+    button.addEventListener("click", () => {
+      const [noteId, itemId] = button.dataset.indentNoteItem.split(":");
+      const note = state.notes.entries.find((item) => item.id === noteId);
+      const index = note?.checklist.findIndex((item) => item.id === itemId) ?? -1;
+      if (!note || index < 0) return;
+      const item = note.checklist[index];
+      if (item.parentId) {
+        item.parentId = "";
+      } else {
+        const parent = [...note.checklist.slice(0, index)].reverse().find((candidate) => !candidate.parentId);
+        if (!parent) return;
+        item.parentId = parent.id;
+      }
       render();
     });
   });
@@ -2004,6 +2050,7 @@ function bindViewEvents() {
       const note = state.notes.entries.find((item) => item.id === input.dataset.noteReminder);
       if (!note) return;
       note.reminder = input.value;
+      note.reminderAt = input.value ? new Date(input.value).toISOString() : "";
       render();
     });
   });
@@ -2749,7 +2796,9 @@ function bindViewEvents() {
   $("#calendarQuickAdd")?.addEventListener("submit", (event) => {
     event.preventDefault();
     const data = Object.fromEntries(new FormData(event.currentTarget));
-    const assignedMember = sharingAccess?.members.find((member) => (member.email || member.name) === data.owner);
+    const assignedMember = (sharedCalendarMembers.length ? sharedCalendarMembers : sharingAccess?.members || []).find((member) => (member.email || member.name) === data.owner);
+    const selectedDateTime = String(data.date || "");
+    const selectedDate = selectedDateTime.slice(0, 10);
     const editingKind = data.editingKind;
     const editingId = data.editingId;
     const wasEditing = Boolean(editingKind && editingId);
@@ -2769,20 +2818,26 @@ function bindViewEvents() {
         assigneeName: assignedMember?.name || sessionUser?.name || data.owner || "Household owner",
         cadence: choreCadenceLabel({ recurrence }),
         recurrence,
-        startDate: data.date,
-        nextDue: data.date,
+        startDate: selectedDate,
+        nextDue: selectedDate,
+        time: selectedDateTime.slice(11, 16) || "09:00",
+        notifyAt: selectedDateTime ? new Date(selectedDateTime).toISOString() : "",
         completedDates: existing?.completedDates || []
       };
       if (existing) Object.assign(existing, chore);
       else state.calendar.chores.push(chore);
     } else {
       const isBirthday = data.type === "birthday";
+      const notificationDate = new Date(selectedDateTime);
+      if (isBirthday) notificationDate.setDate(notificationDate.getDate() - Number(data.reminderDays || 7));
       const existing = editingKind === "event" ? state.calendar.events.find((item) => item.id === editingId) : null;
       const calendarEvent = {
         id: existing?.id || uniqueId("event"),
         title: data.title,
-        date: data.date,
-        monthDay: isBirthday ? data.date.slice(5) : undefined,
+        date: selectedDate,
+        dateTime: selectedDateTime || `${selectedDate}T09:00`,
+        notifyAt: selectedDateTime ? notificationDate.toISOString() : "",
+        monthDay: isBirthday ? selectedDate.slice(5) : undefined,
         type: isBirthday ? "birthday" : "reminder",
         annual: isBirthday,
         reminderDays: isBirthday ? Number(data.reminderDays || 7) : undefined,
@@ -2988,7 +3043,9 @@ function editCalendarItem(reference) {
   form.editingId.value = id;
   form.type.value = kind === "chore" ? "chore" : item.type === "birthday" ? "birthday" : "reminder";
   form.title.value = item.title || "";
-  form.date.value = kind === "chore" ? item.startDate || item.nextDue || `${state.budget.month}-01` : item.date || `${state.budget.month}-01`;
+  form.date.value = kind === "chore"
+    ? `${item.startDate || item.nextDue || `${state.budget.month}-01`}T${item.time || "09:00"}`
+    : item.dateTime || `${item.date || `${state.budget.month}-01`}T09:00`;
   form.owner.value = kind === "chore" ? item.assignee || "" : item.owner || "";
   if (![...form.owner.options].some((option) => option.value === form.owner.value)) form.owner.value = sessionUser?.email || form.owner.options[0]?.value || "";
   form.recurrence.value = kind === "chore" ? item.recurrence || "once" : "once";
@@ -3363,6 +3420,7 @@ $("#syncButton").addEventListener("click", async (event) => {
 $("#monthPicker").addEventListener("change", (event) => {
   rememberCurrentBudgetSnapshot();
   state.budget.month = event.target.value;
+  state.budget.monthPreferenceSet = true;
   autosaveState();
   render();
 });
@@ -3498,6 +3556,7 @@ async function loadApp() {
     api("/api/households"),
     api("/api/state")
   ]);
+  if (migrateInitialMonth()) autosaveState();
   $("#authPanel").hidden = true;
   $("#workspace").hidden = false;
   render();
@@ -3516,8 +3575,10 @@ async function reloadSelectedHousehold() {
     api("/api/households"),
     api("/api/state")
   ]);
+  if (migrateInitialMonth()) autosaveState();
   adminData = null;
   sharingAccess = null;
+  sharedCalendarMembers = [];
   render();
 }
 
@@ -3530,6 +3591,17 @@ async function loadSharingAccess(shouldRender = true) {
     inviteEmailStatus = error.message;
     sharingAccess = { canManage: false, members: [] };
     if (shouldRender && ["sharing", "calendar"].includes(currentView)) render();
+  }
+}
+
+async function loadCalendarMembers(shouldRender = true) {
+  if (!sessionUser) return;
+  try {
+    sharedCalendarMembers = await api("/api/calendar/members");
+    if (shouldRender && currentView === "calendar") render();
+  } catch (error) {
+    console.warn("Unable to load shared calendar members", error);
+    sharedCalendarMembers = [];
   }
 }
 
@@ -3566,43 +3638,32 @@ function csvEscape(value) {
 
 function downloadCsv() {
   if (!state) return;
-  const rows = [];
-  rows.push(["type", "date_or_month", "category", "line_or_payee", "planned", "spent", "remaining", "memo"]);
-
-  allLines().forEach((line) => {
-    const spent = spentByLine(line.id);
-    rows.push([
-      "budget_line",
-      state.budget.month,
-      line.category,
-      line.name,
-      Number(line.planned || 0).toFixed(2),
-      spent.toFixed(2),
-      (Number(line.planned || 0) - spent).toFixed(2),
-      `due day ${line.dueDay || ""}`
-    ]);
-  });
-
-  state.transactions.forEach((transaction) => {
-    const line = allLines().find((item) => item.id === transaction.lineId);
-    rows.push([
-      "transaction",
-      transaction.date,
-      line?.category || transaction.categoryName || "",
-      transaction.payee,
-      "",
-      Number(transaction.amount || 0).toFixed(2),
-      "",
-      transaction.memo || transactionAssignmentLabel(transaction)
-    ]);
-  });
+  const rowsByView = {
+    budget: () => [["month", "category", "subcategory", "due_date", "planned", "spent", "remaining"], ...allLines().map((line) => {
+      const spent = spentByLine(line.id);
+      return [state.budget.month, line.category, line.name, dueDateValue(line.dueDay), Number(line.planned || 0).toFixed(2), spent.toFixed(2), (Number(line.planned || 0) - spent).toFixed(2)];
+    })],
+    transactions: () => [["date", "payee", "amount", "category", "subcategory", "memo"], ...state.transactions.map((transaction) => {
+      const line = allLines().find((item) => item.id === transaction.lineId);
+      return [transaction.date, transaction.payee, Number(transaction.amount || 0).toFixed(2), line?.category || transaction.categoryName || "", line?.name || "Unassigned", transaction.memo || ""];
+    })],
+    paychecks: () => [["date", "paycheck", "amount", "assigned_subcategories"], ...state.paychecks.map((paycheck) => [paycheck.date, paycheck.name, Number(paycheck.amount || 0).toFixed(2), (paycheck.assignedLineIds || []).map((id) => allLines().find((line) => line.id === id)?.name || id).join("; ")])],
+    calendar: () => [["kind", "title", "date_time", "assigned_to", "repeat"], ...state.calendar.events.map((item) => [item.type, item.title, item.dateTime || item.date, item.ownerName || item.owner || "", item.annual ? "Yearly" : "Once"]), ...state.calendar.chores.map((item) => ["chore", item.title, `${item.startDate || item.nextDue}T${item.time || "09:00"}`, item.assigneeName || item.assignee || "", choreCadenceLabel(item)])],
+    meals: () => [["month", "week", "day", "meal", "recipe", "servings"], ...state.meals.plannedWeek.map((item) => [item.month || state.budget.month, item.week || 1, item.day, item.slot || "Dinner", item.meal, item.servings])],
+    recipes: () => [["recipe", "calories", "protein_g", "ingredients"], ...state.meals.recipes.map((recipe) => [recipe.name, recipe.calories, recipe.protein, (recipe.ingredients || []).join("; ")])],
+    goals: () => [["goal", "target_date", "target", "saved", "remaining"], ...state.goals.sinkingFunds.map((goal) => [goal.name, goal.targetDate || "", goal.target, goal.saved, Math.max(0, Number(goal.target || 0) - Number(goal.saved || 0))])],
+    wealth: () => [["record_type", "name", "class_or_apr", "shares_or_term", "price_or_emi", "value_or_balance"], ...state.goals.netWorth.assets.map((asset) => ["asset", asset.name, asset.assetClass || "other", asset.shares || "", asset.price || "", assetValue(asset)]), ...state.goals.debts.map((debt) => ["debt", debt.name, debt.rate, debt.termMonths || "", debt.minimum || 0, debt.balance])],
+    reports: () => [["metric", "value"], ["Income", state.budget.income], ["Assigned", plannedTotal()], ["Spent", spentTotal()], ["Available", state.budget.income - plannedTotal()], ["Cash left", remainingTotal()], ...state.budget.categories.map((category) => [`Category: ${category.name}`, category.lines.reduce((sum, line) => sum + spentByLine(line.id), 0)])],
+    sharing: () => [["name", "email", "role", "status"], ...(sharingAccess?.members || []).map((member) => [member.name, member.email, member.role, member.status])]
+  };
+  const rows = (rowsByView[currentView] || rowsByView.budget)();
 
   const csv = rows.map((row) => row.map(csvEscape).join(",")).join("\n");
   const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
   const url = URL.createObjectURL(blob);
   const link = document.createElement("a");
   link.href = url;
-  link.download = `household-hub-${state.budget.month}.csv`;
+  link.download = `famelo-${currentView}-${state.budget.month}.csv`;
   document.body.appendChild(link);
   link.click();
   link.remove();
