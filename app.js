@@ -38,6 +38,7 @@ let planTimer = null;
 let documentsData = null;
 let documentsCurrentFolderId = null;
 let documentsUploading = false;
+let documentsDragPayload = null;
 
 function currentMonthKey() {
   const now = new Date();
@@ -1420,7 +1421,7 @@ function renderDocumentNoteLinkPicker(document) {
 
 function renderDocumentRow(document) {
   const linkedNote = document.noteId ? state.notes.entries.find((note) => note.id === document.noteId) : null;
-  return `<div class="documents-file-row" data-document-id="${document.id}">
+  return `<div class="documents-file-row" data-document-id="${document.id}" draggable="true" data-drag-type="document" data-drag-id="${document.id}">
     <div class="documents-file-info">
       <strong>${escapeHtml(document.name)}</strong>
       <small>${[formatFileSize(document.sizeBytes), document.status === "pending" ? "Uploading…" : document.contentType].filter(Boolean).join(" · ")}</small>
@@ -1450,8 +1451,8 @@ function renderDocuments() {
     <p class="muted">Shared with your whole household — deeds, patta, tax receipts and other property documents.</p>
     <div class="documents-toolbar">
       <div class="documents-breadcrumb">
-        <button type="button" data-documents-open-folder="" class="${!currentFolderId ? "active" : ""}">All documents</button>
-        ${breadcrumb.map((folder) => `<span aria-hidden="true">/</span><button type="button" data-documents-open-folder="${folder.id}" class="${currentFolderId === folder.id ? "active" : ""}">${escapeHtml(folder.name)}</button>`).join("")}
+        <button type="button" data-documents-open-folder="" data-documents-drop-target="" class="${!currentFolderId ? "active" : ""}">All documents</button>
+        ${breadcrumb.map((folder) => `<span aria-hidden="true">/</span><button type="button" data-documents-open-folder="${folder.id}" data-documents-drop-target="${folder.id}" class="${currentFolderId === folder.id ? "active" : ""}">${escapeHtml(folder.name)}</button>`).join("")}
       </div>
       <div class="documents-actions">
         <button type="button" data-documents-new-folder>+ New folder</button>
@@ -1462,7 +1463,7 @@ function renderDocuments() {
       </div>
     </div>
     ${subfolders.length ? `<div class="documents-folder-grid">
-      ${subfolders.map((folder) => `<div class="documents-folder-card">
+      ${subfolders.map((folder) => `<div class="documents-folder-card" draggable="true" data-drag-type="folder" data-drag-id="${folder.id}" data-documents-drop-target="${folder.id}">
         <button type="button" class="documents-folder-open" data-documents-open-folder="${folder.id}">▢ ${escapeHtml(folder.name)}</button>
         <button type="button" class="icon-button danger-button" data-documents-delete-folder="${folder.id}" title="Delete folder" aria-label="Delete ${escapeHtml(folder.name)} folder">×</button>
       </div>`).join("")}
@@ -3828,6 +3829,61 @@ function bindViewEvents() {
       if (!window.confirm("Delete this document? This cannot be undone.")) return;
       try {
         await api(`/api/documents/${button.dataset.documentsDelete}`, { method: "DELETE" });
+        await loadDocumentsData(false);
+        render();
+      } catch (error) {
+        window.alert(error.message);
+      }
+    });
+  });
+
+  document.querySelectorAll("[data-drag-type]").forEach((element) => {
+    element.addEventListener("dragstart", (event) => {
+      documentsDragPayload = { type: element.dataset.dragType, id: element.dataset.dragId };
+      event.dataTransfer.effectAllowed = "move";
+      event.dataTransfer.setData("text/plain", element.dataset.dragId);
+      element.classList.add("dragging");
+    });
+    element.addEventListener("dragend", () => {
+      documentsDragPayload = null;
+      element.classList.remove("dragging");
+      document.querySelectorAll(".documents-drop-target-active").forEach((target) => target.classList.remove("documents-drop-target-active"));
+    });
+  });
+
+  document.querySelectorAll("[data-documents-drop-target]").forEach((target) => {
+    target.addEventListener("dragover", (event) => {
+      if (!documentsDragPayload) return;
+      event.preventDefault();
+      event.dataTransfer.dropEffect = "move";
+    });
+    target.addEventListener("dragenter", (event) => {
+      if (!documentsDragPayload) return;
+      event.preventDefault();
+      target.classList.add("documents-drop-target-active");
+    });
+    target.addEventListener("dragleave", () => {
+      target.classList.remove("documents-drop-target-active");
+    });
+    target.addEventListener("drop", async (event) => {
+      event.preventDefault();
+      target.classList.remove("documents-drop-target-active");
+      const payload = documentsDragPayload;
+      documentsDragPayload = null;
+      if (!payload) return;
+      const targetFolderId = target.dataset.documentsDropTarget || null;
+      try {
+        if (payload.type === "folder") {
+          if (payload.id === targetFolderId) return;
+          const cycleCandidates = documentsData.folders.map((folder) => ({ id: folder.id, parentId: folder.parentId }));
+          if (wouldCreateFolderCycle(cycleCandidates, payload.id, targetFolderId)) {
+            window.alert("Can't move a folder into itself or one of its own subfolders.");
+            return;
+          }
+          await api(`/api/documents/folders/${payload.id}`, { method: "PATCH", body: JSON.stringify({ parentId: targetFolderId }) });
+        } else if (payload.type === "document") {
+          await api(`/api/documents/${payload.id}`, { method: "PATCH", body: JSON.stringify({ folderId: targetFolderId }) });
+        }
         await loadDocumentsData(false);
         render();
       } catch (error) {

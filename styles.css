@@ -3870,3 +3870,24 @@ main {
   border-radius: 6px;
   font-size: 0.78rem;
 }
+
+.documents-folder-card[draggable="true"],
+.documents-file-row[draggable="true"] {
+  cursor: grab;
+}
+
+.documents-folder-card.dragging,
+.documents-file-row.dragging {
+  opacity: 0.5;
+}
+
+.documents-breadcrumb button[data-documents-drop-target],
+.documents-folder-card[data-documents-drop-target] {
+  transition: background 0.1s ease, outline 0.1s ease;
+}
+
+.documents-drop-target-active {
+  background: var(--soft-blue) !important;
+  outline: 2px dashed var(--blue);
+  outline-offset: -2px;
+}
