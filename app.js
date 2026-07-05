@@ -432,6 +432,8 @@ function renderShell() {
   const isRecipesView = currentView === "recipes";
   const isGoalsView = currentView === "goals";
   const isWealthView = currentView === "wealth";
+  const isJournalView = currentView === "journal";
+  const isPlanView = currentView === "plan";
   $("#viewTitle").textContent = isAdminView
     ? "Application admin"
     : isHelpView
@@ -444,6 +446,10 @@ function renderShell() {
             ? "Financial goals"
             : isWealthView
               ? "Household wealth"
+              : isJournalView
+                ? "Your journal"
+                : isPlanView
+                  ? "Your plan"
           : `${monthLabel()} plan`;
   $("#householdName").textContent = title.toUpperCase();
   $("#userName").textContent = sessionUser?.name || "Demo User";
@@ -489,6 +495,8 @@ function metricsForView() {
     return [["Chore rotation", String(state.calendar.chores.length), "household chores"], ["Birthday reminders", String(birthdaysThisMonth), `annual birthdays in ${monthLabel()}`], [`${monthLabel()} events`, String(upcoming), "chores, birthdays and reminders"], ["Shared calendar", "Household", "tasks in every member"]];
   }
   if (currentView === "notes") return [];
+  if (currentView === "journal") return [];
+  if (currentView === "plan") return [];
   if (currentView === "help") return [];
   if (currentView === "meals") {
     ensureMealWeekData();
