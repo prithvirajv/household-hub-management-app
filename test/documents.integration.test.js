@@ -102,6 +102,21 @@ test("PATCH /api/documents/:id moves a document into a different folder", async 
   assert.equal(moveToInvalidFolder.status, 404);
 });
 
+test("PATCH /api/documents/folders/:id renames a folder without disturbing its parent or wealth tag", async () => {
+  const cookie = await signUp("documents-rename@example.com", "Documents Rename Household");
+  await addWealthItem(cookie, "asset", "asset-rename", "Rename Test Asset");
+  const parent = await server.request("/api/documents/folders", { method: "POST", headers: { cookie }, body: JSON.stringify({ name: "Property" }) });
+  const folder = await server.request("/api/documents/folders", { method: "POST", headers: { cookie }, body: JSON.stringify({ name: "Kanampalayam Land", parentId: parent.body.id }) });
+  await server.request(`/api/documents/folders/${folder.body.id}`, { method: "PATCH", headers: { cookie }, body: JSON.stringify({ wealthItemType: "asset", wealthItemId: "asset-rename" }) });
+
+  const rename = await server.request(`/api/documents/folders/${folder.body.id}`, { method: "PATCH", headers: { cookie }, body: JSON.stringify({ name: "Kanampalayam Land (Updated)" }) });
+  assert.equal(rename.status, 200);
+  assert.equal(rename.body.name, "Kanampalayam Land (Updated)");
+  assert.equal(rename.body.parentId, parent.body.id, "renaming should not change the parent folder");
+  assert.equal(rename.body.wealthItemType, "asset", "renaming should not clear the wealth tag");
+  assert.equal(rename.body.wealthItemId, "asset-rename", "renaming should not clear the wealth tag");
+});
+
 test("upload-url rejects an unsupported content type and an oversized file", async () => {
   const cookie = await signUp("documents-owner-2@example.com", "Documents Household Two");
   const badType = await server.request("/api/documents/upload-url", { method: "POST", headers: { cookie }, body: JSON.stringify({ name: "virus.exe", contentType: "application/x-executable" }) });

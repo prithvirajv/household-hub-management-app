@@ -1561,6 +1561,7 @@ function renderDocuments() {
       ${subfolders.map((folder) => `<div class="documents-folder-card" draggable="true" data-drag-type="folder" data-drag-id="${folder.id}" data-documents-drop-target="${folder.id}">
         <div class="documents-folder-card-row">
           <button type="button" class="documents-folder-open" data-documents-open-folder="${folder.id}">▢ ${escapeHtml(folder.name)}</button>
+          <button type="button" class="documents-icon-btn" data-documents-rename-folder="${folder.id}" title="Rename folder" aria-label="Rename ${escapeHtml(folder.name)} folder">✎</button>
           ${renderFolderWealthLinkPicker(folder)}
           <button type="button" class="documents-icon-btn danger-button" data-documents-delete-folder="${folder.id}" title="Delete folder" aria-label="Delete ${escapeHtml(folder.name)} folder">×</button>
         </div>
@@ -3855,6 +3856,22 @@ function bindViewEvents() {
       if (!window.confirm("Delete this folder? It must be empty.")) return;
       try {
         await api(`/api/documents/folders/${button.dataset.documentsDeleteFolder}`, { method: "DELETE" });
+        await loadDocumentsData(false);
+        render();
+      } catch (error) {
+        window.alert(error.message);
+      }
+    });
+  });
+
+  document.querySelectorAll("[data-documents-rename-folder]").forEach((button) => {
+    button.addEventListener("click", async () => {
+      const folderId = button.dataset.documentsRenameFolder;
+      const folder = documentsData?.folders.find((item) => item.id === folderId);
+      const name = window.prompt("Rename folder", folder?.name || "");
+      if (!name || !name.trim() || name.trim() === folder?.name) return;
+      try {
+        await api(`/api/documents/folders/${folderId}`, { method: "PATCH", body: JSON.stringify({ name: name.trim() }) });
         await loadDocumentsData(false);
         render();
       } catch (error) {
