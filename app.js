@@ -39,6 +39,7 @@ let documentsData = null;
 let documentsCurrentFolderId = null;
 let documentsUploading = false;
 let documentsDragPayload = null;
+let wealthDocsExpandedKey = null;
 
 function currentMonthKey() {
   const now = new Date();
@@ -530,7 +531,7 @@ function render() {
   view.innerHTML = (renderers[currentView] || renderers.budget)();
   bindViewEvents();
   if (currentView === "admin" && !adminData) loadAdminData();
-  if (currentView === "documents" && !documentsData) loadDocumentsData();
+  if (["documents", "wealth"].includes(currentView) && !documentsData) loadDocumentsData();
   if (["sharing", "calendar"].includes(currentView) && !sharingAccess) loadSharingAccess();
   if (currentView === "calendar" && sharedCalendarMembers.length === 0) loadCalendarMembers();
   autosaveState();
@@ -1392,6 +1393,10 @@ function documentsFolderPath(folderId) {
   return path;
 }
 
+function documentsFolderFullPath(folderId) {
+  return documentsFolderPath(folderId).map((folder) => folder.name).join(" / ");
+}
+
 function formatFileSize(sizeBytes) {
   const size = Number(sizeBytes) || 0;
   if (size <= 0) return "";
@@ -1419,20 +1424,54 @@ function renderDocumentNoteLinkPicker(document) {
   </details>`;
 }
 
+function documentsWealthItemLabel(document) {
+  if (!document.wealthItemId) return null;
+  const collection = document.wealthItemType === "liability" ? state.goals.netWorth.liabilities : state.goals.netWorth.assets;
+  const item = collection.find((candidate) => candidate.id === document.wealthItemId);
+  return item ? `${document.wealthItemType === "liability" ? "Liability" : "Asset"}: ${item.name}` : null;
+}
+
+function renderDocumentWealthLinkPicker(document) {
+  const assets = state.goals.netWorth.assets;
+  const liabilities = state.goals.netWorth.liabilities;
+  const currentValue = document.wealthItemId ? `${document.wealthItemType}:${document.wealthItemId}` : "";
+  return `<details class="note-label-picker document-wealth-link-picker">
+    <summary title="Tag to a wealth item" aria-label="${currentValue ? "Tagged to a wealth item" : "Tag to a wealth item"}">⛁</summary>
+    <div class="note-label-picker-options">
+      <label>
+        <input type="radio" name="document-wealth-${document.id}" data-document-wealth-link="${document.id}" value="" ${!currentValue ? "checked" : ""}>
+        <span>Not tagged</span>
+      </label>
+      ${assets.length || liabilities.length ? "" : `<small>No assets or liabilities yet</small>`}
+      ${assets.map((asset) => `<label>
+        <input type="radio" name="document-wealth-${document.id}" data-document-wealth-link="${document.id}" value="asset:${asset.id}" ${currentValue === `asset:${asset.id}` ? "checked" : ""}>
+        <span>Asset: ${escapeHtml(asset.name)}</span>
+      </label>`).join("")}
+      ${liabilities.map((liability) => `<label>
+        <input type="radio" name="document-wealth-${document.id}" data-document-wealth-link="${document.id}" value="liability:${liability.id}" ${currentValue === `liability:${liability.id}` ? "checked" : ""}>
+        <span>Liability: ${escapeHtml(liability.name)}</span>
+      </label>`).join("")}
+    </div>
+  </details>`;
+}
+
 function renderDocumentRow(document) {
   const linkedNote = document.noteId ? state.notes.entries.find((note) => note.id === document.noteId) : null;
+  const wealthLabel = documentsWealthItemLabel(document);
   return `<div class="documents-file-row" data-document-id="${document.id}" draggable="true" data-drag-type="document" data-drag-id="${document.id}">
     <div class="documents-file-info">
       <strong>${escapeHtml(document.name)}</strong>
       <small>${[formatFileSize(document.sizeBytes), document.status === "pending" ? "Uploading…" : document.contentType].filter(Boolean).join(" · ")}</small>
       ${linkedNote ? `<small class="documents-linked-note">Linked to “${escapeHtml(linkedNote.title || "Untitled note")}”</small>` : ""}
+      ${wealthLabel ? `<small class="documents-linked-note">Tagged to ${escapeHtml(wealthLabel)}</small>` : ""}
     </div>
     <div class="documents-file-actions">
       <select class="documents-move-select" data-documents-move="${document.id}" aria-label="Move to folder">
         <option value="">All documents (root)</option>
-        ${documentsData.folders.map((folder) => `<option value="${folder.id}" ${document.folderId === folder.id ? "selected" : ""}>${escapeHtml(folder.name)}</option>`).join("")}
+        ${documentsData.folders.map((folder) => `<option value="${folder.id}" ${document.folderId === folder.id ? "selected" : ""}>${escapeHtml(documentsFolderFullPath(folder.id))}</option>`).join("")}
       </select>
       ${renderDocumentNoteLinkPicker(document)}
+      ${renderDocumentWealthLinkPicker(document)}
       <button type="button" data-documents-download="${document.id}" title="Download" aria-label="Download ${escapeHtml(document.name)}">⇩</button>
       <button type="button" class="icon-button danger-button" data-documents-delete="${document.id}" title="Delete" aria-label="Delete ${escapeHtml(document.name)}">×</button>
     </div>
@@ -1440,6 +1479,7 @@ function renderDocumentRow(document) {
 }
 
 function renderDocuments() {
+  if (ensureDebtNetWorthSync()) autosaveState();
   if (!documentsData) return `<p class="muted">Loading documents…</p>`;
   const folders = documentsData.folders;
   const documents = documentsData.documents;
@@ -1630,12 +1670,21 @@ function renderWealth() {
 function netWorthItemRow(item, type, index) {
   const isLiability = type === "liability";
   const isStock = !isLiability && item.assetClass === "stock";
+  const wealthKey = `${type}:${item.id}`;
+  const linkedDocuments = (documentsData?.documents || []).filter((document) => document.wealthItemType === type && document.wealthItemId === item.id);
   return `<div class="net-worth-item ${isLiability ? "liability" : ""} ${isStock ? "stock" : ""}">
     <label class="net-worth-name">Name<input data-net-worth-name="${type}:${index}" value="${escapeHtml(item.name)}" aria-label="${isLiability ? "Liability" : "Asset"} name"></label>
     <label>Type<select data-net-worth-type="${type}:${index}" aria-label="Item type"><option value="asset" ${isLiability ? "" : "selected"}>Asset</option><option value="liability" ${isLiability ? "selected" : ""}>Liability</option></select></label>
     ${isLiability ? "" : `<label>Asset class<select data-asset-class="${index}" aria-label="Asset class for ${escapeHtml(item.name)}"><option value="other" ${item.assetClass === "other" ? "selected" : ""}>Other asset</option><option value="cash" ${item.assetClass === "cash" ? "selected" : ""}>Cash</option><option value="property" ${item.assetClass === "property" ? "selected" : ""}>Property</option><option value="retirement" ${item.assetClass === "retirement" ? "selected" : ""}>Retirement</option><option value="stock" ${isStock ? "selected" : ""}>Stock</option></select></label>`}
     ${isStock ? `<label>Symbol<input data-stock-symbol="${index}" value="${escapeHtml(item.symbol || "")}" placeholder="AAPL" aria-label="Stock symbol for ${escapeHtml(item.name)}"></label><label>Shares<input data-stock-shares="${index}" type="number" min="0" step="0.0001" inputmode="decimal" value="${Number(item.shares || 0)}" aria-label="Number of shares for ${escapeHtml(item.name)}"></label><label>Price per share<input data-stock-price="${index}" type="number" min="0" step="0.01" inputmode="decimal" value="${Number(item.price || 0)}" aria-label="Share price for ${escapeHtml(item.name)}"></label><div class="stock-market-value"><span>Market value</span><strong data-stock-market-value="${index}">${money.format(assetValue(item))}</strong></div>` : `<label>Amount<input data-net-worth-value="${type}:${index}" type="number" min="0" step="0.01" inputmode="decimal" value="${Number(item.value || 0)}" aria-label="${isLiability ? "Liability" : "Asset"} amount"></label>`}
     <button class="icon-button danger-button" data-delete-${type}="${index}" type="button" aria-label="Remove ${escapeHtml(item.name)}">×</button>
+    <button type="button" class="wealth-doc-chip" data-wealth-doc-toggle="${wealthKey}" title="Documents tagged to ${escapeHtml(item.name)}">📄 ${linkedDocuments.length}</button>
+    ${wealthDocsExpandedKey === wealthKey ? `<div class="wealth-doc-list">
+      ${linkedDocuments.length ? linkedDocuments.map((document) => `<div class="wealth-doc-list-row">
+        <span>${escapeHtml(document.name)}</span>
+        <button type="button" data-documents-download="${document.id}" title="Download" aria-label="Download ${escapeHtml(document.name)}">⇩</button>
+      </div>`).join("") : `<small class="muted">No documents tagged to this ${isLiability ? "liability" : "asset"} yet — tag one from the Documents section.</small>`}
+    </div>` : ""}
   </div>`;
 }
 
@@ -3813,6 +3862,19 @@ function bindViewEvents() {
     });
   });
 
+  document.querySelectorAll("[data-document-wealth-link]").forEach((input) => {
+    input.addEventListener("change", async () => {
+      const [wealthItemType, wealthItemId] = input.value ? input.value.split(":") : [null, null];
+      try {
+        await api(`/api/documents/${input.dataset.documentWealthLink}`, { method: "PATCH", body: JSON.stringify({ wealthItemType, wealthItemId }) });
+        await loadDocumentsData(false);
+        render();
+      } catch (error) {
+        window.alert(error.message);
+      }
+    });
+  });
+
   document.querySelectorAll("[data-documents-download]").forEach((button) => {
     button.addEventListener("click", async () => {
       try {
@@ -3821,6 +3883,14 @@ function bindViewEvents() {
       } catch (error) {
         window.alert(error.message);
       }
+    });
+  });
+
+  document.querySelectorAll("[data-wealth-doc-toggle]").forEach((button) => {
+    button.addEventListener("click", () => {
+      const key = button.dataset.wealthDocToggle;
+      wealthDocsExpandedKey = wealthDocsExpandedKey === key ? null : key;
+      render();
     });
   });
 

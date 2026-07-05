@@ -173,3 +173,9 @@ CREATE TABLE IF NOT EXISTS documents (
 CREATE INDEX IF NOT EXISTS idx_documents_household_id ON documents(household_id);
 CREATE INDEX IF NOT EXISTS idx_documents_folder_id ON documents(folder_id);
 CREATE INDEX IF NOT EXISTS idx_documents_note_id ON documents(note_id);
+
+ALTER TABLE documents
+  ADD COLUMN IF NOT EXISTS wealth_item_type TEXT,
+  ADD COLUMN IF NOT EXISTS wealth_item_id TEXT;
+
+CREATE INDEX IF NOT EXISTS idx_documents_wealth_item_id ON documents(wealth_item_id);

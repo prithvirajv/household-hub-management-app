@@ -2254,6 +2254,8 @@ function toClientDocument(document) {
     uploadedBy: document.uploaded_by,
     folderId: document.folder_id,
     noteId: document.note_id,
+    wealthItemType: document.wealth_item_type,
+    wealthItemId: document.wealth_item_id,
     name: document.name,
     description: document.description,
     contentType: document.content_type,
@@ -2264,16 +2266,26 @@ function toClientDocument(document) {
   };
 }
 
+async function loadHouseholdAppState(householdId) {
+  if (MEMORY_DB) {
+    return memoryDb.households.find((item) => item.id === householdId)?.app_state;
+  }
+  const result = await pool.query("SELECT app_state FROM households WHERE id = $1", [householdId]);
+  return result.rows[0]?.app_state;
+}
+
 async function findHouseholdNoteById(householdId, noteId) {
   if (!noteId) return null;
-  let appState;
-  if (MEMORY_DB) {
-    appState = memoryDb.households.find((item) => item.id === householdId)?.app_state;
-  } else {
-    const result = await pool.query("SELECT app_state FROM households WHERE id = $1", [householdId]);
-    appState = result.rows[0]?.app_state;
-  }
+  const appState = await loadHouseholdAppState(householdId);
   return appState?.notes?.entries?.find((item) => item.id === noteId) || null;
+}
+
+async function findHouseholdWealthItemById(householdId, wealthItemType, wealthItemId) {
+  if (!wealthItemType || !wealthItemId) return null;
+  if (!["asset", "liability"].includes(wealthItemType)) return null;
+  const appState = await loadHouseholdAppState(householdId);
+  const collection = wealthItemType === "asset" ? appState?.goals?.netWorth?.assets : appState?.goals?.netWorth?.liabilities;
+  return collection?.find((item) => item.id === wealthItemId) || null;
 }
 
 app.get("/api/documents", requireSession, async (req, res, next) => {
@@ -2484,6 +2496,10 @@ app.patch("/api/documents/:id", requireSession, async (req, res, next) => {
     const nextDescription = req.body?.description !== undefined ? String(req.body.description) : document.description;
     const nextFolderId = req.body?.folderId !== undefined ? req.body.folderId : document.folder_id;
     const nextNoteId = req.body?.noteId !== undefined ? req.body.noteId : document.note_id;
+    const nextWealthItemId = req.body?.wealthItemId !== undefined ? req.body.wealthItemId : document.wealth_item_id;
+    const nextWealthItemType = nextWealthItemId
+      ? (req.body?.wealthItemId !== undefined ? req.body.wealthItemType : document.wealth_item_type)
+      : null;
 
     if (nextFolderId) {
       const folders = await loadHouseholdFolders(req.sessionUser.household_id);
@@ -2493,19 +2509,25 @@ app.patch("/api/documents/:id", requireSession, async (req, res, next) => {
       const note = await findHouseholdNoteById(req.sessionUser.household_id, nextNoteId);
       if (!note) return res.status(400).json({ error: "Linked note not found" });
     }
+    if (nextWealthItemId) {
+      const wealthItem = await findHouseholdWealthItemById(req.sessionUser.household_id, nextWealthItemType, nextWealthItemId);
+      if (!wealthItem) return res.status(400).json({ error: "Linked wealth item not found" });
+    }
 
     if (MEMORY_DB) {
       document.name = nextName;
       document.description = nextDescription;
       document.folder_id = nextFolderId;
       document.note_id = nextNoteId;
+      document.wealth_item_type = nextWealthItemType;
+      document.wealth_item_id = nextWealthItemId;
       document.updated_at = new Date().toISOString();
       return res.json(toClientDocument(document));
     }
 
     const result = await pool.query(
-      `UPDATE documents SET name = $1, description = $2, folder_id = $3, note_id = $4, updated_at = now() WHERE id = $5 AND household_id = $6 RETURNING *`,
-      [nextName, nextDescription, nextFolderId, nextNoteId, document.id, req.sessionUser.household_id]
+      `UPDATE documents SET name = $1, description = $2, folder_id = $3, note_id = $4, wealth_item_type = $5, wealth_item_id = $6, updated_at = now() WHERE id = $7 AND household_id = $8 RETURNING *`,
+      [nextName, nextDescription, nextFolderId, nextNoteId, nextWealthItemType, nextWealthItemId, document.id, req.sessionUser.household_id]
     );
     res.json(toClientDocument(result.rows[0]));
   } catch (error) {

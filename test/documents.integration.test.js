@@ -23,6 +23,16 @@ async function addNote(cookie, noteId, title) {
   assert.equal(saved.status, 200);
 }
 
+async function addWealthItem(cookie, type, itemId, name) {
+  const state = await server.request("/api/state", { headers: { cookie } });
+  state.body.goals ||= { sinkingFunds: [], debts: [], netWorth: { assets: [], liabilities: [] } };
+  state.body.goals.netWorth ||= { assets: [], liabilities: [] };
+  const collection = type === "asset" ? state.body.goals.netWorth.assets : state.body.goals.netWorth.liabilities;
+  collection.push({ id: itemId, name, value: 1000 });
+  const saved = await server.request("/api/state", { method: "PUT", headers: { cookie }, body: JSON.stringify(state.body) });
+  assert.equal(saved.status, 200);
+}
+
 test("documents endpoints require a session", async () => {
   const list = await server.request("/api/documents");
   assert.equal(list.status, 401);
@@ -106,6 +116,43 @@ test("upload-url rejects linking to a note that does not exist", async () => {
   const response = await server.request("/api/documents/upload-url", {
     method: "POST", headers: { cookie },
     body: JSON.stringify({ name: "deed.pdf", contentType: "application/pdf", noteId: "note-does-not-exist" })
+  });
+  assert.equal(response.status, 400);
+});
+
+test("PATCH /api/documents/:id links and unlinks a document to a wealth asset or liability", async () => {
+  const cookie = await signUp("documents-wealth-1@example.com", "Documents Wealth Household");
+  await addWealthItem(cookie, "asset", "asset-checking", "Checking account");
+  await addWealthItem(cookie, "liability", "liability-mortgage", "Mortgage");
+  const upload = await server.request("/api/documents/upload-url", { method: "POST", headers: { cookie }, body: JSON.stringify({ name: "statement.pdf", contentType: "application/pdf" }) });
+
+  const linkAsset = await server.request(`/api/documents/${upload.body.documentId}`, {
+    method: "PATCH", headers: { cookie }, body: JSON.stringify({ wealthItemType: "asset", wealthItemId: "asset-checking" })
+  });
+  assert.equal(linkAsset.status, 200);
+  assert.equal(linkAsset.body.wealthItemType, "asset");
+  assert.equal(linkAsset.body.wealthItemId, "asset-checking");
+
+  const relinkLiability = await server.request(`/api/documents/${upload.body.documentId}`, {
+    method: "PATCH", headers: { cookie }, body: JSON.stringify({ wealthItemType: "liability", wealthItemId: "liability-mortgage" })
+  });
+  assert.equal(relinkLiability.status, 200);
+  assert.equal(relinkLiability.body.wealthItemType, "liability");
+  assert.equal(relinkLiability.body.wealthItemId, "liability-mortgage");
+
+  const unlink = await server.request(`/api/documents/${upload.body.documentId}`, {
+    method: "PATCH", headers: { cookie }, body: JSON.stringify({ wealthItemType: null, wealthItemId: null })
+  });
+  assert.equal(unlink.status, 200);
+  assert.equal(unlink.body.wealthItemType, null);
+  assert.equal(unlink.body.wealthItemId, null);
+});
+
+test("PATCH /api/documents/:id rejects linking to a wealth item that does not exist", async () => {
+  const cookie = await signUp("documents-wealth-2@example.com", "Documents Wealth Household Two");
+  const upload = await server.request("/api/documents/upload-url", { method: "POST", headers: { cookie }, body: JSON.stringify({ name: "statement.pdf", contentType: "application/pdf" }) });
+  const response = await server.request(`/api/documents/${upload.body.documentId}`, {
+    method: "PATCH", headers: { cookie }, body: JSON.stringify({ wealthItemType: "asset", wealthItemId: "asset-does-not-exist" })
   });
   assert.equal(response.status, 400);
 });

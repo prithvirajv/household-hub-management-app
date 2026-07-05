@@ -3871,6 +3871,57 @@ main {
   font-size: 0.78rem;
 }
 
+/* .note-label-picker-options is normally stretched edge-to-edge of its
+   anchor (left:0;right:0), which works fine inside a wide note card. Here
+   the anchor is just a small icon button, so without this override the
+   dropdown collapses to the icon's own width and clips every option's text. */
+.document-note-link-picker {
+  flex: none;
+}
+
+.document-note-link-picker .note-label-picker-options {
+  left: auto;
+  min-width: 240px;
+}
+
+.document-wealth-link-picker {
+  flex: none;
+}
+
+.document-wealth-link-picker .note-label-picker-options {
+  left: auto;
+  min-width: 240px;
+}
+
+.wealth-doc-chip {
+  grid-column: 1 / -1;
+  justify-self: start;
+  padding: 0.25rem 0.55rem;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: white;
+  font-size: 0.75rem;
+  font-weight: 700;
+  color: var(--text);
+}
+
+.wealth-doc-list {
+  grid-column: 1 / -1;
+  display: grid;
+  gap: 0.35rem;
+  padding: 0.55rem;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: white;
+}
+
+.wealth-doc-list-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+}
+
 .documents-folder-card[draggable="true"],
 .documents-file-row[draggable="true"] {
   cursor: grab;
