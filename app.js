@@ -3191,7 +3191,11 @@ function bindViewEvents() {
 
   $("#addMealRecipeButton")?.addEventListener("click", () => {
     const name = ($("#mealRecipeName")?.value || "").trim();
-    if (!name) return;
+    if (!name) {
+      state.meals.feedback = "Type a recipe name before adding it.";
+      render();
+      return;
+    }
     const existing = state.meals.recipes.find((recipe) => recipe.name.toLowerCase() === name.toLowerCase());
     const recipe = existing || {
       id: uniqueId(name),
@@ -3202,6 +3206,9 @@ function bindViewEvents() {
     };
     if (!existing) state.meals.recipes.push(recipe);
     state.meals.selectedRecipeId = recipe.id;
+    state.meals.feedback = existing
+      ? `${recipe.name} is already saved — selected it for this meal.`
+      : `${recipe.name} added to your recipes. Edit its ingredients and nutrition in the Recipes tab.`;
     render();
   });
 
