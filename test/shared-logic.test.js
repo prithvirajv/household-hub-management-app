@@ -1,6 +1,10 @@
 const assert = require("node:assert/strict");
 const test = require("node:test");
-const { applyChecklistToggle, mealWeeksForMonth, groupPlanTasksByBucket, validateJournalPayload } = require("../lib/shared-logic");
+const {
+  applyChecklistToggle, mealWeeksForMonth, groupPlanTasksByBucket, validateJournalPayload,
+  dailyTaskOccursOnDate, isDailyTaskDoneOnDate, toggleDailyTaskDoneOnDate,
+  timeToMinutes, minutesToTime, snapMinutes
+} = require("../lib/shared-logic");
 
 test("checking a child marks the parent done once every sibling is done", () => {
   const checklist = [
@@ -115,4 +119,70 @@ test("validateJournalPayload respects a custom photo limit", () => {
   const payload = { entries: [{ id: "1", photos }] };
   assert.equal(validateJournalPayload(payload, 2), "Each journal entry supports at most 8 photos");
   assert.equal(validateJournalPayload(payload, 5), null);
+});
+
+test("dailyTaskOccursOnDate: recurrence none only occurs on its exact anchor date", () => {
+  const task = { anchorDate: "2026-07-06", recurrence: "none" };
+  assert.equal(dailyTaskOccursOnDate(task, "2026-07-06"), true);
+  assert.equal(dailyTaskOccursOnDate(task, "2026-07-07"), false);
+  assert.equal(dailyTaskOccursOnDate(task, "2026-07-05"), false);
+});
+
+test("dailyTaskOccursOnDate: recurrence daily occurs every day on or after the anchor", () => {
+  const task = { anchorDate: "2026-07-06", recurrence: "daily" };
+  assert.equal(dailyTaskOccursOnDate(task, "2026-07-06"), true);
+  assert.equal(dailyTaskOccursOnDate(task, "2026-07-20"), true);
+  assert.equal(dailyTaskOccursOnDate(task, "2026-07-05"), false, "must not occur before the anchor date");
+});
+
+test("dailyTaskOccursOnDate: recurrence weekdays skips Saturday and Sunday", () => {
+  // 2026-07-06 is a Monday.
+  const task = { anchorDate: "2026-07-06", recurrence: "weekdays" };
+  assert.equal(dailyTaskOccursOnDate(task, "2026-07-10"), true, "Friday should occur");
+  assert.equal(dailyTaskOccursOnDate(task, "2026-07-11"), false, "Saturday should not occur");
+  assert.equal(dailyTaskOccursOnDate(task, "2026-07-12"), false, "Sunday should not occur");
+  assert.equal(dailyTaskOccursOnDate(task, "2026-07-13"), true, "the following Monday should occur");
+});
+
+test("dailyTaskOccursOnDate: recurrence weekly repeats on the same weekday", () => {
+  // 2026-07-06 is a Monday.
+  const task = { anchorDate: "2026-07-06", recurrence: "weekly" };
+  assert.equal(dailyTaskOccursOnDate(task, "2026-07-13"), true, "the following Monday should occur");
+  assert.equal(dailyTaskOccursOnDate(task, "2026-07-14"), false, "Tuesday should not occur");
+});
+
+test("dailyTaskOccursOnDate: recurrence monthly repeats on the same day of month", () => {
+  const task = { anchorDate: "2026-07-06", recurrence: "monthly" };
+  assert.equal(dailyTaskOccursOnDate(task, "2026-08-06"), true);
+  assert.equal(dailyTaskOccursOnDate(task, "2026-08-07"), false);
+});
+
+test("isDailyTaskDoneOnDate and toggleDailyTaskDoneOnDate track completion per occurrence date", () => {
+  const task = { id: "t1", anchorDate: "2026-07-06", recurrence: "daily", completedDates: [] };
+  assert.equal(isDailyTaskDoneOnDate(task, "2026-07-06"), false);
+
+  const afterFirstToggle = toggleDailyTaskDoneOnDate(task, "2026-07-06");
+  assert.equal(isDailyTaskDoneOnDate(afterFirstToggle, "2026-07-06"), true);
+  assert.equal(isDailyTaskDoneOnDate(afterFirstToggle, "2026-07-07"), false, "a different occurrence date must be unaffected");
+
+  const afterSecondToggle = toggleDailyTaskDoneOnDate(afterFirstToggle, "2026-07-06");
+  assert.equal(isDailyTaskDoneOnDate(afterSecondToggle, "2026-07-06"), false, "toggling again must un-complete it");
+});
+
+test("timeToMinutes and minutesToTime convert both directions", () => {
+  assert.equal(timeToMinutes("09:30"), 570);
+  assert.equal(timeToMinutes("00:00"), 0);
+  assert.equal(minutesToTime(570), "09:30");
+  assert.equal(minutesToTime(0), "00:00");
+});
+
+test("minutesToTime clamps to a single day", () => {
+  assert.equal(minutesToTime(-10), "00:00");
+  assert.equal(minutesToTime(24 * 60 + 10), "23:59");
+});
+
+test("snapMinutes rounds to the nearest step", () => {
+  assert.equal(snapMinutes(52, 15), 45);
+  assert.equal(snapMinutes(58, 15), 60);
+  assert.equal(snapMinutes(0, 15), 0);
 });

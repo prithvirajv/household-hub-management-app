@@ -3552,3 +3552,175 @@ main {
   font-weight: 700;
   color: var(--text);
 }
+
+.plan-day-nav {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  font-size: 0.95rem;
+}
+
+.plan-day-nav .ghost {
+  margin-left: auto;
+  padding: 0.3rem 0.7rem;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: white;
+  font-weight: 700;
+  font-size: 0.78rem;
+  cursor: pointer;
+}
+
+.plan-task-form-daily {
+  grid-template-columns: minmax(160px, 1fr) 130px 110px 160px auto;
+}
+
+.plan-task-form-daily label {
+  display: grid;
+  gap: 0.25rem;
+  color: var(--muted);
+  font-size: 0.72rem;
+  font-weight: 800;
+}
+
+.plan-unscheduled {
+  display: grid;
+  gap: 0.5rem;
+}
+
+.plan-unscheduled h4 {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.78rem;
+  text-transform: uppercase;
+}
+
+.plan-timeline {
+  position: relative;
+  display: grid;
+  grid-template-columns: 56px minmax(0, 1fr);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: white;
+  overflow: hidden;
+}
+
+.plan-timeline-hours {
+  border-right: 1px solid var(--line);
+}
+
+.plan-timeline-hour {
+  padding: 0.2rem 0.4rem;
+  border-bottom: 1px solid var(--line);
+  color: var(--muted);
+  font-size: 0.68rem;
+  font-weight: 700;
+  box-sizing: border-box;
+}
+
+.plan-timeline-body {
+  position: relative;
+}
+
+.plan-timeline-block {
+  position: absolute;
+  left: 6px;
+  right: 6px;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) 28px;
+  align-items: start;
+  gap: 0.4rem;
+  padding: 0.3rem 0.5rem;
+  border-radius: 6px;
+  border-left: 3px solid var(--green);
+  background: var(--green-soft);
+  overflow: hidden;
+  cursor: grab;
+  touch-action: none;
+}
+
+.plan-timeline-block.done {
+  opacity: 0.6;
+}
+
+.plan-timeline-block.done .plan-task-title {
+  text-decoration: line-through;
+  color: var(--muted);
+}
+
+.plan-block-copy {
+  display: grid;
+  gap: 0.05rem;
+  min-width: 0;
+}
+
+.plan-block-copy small {
+  color: var(--muted);
+  font-size: 0.66rem;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.plan-block-resize-handle {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 8px;
+  cursor: ns-resize;
+  touch-action: none;
+}
+
+.plan-subtasks {
+  display: grid;
+  gap: 0.3rem;
+  margin: -0.25rem 0.75rem 0.4rem 2.2rem;
+}
+
+.plan-subtask-row {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.82rem;
+}
+
+.plan-subtask-row.done span {
+  color: var(--muted);
+  text-decoration: line-through;
+}
+
+.plan-subtask-row span {
+  flex: 1;
+}
+
+.plan-add-subtask-form input {
+  width: 100%;
+  border: 1px dashed var(--line);
+  border-radius: 6px;
+  padding: 0.3rem 0.5rem;
+  font-size: 0.8rem;
+  color: var(--muted);
+  background: transparent;
+}
+
+.plan-timeline-details {
+  display: grid;
+  gap: 0.6rem;
+}
+
+.plan-timeline-detail {
+  padding: 0.6rem 0.75rem;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: white;
+}
+
+.plan-timeline-detail h4 {
+  margin: 0 0 0.35rem;
+  font-size: 0.85rem;
+}
+
+.plan-timeline-detail .plan-subtasks {
+  margin: 0;
+}

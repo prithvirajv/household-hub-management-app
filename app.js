@@ -1218,17 +1218,24 @@ async function filesToJournalPhotos(fileList) {
 
 const planBuckets = ["daily", "weekly", "monthly"];
 const planBucketLabels = { daily: "Daily", weekly: "Weekly", monthly: "Monthly" };
+const planRecurrenceLabels = { none: "Does not repeat", daily: "Every day", weekdays: "Every weekday", weekly: "Every week", monthly: "Every month" };
 let planActiveBucket = "daily";
+let planSelectedDate = dateKey(new Date());
+let planDragState = null;
+
+const PLAN_TIMELINE_START_HOUR = 6;
+const PLAN_TIMELINE_END_HOUR = 23;
+const PLAN_PIXELS_PER_MINUTE = 1;
 
 function ensurePlanData() {
   privateData.plans ||= { tasks: [] };
   privateData.plans.tasks ||= [];
 }
 
-
 function defaultPlanAnchorDate(bucket) {
   const now = new Date();
   if (bucket === "monthly") return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
+  if (bucket === "daily") return planSelectedDate;
   return now.toISOString().slice(0, 10);
 }
 
@@ -1244,12 +1251,12 @@ function formatPlanAnchorDate(task) {
 function renderPlan() {
   if (!privateData) return "";
   ensurePlanData();
+  if (planActiveBucket === "daily") return renderDailyPlan();
   const tasks = groupPlanTasksByBucket(privateData.plans.tasks)[planActiveBucket];
   const bucketLabel = planBucketLabels[planActiveBucket].toLowerCase();
   return `
     <section class="plan-layout">
-      <div class="section-head"><div><span class="card-label">Plan</span><h3>Daily, weekly and monthly tasks</h3><p class="private-note">Private to you — never shared with other household members.</p></div></div>
-      <div class="plan-bucket-tabs">${planBuckets.map((bucket) => `<button class="${planActiveBucket === bucket ? "active" : ""}" data-plan-bucket="${bucket}" type="button">${planBucketLabels[bucket]}</button>`).join("")}</div>
+      ${renderPlanHead()}
       <form id="planTaskForm" class="plan-task-form card">
         <input name="title" placeholder="Add a ${bucketLabel} task" required>
         <input name="anchorDate" type="${planActiveBucket === "monthly" ? "month" : "date"}" value="${defaultPlanAnchorDate(planActiveBucket)}">
@@ -1261,6 +1268,11 @@ function renderPlan() {
     </section>`;
 }
 
+function renderPlanHead() {
+  return `<div class="section-head"><div><span class="card-label">Plan</span><h3>Daily, weekly and monthly tasks</h3><p class="private-note">Private to you — never shared with other household members.</p></div></div>
+    <div class="plan-bucket-tabs">${planBuckets.map((bucket) => `<button class="${planActiveBucket === bucket ? "active" : ""}" data-plan-bucket="${bucket}" type="button">${planBucketLabels[bucket]}</button>`).join("")}</div>`;
+}
+
 function renderPlanTask(task) {
   return `<div class="plan-task-row ${task.done ? "done" : ""}" data-plan-task-id="${task.id}">
     <input type="checkbox" data-plan-task-check="${task.id}" ${task.done ? "checked" : ""} aria-label="Complete ${escapeHtml(task.title)}">
@@ -1269,6 +1281,91 @@ function renderPlanTask(task) {
       <small>${escapeHtml(formatPlanAnchorDate(task))}</small>
     </div>
     <button class="icon-button danger-button" data-delete-plan-task="${task.id}" type="button" aria-label="Delete task">×</button>
+  </div>${renderSubtasks(task)}`;
+}
+
+function renderDailyPlan() {
+  const dailyTasks = privateData.plans.tasks.filter((task) => task.bucket === "daily" && dailyTaskOccursOnDate(task, planSelectedDate));
+  const scheduled = dailyTasks.filter((task) => task.startTime);
+  const unscheduled = dailyTasks.filter((task) => !task.startTime);
+  const dayLabel = new Date(`${planSelectedDate}T00:00:00`).toLocaleDateString("en-US", { weekday: "long", month: "short", day: "numeric" });
+  const hours = [];
+  for (let hour = PLAN_TIMELINE_START_HOUR; hour <= PLAN_TIMELINE_END_HOUR; hour += 1) hours.push(hour);
+  const timelineHeight = (PLAN_TIMELINE_END_HOUR - PLAN_TIMELINE_START_HOUR + 1) * 60 * PLAN_PIXELS_PER_MINUTE;
+
+  return `
+    <section class="plan-layout">
+      ${renderPlanHead()}
+      <div class="plan-day-nav">
+        <button class="icon-button" data-plan-day="prev" type="button" aria-label="Previous day">‹</button>
+        <strong>${dayLabel}</strong>
+        <button class="icon-button" data-plan-day="next" type="button" aria-label="Next day">›</button>
+        <button class="ghost" data-plan-day="today" type="button">Today</button>
+      </div>
+      <form id="planTaskForm" class="plan-task-form plan-task-form-daily card">
+        <input name="title" placeholder="Add a task for this day" required>
+        <label>Start time (optional)<input name="startTime" type="time"></label>
+        <label>Duration (min)<input name="durationMinutes" type="number" min="5" step="5" value="30"></label>
+        <label>Repeat<select name="recurrence">${Object.entries(planRecurrenceLabels).map(([value, label]) => `<option value="${value}">${label}</option>`).join("")}</select></label>
+        <button type="submit">Add</button>
+      </form>
+      ${unscheduled.length ? `<div class="plan-unscheduled"><h4>Unscheduled</h4>${unscheduled.map((task) => renderPlanTaskDaily(task)).join("")}</div>` : ""}
+      <div class="plan-timeline" style="height:${timelineHeight}px">
+        <div class="plan-timeline-hours">${hours.map((hour) => `<div class="plan-timeline-hour" style="height:${60 * PLAN_PIXELS_PER_MINUTE}px">${formatHourLabel(hour)}</div>`).join("")}</div>
+        <div class="plan-timeline-body" style="height:${timelineHeight}px" data-plan-timeline>
+          ${scheduled.map((task) => renderTimelineBlock(task)).join("")}
+        </div>
+      </div>
+      ${scheduled.length ? `<div class="plan-timeline-details">${scheduled.map((task) => `<div class="plan-timeline-detail"><h4>${escapeHtml(task.title)}</h4>${renderSubtasks(task)}</div>`).join("")}</div>` : ""}
+    </section>`;
+}
+
+function formatHourLabel(hour) {
+  const period = hour < 12 || hour === 24 ? "AM" : "PM";
+  const displayHour = hour % 12 === 0 ? 12 : hour % 12;
+  return `${displayHour} ${period}`;
+}
+
+function renderTimelineBlock(task) {
+  const startMinutes = timeToMinutes(task.startTime) - PLAN_TIMELINE_START_HOUR * 60;
+  const duration = Number(task.durationMinutes || 30);
+  const top = Math.max(0, startMinutes * PLAN_PIXELS_PER_MINUTE);
+  const height = Math.max(20, duration * PLAN_PIXELS_PER_MINUTE);
+  const done = isDailyTaskDoneOnDate(task, planSelectedDate);
+  return `<div class="plan-timeline-block ${done ? "done" : ""}" data-plan-task-id="${task.id}" style="top:${top}px;height:${height}px">
+    <input type="checkbox" data-plan-task-check="${task.id}" ${done ? "checked" : ""} aria-label="Complete ${escapeHtml(task.title)}">
+    <div class="plan-block-copy">
+      <input class="plan-task-title" data-plan-task-title="${task.id}" value="${escapeHtml(task.title)}" aria-label="Task title">
+      <small>${escapeHtml(task.startTime)} · ${duration} min${task.recurrence && task.recurrence !== "none" ? ` · ${planRecurrenceLabels[task.recurrence]}` : ""}${task.subtasks?.length ? ` · ${task.subtasks.filter((item) => item.done).length}/${task.subtasks.length} subtasks` : ""}</small>
+    </div>
+    <button class="icon-button danger-button" data-delete-plan-task="${task.id}" type="button" aria-label="Delete task">×</button>
+    <div class="plan-block-resize-handle" data-plan-resize="${task.id}"></div>
+  </div>`;
+}
+
+function renderPlanTaskDaily(task) {
+  const done = isDailyTaskDoneOnDate(task, planSelectedDate);
+  return `<div class="plan-task-row ${done ? "done" : ""}" data-plan-task-id="${task.id}">
+    <input type="checkbox" data-plan-task-check="${task.id}" ${done ? "checked" : ""} aria-label="Complete ${escapeHtml(task.title)}">
+    <div class="plan-task-copy">
+      <input class="plan-task-title" data-plan-task-title="${task.id}" value="${escapeHtml(task.title)}" aria-label="Task title">
+      ${task.recurrence && task.recurrence !== "none" ? `<small>${planRecurrenceLabels[task.recurrence]}</small>` : ""}
+    </div>
+    <button class="icon-button danger-button" data-delete-plan-task="${task.id}" type="button" aria-label="Delete task">×</button>
+  </div>${renderSubtasks(task)}`;
+}
+
+function renderSubtasks(task) {
+  const subtasks = task.subtasks || [];
+  return `<div class="plan-subtasks">
+    ${subtasks.map((subtask) => `<div class="plan-subtask-row ${subtask.done ? "done" : ""}">
+      <input type="checkbox" data-plan-subtask-check="${task.id}:${subtask.id}" ${subtask.done ? "checked" : ""} aria-label="Complete ${escapeHtml(subtask.text)}">
+      <span>${escapeHtml(subtask.text)}</span>
+      <button class="icon-button danger-button" data-delete-plan-subtask="${task.id}:${subtask.id}" type="button" aria-label="Delete subtask">×</button>
+    </div>`).join("")}
+    <form class="plan-add-subtask-form" data-add-plan-subtask="${task.id}">
+      <input name="text" placeholder="Add a subtask" aria-label="Add a subtask">
+    </form>
   </div>`;
 }
 
@@ -2451,20 +2548,40 @@ function bindViewEvents() {
     });
   });
 
+  document.querySelectorAll("[data-plan-day]").forEach((button) => {
+    button.addEventListener("click", () => {
+      const date = new Date(`${planSelectedDate}T00:00:00`);
+      if (button.dataset.planDay === "prev") date.setDate(date.getDate() - 1);
+      else if (button.dataset.planDay === "next") date.setDate(date.getDate() + 1);
+      else { planSelectedDate = dateKey(new Date()); render(); return; }
+      planSelectedDate = dateKey(date);
+      render();
+    });
+  });
+
   $("#planTaskForm")?.addEventListener("submit", (event) => {
     event.preventDefault();
     const form = event.currentTarget;
     const data = Object.fromEntries(new FormData(form));
     if (!data.title || !data.title.trim()) return;
-    privateData.plans.tasks.push({
+    const task = {
       id: uniqueId("plan"),
       title: data.title.trim(),
       notes: "",
       bucket: planActiveBucket,
       anchorDate: data.anchorDate || defaultPlanAnchorDate(planActiveBucket),
-      done: false,
-      createdAt: new Date().toISOString()
-    });
+      createdAt: new Date().toISOString(),
+      subtasks: []
+    };
+    if (planActiveBucket === "daily") {
+      task.startTime = data.startTime || "";
+      task.durationMinutes = Math.max(5, Number(data.durationMinutes || 30));
+      task.recurrence = data.recurrence || "none";
+      task.completedDates = [];
+    } else {
+      task.done = false;
+    }
+    privateData.plans.tasks.push(task);
     autosavePlans();
     render();
   });
@@ -2473,7 +2590,12 @@ function bindViewEvents() {
     checkbox.addEventListener("change", () => {
       const task = privateData.plans.tasks.find((item) => item.id === checkbox.dataset.planTaskCheck);
       if (!task) return;
-      task.done = checkbox.checked;
+      if (task.bucket === "daily") {
+        const updated = toggleDailyTaskDoneOnDate(task, planSelectedDate);
+        Object.assign(task, updated);
+      } else {
+        task.done = checkbox.checked;
+      }
       autosavePlans();
       render();
     });
@@ -2485,6 +2607,102 @@ function bindViewEvents() {
       if (!task) return;
       task.title = input.value;
       autosavePlans();
+    });
+  });
+
+  document.querySelectorAll("[data-add-plan-subtask]").forEach((form) => {
+    form.addEventListener("submit", (event) => {
+      event.preventDefault();
+      const input = form.querySelector('input[name="text"]');
+      if (!input || !input.value.trim()) return;
+      const task = privateData.plans.tasks.find((item) => item.id === form.dataset.addPlanSubtask);
+      if (!task) return;
+      task.subtasks ||= [];
+      task.subtasks.push({ id: uniqueId("subtask"), text: input.value.trim(), done: false });
+      autosavePlans();
+      render();
+    });
+  });
+
+  document.querySelectorAll("[data-plan-subtask-check]").forEach((checkbox) => {
+    checkbox.addEventListener("change", () => {
+      const [taskId, subtaskId] = checkbox.dataset.planSubtaskCheck.split(":");
+      const task = privateData.plans.tasks.find((item) => item.id === taskId);
+      const subtask = task?.subtasks?.find((item) => item.id === subtaskId);
+      if (!subtask) return;
+      subtask.done = checkbox.checked;
+      autosavePlans();
+      render();
+    });
+  });
+
+  document.querySelectorAll("[data-delete-plan-subtask]").forEach((button) => {
+    button.addEventListener("click", () => {
+      const [taskId, subtaskId] = button.dataset.deletePlanSubtask.split(":");
+      const task = privateData.plans.tasks.find((item) => item.id === taskId);
+      if (!task) return;
+      task.subtasks = (task.subtasks || []).filter((item) => item.id !== subtaskId);
+      autosavePlans();
+      render();
+    });
+  });
+
+  document.querySelectorAll(".plan-timeline-block").forEach((block) => {
+    block.addEventListener("pointerdown", (event) => {
+      if (event.target.closest("[data-plan-resize]") || event.target.closest("input") || event.target.closest("button")) return;
+      const task = privateData.plans.tasks.find((item) => item.id === block.dataset.planTaskId);
+      if (!task) return;
+      try { block.setPointerCapture(event.pointerId); } catch (_error) { /* capture is a convenience; drag still works without it */ }
+      planDragState = { mode: "move", taskId: task.id, pointerId: event.pointerId, startY: event.clientY, startMinutes: timeToMinutes(task.startTime), moved: false, block };
+    });
+    block.addEventListener("pointermove", (event) => {
+      if (!planDragState || planDragState.pointerId !== event.pointerId || planDragState.mode !== "move") return;
+      const deltaY = event.clientY - planDragState.startY;
+      if (Math.abs(deltaY) > 3) planDragState.moved = true;
+      const rawMinutes = planDragState.startMinutes + deltaY / PLAN_PIXELS_PER_MINUTE;
+      const snapped = Math.max(PLAN_TIMELINE_START_HOUR * 60, Math.min((PLAN_TIMELINE_END_HOUR + 1) * 60 - 5, snapMinutes(rawMinutes)));
+      block.style.top = `${(snapped - PLAN_TIMELINE_START_HOUR * 60) * PLAN_PIXELS_PER_MINUTE}px`;
+      planDragState.pendingMinutes = snapped;
+    });
+    block.addEventListener("pointerup", (event) => {
+      if (!planDragState || planDragState.pointerId !== event.pointerId || planDragState.mode !== "move") return;
+      const task = privateData.plans.tasks.find((item) => item.id === planDragState.taskId);
+      if (task && planDragState.moved && planDragState.pendingMinutes != null) {
+        task.startTime = minutesToTime(planDragState.pendingMinutes);
+        autosavePlans();
+      }
+      planDragState = null;
+      render();
+    });
+  });
+
+  document.querySelectorAll("[data-plan-resize]").forEach((handle) => {
+    handle.addEventListener("pointerdown", (event) => {
+      event.stopPropagation();
+      const block = handle.closest(".plan-timeline-block");
+      const task = privateData.plans.tasks.find((item) => item.id === handle.dataset.planResize);
+      if (!task || !block) return;
+      try { handle.setPointerCapture(event.pointerId); } catch (_error) { /* capture is a convenience; drag still works without it */ }
+      planDragState = { mode: "resize", taskId: task.id, pointerId: event.pointerId, startY: event.clientY, startDuration: Number(task.durationMinutes || 30), moved: false, block };
+    });
+    handle.addEventListener("pointermove", (event) => {
+      if (!planDragState || planDragState.pointerId !== event.pointerId || planDragState.mode !== "resize") return;
+      const deltaY = event.clientY - planDragState.startY;
+      if (Math.abs(deltaY) > 3) planDragState.moved = true;
+      const rawDuration = planDragState.startDuration + deltaY / PLAN_PIXELS_PER_MINUTE;
+      const snapped = Math.max(15, snapMinutes(rawDuration));
+      planDragState.block.style.height = `${snapped * PLAN_PIXELS_PER_MINUTE}px`;
+      planDragState.pendingDuration = snapped;
+    });
+    handle.addEventListener("pointerup", (event) => {
+      if (!planDragState || planDragState.pointerId !== event.pointerId || planDragState.mode !== "resize") return;
+      const task = privateData.plans.tasks.find((item) => item.id === planDragState.taskId);
+      if (task && planDragState.moved && planDragState.pendingDuration != null) {
+        task.durationMinutes = planDragState.pendingDuration;
+        autosavePlans();
+      }
+      planDragState = null;
+      render();
     });
   });
 
