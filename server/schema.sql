@@ -142,3 +142,34 @@ CREATE TABLE IF NOT EXISTS user_private_data (
   plans JSONB NOT NULL DEFAULT '{"tasks":[]}'::jsonb,
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+
+CREATE TABLE IF NOT EXISTS document_folders (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  household_id UUID NOT NULL REFERENCES households(id) ON DELETE CASCADE,
+  parent_id UUID REFERENCES document_folders(id) ON DELETE CASCADE,
+  name TEXT NOT NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS idx_document_folders_household_id ON document_folders(household_id);
+CREATE INDEX IF NOT EXISTS idx_document_folders_parent_id ON document_folders(parent_id);
+
+CREATE TABLE IF NOT EXISTS documents (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  household_id UUID NOT NULL REFERENCES households(id) ON DELETE CASCADE,
+  uploaded_by UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  folder_id UUID REFERENCES document_folders(id) ON DELETE SET NULL,
+  note_id TEXT,
+  name TEXT NOT NULL,
+  description TEXT NOT NULL DEFAULT '',
+  content_type TEXT NOT NULL,
+  size_bytes BIGINT,
+  storage_object TEXT NOT NULL UNIQUE,
+  status TEXT NOT NULL DEFAULT 'pending',
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS idx_documents_household_id ON documents(household_id);
+CREATE INDEX IF NOT EXISTS idx_documents_folder_id ON documents(folder_id);
+CREATE INDEX IF NOT EXISTS idx_documents_note_id ON documents(note_id);

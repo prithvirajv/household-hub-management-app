@@ -13,7 +13,8 @@ try {
 const { Pool } = require("pg");
 const { countries } = require("countries-list");
 const { defaultState } = require("./default-state");
-const { validateJournalPayload } = require("../lib/shared-logic");
+const { validateJournalPayload, buildDocumentObjectPath, wouldCreateFolderCycle } = require("../lib/shared-logic");
+const { createSignedUploadUrl, createSignedDownloadUrl, deleteObject } = require("./gcs");
 
 const PORT = Number(process.env.PORT || 8080);
 const SESSION_COOKIE = "hh_session";
@@ -80,7 +81,9 @@ const memoryDb = {
   passwordResetTokens: [],
   notificationJobs: [],
   pushDevices: [],
-  privateData: []
+  privateData: [],
+  documentFolders: [],
+  documents: []
 };
 
 const app = express();
@@ -2203,6 +2206,308 @@ app.post("/api/push-devices", requireSession, async (req, res, next) => {
       [req.sessionUser.id, token, platform]
     );
     res.json({ ok: true });
+  } catch (error) {
+    next(error);
+  }
+});
+
+const ALLOWED_DOCUMENT_CONTENT_TYPES = new Set([
+  "application/pdf",
+  "image/jpeg",
+  "image/png",
+  "image/heic",
+  "image/webp",
+  "image/gif",
+  "application/msword",
+  "application/vnd.ms-excel",
+  "text/plain",
+  "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+  "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+  "application/vnd.openxmlformats-officedocument.presentationml.presentation"
+]);
+const MAX_DOCUMENT_SIZE_BYTES = 500 * 1024 * 1024;
+
+async function loadHouseholdFolders(householdId) {
+  if (MEMORY_DB) {
+    return memoryDb.documentFolders.filter((item) => item.household_id === householdId);
+  }
+  const result = await pool.query("SELECT * FROM document_folders WHERE household_id = $1", [householdId]);
+  return result.rows;
+}
+
+async function loadHouseholdDocuments(householdId) {
+  if (MEMORY_DB) {
+    return memoryDb.documents.filter((item) => item.household_id === householdId);
+  }
+  const result = await pool.query("SELECT * FROM documents WHERE household_id = $1", [householdId]);
+  return result.rows;
+}
+
+function toClientFolder(folder) {
+  return { id: folder.id, householdId: folder.household_id, parentId: folder.parent_id, name: folder.name, createdAt: folder.created_at };
+}
+
+function toClientDocument(document) {
+  return {
+    id: document.id,
+    householdId: document.household_id,
+    uploadedBy: document.uploaded_by,
+    folderId: document.folder_id,
+    noteId: document.note_id,
+    name: document.name,
+    description: document.description,
+    contentType: document.content_type,
+    sizeBytes: document.size_bytes,
+    status: document.status,
+    createdAt: document.created_at,
+    updatedAt: document.updated_at
+  };
+}
+
+async function findHouseholdNoteById(householdId, noteId) {
+  if (!noteId) return null;
+  let appState;
+  if (MEMORY_DB) {
+    appState = memoryDb.households.find((item) => item.id === householdId)?.app_state;
+  } else {
+    const result = await pool.query("SELECT app_state FROM households WHERE id = $1", [householdId]);
+    appState = result.rows[0]?.app_state;
+  }
+  return appState?.notes?.entries?.find((item) => item.id === noteId) || null;
+}
+
+app.get("/api/documents", requireSession, async (req, res, next) => {
+  try {
+    const [folders, documents] = await Promise.all([
+      loadHouseholdFolders(req.sessionUser.household_id),
+      loadHouseholdDocuments(req.sessionUser.household_id)
+    ]);
+    res.json({ folders: folders.map(toClientFolder), documents: documents.map(toClientDocument) });
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.post("/api/documents/folders", requireSession, async (req, res, next) => {
+  try {
+    const name = String(req.body?.name || "").trim();
+    const parentId = req.body?.parentId || null;
+    if (!name) return res.status(400).json({ error: "A folder name is required" });
+
+    const folders = await loadHouseholdFolders(req.sessionUser.household_id);
+    if (parentId && !folders.some((item) => item.id === parentId)) {
+      return res.status(404).json({ error: "Parent folder not found" });
+    }
+
+    if (MEMORY_DB) {
+      const folder = { id: crypto.randomUUID(), household_id: req.sessionUser.household_id, parent_id: parentId, name, created_at: new Date().toISOString() };
+      memoryDb.documentFolders.push(folder);
+      return res.json(toClientFolder(folder));
+    }
+
+    const result = await pool.query(
+      `INSERT INTO document_folders (household_id, parent_id, name) VALUES ($1, $2, $3) RETURNING *`,
+      [req.sessionUser.household_id, parentId, name]
+    );
+    res.json(toClientFolder(result.rows[0]));
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.patch("/api/documents/folders/:id", requireSession, async (req, res, next) => {
+  try {
+    const folders = await loadHouseholdFolders(req.sessionUser.household_id);
+    const folder = folders.find((item) => item.id === req.params.id);
+    if (!folder) return res.status(404).json({ error: "Folder not found" });
+
+    const nextName = req.body?.name !== undefined ? String(req.body.name).trim() : folder.name;
+    if (!nextName) return res.status(400).json({ error: "A folder name is required" });
+    const nextParentId = req.body?.parentId !== undefined ? req.body.parentId : folder.parent_id;
+    if (nextParentId && !folders.some((item) => item.id === nextParentId)) {
+      return res.status(404).json({ error: "Parent folder not found" });
+    }
+    const cycleCandidates = folders.map((item) => ({ id: item.id, parentId: item.parent_id }));
+    if (wouldCreateFolderCycle(cycleCandidates, folder.id, nextParentId)) {
+      return res.status(400).json({ error: "Cannot move a folder into itself or one of its own subfolders" });
+    }
+
+    if (MEMORY_DB) {
+      folder.name = nextName;
+      folder.parent_id = nextParentId;
+      return res.json(toClientFolder(folder));
+    }
+
+    const result = await pool.query(
+      `UPDATE document_folders SET name = $1, parent_id = $2 WHERE id = $3 AND household_id = $4 RETURNING *`,
+      [nextName, nextParentId, folder.id, req.sessionUser.household_id]
+    );
+    res.json(toClientFolder(result.rows[0]));
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.delete("/api/documents/folders/:id", requireSession, async (req, res, next) => {
+  try {
+    const folders = await loadHouseholdFolders(req.sessionUser.household_id);
+    const folder = folders.find((item) => item.id === req.params.id);
+    if (!folder) return res.status(404).json({ error: "Folder not found" });
+
+    const documents = await loadHouseholdDocuments(req.sessionUser.household_id);
+    const hasChildFolder = folders.some((item) => item.parent_id === folder.id);
+    const hasDocument = documents.some((item) => item.folder_id === folder.id);
+    if (hasChildFolder || hasDocument) {
+      return res.status(409).json({ error: "Folder must be empty before it can be deleted" });
+    }
+
+    if (MEMORY_DB) {
+      memoryDb.documentFolders = memoryDb.documentFolders.filter((item) => item.id !== folder.id);
+      return res.json({ ok: true });
+    }
+
+    await pool.query("DELETE FROM document_folders WHERE id = $1 AND household_id = $2", [folder.id, req.sessionUser.household_id]);
+    res.json({ ok: true });
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.post("/api/documents/upload-url", requireSession, async (req, res, next) => {
+  try {
+    const name = String(req.body?.name || "").trim();
+    const contentType = String(req.body?.contentType || "").trim();
+    const sizeBytes = Number(req.body?.sizeBytes) || null;
+    const folderId = req.body?.folderId || null;
+    const noteId = req.body?.noteId || null;
+    if (!name) return res.status(400).json({ error: "A document name is required" });
+    if (!ALLOWED_DOCUMENT_CONTENT_TYPES.has(contentType)) return res.status(400).json({ error: "Unsupported file type" });
+    if (sizeBytes && sizeBytes > MAX_DOCUMENT_SIZE_BYTES) return res.status(400).json({ error: "File exceeds the 500MB limit" });
+
+    if (folderId) {
+      const folders = await loadHouseholdFolders(req.sessionUser.household_id);
+      if (!folders.some((item) => item.id === folderId)) return res.status(404).json({ error: "Folder not found" });
+    }
+    if (noteId) {
+      const note = await findHouseholdNoteById(req.sessionUser.household_id, noteId);
+      if (!note) return res.status(400).json({ error: "Linked note not found" });
+    }
+
+    const documentId = crypto.randomUUID();
+    const storageObject = buildDocumentObjectPath(req.sessionUser.household_id, documentId, name);
+    const { url, expiresAt } = await createSignedUploadUrl(storageObject, contentType);
+
+    if (MEMORY_DB) {
+      memoryDb.documents.push({
+        id: documentId, household_id: req.sessionUser.household_id, uploaded_by: req.sessionUser.id,
+        folder_id: folderId, note_id: noteId, name, description: "", content_type: contentType,
+        size_bytes: sizeBytes, storage_object: storageObject, status: "pending",
+        created_at: new Date().toISOString(), updated_at: new Date().toISOString()
+      });
+      return res.json({ documentId, uploadUrl: url, expiresAt });
+    }
+
+    await pool.query(
+      `INSERT INTO documents (id, household_id, uploaded_by, folder_id, note_id, name, content_type, size_bytes, storage_object, status)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, 'pending')`,
+      [documentId, req.sessionUser.household_id, req.sessionUser.id, folderId, noteId, name, contentType, sizeBytes, storageObject]
+    );
+    res.json({ documentId, uploadUrl: url, expiresAt });
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.post("/api/documents/:id/confirm", requireSession, async (req, res, next) => {
+  try {
+    const documents = await loadHouseholdDocuments(req.sessionUser.household_id);
+    const document = documents.find((item) => item.id === req.params.id);
+    if (!document) return res.status(404).json({ error: "Document not found" });
+
+    if (MEMORY_DB) {
+      document.status = "ready";
+      document.updated_at = new Date().toISOString();
+      return res.json(toClientDocument(document));
+    }
+
+    const result = await pool.query(
+      `UPDATE documents SET status = 'ready', updated_at = now() WHERE id = $1 AND household_id = $2 RETURNING *`,
+      [document.id, req.sessionUser.household_id]
+    );
+    res.json(toClientDocument(result.rows[0]));
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.get("/api/documents/:id/download-url", requireSession, async (req, res, next) => {
+  try {
+    const documents = await loadHouseholdDocuments(req.sessionUser.household_id);
+    const document = documents.find((item) => item.id === req.params.id);
+    if (!document) return res.status(404).json({ error: "Document not found" });
+
+    const { url, expiresAt } = await createSignedDownloadUrl(document.storage_object);
+    res.json({ url, expiresAt });
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.delete("/api/documents/:id", requireSession, async (req, res, next) => {
+  try {
+    const documents = await loadHouseholdDocuments(req.sessionUser.household_id);
+    const document = documents.find((item) => item.id === req.params.id);
+    if (!document) return res.status(404).json({ error: "Document not found" });
+
+    await deleteObject(document.storage_object);
+
+    if (MEMORY_DB) {
+      memoryDb.documents = memoryDb.documents.filter((item) => item.id !== document.id);
+      return res.json({ ok: true });
+    }
+
+    await pool.query("DELETE FROM documents WHERE id = $1 AND household_id = $2", [document.id, req.sessionUser.household_id]);
+    res.json({ ok: true });
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.patch("/api/documents/:id", requireSession, async (req, res, next) => {
+  try {
+    const documents = await loadHouseholdDocuments(req.sessionUser.household_id);
+    const document = documents.find((item) => item.id === req.params.id);
+    if (!document) return res.status(404).json({ error: "Document not found" });
+
+    const nextName = req.body?.name !== undefined ? String(req.body.name).trim() : document.name;
+    if (!nextName) return res.status(400).json({ error: "A document name is required" });
+    const nextDescription = req.body?.description !== undefined ? String(req.body.description) : document.description;
+    const nextFolderId = req.body?.folderId !== undefined ? req.body.folderId : document.folder_id;
+    const nextNoteId = req.body?.noteId !== undefined ? req.body.noteId : document.note_id;
+
+    if (nextFolderId) {
+      const folders = await loadHouseholdFolders(req.sessionUser.household_id);
+      if (!folders.some((item) => item.id === nextFolderId)) return res.status(404).json({ error: "Folder not found" });
+    }
+    if (nextNoteId) {
+      const note = await findHouseholdNoteById(req.sessionUser.household_id, nextNoteId);
+      if (!note) return res.status(400).json({ error: "Linked note not found" });
+    }
+
+    if (MEMORY_DB) {
+      document.name = nextName;
+      document.description = nextDescription;
+      document.folder_id = nextFolderId;
+      document.note_id = nextNoteId;
+      document.updated_at = new Date().toISOString();
+      return res.json(toClientDocument(document));
+    }
+
+    const result = await pool.query(
+      `UPDATE documents SET name = $1, description = $2, folder_id = $3, note_id = $4, updated_at = now() WHERE id = $5 AND household_id = $6 RETURNING *`,
+      [nextName, nextDescription, nextFolderId, nextNoteId, document.id, req.sessionUser.household_id]
+    );
+    res.json(toClientDocument(result.rows[0]));
   } catch (error) {
     next(error);
   }

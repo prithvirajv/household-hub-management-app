@@ -3,8 +3,74 @@ const test = require("node:test");
 const {
   applyChecklistToggle, bucketChecklistItems, findChecklistDuplicate, mealWeeksForMonth, groupPlanTasksByBucket, validateJournalPayload,
   dailyTaskOccursOnDate, isDailyTaskDoneOnDate, toggleDailyTaskDoneOnDate,
-  timeToMinutes, minutesToTime, snapMinutes
+  timeToMinutes, minutesToTime, snapMinutes,
+  sanitizeFilename, buildDocumentObjectPath, wouldCreateFolderCycle, buildFolderTree
 } = require("../lib/shared-logic");
+
+test("sanitizeFilename strips path separators, parent-dir sequences, and control characters", () => {
+  const traversal = sanitizeFilename("../../etc/passwd");
+  assert.ok(!traversal.includes("/"), "sanitized name must not contain a path separator");
+  assert.ok(!traversal.includes(".."), "sanitized name must not contain a parent-directory sequence");
+  assert.equal(sanitizeFilename("deed\\scan.pdf"), "deed_scan.pdf");
+  assert.equal(sanitizeFilename("tax\x00receipt.pdf"), "taxreceipt.pdf");
+  assert.equal(sanitizeFilename("   "), "file");
+  assert.equal(sanitizeFilename(""), "file");
+  assert.equal(sanitizeFilename(null), "file");
+});
+
+test("sanitizeFilename truncates very long names", () => {
+  const long = `${"a".repeat(250)}.pdf`;
+  const result = sanitizeFilename(long);
+  assert.ok(result.length <= 200, "sanitized filename should be capped at 200 characters");
+});
+
+test("buildDocumentObjectPath embeds household id, document id, and a sanitized filename", () => {
+  const path = buildDocumentObjectPath("household-1", "doc-1", "Kanampalayam Patta.pdf");
+  assert.equal(path, "documents/household-1/doc-1/Kanampalayam Patta.pdf");
+});
+
+test("buildDocumentObjectPath returns null when householdId or documentId is missing", () => {
+  assert.equal(buildDocumentObjectPath(null, "doc-1", "a.pdf"), null);
+  assert.equal(buildDocumentObjectPath("household-1", null, "a.pdf"), null);
+});
+
+test("wouldCreateFolderCycle rejects moving a folder into itself", () => {
+  const folders = [{ id: "a", parentId: null }];
+  assert.equal(wouldCreateFolderCycle(folders, "a", "a"), true);
+});
+
+test("wouldCreateFolderCycle rejects moving a folder into its own child or grandchild", () => {
+  const folders = [
+    { id: "a", parentId: null },
+    { id: "b", parentId: "a" },
+    { id: "c", parentId: "b" }
+  ];
+  assert.equal(wouldCreateFolderCycle(folders, "a", "b"), true, "moving a into its direct child b should be rejected");
+  assert.equal(wouldCreateFolderCycle(folders, "a", "c"), true, "moving a into its grandchild c should be rejected");
+});
+
+test("wouldCreateFolderCycle allows moving a folder to a sibling or to the root", () => {
+  const folders = [
+    { id: "a", parentId: null },
+    { id: "b", parentId: "a" },
+    { id: "sibling", parentId: "a" }
+  ];
+  assert.equal(wouldCreateFolderCycle(folders, "b", "sibling"), false);
+  assert.equal(wouldCreateFolderCycle(folders, "b", null), false);
+});
+
+test("buildFolderTree nests folders by parentId", () => {
+  const folders = [
+    { id: "a", parentId: null, name: "Root" },
+    { id: "b", parentId: "a", name: "Child" },
+    { id: "c", parentId: "b", name: "Grandchild" }
+  ];
+  const tree = buildFolderTree(folders);
+  assert.equal(tree.length, 1);
+  assert.equal(tree[0].id, "a");
+  assert.equal(tree[0].children[0].id, "b");
+  assert.equal(tree[0].children[0].children[0].id, "c");
+});
 
 test("bucketChecklistItems keeps a checked child in the open bucket while its siblings are still open", () => {
   const checklist = [

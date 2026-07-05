@@ -6,6 +6,7 @@ const views = [
   ["notes", "Notes", "✎"],
   ["journal", "Journal", "✒"],
   ["plan", "Plan", "◫"],
+  ["documents", "Documents", "▢"],
   ["meals", "Meals", "♨"],
   ["recipes", "Recipes", "▤"],
   ["goals", "Goals", "◎"],
@@ -32,6 +33,11 @@ let calendarFilterOwner = "";
 let privateData = null;
 let journalTimer = null;
 let planTimer = null;
+// documentsData is household-shared (like Notes/Calendar), backed by real Postgres
+// rows and Google Cloud Storage, not part of `state`/autosaveState().
+let documentsData = null;
+let documentsCurrentFolderId = null;
+let documentsUploading = false;
 
 function currentMonthKey() {
   const now = new Date();
@@ -434,6 +440,7 @@ function renderShell() {
   const isWealthView = currentView === "wealth";
   const isJournalView = currentView === "journal";
   const isPlanView = currentView === "plan";
+  const isDocumentsView = currentView === "documents";
   $("#viewTitle").textContent = isAdminView
     ? "Application admin"
     : isHelpView
@@ -450,6 +457,8 @@ function renderShell() {
                 ? "Your journal"
                 : isPlanView
                   ? "Your plan"
+                  : isDocumentsView
+                    ? "Household documents"
           : `${monthLabel()} plan`;
   $("#householdName").textContent = title.toUpperCase();
   $("#userName").textContent = sessionUser?.name || "Demo User";
@@ -497,6 +506,7 @@ function metricsForView() {
   if (currentView === "notes") return [];
   if (currentView === "journal") return [];
   if (currentView === "plan") return [];
+  if (currentView === "documents") return [];
   if (currentView === "help") return [];
   if (currentView === "meals") {
     ensureMealWeekData();
@@ -519,6 +529,7 @@ function render() {
   view.innerHTML = (renderers[currentView] || renderers.budget)();
   bindViewEvents();
   if (currentView === "admin" && !adminData) loadAdminData();
+  if (currentView === "documents" && !documentsData) loadDocumentsData();
   if (["sharing", "calendar"].includes(currentView) && !sharingAccess) loadSharingAccess();
   if (currentView === "calendar" && sharedCalendarMembers.length === 0) loadCalendarMembers();
   autosaveState();
@@ -532,6 +543,7 @@ const renderers = {
   notes: renderNotes,
   journal: renderJournal,
   plan: renderPlan,
+  documents: renderDocuments,
   meals: renderMeals,
   recipes: renderRecipes,
   goals: renderGoals,
@@ -1366,6 +1378,97 @@ function renderSubtasks(task) {
       <input name="text" placeholder="Add a subtask" aria-label="Add a subtask">
     </form>
   </div>`;
+}
+
+function documentsFolderPath(folderId) {
+  const folders = documentsData?.folders || [];
+  const path = [];
+  let cursor = folders.find((folder) => folder.id === folderId);
+  while (cursor) {
+    path.unshift(cursor);
+    cursor = cursor.parentId ? folders.find((folder) => folder.id === cursor.parentId) : null;
+  }
+  return path;
+}
+
+function formatFileSize(sizeBytes) {
+  const size = Number(sizeBytes) || 0;
+  if (size <= 0) return "";
+  if (size < 1024) return `${size} B`;
+  if (size < 1024 * 1024) return `${(size / 1024).toFixed(1)} KB`;
+  if (size < 1024 * 1024 * 1024) return `${(size / (1024 * 1024)).toFixed(1)} MB`;
+  return `${(size / (1024 * 1024 * 1024)).toFixed(1)} GB`;
+}
+
+function renderDocumentNoteLinkPicker(document) {
+  const notes = state.notes.entries.filter((note) => !note.trashed);
+  const count = document.noteId ? 1 : 0;
+  return `<details class="note-label-picker document-note-link-picker">
+    <summary title="Link to a property note" aria-label="${count ? "Linked to a note" : "Link to a note"}">⚯</summary>
+    <div class="note-label-picker-options">
+      <label>
+        <input type="radio" name="document-note-${document.id}" data-document-note-link="${document.id}" value="" ${!document.noteId ? "checked" : ""}>
+        <span>No linked note</span>
+      </label>
+      ${notes.length ? notes.map((note) => `<label>
+        <input type="radio" name="document-note-${document.id}" data-document-note-link="${document.id}" value="${note.id}" ${document.noteId === note.id ? "checked" : ""}>
+        <span>${escapeHtml(note.title || "Untitled note")}</span>
+      </label>`).join("") : `<small>No notes created yet</small>`}
+    </div>
+  </details>`;
+}
+
+function renderDocumentRow(document) {
+  const linkedNote = document.noteId ? state.notes.entries.find((note) => note.id === document.noteId) : null;
+  return `<div class="documents-file-row" data-document-id="${document.id}">
+    <div class="documents-file-info">
+      <strong>${escapeHtml(document.name)}</strong>
+      <small>${[formatFileSize(document.sizeBytes), document.status === "pending" ? "Uploading…" : document.contentType].filter(Boolean).join(" · ")}</small>
+      ${linkedNote ? `<small class="documents-linked-note">Linked to “${escapeHtml(linkedNote.title || "Untitled note")}”</small>` : ""}
+    </div>
+    <div class="documents-file-actions">
+      <select class="documents-move-select" data-documents-move="${document.id}" aria-label="Move to folder">
+        <option value="">All documents (root)</option>
+        ${documentsData.folders.map((folder) => `<option value="${folder.id}" ${document.folderId === folder.id ? "selected" : ""}>${escapeHtml(folder.name)}</option>`).join("")}
+      </select>
+      ${renderDocumentNoteLinkPicker(document)}
+      <button type="button" data-documents-download="${document.id}" title="Download" aria-label="Download ${escapeHtml(document.name)}">⇩</button>
+      <button type="button" class="icon-button danger-button" data-documents-delete="${document.id}" title="Delete" aria-label="Delete ${escapeHtml(document.name)}">×</button>
+    </div>
+  </div>`;
+}
+
+function renderDocuments() {
+  if (!documentsData) return `<p class="muted">Loading documents…</p>`;
+  const folders = documentsData.folders;
+  const documents = documentsData.documents;
+  const currentFolderId = documentsCurrentFolderId || null;
+  const subfolders = folders.filter((folder) => (folder.parentId || null) === currentFolderId);
+  const currentDocuments = documents.filter((item) => (item.folderId || null) === currentFolderId);
+  const breadcrumb = documentsFolderPath(currentFolderId);
+  return `<section class="documents-layout">
+    <p class="muted">Shared with your whole household — deeds, patta, tax receipts and other property documents.</p>
+    <div class="documents-toolbar">
+      <div class="documents-breadcrumb">
+        <button type="button" data-documents-open-folder="" class="${!currentFolderId ? "active" : ""}">All documents</button>
+        ${breadcrumb.map((folder) => `<span aria-hidden="true">/</span><button type="button" data-documents-open-folder="${folder.id}" class="${currentFolderId === folder.id ? "active" : ""}">${escapeHtml(folder.name)}</button>`).join("")}
+      </div>
+      <div class="documents-actions">
+        <button type="button" data-documents-new-folder>+ New folder</button>
+        <label class="documents-upload-button ${documentsUploading ? "disabled" : ""}">
+          ${documentsUploading ? "Uploading…" : "+ Upload"}
+          <input type="file" data-documents-file-input ${documentsUploading ? "disabled" : ""}>
+        </label>
+      </div>
+    </div>
+    ${subfolders.length ? `<div class="documents-folder-grid">
+      ${subfolders.map((folder) => `<div class="documents-folder-card">
+        <button type="button" class="documents-folder-open" data-documents-open-folder="${folder.id}">▢ ${escapeHtml(folder.name)}</button>
+        <button type="button" class="icon-button danger-button" data-documents-delete-folder="${folder.id}" title="Delete folder" aria-label="Delete ${escapeHtml(folder.name)} folder">×</button>
+      </div>`).join("")}
+    </div>` : ""}
+    ${currentDocuments.length ? `<div class="documents-file-list">${currentDocuments.map(renderDocumentRow).join("")}</div>` : `<p class="muted">No documents in this folder yet.</p>`}
+  </section>`;
 }
 
 function renderMeals() {
@@ -3617,6 +3720,121 @@ function bindViewEvents() {
       await updateAdminUser(button.dataset.adminResetPassword, { password });
     });
   });
+
+  document.querySelectorAll("[data-documents-open-folder]").forEach((button) => {
+    button.addEventListener("click", () => {
+      documentsCurrentFolderId = button.dataset.documentsOpenFolder || null;
+      render();
+    });
+  });
+
+  $("[data-documents-new-folder]")?.addEventListener("click", async () => {
+    const name = window.prompt("Folder name");
+    if (!name || !name.trim()) return;
+    try {
+      await api("/api/documents/folders", { method: "POST", body: JSON.stringify({ name: name.trim(), parentId: documentsCurrentFolderId || null }) });
+      await loadDocumentsData(false);
+      render();
+    } catch (error) {
+      window.alert(error.message);
+    }
+  });
+
+  document.querySelectorAll("[data-documents-delete-folder]").forEach((button) => {
+    button.addEventListener("click", async () => {
+      if (!window.confirm("Delete this folder? It must be empty.")) return;
+      try {
+        await api(`/api/documents/folders/${button.dataset.documentsDeleteFolder}`, { method: "DELETE" });
+        await loadDocumentsData(false);
+        render();
+      } catch (error) {
+        window.alert(error.message);
+      }
+    });
+  });
+
+  document.querySelectorAll("[data-documents-file-input]").forEach((input) => {
+    input.addEventListener("change", async () => {
+      const file = input.files?.[0];
+      if (!file) return;
+      documentsUploading = true;
+      render();
+      try {
+        const { documentId, uploadUrl } = await api("/api/documents/upload-url", {
+          method: "POST",
+          body: JSON.stringify({
+            name: file.name,
+            contentType: file.type || "application/octet-stream",
+            sizeBytes: file.size,
+            folderId: documentsCurrentFolderId || null
+          })
+        });
+        // In MEMORY_DB (test/preview) mode the server returns a placeholder
+        // URL rather than a real signed GCS URL, since there is no bucket to
+        // upload to — only real deployments with GCS_BUCKET configured issue
+        // an http(s) signed URL that this PUT actually reaches.
+        if (/^https?:\/\//.test(uploadUrl)) {
+          const uploadResponse = await fetch(uploadUrl, { method: "PUT", body: file, headers: { "Content-Type": file.type || "application/octet-stream" } });
+          if (!uploadResponse.ok) throw new Error("Upload to storage failed");
+        }
+        await api(`/api/documents/${documentId}/confirm`, { method: "POST" });
+        await loadDocumentsData(false);
+      } catch (error) {
+        window.alert(error.message || "Upload failed");
+      } finally {
+        documentsUploading = false;
+        render();
+      }
+    });
+  });
+
+  document.querySelectorAll("[data-documents-move]").forEach((select) => {
+    select.addEventListener("change", async () => {
+      try {
+        await api(`/api/documents/${select.dataset.documentsMove}`, { method: "PATCH", body: JSON.stringify({ folderId: select.value || null }) });
+        await loadDocumentsData(false);
+        render();
+      } catch (error) {
+        window.alert(error.message);
+      }
+    });
+  });
+
+  document.querySelectorAll("[data-document-note-link]").forEach((input) => {
+    input.addEventListener("change", async () => {
+      try {
+        await api(`/api/documents/${input.dataset.documentNoteLink}`, { method: "PATCH", body: JSON.stringify({ noteId: input.value || null }) });
+        await loadDocumentsData(false);
+        render();
+      } catch (error) {
+        window.alert(error.message);
+      }
+    });
+  });
+
+  document.querySelectorAll("[data-documents-download]").forEach((button) => {
+    button.addEventListener("click", async () => {
+      try {
+        const { url } = await api(`/api/documents/${button.dataset.documentsDownload}/download-url`);
+        window.open(url, "_blank", "noopener");
+      } catch (error) {
+        window.alert(error.message);
+      }
+    });
+  });
+
+  document.querySelectorAll("[data-documents-delete]").forEach((button) => {
+    button.addEventListener("click", async () => {
+      if (!window.confirm("Delete this document? This cannot be undone.")) return;
+      try {
+        await api(`/api/documents/${button.dataset.documentsDelete}`, { method: "DELETE" });
+        await loadDocumentsData(false);
+        render();
+      } catch (error) {
+        window.alert(error.message);
+      }
+    });
+  });
 }
 
 function focusCalendarType(type) {
@@ -4206,6 +4424,18 @@ async function loadCalendarMembers(shouldRender = true) {
   } catch (error) {
     console.warn("Unable to load shared calendar members", error);
     sharedCalendarMembers = [];
+  }
+}
+
+async function loadDocumentsData(shouldRender = true) {
+  if (!sessionUser) return;
+  try {
+    documentsData = await api("/api/documents");
+    if (shouldRender && currentView === "documents") render();
+  } catch (error) {
+    console.warn("Unable to load documents", error);
+    documentsData = { folders: [], documents: [] };
+    if (shouldRender && currentView === "documents") render();
   }
 }
 
