@@ -157,6 +157,35 @@ test("PATCH /api/documents/:id rejects linking to a wealth item that does not ex
   assert.equal(response.status, 400);
 });
 
+test("PATCH /api/documents/folders/:id links and unlinks a folder to a wealth asset", async () => {
+  const cookie = await signUp("documents-wealth-folder-1@example.com", "Documents Wealth Folder Household");
+  await addWealthItem(cookie, "asset", "asset-kanam", "Kanampalayam Land");
+  const folder = await server.request("/api/documents/folders", { method: "POST", headers: { cookie }, body: JSON.stringify({ name: "Kanampalayam Land" }) });
+
+  const link = await server.request(`/api/documents/folders/${folder.body.id}`, {
+    method: "PATCH", headers: { cookie }, body: JSON.stringify({ wealthItemType: "asset", wealthItemId: "asset-kanam" })
+  });
+  assert.equal(link.status, 200);
+  assert.equal(link.body.wealthItemType, "asset");
+  assert.equal(link.body.wealthItemId, "asset-kanam");
+
+  const unlink = await server.request(`/api/documents/folders/${folder.body.id}`, {
+    method: "PATCH", headers: { cookie }, body: JSON.stringify({ wealthItemType: null, wealthItemId: null })
+  });
+  assert.equal(unlink.status, 200);
+  assert.equal(unlink.body.wealthItemType, null);
+  assert.equal(unlink.body.wealthItemId, null);
+});
+
+test("PATCH /api/documents/folders/:id rejects linking to a wealth item that does not exist", async () => {
+  const cookie = await signUp("documents-wealth-folder-2@example.com", "Documents Wealth Folder Household Two");
+  const folder = await server.request("/api/documents/folders", { method: "POST", headers: { cookie }, body: JSON.stringify({ name: "Some Folder" }) });
+  const response = await server.request(`/api/documents/folders/${folder.body.id}`, {
+    method: "PATCH", headers: { cookie }, body: JSON.stringify({ wealthItemType: "asset", wealthItemId: "asset-does-not-exist" })
+  });
+  assert.equal(response.status, 400);
+});
+
 test("cross-household isolation: another household's folders and documents are not visible or mutable", async () => {
   const cookieA = await signUp("documents-isolation-a@example.com", "Household A");
   const cookieB = await signUp("documents-isolation-b@example.com", "Household B");

@@ -1397,6 +1397,29 @@ function documentsFolderFullPath(folderId) {
   return documentsFolderPath(folderId).map((folder) => folder.name).join(" / ");
 }
 
+// A folder tagged to a wealth item implicitly tags every document inside it
+// (and inside any of its subfolders), so you can tag a whole property's
+// folder once instead of tagging each deed/patta/receipt individually.
+function documentsLinkedToWealthItem(wealthItemType, wealthItemId) {
+  if (!documentsData) return [];
+  const folders = documentsData.folders;
+  const inScope = new Set(folders.filter((folder) => folder.wealthItemType === wealthItemType && folder.wealthItemId === wealthItemId).map((folder) => folder.id));
+  let changed = true;
+  while (changed) {
+    changed = false;
+    folders.forEach((folder) => {
+      if (folder.parentId && inScope.has(folder.parentId) && !inScope.has(folder.id)) {
+        inScope.add(folder.id);
+        changed = true;
+      }
+    });
+  }
+  return documentsData.documents.filter((document) =>
+    (document.wealthItemType === wealthItemType && document.wealthItemId === wealthItemId) ||
+    (document.folderId && inScope.has(document.folderId))
+  );
+}
+
 function formatFileSize(sizeBytes) {
   const size = Number(sizeBytes) || 0;
   if (size <= 0) return "";
@@ -1424,17 +1447,26 @@ function renderDocumentNoteLinkPicker(document) {
   </details>`;
 }
 
+function wealthItemLabel(wealthItemType, wealthItemId) {
+  if (!wealthItemId) return null;
+  const collection = wealthItemType === "liability" ? state.goals.netWorth.liabilities : state.goals.netWorth.assets;
+  const item = collection.find((candidate) => candidate.id === wealthItemId);
+  return item ? `${wealthItemType === "liability" ? "Liability" : "Asset"}: ${item.name}` : null;
+}
+
 function documentsWealthItemLabel(document) {
-  if (!document.wealthItemId) return null;
-  const collection = document.wealthItemType === "liability" ? state.goals.netWorth.liabilities : state.goals.netWorth.assets;
-  const item = collection.find((candidate) => candidate.id === document.wealthItemId);
-  return item ? `${document.wealthItemType === "liability" ? "Liability" : "Asset"}: ${item.name}` : null;
+  return wealthItemLabel(document.wealthItemType, document.wealthItemId);
+}
+
+function wealthLinkPickerOptions(currentValue) {
+  const assets = state.goals.netWorth.assets;
+  const liabilities = state.goals.netWorth.liabilities;
+  return { assets, liabilities, hasAny: Boolean(assets.length || liabilities.length), currentValue };
 }
 
 function renderDocumentWealthLinkPicker(document) {
-  const assets = state.goals.netWorth.assets;
-  const liabilities = state.goals.netWorth.liabilities;
   const currentValue = document.wealthItemId ? `${document.wealthItemType}:${document.wealthItemId}` : "";
+  const { assets, liabilities, hasAny } = wealthLinkPickerOptions(currentValue);
   return `<details class="note-label-picker document-wealth-link-picker">
     <summary title="Tag to a wealth item" aria-label="${currentValue ? "Tagged to a wealth item" : "Tag to a wealth item"}">⛁</summary>
     <div class="note-label-picker-options">
@@ -1442,13 +1474,36 @@ function renderDocumentWealthLinkPicker(document) {
         <input type="radio" name="document-wealth-${document.id}" data-document-wealth-link="${document.id}" value="" ${!currentValue ? "checked" : ""}>
         <span>Not tagged</span>
       </label>
-      ${assets.length || liabilities.length ? "" : `<small>No assets or liabilities yet</small>`}
+      ${hasAny ? "" : `<small>No assets or liabilities yet</small>`}
       ${assets.map((asset) => `<label>
         <input type="radio" name="document-wealth-${document.id}" data-document-wealth-link="${document.id}" value="asset:${asset.id}" ${currentValue === `asset:${asset.id}` ? "checked" : ""}>
         <span>Asset: ${escapeHtml(asset.name)}</span>
       </label>`).join("")}
       ${liabilities.map((liability) => `<label>
         <input type="radio" name="document-wealth-${document.id}" data-document-wealth-link="${document.id}" value="liability:${liability.id}" ${currentValue === `liability:${liability.id}` ? "checked" : ""}>
+        <span>Liability: ${escapeHtml(liability.name)}</span>
+      </label>`).join("")}
+    </div>
+  </details>`;
+}
+
+function renderFolderWealthLinkPicker(folder) {
+  const currentValue = folder.wealthItemId ? `${folder.wealthItemType}:${folder.wealthItemId}` : "";
+  const { assets, liabilities, hasAny } = wealthLinkPickerOptions(currentValue);
+  return `<details class="note-label-picker document-wealth-link-picker">
+    <summary title="Tag folder to a wealth item" aria-label="${currentValue ? "Folder tagged to a wealth item" : "Tag folder to a wealth item"}">⛁</summary>
+    <div class="note-label-picker-options">
+      <label>
+        <input type="radio" name="folder-wealth-${folder.id}" data-folder-wealth-link="${folder.id}" value="" ${!currentValue ? "checked" : ""}>
+        <span>Not tagged</span>
+      </label>
+      ${hasAny ? "" : `<small>No assets or liabilities yet</small>`}
+      ${assets.map((asset) => `<label>
+        <input type="radio" name="folder-wealth-${folder.id}" data-folder-wealth-link="${folder.id}" value="asset:${asset.id}" ${currentValue === `asset:${asset.id}` ? "checked" : ""}>
+        <span>Asset: ${escapeHtml(asset.name)}</span>
+      </label>`).join("")}
+      ${liabilities.map((liability) => `<label>
+        <input type="radio" name="folder-wealth-${folder.id}" data-folder-wealth-link="${folder.id}" value="liability:${liability.id}" ${currentValue === `liability:${liability.id}` ? "checked" : ""}>
         <span>Liability: ${escapeHtml(liability.name)}</span>
       </label>`).join("")}
     </div>
@@ -1504,8 +1559,12 @@ function renderDocuments() {
     </div>
     ${subfolders.length ? `<div class="documents-folder-grid">
       ${subfolders.map((folder) => `<div class="documents-folder-card" draggable="true" data-drag-type="folder" data-drag-id="${folder.id}" data-documents-drop-target="${folder.id}">
-        <button type="button" class="documents-folder-open" data-documents-open-folder="${folder.id}">▢ ${escapeHtml(folder.name)}</button>
-        <button type="button" class="icon-button danger-button" data-documents-delete-folder="${folder.id}" title="Delete folder" aria-label="Delete ${escapeHtml(folder.name)} folder">×</button>
+        <div class="documents-folder-card-row">
+          <button type="button" class="documents-folder-open" data-documents-open-folder="${folder.id}">▢ ${escapeHtml(folder.name)}</button>
+          ${renderFolderWealthLinkPicker(folder)}
+          <button type="button" class="icon-button danger-button" data-documents-delete-folder="${folder.id}" title="Delete folder" aria-label="Delete ${escapeHtml(folder.name)} folder">×</button>
+        </div>
+        ${folder.wealthItemId ? `<small class="documents-linked-note">Tagged to ${escapeHtml(wealthItemLabel(folder.wealthItemType, folder.wealthItemId) || "")}</small>` : ""}
       </div>`).join("")}
     </div>` : ""}
     ${currentDocuments.length ? `<div class="documents-file-list">${currentDocuments.map(renderDocumentRow).join("")}</div>` : `<p class="muted">No documents in this folder yet.</p>`}
@@ -1671,7 +1730,7 @@ function netWorthItemRow(item, type, index) {
   const isLiability = type === "liability";
   const isStock = !isLiability && item.assetClass === "stock";
   const wealthKey = `${type}:${item.id}`;
-  const linkedDocuments = (documentsData?.documents || []).filter((document) => document.wealthItemType === type && document.wealthItemId === item.id);
+  const linkedDocuments = documentsLinkedToWealthItem(type, item.id);
   return `<div class="net-worth-item ${isLiability ? "liability" : ""} ${isStock ? "stock" : ""}">
     <label class="net-worth-name">Name<input data-net-worth-name="${type}:${index}" value="${escapeHtml(item.name)}" aria-label="${isLiability ? "Liability" : "Asset"} name"></label>
     <label>Type<select data-net-worth-type="${type}:${index}" aria-label="Item type"><option value="asset" ${isLiability ? "" : "selected"}>Asset</option><option value="liability" ${isLiability ? "selected" : ""}>Liability</option></select></label>
@@ -3868,6 +3927,19 @@ function bindViewEvents() {
       const [wealthItemType, wealthItemId] = input.value ? input.value.split(":") : [null, null];
       try {
         await api(`/api/documents/${input.dataset.documentWealthLink}`, { method: "PATCH", body: JSON.stringify({ wealthItemType, wealthItemId }) });
+        await loadDocumentsData(false);
+        render();
+      } catch (error) {
+        window.alert(error.message);
+      }
+    });
+  });
+
+  document.querySelectorAll("[data-folder-wealth-link]").forEach((input) => {
+    input.addEventListener("change", async () => {
+      const [wealthItemType, wealthItemId] = input.value ? input.value.split(":") : [null, null];
+      try {
+        await api(`/api/documents/folders/${input.dataset.folderWealthLink}`, { method: "PATCH", body: JSON.stringify({ wealthItemType, wealthItemId }) });
         await loadDocumentsData(false);
         render();
       } catch (error) {

@@ -2244,7 +2244,15 @@ async function loadHouseholdDocuments(householdId) {
 }
 
 function toClientFolder(folder) {
-  return { id: folder.id, householdId: folder.household_id, parentId: folder.parent_id, name: folder.name, createdAt: folder.created_at };
+  return {
+    id: folder.id,
+    householdId: folder.household_id,
+    parentId: folder.parent_id,
+    name: folder.name,
+    wealthItemType: folder.wealth_item_type,
+    wealthItemId: folder.wealth_item_id,
+    createdAt: folder.created_at
+  };
 }
 
 function toClientDocument(document) {
@@ -2343,16 +2351,26 @@ app.patch("/api/documents/folders/:id", requireSession, async (req, res, next) =
     if (wouldCreateFolderCycle(cycleCandidates, folder.id, nextParentId)) {
       return res.status(400).json({ error: "Cannot move a folder into itself or one of its own subfolders" });
     }
+    const nextWealthItemId = req.body?.wealthItemId !== undefined ? req.body.wealthItemId : folder.wealth_item_id;
+    const nextWealthItemType = nextWealthItemId
+      ? (req.body?.wealthItemId !== undefined ? req.body.wealthItemType : folder.wealth_item_type)
+      : null;
+    if (nextWealthItemId) {
+      const wealthItem = await findHouseholdWealthItemById(req.sessionUser.household_id, nextWealthItemType, nextWealthItemId);
+      if (!wealthItem) return res.status(400).json({ error: "Linked wealth item not found" });
+    }
 
     if (MEMORY_DB) {
       folder.name = nextName;
       folder.parent_id = nextParentId;
+      folder.wealth_item_type = nextWealthItemType;
+      folder.wealth_item_id = nextWealthItemId;
       return res.json(toClientFolder(folder));
     }
 
     const result = await pool.query(
-      `UPDATE document_folders SET name = $1, parent_id = $2 WHERE id = $3 AND household_id = $4 RETURNING *`,
-      [nextName, nextParentId, folder.id, req.sessionUser.household_id]
+      `UPDATE document_folders SET name = $1, parent_id = $2, wealth_item_type = $3, wealth_item_id = $4 WHERE id = $5 AND household_id = $6 RETURNING *`,
+      [nextName, nextParentId, nextWealthItemType, nextWealthItemId, folder.id, req.sessionUser.household_id]
     );
     res.json(toClientFolder(result.rows[0]));
   } catch (error) {

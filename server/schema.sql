@@ -179,3 +179,9 @@ ALTER TABLE documents
   ADD COLUMN IF NOT EXISTS wealth_item_id TEXT;
 
 CREATE INDEX IF NOT EXISTS idx_documents_wealth_item_id ON documents(wealth_item_id);
+
+ALTER TABLE document_folders
+  ADD COLUMN IF NOT EXISTS wealth_item_type TEXT,
+  ADD COLUMN IF NOT EXISTS wealth_item_id TEXT;
+
+CREATE INDEX IF NOT EXISTS idx_document_folders_wealth_item_id ON document_folders(wealth_item_id);
