@@ -135,3 +135,10 @@ CREATE TABLE IF NOT EXISTS push_devices (
   platform TEXT NOT NULL DEFAULT 'unknown',
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+
+CREATE TABLE IF NOT EXISTS user_private_data (
+  user_id UUID PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+  journal JSONB NOT NULL DEFAULT '{"entries":[]}'::jsonb,
+  plans JSONB NOT NULL DEFAULT '{"tasks":[]}'::jsonb,
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);

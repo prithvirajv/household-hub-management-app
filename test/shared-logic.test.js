@@ -1,6 +1,6 @@
 const assert = require("node:assert/strict");
 const test = require("node:test");
-const { applyChecklistToggle, mealWeeksForMonth } = require("../lib/shared-logic");
+const { applyChecklistToggle, mealWeeksForMonth, groupPlanTasksByBucket, validateJournalPayload } = require("../lib/shared-logic");
 
 test("checking a child marks the parent done once every sibling is done", () => {
   const checklist = [
@@ -73,4 +73,46 @@ test("mealWeeksForMonth week start dates advance by exactly 7 days", () => {
     const diffDays = (weeks[index].start - weeks[index - 1].start) / 86400000;
     assert.equal(diffDays, 7);
   }
+});
+
+test("groupPlanTasksByBucket sorts tasks into daily, weekly, and monthly groups", () => {
+  const tasks = [
+    { id: "1", bucket: "daily" },
+    { id: "2", bucket: "weekly" },
+    { id: "3", bucket: "monthly" },
+    { id: "4", bucket: "daily" }
+  ];
+  const grouped = groupPlanTasksByBucket(tasks);
+  assert.deepEqual(grouped.daily.map((task) => task.id), ["1", "4"]);
+  assert.deepEqual(grouped.weekly.map((task) => task.id), ["2"]);
+  assert.deepEqual(grouped.monthly.map((task) => task.id), ["3"]);
+});
+
+test("groupPlanTasksByBucket returns empty arrays for buckets with no tasks", () => {
+  const grouped = groupPlanTasksByBucket([]);
+  assert.deepEqual(grouped, { daily: [], weekly: [], monthly: [] });
+});
+
+test("validateJournalPayload rejects a non-object or missing entries array", () => {
+  assert.equal(validateJournalPayload(null), "Invalid journal payload");
+  assert.equal(validateJournalPayload({}), "Invalid journal payload");
+  assert.equal(validateJournalPayload({ entries: "not-an-array" }), "Invalid journal payload");
+});
+
+test("validateJournalPayload accepts entries within the photo limit", () => {
+  const payload = { entries: [{ id: "1", photos: [{ id: "p1" }, { id: "p2" }] }] };
+  assert.equal(validateJournalPayload(payload), null);
+});
+
+test("validateJournalPayload rejects an entry exceeding the photo limit", () => {
+  const photos = Array.from({ length: 9 }, (_, index) => ({ id: `p${index}` }));
+  const payload = { entries: [{ id: "1", photos }] };
+  assert.equal(validateJournalPayload(payload), "Each journal entry supports at most 8 photos");
+});
+
+test("validateJournalPayload respects a custom photo limit", () => {
+  const photos = [{ id: "p1" }, { id: "p2" }, { id: "p3" }];
+  const payload = { entries: [{ id: "1", photos }] };
+  assert.equal(validateJournalPayload(payload, 2), "Each journal entry supports at most 8 photos");
+  assert.equal(validateJournalPayload(payload, 5), null);
 });

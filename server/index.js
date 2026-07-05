@@ -13,6 +13,7 @@ try {
 const { Pool } = require("pg");
 const { countries } = require("countries-list");
 const { defaultState } = require("./default-state");
+const { validateJournalPayload } = require("../lib/shared-logic");
 
 const PORT = Number(process.env.PORT || 8080);
 const SESSION_COOKIE = "hh_session";
@@ -78,11 +79,13 @@ const memoryDb = {
   loginEvents: [],
   passwordResetTokens: [],
   notificationJobs: [],
-  pushDevices: []
+  pushDevices: [],
+  privateData: []
 };
 
 const app = express();
 app.disable("x-powered-by");
+app.use("/api/private-data/journal", express.json({ limit: "10mb" }));
 app.use(express.json({ limit: "1mb" }));
 app.use(cookieParser(SESSION_SECRET));
 app.use(express.static(path.join(__dirname, ".."), {
@@ -375,6 +378,10 @@ function applySharedModules(appState, sharedModules) {
   if (sharedModules?.meals) merged.meals = cloneJson(sharedModules.meals);
   if (sharedModules?.calendar) merged.calendar = cloneJson(sharedModules.calendar);
   return merged;
+}
+
+function defaultPrivateData() {
+  return { journal: { entries: [] }, plans: { tasks: [] } };
 }
 
 function memoryPrimaryOwnerId(householdId) {
@@ -2098,6 +2105,73 @@ app.put("/api/state", requireSession, async (req, res, next) => {
       )
     ]);
     await syncNotificationJobs({ householdId: req.sessionUser.household_id, appState: req.body, user: req.sessionUser });
+    res.json({ ok: true });
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.get("/api/private-data", requireSession, async (req, res, next) => {
+  try {
+    if (MEMORY_DB) {
+      let record = memoryDb.privateData.find((item) => item.user_id === req.sessionUser.id);
+      if (!record) {
+        record = { user_id: req.sessionUser.id, ...defaultPrivateData() };
+        memoryDb.privateData.push(record);
+      }
+      return res.json({ journal: record.journal, plans: record.plans });
+    }
+
+    const defaults = defaultPrivateData();
+    const result = await pool.query(
+      `INSERT INTO user_private_data (user_id, journal, plans) VALUES ($1, $2, $3)
+       ON CONFLICT (user_id) DO UPDATE SET user_id = EXCLUDED.user_id
+       RETURNING journal, plans`,
+      [req.sessionUser.id, defaults.journal, defaults.plans]
+    );
+    res.json(result.rows[0]);
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.put("/api/private-data/journal", requireSession, async (req, res, next) => {
+  try {
+    const validationError = validateJournalPayload(req.body);
+    if (validationError) return res.status(400).json({ error: validationError });
+
+    if (MEMORY_DB) {
+      let record = memoryDb.privateData.find((item) => item.user_id === req.sessionUser.id);
+      if (record) record.journal = req.body;
+      else memoryDb.privateData.push({ user_id: req.sessionUser.id, journal: req.body, plans: defaultPrivateData().plans });
+      return res.json({ ok: true });
+    }
+
+    await pool.query(
+      `INSERT INTO user_private_data (user_id, journal, updated_at) VALUES ($1, $2, now())
+       ON CONFLICT (user_id) DO UPDATE SET journal = EXCLUDED.journal, updated_at = now()`,
+      [req.sessionUser.id, req.body]
+    );
+    res.json({ ok: true });
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.put("/api/private-data/plans", requireSession, async (req, res, next) => {
+  try {
+    if (MEMORY_DB) {
+      let record = memoryDb.privateData.find((item) => item.user_id === req.sessionUser.id);
+      if (record) record.plans = req.body;
+      else memoryDb.privateData.push({ user_id: req.sessionUser.id, journal: defaultPrivateData().journal, plans: req.body });
+      return res.json({ ok: true });
+    }
+
+    await pool.query(
+      `INSERT INTO user_private_data (user_id, plans, updated_at) VALUES ($1, $2, now())
+       ON CONFLICT (user_id) DO UPDATE SET plans = EXCLUDED.plans, updated_at = now()`,
+      [req.sessionUser.id, req.body]
+    );
     res.json({ ok: true });
   } catch (error) {
     next(error);

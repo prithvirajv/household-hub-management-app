@@ -4,6 +4,8 @@ const views = [
   ["paychecks", "Paychecks", "☑"],
   ["calendar", "Calendar", "⌂"],
   ["notes", "Notes", "✎"],
+  ["journal", "Journal", "✒"],
+  ["plan", "Plan", "◫"],
   ["meals", "Meals", "♨"],
   ["recipes", "Recipes", "▤"],
   ["goals", "Goals", "◎"],
@@ -25,6 +27,11 @@ let currentView = "budget";
 let autosaveTimer = null;
 let inviteEmailStatus = "";
 let calendarFilterOwner = "";
+// privateData is scoped to the signed-in user (not the household) and is never part
+// of `state` or autosaveState() — it must never reach the shared household blob.
+let privateData = null;
+let journalTimer = null;
+let planTimer = null;
 
 function currentMonthKey() {
   const now = new Date();
@@ -112,6 +119,26 @@ async function saveStateNow() {
   if (!state) return;
   clearTimeout(autosaveTimer);
   await api("/api/state", { method: "PUT", body: JSON.stringify(state) });
+}
+
+function autosaveJournal() {
+  if (!privateData) return;
+  clearTimeout(journalTimer);
+  journalTimer = setTimeout(() => {
+    api("/api/private-data/journal", { method: "PUT", body: JSON.stringify(privateData.journal) }).catch((error) => {
+      console.warn("Journal autosave failed", error);
+    });
+  }, 350);
+}
+
+function autosavePlans() {
+  if (!privateData) return;
+  clearTimeout(planTimer);
+  planTimer = setTimeout(() => {
+    api("/api/private-data/plans", { method: "PUT", body: JSON.stringify(privateData.plans) }).catch((error) => {
+      console.warn("Plan autosave failed", error);
+    });
+  }, 350);
 }
 
 function allLines() {
@@ -495,6 +522,8 @@ const renderers = {
   paychecks: renderPaychecks,
   calendar: renderCalendar,
   notes: renderNotes,
+  journal: renderJournal,
+  plan: renderPlan,
   meals: renderMeals,
   recipes: renderRecipes,
   goals: renderGoals,
@@ -1086,6 +1115,153 @@ function setupNoteComposerChecklist() {
     pinButton.setAttribute("aria-label", pinInput.checked ? "Unpin note" : "Pin note");
     pinButton.title = pinInput.checked ? "Unpin note" : "Pin note";
   });
+}
+
+const journalMoods = ["Happy", "Calm", "Neutral", "Stressed", "Sad", "Grateful", "Excited"];
+
+function ensureJournalData() {
+  privateData.journal ||= { entries: [] };
+  privateData.journal.entries ||= [];
+}
+
+function sortedJournalEntries() {
+  return [...privateData.journal.entries].sort((a, b) =>
+    (b.entryDate || "").localeCompare(a.entryDate || "") || (b.createdAt || "").localeCompare(a.createdAt || ""));
+}
+
+function moodOptions(selected) {
+  return `<option value="">No mood</option>${journalMoods.map((mood) => `<option value="${mood}" ${selected === mood ? "selected" : ""}>${mood}</option>`).join("")}`;
+}
+
+function renderJournal() {
+  if (!privateData) return "";
+  ensureJournalData();
+  const entries = sortedJournalEntries();
+  return `
+    <section class="journal-layout">
+      <div class="section-head"><div><span class="card-label">Journal</span><h3>Your private journal</h3><p class="private-note">Private to you — never shared with other household members.</p></div></div>
+      <form id="journalComposer" class="journal-composer card">
+        <label>Date<input name="entryDate" type="date" value="${new Date().toISOString().slice(0, 10)}" required></label>
+        <label>Title<input name="title" placeholder="Give today a title"></label>
+        <label>Mood<select name="mood">${moodOptions("")}</select></label>
+        <label>Tags<input name="tags" placeholder="travel, family, work"></label>
+        <textarea name="body" rows="3" placeholder="What happened today?"></textarea>
+        <label class="journal-photo-picker">+ Add photos<input name="photos" type="file" accept="image/*" multiple></label>
+        <button type="submit">Add entry</button>
+      </form>
+      <div class="journal-entries">
+        ${entries.length ? entries.map(renderJournalEntry).join("") : `<div class="empty-inline">No journal entries yet. Write your first one above.</div>`}
+      </div>
+    </section>`;
+}
+
+function renderJournalEntry(entry) {
+  return `<article class="journal-entry card" data-journal-id="${entry.id}">
+    <div class="journal-entry-head">
+      <input class="journal-date-input" data-journal-date="${entry.id}" type="date" value="${entry.entryDate || ""}" aria-label="Entry date">
+      <input class="journal-title-input" data-journal-title="${entry.id}" value="${escapeHtml(entry.title || "")}" placeholder="Untitled entry" aria-label="Entry title">
+      <button class="icon-button danger-button" data-delete-journal-entry="${entry.id}" type="button" aria-label="Delete entry">×</button>
+    </div>
+    <textarea class="journal-body-input" data-journal-body="${entry.id}" rows="3" placeholder="Write here..." aria-label="Entry body">${escapeHtml(entry.body || "")}</textarea>
+    <div class="journal-entry-row">
+      <label>Mood<select data-journal-mood="${entry.id}" aria-label="Mood">${moodOptions(entry.mood || "")}</select></label>
+      <input class="journal-tags-input" data-journal-tags="${entry.id}" value="${escapeHtml((entry.tags || []).join(", "))}" placeholder="Tags" aria-label="Tags">
+    </div>
+    ${entry.tags?.length ? `<div class="journal-tags">${entry.tags.map((tag) => `<span>${escapeHtml(tag)}</span>`).join("")}</div>` : ""}
+    ${entry.photos?.length ? `<div class="journal-photos">${entry.photos.map((photo) => `<div class="journal-photo"><img src="${photo.dataUrl}" alt="Journal photo"><button class="icon-button danger-button" data-delete-journal-photo="${entry.id}:${photo.id}" type="button" aria-label="Remove photo">×</button></div>`).join("")}</div>` : ""}
+    <label class="journal-photo-picker ghost">+ Add photo<input data-journal-photo-input="${entry.id}" type="file" accept="image/*" multiple></label>
+  </article>`;
+}
+
+function resizeImageFile(file, maxWidth = 1280, quality = 0.65) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onerror = () => reject(reader.error || new Error("Could not read photo"));
+    reader.onload = () => {
+      const img = new Image();
+      img.onerror = () => reject(new Error("Could not read photo"));
+      img.onload = () => {
+        const scale = Math.min(1, maxWidth / img.width);
+        const canvas = document.createElement("canvas");
+        canvas.width = Math.max(1, Math.round(img.width * scale));
+        canvas.height = Math.max(1, Math.round(img.height * scale));
+        canvas.getContext("2d").drawImage(img, 0, 0, canvas.width, canvas.height);
+        resolve(canvas.toDataURL("image/jpeg", quality));
+      };
+      img.src = reader.result;
+    };
+    reader.readAsDataURL(file);
+  });
+}
+
+async function filesToJournalPhotos(fileList) {
+  const files = fileList ? [...fileList].slice(0, 8) : [];
+  const photos = [];
+  for (const file of files) {
+    try {
+      const dataUrl = await resizeImageFile(file);
+      photos.push({ id: uniqueId("photo"), dataUrl, createdAt: new Date().toISOString() });
+    } catch (error) {
+      console.warn("Could not process photo", error);
+    }
+  }
+  return photos;
+}
+
+const planBuckets = ["daily", "weekly", "monthly"];
+const planBucketLabels = { daily: "Daily", weekly: "Weekly", monthly: "Monthly" };
+let planActiveBucket = "daily";
+
+function ensurePlanData() {
+  privateData.plans ||= { tasks: [] };
+  privateData.plans.tasks ||= [];
+}
+
+
+function defaultPlanAnchorDate(bucket) {
+  const now = new Date();
+  if (bucket === "monthly") return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
+  return now.toISOString().slice(0, 10);
+}
+
+function formatPlanAnchorDate(task) {
+  if (!task.anchorDate) return "";
+  if (task.bucket === "monthly") {
+    const [year, month] = task.anchorDate.split("-").map(Number);
+    return new Date(year, month - 1, 1).toLocaleDateString("en-US", { month: "long", year: "numeric" });
+  }
+  return new Date(`${task.anchorDate}T00:00:00`).toLocaleDateString("en-US", { month: "short", day: "numeric" });
+}
+
+function renderPlan() {
+  if (!privateData) return "";
+  ensurePlanData();
+  const tasks = groupPlanTasksByBucket(privateData.plans.tasks)[planActiveBucket];
+  const bucketLabel = planBucketLabels[planActiveBucket].toLowerCase();
+  return `
+    <section class="plan-layout">
+      <div class="section-head"><div><span class="card-label">Plan</span><h3>Daily, weekly and monthly tasks</h3><p class="private-note">Private to you — never shared with other household members.</p></div></div>
+      <div class="plan-bucket-tabs">${planBuckets.map((bucket) => `<button class="${planActiveBucket === bucket ? "active" : ""}" data-plan-bucket="${bucket}" type="button">${planBucketLabels[bucket]}</button>`).join("")}</div>
+      <form id="planTaskForm" class="plan-task-form card">
+        <input name="title" placeholder="Add a ${bucketLabel} task" required>
+        <input name="anchorDate" type="${planActiveBucket === "monthly" ? "month" : "date"}" value="${defaultPlanAnchorDate(planActiveBucket)}">
+        <button type="submit">Add</button>
+      </form>
+      <div class="plan-task-list">
+        ${tasks.length ? tasks.map(renderPlanTask).join("") : `<div class="empty-inline">No ${bucketLabel} tasks yet.</div>`}
+      </div>
+    </section>`;
+}
+
+function renderPlanTask(task) {
+  return `<div class="plan-task-row ${task.done ? "done" : ""}" data-plan-task-id="${task.id}">
+    <input type="checkbox" data-plan-task-check="${task.id}" ${task.done ? "checked" : ""} aria-label="Complete ${escapeHtml(task.title)}">
+    <div class="plan-task-copy">
+      <input class="plan-task-title" data-plan-task-title="${task.id}" value="${escapeHtml(task.title)}" aria-label="Task title">
+      <small>${escapeHtml(formatPlanAnchorDate(task))}</small>
+    </div>
+    <button class="icon-button danger-button" data-delete-plan-task="${task.id}" type="button" aria-label="Delete task">×</button>
+  </div>`;
 }
 
 function renderMeals() {
@@ -2157,6 +2333,157 @@ function bindViewEvents() {
   document.querySelectorAll("[data-delete-note-forever]").forEach((button) => {
     button.addEventListener("click", () => {
       state.notes.entries = state.notes.entries.filter((note) => note.id !== button.dataset.deleteNoteForever);
+      render();
+    });
+  });
+
+  $("#journalComposer")?.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    const form = event.currentTarget;
+    const data = Object.fromEntries(new FormData(form));
+    const fileInput = form.querySelector('input[name="photos"]');
+    const photos = await filesToJournalPhotos(fileInput?.files);
+    const now = new Date().toISOString();
+    privateData.journal.entries.push({
+      id: uniqueId("journal"),
+      entryDate: data.entryDate || now.slice(0, 10),
+      title: data.title || "",
+      body: data.body || "",
+      mood: data.mood || "",
+      tags: String(data.tags || "").split(",").map((tag) => tag.trim()).filter(Boolean),
+      photos,
+      createdAt: now,
+      updatedAt: now
+    });
+    autosaveJournal();
+    render();
+  });
+
+  document.querySelectorAll("[data-journal-date]").forEach((input) => {
+    input.addEventListener("change", () => {
+      const entry = privateData.journal.entries.find((item) => item.id === input.dataset.journalDate);
+      if (!entry) return;
+      entry.entryDate = input.value;
+      autosaveJournal();
+      render();
+    });
+  });
+
+  document.querySelectorAll("[data-journal-title]").forEach((input) => {
+    input.addEventListener("input", () => {
+      const entry = privateData.journal.entries.find((item) => item.id === input.dataset.journalTitle);
+      if (!entry) return;
+      entry.title = input.value;
+      autosaveJournal();
+    });
+  });
+
+  document.querySelectorAll("[data-journal-body]").forEach((input) => {
+    input.addEventListener("input", () => {
+      const entry = privateData.journal.entries.find((item) => item.id === input.dataset.journalBody);
+      if (!entry) return;
+      entry.body = input.value;
+      autosaveJournal();
+    });
+  });
+
+  document.querySelectorAll("[data-journal-mood]").forEach((select) => {
+    select.addEventListener("change", () => {
+      const entry = privateData.journal.entries.find((item) => item.id === select.dataset.journalMood);
+      if (!entry) return;
+      entry.mood = select.value;
+      autosaveJournal();
+    });
+  });
+
+  document.querySelectorAll("[data-journal-tags]").forEach((input) => {
+    input.addEventListener("change", () => {
+      const entry = privateData.journal.entries.find((item) => item.id === input.dataset.journalTags);
+      if (!entry) return;
+      entry.tags = input.value.split(",").map((tag) => tag.trim()).filter(Boolean);
+      autosaveJournal();
+      render();
+    });
+  });
+
+  document.querySelectorAll("[data-journal-photo-input]").forEach((input) => {
+    input.addEventListener("change", async () => {
+      const entry = privateData.journal.entries.find((item) => item.id === input.dataset.journalPhotoInput);
+      if (!entry) return;
+      const photos = await filesToJournalPhotos(input.files);
+      entry.photos = [...(entry.photos || []), ...photos].slice(0, 8);
+      autosaveJournal();
+      render();
+    });
+  });
+
+  document.querySelectorAll("[data-delete-journal-photo]").forEach((button) => {
+    button.addEventListener("click", () => {
+      const [entryId, photoId] = button.dataset.deleteJournalPhoto.split(":");
+      const entry = privateData.journal.entries.find((item) => item.id === entryId);
+      if (!entry) return;
+      entry.photos = (entry.photos || []).filter((photo) => photo.id !== photoId);
+      autosaveJournal();
+      render();
+    });
+  });
+
+  document.querySelectorAll("[data-delete-journal-entry]").forEach((button) => {
+    button.addEventListener("click", () => {
+      privateData.journal.entries = privateData.journal.entries.filter((entry) => entry.id !== button.dataset.deleteJournalEntry);
+      autosaveJournal();
+      render();
+    });
+  });
+
+  document.querySelectorAll("[data-plan-bucket]").forEach((button) => {
+    button.addEventListener("click", () => {
+      planActiveBucket = button.dataset.planBucket;
+      render();
+    });
+  });
+
+  $("#planTaskForm")?.addEventListener("submit", (event) => {
+    event.preventDefault();
+    const form = event.currentTarget;
+    const data = Object.fromEntries(new FormData(form));
+    if (!data.title || !data.title.trim()) return;
+    privateData.plans.tasks.push({
+      id: uniqueId("plan"),
+      title: data.title.trim(),
+      notes: "",
+      bucket: planActiveBucket,
+      anchorDate: data.anchorDate || defaultPlanAnchorDate(planActiveBucket),
+      done: false,
+      createdAt: new Date().toISOString()
+    });
+    autosavePlans();
+    render();
+  });
+
+  document.querySelectorAll("[data-plan-task-check]").forEach((checkbox) => {
+    checkbox.addEventListener("change", () => {
+      const task = privateData.plans.tasks.find((item) => item.id === checkbox.dataset.planTaskCheck);
+      if (!task) return;
+      task.done = checkbox.checked;
+      autosavePlans();
+      render();
+    });
+  });
+
+  document.querySelectorAll("[data-plan-task-title]").forEach((input) => {
+    input.addEventListener("input", () => {
+      const task = privateData.plans.tasks.find((item) => item.id === input.dataset.planTaskTitle);
+      if (!task) return;
+      task.title = input.value;
+      autosavePlans();
+    });
+  });
+
+  document.querySelectorAll("[data-delete-plan-task]").forEach((button) => {
+    button.addEventListener("click", () => {
+      privateData.plans.tasks = privateData.plans.tasks.filter((task) => task.id !== button.dataset.deletePlanTask);
+      autosavePlans();
       render();
     });
   });
@@ -3600,9 +3927,10 @@ async function loadApp() {
   document.body.classList.remove("auth-mode");
   sessionUser = session.user;
   sharingAccess = null;
-  [households, state] = await Promise.all([
+  [households, state, privateData] = await Promise.all([
     api("/api/households"),
-    api("/api/state")
+    api("/api/state"),
+    api("/api/private-data")
   ]);
   if (migrateInitialMonth()) autosaveState();
   $("#authPanel").hidden = true;
@@ -3619,9 +3947,12 @@ function setAuthShell(title) {
 async function reloadSelectedHousehold() {
   const session = await api("/api/session");
   sessionUser = session.user;
-  [households, state] = await Promise.all([
+  // privateData is scoped to the user, not the household, so it stays the same across
+  // this reload — refetched here anyway for simplicity, since it's cheap and correct.
+  [households, state, privateData] = await Promise.all([
     api("/api/households"),
-    api("/api/state")
+    api("/api/state"),
+    api("/api/private-data")
   ]);
   if (migrateInitialMonth()) autosaveState();
   adminData = null;
