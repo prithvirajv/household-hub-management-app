@@ -1030,8 +1030,7 @@ function renderNoteLabelPicker(note = null, compact = false) {
 }
 
 function renderNoteCard(note) {
-  const completed = note.checklist.filter((item) => item.done);
-  const open = note.checklist.filter((item) => !item.done);
+  const { open, completed } = bucketChecklistItems(note.checklist);
   const checklistRow = (item) => `<div class="note-check-row ${item.done ? "done" : ""} ${item.parentId ? "child-item" : ""}">
     <input data-note-check="${note.id}:${item.id}" type="checkbox" aria-label="Complete ${escapeHtml(item.text)}" ${item.done ? "checked" : ""}>
     <div class="note-check-combobox">

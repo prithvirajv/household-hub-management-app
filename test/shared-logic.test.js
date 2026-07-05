@@ -1,10 +1,44 @@
 const assert = require("node:assert/strict");
 const test = require("node:test");
 const {
-  applyChecklistToggle, findChecklistDuplicate, mealWeeksForMonth, groupPlanTasksByBucket, validateJournalPayload,
+  applyChecklistToggle, bucketChecklistItems, findChecklistDuplicate, mealWeeksForMonth, groupPlanTasksByBucket, validateJournalPayload,
   dailyTaskOccursOnDate, isDailyTaskDoneOnDate, toggleDailyTaskDoneOnDate,
   timeToMinutes, minutesToTime, snapMinutes
 } = require("../lib/shared-logic");
+
+test("bucketChecklistItems keeps a checked child in the open bucket while its siblings are still open", () => {
+  const checklist = [
+    { id: "parent", text: "Peedampally land", done: false, parentId: "" },
+    { id: "child-1", text: "Get the survey sign", done: false, parentId: "parent" },
+    { id: "child-2", text: "subdivision", done: false, parentId: "parent" },
+    { id: "child-3", text: "Fence on one side", done: true, parentId: "parent" }
+  ];
+  const { open, completed } = bucketChecklistItems(checklist);
+  assert.deepEqual(open.map((item) => item.id), ["parent", "child-1", "child-2", "child-3"],
+    "checking one child shouldn't strand it in the completed section while siblings are still open");
+  assert.deepEqual(completed.map((item) => item.id), []);
+});
+
+test("bucketChecklistItems moves the whole group to completed once every child is done", () => {
+  const checklist = [
+    { id: "parent", text: "Peedampally land", done: true, parentId: "" },
+    { id: "child-1", text: "Get the survey sign", done: true, parentId: "parent" },
+    { id: "child-2", text: "subdivision", done: true, parentId: "parent" }
+  ];
+  const { open, completed } = bucketChecklistItems(checklist);
+  assert.deepEqual(open, []);
+  assert.deepEqual(completed.map((item) => item.id), ["parent", "child-1", "child-2"]);
+});
+
+test("bucketChecklistItems buckets standalone top-level items by their own done state", () => {
+  const checklist = [
+    { id: "item-1", text: "Buy milk", done: false, parentId: "" },
+    { id: "item-2", text: "Pay rent", done: true, parentId: "" }
+  ];
+  const { open, completed } = bucketChecklistItems(checklist);
+  assert.deepEqual(open.map((item) => item.id), ["item-1"]);
+  assert.deepEqual(completed.map((item) => item.id), ["item-2"]);
+});
 
 test("findChecklistDuplicate ignores same-text items that belong to a different parent", () => {
   const checklist = [
