@@ -512,7 +512,7 @@ function metricsForView() {
   if (currentView === "help") return [];
   if (currentView === "meals") {
     ensureMealWeekData();
-    return [["Weekly meals", `${currentMealPlans().length}/28`, `occupied slots in Week ${selectedMealWeek()}`], ["Groceries estimate", money.format(107), "can post directly to budget"], ["Planned servings", String(plannedServingsTotal()), "people or portions planned"], ["Household plan", "Shared", "meals, recipes and grocery list"]];
+    return [["Weekly meals", `${currentMealPlans().length}/28`, `occupied slots in Week ${selectedMealWeek()}`], ["Groceries estimate", money.format(groceryEstimateAmount()), "can post directly to budget"], ["Planned servings", String(plannedServingsTotal()), "people or portions planned"], ["Household plan", "Shared", "meals, recipes and grocery list"]];
   }
   if (currentView === "recipes") return [["Saved recipes", String(state.meals.recipes.length), "available to meal plans"], ["Ingredients", String(new Set(state.meals.recipes.flatMap((recipe) => recipe.ingredients)).size), "unique grocery items"], ["Average protein", `${Math.round(state.meals.recipes.reduce((sum, recipe) => sum + Number(recipe.protein || 0), 0) / Math.max(state.meals.recipes.length, 1))}g`, "per recipe"], ["Household library", "Shared", "available to every member"]];
   if (currentView === "sharing") return [["Invite status", state.household.inviteCode || "Ready", "household invite"], ["Members", String(sharingAccess?.members.length ?? state.household.members.length), "active and invited users"], ["Shared scopes", String(state.household.sharedScopes.length), "workspace modules"], ["Activity", String(state.household.activity.length), "recent household changes"]];
@@ -2183,6 +2183,16 @@ function groceryList() {
   return [...new Set(currentMealPlans().flatMap((planned) => state.meals.recipes.find((recipe) => recipe.id === planned.recipeId)?.ingredients || []))];
 }
 
+// Recipes don't carry per-ingredient prices, so this is a rough per-item
+// average (roughly in line with the $360-400/month Groceries budget lines
+// in the seed data) rather than exact pricing — but it scales with what's
+// actually planned instead of a fixed guess regardless of the meal plan.
+const GROCERY_ITEM_ESTIMATE = 7;
+
+function groceryEstimateAmount() {
+  return groceryList().length * GROCERY_ITEM_ESTIMATE;
+}
+
 function plannedMeal(day, slot) {
   return plannedMeals(day, slot)[0];
 }
@@ -3158,7 +3168,12 @@ function bindViewEvents() {
       render();
       return;
     }
-    const amount = Math.max(0, Number(state.meals.groceryEstimate || 185));
+    if (groceryList().length === 0) {
+      state.meals.feedback = "Plan at least one meal this week before posting a grocery estimate.";
+      render();
+      return;
+    }
+    const amount = Math.max(0, Number(state.meals.groceryEstimate || groceryEstimateAmount()));
     state.transactions.unshift(makeTransaction({ date: new Date().toISOString().slice(0, 10), payee: "Meal plan groceries", lineId: groceryLine.id, amount, memo: `Posted from Week ${selectedMealWeek()} grocery list` }));
     state.meals.feedback = `${exactMoney.format(amount)} posted to ${groceryLine.category} · ${groceryLine.name}.`;
     state.household.activity.unshift(state.meals.feedback);
