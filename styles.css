@@ -3832,6 +3832,47 @@ main {
   font-weight: 700;
 }
 
+/* A shared square size for every icon-only action next to a folder or file
+   (download, delete, and the note/wealth link picker toggles) so they line
+   up cleanly in a row instead of each sizing itself differently — plain
+   buttons shrink to their glyph, .icon-button is 48px (sized for other parts
+   of the app), and <details> summaries default to ~42px with a stray
+   dropdown caret. */
+.documents-icon-btn {
+  width: 36px;
+  min-width: 36px;
+  height: 36px;
+  min-height: 36px;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: white;
+  color: var(--text);
+  flex-shrink: 0;
+}
+
+.documents-icon-btn.danger-button {
+  color: var(--coral);
+}
+
+.document-note-link-picker summary,
+.document-wealth-link-picker summary {
+  width: 36px;
+  min-width: 36px;
+  height: 36px;
+  min-height: 36px;
+  padding: 0;
+  justify-content: center;
+}
+
+.document-note-link-picker summary::after,
+.document-wealth-link-picker summary::after {
+  display: none;
+}
+
 .documents-file-list {
   display: grid;
   gap: 0.6rem;

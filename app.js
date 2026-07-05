@@ -1527,8 +1527,8 @@ function renderDocumentRow(document) {
       </select>
       ${renderDocumentNoteLinkPicker(document)}
       ${renderDocumentWealthLinkPicker(document)}
-      <button type="button" data-documents-download="${document.id}" title="Download" aria-label="Download ${escapeHtml(document.name)}">⇩</button>
-      <button type="button" class="icon-button danger-button" data-documents-delete="${document.id}" title="Delete" aria-label="Delete ${escapeHtml(document.name)}">×</button>
+      <button type="button" class="documents-icon-btn" data-documents-download="${document.id}" title="Download" aria-label="Download ${escapeHtml(document.name)}">⇩</button>
+      <button type="button" class="documents-icon-btn danger-button" data-documents-delete="${document.id}" title="Delete" aria-label="Delete ${escapeHtml(document.name)}">×</button>
     </div>
   </div>`;
 }
@@ -1562,7 +1562,7 @@ function renderDocuments() {
         <div class="documents-folder-card-row">
           <button type="button" class="documents-folder-open" data-documents-open-folder="${folder.id}">▢ ${escapeHtml(folder.name)}</button>
           ${renderFolderWealthLinkPicker(folder)}
-          <button type="button" class="icon-button danger-button" data-documents-delete-folder="${folder.id}" title="Delete folder" aria-label="Delete ${escapeHtml(folder.name)} folder">×</button>
+          <button type="button" class="documents-icon-btn danger-button" data-documents-delete-folder="${folder.id}" title="Delete folder" aria-label="Delete ${escapeHtml(folder.name)} folder">×</button>
         </div>
         ${folder.wealthItemId ? `<small class="documents-linked-note">Tagged to ${escapeHtml(wealthItemLabel(folder.wealthItemType, folder.wealthItemId) || "")}</small>` : ""}
       </div>`).join("")}
