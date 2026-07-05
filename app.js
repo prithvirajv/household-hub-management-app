@@ -1699,6 +1699,7 @@ function renderSharing() {
     "Chores",
     "Birthday reminders",
     "Notes",
+    "Documents",
     "Meals",
     "Grocery lists",
     "Reminders",
