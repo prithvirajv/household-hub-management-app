@@ -1,10 +1,28 @@
 const assert = require("node:assert/strict");
 const test = require("node:test");
 const {
-  applyChecklistToggle, mealWeeksForMonth, groupPlanTasksByBucket, validateJournalPayload,
+  applyChecklistToggle, findChecklistDuplicate, mealWeeksForMonth, groupPlanTasksByBucket, validateJournalPayload,
   dailyTaskOccursOnDate, isDailyTaskDoneOnDate, toggleDailyTaskDoneOnDate,
   timeToMinutes, minutesToTime, snapMinutes
 } = require("../lib/shared-logic");
+
+test("findChecklistDuplicate ignores same-text items that belong to a different parent", () => {
+  const checklist = [
+    { id: "parent-1", text: "Kanampalayam land", done: false, parentId: "" },
+    { id: "child-1", text: "subdivision", done: false, parentId: "parent-1" },
+    { id: "parent-2", text: "IOB plot", done: false, parentId: "" }
+  ];
+  // Adding a new root-level "subdivision" item should not be blocked by the
+  // one nested under a different parent.
+  assert.equal(findChecklistDuplicate(checklist, "subdivision", ""), null);
+  // But it should still find a duplicate among items that share the same parent.
+  assert.equal(findChecklistDuplicate(checklist, "subdivision", "parent-1")?.id, "child-1");
+});
+
+test("findChecklistDuplicate matches case-insensitively and trims whitespace within the same scope", () => {
+  const checklist = [{ id: "item-1", text: "Milk", done: false, parentId: "" }];
+  assert.equal(findChecklistDuplicate(checklist, "  milk  ", "")?.id, "item-1");
+});
 
 test("checking a child marks the parent done once every sibling is done", () => {
   const checklist = [

@@ -914,16 +914,16 @@ function matchingChecklistSuggestions(query, limit = 6) {
     .slice(0, limit);
 }
 
-function addOrRestoreChecklistItem(note, text) {
+function addOrRestoreChecklistItem(note, text, parentId = "") {
   const normalized = String(text || "").trim().toLowerCase();
   if (!note || !normalized) return false;
-  const existing = note.checklist.find((item) => String(item.text || "").trim().toLowerCase() === normalized);
+  const existing = findChecklistDuplicate(note.checklist, text, parentId);
   if (existing) {
     existing.done = false;
     return true;
   }
   const canonical = noteChecklistSuggestions().find((item) => item.toLowerCase() === normalized) || String(text).trim();
-  note.checklist.push({ id: uniqueId("item"), text: canonical, done: false });
+  note.checklist.push({ id: uniqueId("item"), text: canonical, done: false, parentId: parentId || "" });
   return true;
 }
 
@@ -2281,7 +2281,7 @@ function bindViewEvents() {
       const matches = matchingChecklistSuggestions(input.value);
       suggestions.innerHTML = matches.map((text) => {
         const note = state.notes.entries.find((item) => item.id === input.dataset.noteItemInput);
-        const existing = note?.checklist.find((item) => item.text.trim().toLowerCase() === text.toLowerCase());
+        const existing = note ? findChecklistDuplicate(note.checklist, text) : null;
         const status = existing?.done ? "Completed in this note" : existing ? "Already in this note" : "Previous checklist item";
         return `<button type="button" role="option" data-note-item-suggestion="${escapeHtml(text)}"><span>${escapeHtml(text)}</span><small>${status}</small></button>`;
       }).join("");
