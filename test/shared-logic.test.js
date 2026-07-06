@@ -3,9 +3,58 @@ const test = require("node:test");
 const {
   applyChecklistToggle, bucketChecklistItems, findChecklistDuplicate, mealWeeksForMonth, groupPlanTasksByBucket, validateJournalPayload,
   dailyTaskOccursOnDate, isDailyTaskDoneOnDate, toggleDailyTaskDoneOnDate,
-  timeToMinutes, minutesToTime, snapMinutes,
+  timeToMinutes, minutesToTime, snapMinutes, layoutTimelineBlocks,
   sanitizeFilename, buildDocumentObjectPath, wouldCreateFolderCycle, buildFolderTree
 } = require("../lib/shared-logic");
+
+test("layoutTimelineBlocks gives non-overlapping tasks full width", () => {
+  const result = layoutTimelineBlocks([
+    { id: "a", start: 480, end: 510 },
+    { id: "b", start: 540, end: 570 }
+  ]);
+  assert.deepEqual(result.find((item) => item.id === "a"), { id: "a", column: 0, columns: 1 });
+  assert.deepEqual(result.find((item) => item.id === "b"), { id: "b", column: 0, columns: 1 });
+});
+
+test("layoutTimelineBlocks splits two overlapping tasks into two side-by-side columns", () => {
+  const result = layoutTimelineBlocks([
+    { id: "a", start: 480, end: 540 },
+    { id: "b", start: 500, end: 560 }
+  ]);
+  const a = result.find((item) => item.id === "a");
+  const b = result.find((item) => item.id === "b");
+  assert.equal(a.columns, 2);
+  assert.equal(b.columns, 2);
+  assert.notEqual(a.column, b.column, "overlapping tasks must not share a column, or one would still hide the other");
+});
+
+test("layoutTimelineBlocks lets a later non-overlapping task reuse a freed column", () => {
+  // a spans the whole cluster; b and c don't overlap each other, so they can
+  // share one column between them, giving the cluster only 2 columns total.
+  const result = layoutTimelineBlocks([
+    { id: "a", start: 480, end: 600 },
+    { id: "b", start: 490, end: 520 },
+    { id: "c", start: 540, end: 570 }
+  ]);
+  const byId = Object.fromEntries(result.map((item) => [item.id, item]));
+  assert.equal(byId.a.columns, 2);
+  assert.equal(byId.b.columns, 2);
+  assert.equal(byId.c.columns, 2);
+  assert.equal(byId.b.column, byId.c.column, "b and c don't overlap each other and should reuse the same column");
+  assert.notEqual(byId.a.column, byId.b.column);
+});
+
+test("layoutTimelineBlocks treats disjoint clusters independently", () => {
+  const result = layoutTimelineBlocks([
+    { id: "a", start: 480, end: 510 },
+    { id: "b", start: 480, end: 510 },
+    { id: "c", start: 700, end: 720 }
+  ]);
+  const byId = Object.fromEntries(result.map((item) => [item.id, item]));
+  assert.equal(byId.a.columns, 2);
+  assert.equal(byId.b.columns, 2);
+  assert.equal(byId.c.columns, 1, "a task in a separate, non-overlapping cluster should keep full width");
+});
 
 test("sanitizeFilename strips path separators, parent-dir sequences, and control characters", () => {
   const traversal = sanitizeFilename("../../etc/passwd");

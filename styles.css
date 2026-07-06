@@ -1374,6 +1374,26 @@ main {
   padding: 0.75rem;
 }
 
+.paycheck-card-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-shrink: 0;
+}
+
+.paycheck-recurrence-field {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  color: var(--muted);
+  font-size: 0.78rem;
+  font-weight: 700;
+}
+
+.paycheck-recurrence-field select {
+  flex: 1;
+}
+
 .debt-card {
   background: var(--soft-blue);
 }
@@ -3624,8 +3644,7 @@ main {
 
 .plan-timeline-block {
   position: absolute;
-  left: 6px;
-  right: 6px;
+  box-sizing: border-box;
   display: grid;
   grid-template-columns: auto minmax(0, 1fr) 28px;
   align-items: start;

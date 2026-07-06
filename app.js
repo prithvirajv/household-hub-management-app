@@ -725,6 +725,7 @@ function renderTransactions() {
 }
 
 function renderPaychecks() {
+  ensurePaycheckRecurrenceData();
   const paycheckOptions = state.paychecks.map((paycheck) => `<option value="${paycheck.date}">${paycheck.name} - ${money.format(paycheck.amount)}</option>`).join("");
   const lineOptions = allLines().map((line) => `<option value="${line.id}">${line.category} - ${line.name}</option>`).join("");
   const amountOptions = [50, 100, 150, 200, 250, 300, 350, 450, 520, 620, 850, 1850].map((amount) => `<option value="${amount}">${money.format(amount)}</option>`).join("");
@@ -740,11 +741,18 @@ function renderPaychecks() {
             <button id="assignBillButton" type="button">Assign bill</button>
           </div>
           <div class="paycheck-grid">
-            ${state.paychecks.map((paycheck) => {
+            ${state.paychecks.map((paycheck, index) => {
               const assigned = paycheck.assignedLineIds.reduce((sum, id) => sum + (allLines().find((line) => line.id === id)?.planned || 0), 0);
               return `<article class="paycheck-card">
-                <div class="section-head"><h3>${paycheck.name}</h3><span class="pill">${money.format(paycheck.amount)}</span></div>
+                <div class="section-head">
+                  <h3>${paycheck.name}</h3>
+                  <div class="paycheck-card-actions">
+                    <span class="pill">${money.format(paycheck.amount)}</span>
+                    <button class="icon-button danger-button" data-delete-paycheck="${index}" type="button" aria-label="Delete ${escapeHtml(paycheck.name)}">×</button>
+                  </div>
+                </div>
                 <small>${paycheck.date}</small>
+                <label class="paycheck-recurrence-field">Repeat<select data-paycheck-recurrence="${index}" aria-label="How often ${escapeHtml(paycheck.name)} repeats">${Object.entries(paycheckRecurrenceLabels).map(([value, label]) => `<option value="${value}" ${paycheck.recurrence === value ? "selected" : ""}>${label}</option>`).join("")}</select></label>
                 <div class="mini-tags">${paycheck.assignedLineIds.map((id) => `<span>${lineName(id)}</span>`).join("")}</div>
                 <div class="split-stat"><span>Income ${money.format(paycheck.amount)}</span><b>Assigned ${money.format(assigned)}</b></div>
               </article>`;
@@ -1326,7 +1334,15 @@ function renderDailyPlan() {
       <div class="plan-timeline" style="height:${timelineHeight}px">
         <div class="plan-timeline-hours">${hours.map((hour) => `<div class="plan-timeline-hour" style="height:${60 * PLAN_PIXELS_PER_MINUTE}px">${formatHourLabel(hour)}</div>`).join("")}</div>
         <div class="plan-timeline-body" style="height:${timelineHeight}px" data-plan-timeline>
-          ${scheduled.map((task) => renderTimelineBlock(task)).join("")}
+          ${(() => {
+            const layout = layoutTimelineBlocks(scheduled.map((task) => ({
+              id: task.id,
+              start: timeToMinutes(task.startTime),
+              end: timeToMinutes(task.startTime) + Number(task.durationMinutes || 30)
+            })));
+            const layoutById = new Map(layout.map((item) => [item.id, item]));
+            return scheduled.map((task) => renderTimelineBlock(task, layoutById.get(task.id))).join("");
+          })()}
         </div>
       </div>
       ${scheduled.length ? `<div class="plan-timeline-details">${scheduled.map((task) => `<div class="plan-timeline-detail"><h4>${escapeHtml(task.title)}</h4>${renderSubtasks(task)}</div>`).join("")}</div>` : ""}
@@ -1339,13 +1355,19 @@ function formatHourLabel(hour) {
   return `${displayHour} ${period}`;
 }
 
-function renderTimelineBlock(task) {
+function renderTimelineBlock(task, layoutInfo) {
   const startMinutes = timeToMinutes(task.startTime) - PLAN_TIMELINE_START_HOUR * 60;
   const duration = Number(task.durationMinutes || 30);
   const top = Math.max(0, startMinutes * PLAN_PIXELS_PER_MINUTE);
   const height = Math.max(20, duration * PLAN_PIXELS_PER_MINUTE);
   const done = isDailyTaskDoneOnDate(task, planSelectedDate);
-  return `<div class="plan-timeline-block ${done ? "done" : ""}" data-plan-task-id="${task.id}" style="top:${top}px;height:${height}px">
+  const columns = layoutInfo?.columns || 1;
+  const column = layoutInfo?.column || 0;
+  const gutter = 6;
+  const gap = columns > 1 ? 4 : 0;
+  const left = `calc(${gutter}px + (100% - ${gutter * 2}px) * ${column} / ${columns})`;
+  const width = `calc((100% - ${gutter * 2}px) / ${columns} - ${gap}px)`;
+  return `<div class="plan-timeline-block ${done ? "done" : ""}" data-plan-task-id="${task.id}" style="top:${top}px;height:${height}px;left:${left};width:${width}">
     <input type="checkbox" data-plan-task-check="${task.id}" ${done ? "checked" : ""} aria-label="Complete ${escapeHtml(task.title)}">
     <div class="plan-block-copy">
       <input class="plan-task-title" data-plan-task-title="${task.id}" value="${escapeHtml(task.title)}" aria-label="Task title">
@@ -2015,6 +2037,14 @@ function scheduleItems() {
   const annualBirthdays = birthdayScheduleItems();
   return [...oneTimeEvents, ...chores, ...annualBirthdays]
     .sort((a, b) => a.date.localeCompare(b.date));
+}
+
+const paycheckRecurrenceLabels = { once: "One-time", weekly: "Weekly", biweekly: "Biweekly", monthly: "Monthly" };
+
+function ensurePaycheckRecurrenceData() {
+  state.paychecks.forEach((paycheck) => {
+    paycheck.recurrence ||= "monthly";
+  });
 }
 
 function ensureChoreRecurrenceData() {
@@ -3149,8 +3179,24 @@ function bindViewEvents() {
   });
 
   $("#addPaycheckButton")?.addEventListener("click", () => {
-    state.paychecks.push({ date: new Date().toISOString().slice(0, 10), name: `Paycheck ${state.paychecks.length + 1}`, amount: 0, assignedLineIds: [] });
+    state.paychecks.push({ date: new Date().toISOString().slice(0, 10), name: `Paycheck ${state.paychecks.length + 1}`, amount: 0, assignedLineIds: [], recurrence: "monthly" });
     render();
+  });
+
+  document.querySelectorAll("[data-delete-paycheck]").forEach((button) => {
+    button.addEventListener("click", () => {
+      state.paychecks.splice(Number(button.dataset.deletePaycheck), 1);
+      state.budget.income = state.paychecks.reduce((sum, paycheck) => sum + Number(paycheck.amount || 0), 0);
+      render();
+    });
+  });
+
+  document.querySelectorAll("[data-paycheck-recurrence]").forEach((select) => {
+    select.addEventListener("change", () => {
+      const paycheck = state.paychecks[Number(select.dataset.paycheckRecurrence)];
+      if (paycheck) paycheck.recurrence = select.value;
+      render();
+    });
   });
 
   $("#assignBillButton")?.addEventListener("click", () => {
