@@ -1282,7 +1282,7 @@ function renderPlan() {
 }
 
 function renderPlanHead() {
-  return `<div class="section-head"><div><span class="card-label">Plan</span><h3>Daily, weekly and monthly tasks</h3><p class="private-note">Private to you — never shared with other household members.</p></div></div>
+  return `<p class="private-note">Private to you — never shared with other household members.</p>
     <div class="plan-bucket-tabs">${planBuckets.map((bucket) => `<button class="${planActiveBucket === bucket ? "active" : ""}" data-plan-bucket="${bucket}" type="button">${planBucketLabels[bucket]}</button>`).join("")}</div>`;
 }
 
