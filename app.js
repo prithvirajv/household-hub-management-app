@@ -1467,13 +1467,15 @@ function renderActualTimelineBlock(task, layoutInfo) {
   if (startDeltaMinutes) deviationParts.push(`started ${Math.abs(startDeltaMinutes)} min ${startDeltaMinutes > 0 ? "late" : "early"}`);
   if (durationDeltaMinutes) deviationParts.push(`ran ${Math.abs(durationDeltaMinutes)} min ${durationDeltaMinutes > 0 ? "over" : "under"}`);
   const deviationLabel = deviationParts.join(" · ");
-  const tooltip = [`${task.title}: ${timeRangeLabel}`, deviationLabel, actual.note].filter(Boolean).join(" · ");
+  const displayTitle = actual.note ? actual.note : task.title;
+  const secondaryLabel = actual.note ? `Planned: ${task.title}` : "";
+  const tooltip = [`${displayTitle}: ${timeRangeLabel}`, deviationLabel, secondaryLabel].filter(Boolean).join(" · ");
   return `<div class="plan-timeline-block plan-actual-block ${compact ? "compact" : ""} ${deviationClass}" style="top:${top}px;height:${height}px;left:${left};width:${width}" title="${escapeHtml(tooltip)}">
     <div class="plan-block-copy">
-      <strong class="plan-actual-title">${escapeHtml(task.title)}</strong>
+      <strong class="plan-actual-title">${escapeHtml(displayTitle)}</strong>
       ${compact
         ? (compactSubtitle ? `<small>${escapeHtml(timeRangeLabel)}</small>` : "")
-        : `<small>${escapeHtml(timeRangeLabel)}${deviationLabel ? ` · ${escapeHtml(deviationLabel)}` : ""}</small>${actual.note ? `<small class="plan-actual-note">${escapeHtml(actual.note)}</small>` : ""}`}
+        : `<small>${escapeHtml(timeRangeLabel)}${deviationLabel ? ` · ${escapeHtml(deviationLabel)}` : ""}</small>${secondaryLabel ? `<small class="plan-actual-note">${escapeHtml(secondaryLabel)}</small>` : ""}`}
     </div>
   </div>`;
 }
