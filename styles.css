@@ -2753,7 +2753,7 @@ main {
 
 .note-check-row {
   display: grid;
-  grid-template-columns: 22px minmax(0, 1fr) 30px 30px;
+  grid-template-columns: 22px minmax(0, 1fr) 30px 30px 30px;
   gap: 0.55rem;
   align-items: center;
   min-height: 34px;
@@ -2799,6 +2799,14 @@ main {
   border: 0;
   background: rgba(239, 80, 80, 0.1);
   color: var(--coral);
+}
+
+.note-check-plan {
+  min-height: 30px;
+  padding: 0;
+  border: 0;
+  background: var(--green-soft);
+  color: var(--green);
 }
 
 .note-add-item-form {
@@ -3658,29 +3666,11 @@ main {
   cursor: pointer;
 }
 
-.plan-form-columns {
-  display: grid;
-  grid-template-columns: 1fr;
-  gap: 1.2rem;
-  align-items: start;
-}
-
-@media (min-width: 640px) {
-  .plan-form-columns:has(.plan-form-col-actual) {
-    grid-template-columns: 1fr 1fr;
-  }
-}
-
-.plan-form-col {
+.plan-task-form-daily {
   display: flex;
   flex-wrap: wrap;
   align-items: end;
   gap: 0.6rem;
-}
-
-.plan-form-col-actual {
-  padding-left: 1.2rem;
-  border-left: 1px dashed var(--line);
 }
 
 .plan-form-col-label {
@@ -3691,11 +3681,12 @@ main {
   text-transform: uppercase;
 }
 
-.plan-form-col > input[name="title"] {
+.plan-task-form-daily > input[name="title"],
+.plan-task-form-daily > input[name="logNote"] {
   flex: 1 1 200px;
 }
 
-.plan-form-col label {
+.plan-task-form-daily label {
   display: grid;
   gap: 0.25rem;
   color: var(--muted);
@@ -3704,15 +3695,15 @@ main {
   flex: 0 0 auto;
 }
 
-.plan-form-col label input[type="time"] {
+.plan-task-form-daily label input[type="time"] {
   width: 130px;
 }
 
-.plan-form-col label input[type="number"] {
+.plan-task-form-daily label input[type="number"] {
   width: 90px;
 }
 
-.plan-form-col label select {
+.plan-task-form-daily label select {
   width: 160px;
 }
 
@@ -3720,6 +3711,41 @@ main {
   display: flex;
   gap: 0.6rem;
   flex: 1 0 100%;
+}
+
+.plan-actual-log-form {
+  margin-top: 1rem;
+  padding-top: 1rem;
+  border-top: 1px dashed var(--line);
+}
+
+.plan-log-link-tasks {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  flex: 1 0 100%;
+}
+
+.plan-log-link-tasks > span {
+  font-size: 0.72rem;
+  font-weight: 800;
+  color: var(--muted);
+  text-transform: uppercase;
+}
+
+.plan-log-link-option {
+  display: flex !important;
+  flex-direction: row !important;
+  align-items: center;
+  gap: 0.4rem;
+  color: var(--text) !important;
+  font-size: 0.85rem !important;
+  font-weight: 600 !important;
+  text-transform: none !important;
+}
+
+.plan-log-link-option input[type="checkbox"] {
+  width: auto;
 }
 
 .plan-unscheduled {

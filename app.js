@@ -1068,6 +1068,7 @@ function renderNoteCard(note) {
       <div class="note-item-suggestions" data-note-check-suggestions="${note.id}:${item.id}" role="listbox" hidden></div>
     </div>
     <button class="note-check-level" data-indent-note-item="${note.id}:${item.id}" type="button" aria-label="${item.parentId ? "Move checklist item to top level" : "Make checklist item a sub-item"}" title="${item.parentId ? "Move to top level" : "Make sub-item"}">${item.parentId ? "←" : "→"}</button>
+    <button class="note-check-plan" data-add-checklist-to-plan="${note.id}:${item.id}" type="button" aria-label="Add to today's Plan" title="Add to today's Plan">◫</button>
     <button class="note-check-delete" data-delete-note-item="${note.id}:${item.id}" type="button" aria-label="Delete checklist item">×</button>
   </div>`;
   return `<article class="note-card" data-note-id="${note.id}" style="background:${note.color}">
@@ -1252,6 +1253,7 @@ let planActiveBucket = "daily";
 let planSelectedDate = dateKey(new Date());
 let planDragState = null;
 let planEditingDailyTaskId = null;
+let planEditingActualLogId = null;
 
 const PLAN_TIMELINE_START_HOUR = 6;
 const PLAN_TIMELINE_END_HOUR = 23;
@@ -1260,6 +1262,11 @@ const PLAN_PIXELS_PER_MINUTE = 2;
 function ensurePlanData() {
   privateData.plans ||= { tasks: [] };
   privateData.plans.tasks ||= [];
+  privateData.plans.actualLogs ||= {};
+}
+
+function actualLogsForDate(dateKey) {
+  return privateData.plans.actualLogs?.[dateKey] || [];
 }
 
 function defaultPlanAnchorDate(bucket) {
@@ -1326,6 +1333,9 @@ function renderDailyPlan() {
   if (!editingTask) planEditingDailyTaskId = null;
   const formDuration = Number(editingTask?.durationMinutes || 30);
   const formEndTime = editingTask?.startTime ? minutesToTime(timeToMinutes(editingTask.startTime) + formDuration) : "";
+  const logsToday = actualLogsForDate(planSelectedDate);
+  const editingLog = planEditingActualLogId ? logsToday.find((log) => log.id === planEditingActualLogId) : null;
+  if (!editingLog) planEditingActualLogId = null;
 
   return `
     <section class="plan-layout">
@@ -1337,29 +1347,30 @@ function renderDailyPlan() {
         <button class="ghost" data-plan-day="today" type="button">Today</button>
       </div>
       <form id="planTaskForm" class="plan-task-form plan-task-form-daily card">
-        <div class="plan-form-columns">
-          <div class="plan-form-col">
-            ${editingTask ? `<span class="plan-form-col-label">Planned</span>` : ""}
-            <input name="title" placeholder="Add a task for this day" value="${escapeHtml(editingTask?.title || "")}" required>
-            <label>Start time (optional)<input name="startTime" type="time" value="${editingTask?.startTime || ""}"></label>
-            <label>Duration (min)<input name="durationMinutes" type="number" min="5" step="5" value="${formDuration}"></label>
-            <label>End time<input name="endTimeDisplay" type="time" value="${formEndTime}" readonly tabindex="-1"></label>
-            <label>Repeat<select name="recurrence">${Object.entries(planRecurrenceLabels).map(([value, label]) => `<option value="${value}" ${editingTask && editingTask.recurrence === value ? "selected" : ""}>${label}</option>`).join("")}</select></label>
-            <div class="plan-form-actions">
-              <button type="submit">${editingTask ? "Save changes" : "Add"}</button>
-              ${editingTask ? `<button class="ghost" id="cancelPlanTaskEditButton" type="button">Cancel</button>` : ""}
-            </div>
-          </div>
-          ${editingTask ? `
-            <div class="plan-form-col plan-form-col-actual">
-              <span class="plan-form-col-label">Actual (${dayLabel})</span>
-              <label>Actual start<input name="actualStartTime" type="time" value="${editingTask.actuals?.[planSelectedDate]?.startTime || ""}"></label>
-              <label>Actual end<input name="actualEndTime" type="time" value="${editingTask.actuals?.[planSelectedDate]?.endTime || ""}"></label>
-              <label>What did you actually work on? (if different)<input name="actualNote" placeholder="e.g. Replied to emails instead" value="${escapeHtml(editingTask.actuals?.[planSelectedDate]?.note || "")}"></label>
-            </div>` : ""}
-        </div>
+        <input name="title" placeholder="Add a task for this day" value="${escapeHtml(editingTask?.title || "")}" required>
+        <label>Start time (optional)<input name="startTime" type="time" value="${editingTask?.startTime || ""}"></label>
+        <label>Duration (min)<input name="durationMinutes" type="number" min="5" step="5" value="${formDuration}"></label>
+        <label>End time<input name="endTimeDisplay" type="time" value="${formEndTime}" readonly tabindex="-1"></label>
+        <label>Repeat<select name="recurrence">${Object.entries(planRecurrenceLabels).map(([value, label]) => `<option value="${value}" ${editingTask && editingTask.recurrence === value ? "selected" : ""}>${label}</option>`).join("")}</select></label>
+        <button type="submit">${editingTask ? "Save changes" : "Add"}</button>
+        ${editingTask ? `<button class="ghost" id="cancelPlanTaskEditButton" type="button">Cancel</button>` : ""}
       </form>
       ${unscheduled.length ? `<div class="plan-unscheduled"><h4>Unscheduled</h4>${unscheduled.map((task) => renderPlanTaskDaily(task)).join("")}</div>` : ""}
+      <form id="actualLogForm" class="plan-task-form plan-task-form-daily card plan-actual-log-form">
+        <span class="plan-form-col-label">${editingLog ? "Edit what actually happened" : "Log what actually happened"} (${dayLabel})</span>
+        <label>Start time<input name="logStartTime" type="time" value="${editingLog?.startTime || ""}" required></label>
+        <label>End time<input name="logEndTime" type="time" value="${editingLog?.endTime || ""}" required></label>
+        <input name="logNote" placeholder="What did you actually do?" value="${escapeHtml(editingLog?.note || "")}" required>
+        ${dailyTasks.length ? `
+          <div class="plan-log-link-tasks">
+            <span>Link to planned task(s) — optional</span>
+            ${dailyTasks.map((task) => `<label class="plan-log-link-option"><input type="checkbox" name="linkedTaskIds" value="${task.id}" ${editingLog?.linkedTaskIds?.includes(task.id) ? "checked" : ""}> ${escapeHtml(task.title)}</label>`).join("")}
+          </div>` : ""}
+        <div class="plan-form-actions">
+          <button type="submit">${editingLog ? "Save changes" : "Log it"}</button>
+          ${editingLog ? `<button class="ghost" id="cancelActualLogEditButton" type="button">Cancel</button><button class="danger-button" id="deleteActualLogButton" type="button">Delete</button>` : ""}
+        </div>
+      </form>
       <div class="plan-timeline" style="height:${timelineHeight + 28}px">
         <div class="plan-timeline-hours-label"></div>
         <div class="plan-timeline-col-label plan-timeline-col-label-planned">Planned</div>
@@ -1378,13 +1389,14 @@ function renderDailyPlan() {
         </div>
         <div class="plan-timeline-body plan-timeline-body-actual" style="height:${timelineHeight}px">
           ${(() => {
-            const withActuals = dailyTasks.filter((task) => task.actuals?.[planSelectedDate]?.startTime && task.actuals?.[planSelectedDate]?.endTime);
-            const layout = layoutTimelineBlocks(withActuals.map((task) => {
-              const actual = task.actuals[planSelectedDate];
-              return { id: task.id, start: timeToMinutes(actual.startTime), end: timeToMinutes(actual.endTime) };
-            }));
+            const layout = layoutTimelineBlocks(logsToday.map((log) => ({
+              id: log.id,
+              start: timeToMinutes(log.startTime),
+              end: timeToMinutes(log.endTime)
+            })));
             const layoutById = new Map(layout.map((item) => [item.id, item]));
-            return withActuals.map((task) => renderActualTimelineBlock(task, layoutById.get(task.id))).join("");
+            const tasksById = new Map(dailyTasks.map((task) => [task.id, task]));
+            return logsToday.map((log) => renderActualLogBlock(log, tasksById, layoutById.get(log.id))).join("");
           })()}
         </div>
       </div>
@@ -1398,20 +1410,23 @@ function formatHourLabel(hour) {
   return `${displayHour} ${period}`;
 }
 
-function formatActualComparison(task, timeRangeLabel) {
-  const actual = task.actuals?.[planSelectedDate];
-  if (!actual) return "";
-  const { startDeltaMinutes, durationDeltaMinutes } = comparePlannedToActual({
-    plannedStartTime: task.startTime,
-    plannedDurationMinutes: Number(task.durationMinutes || 30),
-    actualStartTime: actual.startTime,
-    actualEndTime: actual.endTime
-  });
-  const parts = [`Actual ${actual.startTime || "?"}–${actual.endTime || "?"}`];
-  if (startDeltaMinutes) parts.push(`started ${Math.abs(startDeltaMinutes)} min ${startDeltaMinutes > 0 ? "late" : "early"}`);
-  if (durationDeltaMinutes) parts.push(`ran ${Math.abs(durationDeltaMinutes)} min ${durationDeltaMinutes > 0 ? "over" : "under"}`);
-  if (actual.note) parts.push(actual.note);
-  return parts.join(" · ");
+function describeLinkedActualLogs(task, linkedLogs) {
+  if (!linkedLogs.length) return { deviationClass: "", label: "" };
+  if (linkedLogs.length === 1) {
+    const log = linkedLogs[0];
+    const { startDeltaMinutes, durationDeltaMinutes } = comparePlannedToActual({
+      plannedStartTime: task.startTime,
+      plannedDurationMinutes: Number(task.durationMinutes || 30),
+      actualStartTime: log.startTime,
+      actualEndTime: log.endTime
+    });
+    const parts = [`Actual ${log.startTime || "?"}–${log.endTime || "?"}`];
+    if (startDeltaMinutes) parts.push(`started ${Math.abs(startDeltaMinutes)} min ${startDeltaMinutes > 0 ? "late" : "early"}`);
+    if (durationDeltaMinutes) parts.push(`ran ${Math.abs(durationDeltaMinutes)} min ${durationDeltaMinutes > 0 ? "over" : "under"}`);
+    if (log.note) parts.push(log.note);
+    return { deviationClass: startDeltaMinutes || durationDeltaMinutes ? "deviated" : "on-time", label: parts.join(" · ") };
+  }
+  return { deviationClass: "deviated", label: `Overlaps: ${linkedLogs.map((log) => log.note).join(", ")}` };
 }
 
 function renderTimelineBlock(task, layoutInfo) {
@@ -1431,8 +1446,8 @@ function renderTimelineBlock(task, layoutInfo) {
   const left = `calc(${gutter}px + (100% - ${gutter * 2}px) * ${column} / ${columns})`;
   const width = `calc((100% - ${gutter * 2}px) / ${columns} - ${gap}px)`;
   const timeRangeLabel = `${task.startTime}–${endTime}`;
-  const actualComparison = formatActualComparison(task, timeRangeLabel);
-  const deviationClass = actualComparison ? (/started|ran/.test(actualComparison) ? "deviated" : "on-time") : "";
+  const linkedLogs = actualLogsForDate(planSelectedDate).filter((log) => (log.linkedTaskIds || []).includes(task.id));
+  const { deviationClass, label: actualComparison } = describeLinkedActualLogs(task, linkedLogs);
   const tooltip = actualComparison ? `${task.title}: ${timeRangeLabel} · ${actualComparison}` : `${task.title}: ${timeRangeLabel}`;
   return `<div class="plan-timeline-block ${done ? "done" : ""} ${compact ? "compact" : ""} ${editing ? "editing" : ""} ${actualComparison ? `has-actual ${deviationClass}` : ""}" data-plan-task-id="${task.id}" style="top:${top}px;height:${height}px;left:${left};width:${width}" title="${escapeHtml(tooltip)}">
     <input type="checkbox" data-plan-task-check="${task.id}" ${done ? "checked" : ""} aria-label="Complete ${escapeHtml(task.title)}">
@@ -1447,10 +1462,9 @@ function renderTimelineBlock(task, layoutInfo) {
   </div>`;
 }
 
-function renderActualTimelineBlock(task, layoutInfo) {
-  const actual = task.actuals[planSelectedDate];
-  const startMinutes = timeToMinutes(actual.startTime) - PLAN_TIMELINE_START_HOUR * 60;
-  const duration = timeToMinutes(actual.endTime) - timeToMinutes(actual.startTime);
+function renderActualLogBlock(log, tasksById, layoutInfo) {
+  const startMinutes = timeToMinutes(log.startTime) - PLAN_TIMELINE_START_HOUR * 60;
+  const duration = timeToMinutes(log.endTime) - timeToMinutes(log.startTime);
   const top = Math.max(0, startMinutes * PLAN_PIXELS_PER_MINUTE);
   const height = Math.max(24, duration * PLAN_PIXELS_PER_MINUTE);
   const compact = height < 56;
@@ -1461,43 +1475,49 @@ function renderActualTimelineBlock(task, layoutInfo) {
   const gap = columns > 1 ? 4 : 0;
   const left = `calc(${gutter}px + (100% - ${gutter * 2}px) * ${column} / ${columns})`;
   const width = `calc((100% - ${gutter * 2}px) / ${columns} - ${gap}px)`;
-  const timeRangeLabel = `${actual.startTime}–${actual.endTime}`;
-  const isPlanned = Boolean(task.startTime);
-  const { startDeltaMinutes, durationDeltaMinutes } = comparePlannedToActual({
-    plannedStartTime: task.startTime,
-    plannedDurationMinutes: Number(task.durationMinutes || 30),
-    actualStartTime: actual.startTime,
-    actualEndTime: actual.endTime
-  });
-  const deviationClass = !isPlanned ? "unplanned" : (startDeltaMinutes || durationDeltaMinutes) ? "deviated" : "on-time";
-  const deviationParts = [];
-  if (startDeltaMinutes) deviationParts.push(`started ${Math.abs(startDeltaMinutes)} min ${startDeltaMinutes > 0 ? "late" : "early"}`);
-  if (durationDeltaMinutes) deviationParts.push(`ran ${Math.abs(durationDeltaMinutes)} min ${durationDeltaMinutes > 0 ? "over" : "under"}`);
-  const deviationLabel = deviationParts.join(" · ");
-  const displayTitle = actual.note ? actual.note : task.title;
-  const secondaryLabel = actual.note ? `Planned: ${task.title}` : "";
-  const tooltip = [`${displayTitle}: ${timeRangeLabel}`, deviationLabel, secondaryLabel].filter(Boolean).join(" · ");
-  return `<div class="plan-timeline-block plan-actual-block ${compact ? "compact" : ""} ${deviationClass}" data-edit-actual-task="${task.id}" role="button" tabindex="0" aria-label="Edit actual time for ${escapeHtml(displayTitle)}" style="top:${top}px;height:${height}px;left:${left};width:${width}" title="${escapeHtml(tooltip)}">
+  const timeRangeLabel = `${log.startTime}–${log.endTime}`;
+  const linkedTasks = (log.linkedTaskIds || []).map((id) => tasksById.get(id)).filter(Boolean);
+  let deviationClass = "unplanned";
+  let deviationLabel = "";
+  if (linkedTasks.length === 1) {
+    const task = linkedTasks[0];
+    const { startDeltaMinutes, durationDeltaMinutes } = comparePlannedToActual({
+      plannedStartTime: task.startTime,
+      plannedDurationMinutes: Number(task.durationMinutes || 30),
+      actualStartTime: log.startTime,
+      actualEndTime: log.endTime
+    });
+    const parts = [];
+    if (startDeltaMinutes) parts.push(`started ${Math.abs(startDeltaMinutes)} min ${startDeltaMinutes > 0 ? "late" : "early"}`);
+    if (durationDeltaMinutes) parts.push(`ran ${Math.abs(durationDeltaMinutes)} min ${durationDeltaMinutes > 0 ? "over" : "under"}`);
+    deviationLabel = parts.join(" · ");
+    deviationClass = deviationLabel ? "deviated" : "on-time";
+  } else if (linkedTasks.length > 1) {
+    deviationClass = "deviated";
+    deviationLabel = `Overlaps: ${linkedTasks.map((task) => task.title).join(", ")}`;
+  }
+  const tooltip = [`${log.note}: ${timeRangeLabel}`, deviationLabel].filter(Boolean).join(" · ");
+  return `<div class="plan-timeline-block plan-actual-block ${compact ? "compact" : ""} ${deviationClass}" data-edit-actual-log="${log.id}" role="button" tabindex="0" aria-label="Edit actual entry ${escapeHtml(log.note)}" style="top:${top}px;height:${height}px;left:${left};width:${width}" title="${escapeHtml(tooltip)}">
     <div class="plan-block-copy">
-      <strong class="plan-actual-title">${escapeHtml(displayTitle)}</strong>
+      <strong class="plan-actual-title">${escapeHtml(log.note)}</strong>
       ${compact
         ? (compactSubtitle ? `<small>${escapeHtml(timeRangeLabel)}</small>` : "")
-        : `<small>${escapeHtml(timeRangeLabel)}${deviationLabel ? ` · ${escapeHtml(deviationLabel)}` : ""}</small>${secondaryLabel ? `<small class="plan-actual-note">${escapeHtml(secondaryLabel)}</small>` : ""}`}
+        : `<small>${escapeHtml(timeRangeLabel)}${deviationLabel ? ` · ${escapeHtml(deviationLabel)}` : ""}</small>`}
     </div>
   </div>`;
 }
 
 function renderPlanTaskDaily(task) {
   const done = isDailyTaskDoneOnDate(task, planSelectedDate);
-  const actual = task.actuals?.[planSelectedDate];
+  const linkedLogs = actualLogsForDate(planSelectedDate).filter((log) => (log.linkedTaskIds || []).includes(task.id));
+  const { label: actualLabel } = describeLinkedActualLogs(task, linkedLogs);
   return `<div class="plan-task-row ${done ? "done" : ""}" data-plan-task-id="${task.id}">
     <input type="checkbox" data-plan-task-check="${task.id}" ${done ? "checked" : ""} aria-label="Complete ${escapeHtml(task.title)}">
     <div class="plan-task-copy">
       <input class="plan-task-title" data-plan-task-title="${task.id}" value="${escapeHtml(task.title)}" aria-label="Task title">
       ${task.recurrence && task.recurrence !== "none" ? `<small>${planRecurrenceLabels[task.recurrence]}</small>` : ""}
-      ${actual ? `<small>Actual: ${escapeHtml(actual.startTime || "?")}–${escapeHtml(actual.endTime || "?")}${actual.note ? ` · ${escapeHtml(actual.note)}` : ""}</small>` : ""}
+      ${actualLabel ? `<small>${escapeHtml(actualLabel)}</small>` : ""}
     </div>
-    <button class="ghost" data-log-actual-time="${task.id}" type="button">Log actual time</button>
     <button class="icon-button danger-button" data-delete-plan-task="${task.id}" type="button" aria-label="Delete task">×</button>
   </div>${renderSubtasks(task)}`;
 }
@@ -2711,6 +2731,38 @@ function bindViewEvents() {
     });
   });
 
+  document.querySelectorAll("[data-add-checklist-to-plan]").forEach((button) => {
+    button.addEventListener("click", () => {
+      const [noteId, itemId] = button.dataset.addChecklistToPlan.split(":");
+      const note = state.notes.entries.find((item) => item.id === noteId);
+      const checklistItem = note?.checklist.find((item) => item.id === itemId);
+      if (!checklistItem || !privateData) return;
+      privateData.plans ||= { tasks: [] };
+      privateData.plans.tasks ||= [];
+      privateData.plans.tasks.push({
+        id: uniqueId("plan"),
+        title: checklistItem.text,
+        notes: "",
+        bucket: "daily",
+        anchorDate: dateKey(new Date()),
+        createdAt: new Date().toISOString(),
+        subtasks: [],
+        startTime: "",
+        durationMinutes: 30,
+        recurrence: "none",
+        completedDates: []
+      });
+      autosavePlans();
+      const originalLabel = button.textContent;
+      button.textContent = "✓";
+      button.disabled = true;
+      setTimeout(() => {
+        button.textContent = originalLabel;
+        button.disabled = false;
+      }, 1400);
+    });
+  });
+
   document.querySelectorAll("[data-indent-note-item]").forEach((button) => {
     button.addEventListener("click", () => {
       const [noteId, itemId] = button.dataset.indentNoteItem.split(":");
@@ -2934,6 +2986,7 @@ function bindViewEvents() {
     button.addEventListener("click", () => {
       planActiveBucket = button.dataset.planBucket;
       planEditingDailyTaskId = null;
+      planEditingActualLogId = null;
       render();
     });
   });
@@ -2942,6 +2995,7 @@ function bindViewEvents() {
     button.addEventListener("click", () => {
       const date = new Date(`${planSelectedDate}T00:00:00`);
       planEditingDailyTaskId = null;
+      planEditingActualLogId = null;
       if (button.dataset.planDay === "prev") date.setDate(date.getDate() - 1);
       else if (button.dataset.planDay === "next") date.setDate(date.getDate() + 1);
       else { planSelectedDate = dateKey(new Date()); render(); return; }
@@ -2955,24 +3009,53 @@ function bindViewEvents() {
     render();
   });
 
-  document.querySelectorAll("[data-log-actual-time]").forEach((button) => {
-    button.addEventListener("click", () => {
-      planEditingDailyTaskId = button.dataset.logActualTime;
-      render();
-      $("#planTaskForm")?.scrollIntoView({ behavior: "smooth", block: "center" });
-    });
+  $("#cancelActualLogEditButton")?.addEventListener("click", () => {
+    planEditingActualLogId = null;
+    render();
   });
 
-  document.querySelectorAll("[data-edit-actual-task]").forEach((block) => {
+  $("#deleteActualLogButton")?.addEventListener("click", () => {
+    if (!planEditingActualLogId) return;
+    const logs = actualLogsForDate(planSelectedDate);
+    privateData.plans.actualLogs[planSelectedDate] = logs.filter((log) => log.id !== planEditingActualLogId);
+    planEditingActualLogId = null;
+    autosavePlans();
+    render();
+  });
+
+  document.querySelectorAll("[data-edit-actual-log]").forEach((block) => {
     const openEditor = () => {
-      planEditingDailyTaskId = block.dataset.editActualTask;
+      planEditingActualLogId = block.dataset.editActualLog;
       render();
-      $("#planTaskForm")?.scrollIntoView({ behavior: "smooth", block: "center" });
+      $("#actualLogForm")?.scrollIntoView({ behavior: "smooth", block: "center" });
     };
     block.addEventListener("click", openEditor);
     block.addEventListener("keydown", (event) => {
       if (event.key === "Enter" || event.key === " ") { event.preventDefault(); openEditor(); }
     });
+  });
+
+  $("#actualLogForm")?.addEventListener("submit", (event) => {
+    event.preventDefault();
+    const form = event.currentTarget;
+    const data = new FormData(form);
+    const startTime = (data.get("logStartTime") || "").trim();
+    const endTime = (data.get("logEndTime") || "").trim();
+    const note = (data.get("logNote") || "").trim();
+    if (!startTime || !endTime || !note) return;
+    const linkedTaskIds = data.getAll("linkedTaskIds");
+    ensurePlanData();
+    const logs = actualLogsForDate(planSelectedDate);
+    if (planEditingActualLogId) {
+      const entry = logs.find((log) => log.id === planEditingActualLogId);
+      if (entry) Object.assign(entry, { startTime, endTime, note, linkedTaskIds });
+    } else {
+      logs.push({ id: uniqueId("actual"), startTime, endTime, note, linkedTaskIds });
+    }
+    privateData.plans.actualLogs[planSelectedDate] = logs;
+    planEditingActualLogId = null;
+    autosavePlans();
+    render();
   });
 
   (() => {
@@ -3002,15 +3085,6 @@ function bindViewEvents() {
         task.startTime = data.startTime || "";
         task.durationMinutes = Math.max(5, Number(data.durationMinutes || 30));
         task.recurrence = data.recurrence || "none";
-        const actualStartTime = (data.actualStartTime || "").trim();
-        const actualEndTime = (data.actualEndTime || "").trim();
-        const actualNote = (data.actualNote || "").trim();
-        task.actuals ||= {};
-        if (actualStartTime || actualEndTime || actualNote) {
-          task.actuals[planSelectedDate] = { startTime: actualStartTime, endTime: actualEndTime, note: actualNote };
-        } else {
-          delete task.actuals[planSelectedDate];
-        }
       }
       planEditingDailyTaskId = null;
       autosavePlans();
