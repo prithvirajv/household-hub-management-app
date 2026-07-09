@@ -1243,6 +1243,7 @@ const planRecurrenceLabels = { none: "Does not repeat", daily: "Every day", week
 let planActiveBucket = "daily";
 let planSelectedDate = dateKey(new Date());
 let planDragState = null;
+let planEditingDailyTaskId = null;
 
 const PLAN_TIMELINE_START_HOUR = 6;
 const PLAN_TIMELINE_END_HOUR = 23;
@@ -1313,6 +1314,10 @@ function renderDailyPlan() {
   const hours = [];
   for (let hour = PLAN_TIMELINE_START_HOUR; hour <= PLAN_TIMELINE_END_HOUR; hour += 1) hours.push(hour);
   const timelineHeight = (PLAN_TIMELINE_END_HOUR - PLAN_TIMELINE_START_HOUR + 1) * 60 * PLAN_PIXELS_PER_MINUTE;
+  const editingTask = planEditingDailyTaskId ? dailyTasks.find((task) => task.id === planEditingDailyTaskId) : null;
+  if (!editingTask) planEditingDailyTaskId = null;
+  const formDuration = Number(editingTask?.durationMinutes || 30);
+  const formEndTime = editingTask?.startTime ? minutesToTime(timeToMinutes(editingTask.startTime) + formDuration) : "";
 
   return `
     <section class="plan-layout">
@@ -1324,11 +1329,13 @@ function renderDailyPlan() {
         <button class="ghost" data-plan-day="today" type="button">Today</button>
       </div>
       <form id="planTaskForm" class="plan-task-form plan-task-form-daily card">
-        <input name="title" placeholder="Add a task for this day" required>
-        <label>Start time (optional)<input name="startTime" type="time"></label>
-        <label>Duration (min)<input name="durationMinutes" type="number" min="5" step="5" value="30"></label>
-        <label>Repeat<select name="recurrence">${Object.entries(planRecurrenceLabels).map(([value, label]) => `<option value="${value}">${label}</option>`).join("")}</select></label>
-        <button type="submit">Add</button>
+        <input name="title" placeholder="Add a task for this day" value="${escapeHtml(editingTask?.title || "")}" required>
+        <label>Start time (optional)<input name="startTime" type="time" value="${editingTask?.startTime || ""}"></label>
+        <label>Duration (min)<input name="durationMinutes" type="number" min="5" step="5" value="${formDuration}"></label>
+        <label>End time<input name="endTimeDisplay" type="time" value="${formEndTime}" readonly tabindex="-1"></label>
+        <label>Repeat<select name="recurrence">${Object.entries(planRecurrenceLabels).map(([value, label]) => `<option value="${value}" ${editingTask && editingTask.recurrence === value ? "selected" : ""}>${label}</option>`).join("")}</select></label>
+        <button type="submit">${editingTask ? "Save changes" : "Add"}</button>
+        ${editingTask ? `<button class="ghost" id="cancelPlanTaskEditButton" type="button">Cancel</button>` : ""}
       </form>
       ${unscheduled.length ? `<div class="plan-unscheduled"><h4>Unscheduled</h4>${unscheduled.map((task) => renderPlanTaskDaily(task)).join("")}</div>` : ""}
       <div class="plan-timeline" style="height:${timelineHeight}px">
@@ -1358,20 +1365,24 @@ function formatHourLabel(hour) {
 function renderTimelineBlock(task, layoutInfo) {
   const startMinutes = timeToMinutes(task.startTime) - PLAN_TIMELINE_START_HOUR * 60;
   const duration = Number(task.durationMinutes || 30);
+  const endTime = minutesToTime(timeToMinutes(task.startTime) + duration);
   const top = Math.max(0, startMinutes * PLAN_PIXELS_PER_MINUTE);
-  const height = Math.max(20, duration * PLAN_PIXELS_PER_MINUTE);
+  const height = Math.max(24, duration * PLAN_PIXELS_PER_MINUTE);
+  const compact = height < 56;
   const done = isDailyTaskDoneOnDate(task, planSelectedDate);
+  const editing = task.id === planEditingDailyTaskId;
   const columns = layoutInfo?.columns || 1;
   const column = layoutInfo?.column || 0;
   const gutter = 6;
   const gap = columns > 1 ? 4 : 0;
   const left = `calc(${gutter}px + (100% - ${gutter * 2}px) * ${column} / ${columns})`;
   const width = `calc((100% - ${gutter * 2}px) / ${columns} - ${gap}px)`;
-  return `<div class="plan-timeline-block ${done ? "done" : ""}" data-plan-task-id="${task.id}" style="top:${top}px;height:${height}px;left:${left};width:${width}">
+  const timeRangeLabel = `${task.startTime}–${endTime}`;
+  return `<div class="plan-timeline-block ${done ? "done" : ""} ${compact ? "compact" : ""} ${editing ? "editing" : ""}" data-plan-task-id="${task.id}" style="top:${top}px;height:${height}px;left:${left};width:${width}" title="${escapeHtml(task.title)}: ${escapeHtml(timeRangeLabel)}">
     <input type="checkbox" data-plan-task-check="${task.id}" ${done ? "checked" : ""} aria-label="Complete ${escapeHtml(task.title)}">
     <div class="plan-block-copy">
       <input class="plan-task-title" data-plan-task-title="${task.id}" value="${escapeHtml(task.title)}" aria-label="Task title">
-      <small>${escapeHtml(task.startTime)} · ${duration} min${task.recurrence && task.recurrence !== "none" ? ` · ${planRecurrenceLabels[task.recurrence]}` : ""}${task.subtasks?.length ? ` · ${task.subtasks.filter((item) => item.done).length}/${task.subtasks.length} subtasks` : ""}</small>
+      ${compact ? "" : `<small>${escapeHtml(timeRangeLabel)} · ${duration} min${task.recurrence && task.recurrence !== "none" ? ` · ${planRecurrenceLabels[task.recurrence]}` : ""}${task.subtasks?.length ? ` · ${task.subtasks.filter((item) => item.done).length}/${task.subtasks.length} subtasks` : ""}</small>`}
     </div>
     <button class="icon-button danger-button" data-delete-plan-task="${task.id}" type="button" aria-label="Delete task">×</button>
     <div class="plan-block-resize-handle" data-plan-resize="${task.id}"></div>
@@ -1614,7 +1625,7 @@ function renderMeals() {
               <label>Day<select name="day">${days.map((day) => `<option value="${day}">${day}</option>`).join("")}</select></label>
               <label>Meal<select name="slot">${meals.map((meal) => `<option value="${meal}">${meal}</option>`).join("")}</select></label>
               <label class="custom-combobox meal-recipe-combobox">Recipe
-                <input id="mealRecipeName" autocomplete="off" placeholder="Type to search or add" value="${selectedRecipe?.name || ""}">
+                <input id="mealRecipeName" autocomplete="off" placeholder="Search recipes or type any meal" value="${selectedRecipe?.name || ""}">
                 <input id="mealRecipeId" name="recipeId" type="hidden" value="${selectedRecipe?.id || ""}">
                 <div id="mealRecipeMenu" class="combo-menu" hidden>
                   ${state.meals.recipes.map((recipe) => `<button type="button" data-meal-recipe-option="${recipe.id}">${recipe.name}</button>`).join("")}
@@ -2268,8 +2279,9 @@ function planMealFromCurrentForm() {
     recipeId: $("#mealRecipeId")?.value || ""
   };
   const recipe = recipeById(data.recipeId);
-  if (!recipe) {
-    state.meals.feedback = "Choose a saved recipe before planning the meal.";
+  const mealName = recipe ? recipe.name : ($("#mealRecipeName")?.value || "").trim();
+  if (!mealName) {
+    state.meals.feedback = "Enter a meal name or choose a saved recipe before planning the meal.";
     render();
     return;
   }
@@ -2280,10 +2292,10 @@ function planMealFromCurrentForm() {
     && planned.day === data.day
     && (planned.slot === data.slot || (!planned.slot && data.slot === "Dinner"))
   );
-  const planned = { month: state.budget.month, week, day: data.day, slot: data.slot, meal: recipe.name, recipeId: recipe.id, servings: Number(data.servings || 1) };
+  const planned = { month: state.budget.month, week, day: data.day, slot: data.slot, meal: mealName, recipeId: recipe?.id || "", servings: Number(data.servings || 1) };
   if (existing) Object.assign(existing, planned);
   else state.meals.plannedWeek.push(planned);
-  state.meals.feedback = `${recipe.name} planned for ${data.day} ${data.slot}.`;
+  state.meals.feedback = `${mealName} planned for ${data.day} ${data.slot}.`;
   render();
 }
 
@@ -2797,6 +2809,7 @@ function bindViewEvents() {
   document.querySelectorAll("[data-plan-bucket]").forEach((button) => {
     button.addEventListener("click", () => {
       planActiveBucket = button.dataset.planBucket;
+      planEditingDailyTaskId = null;
       render();
     });
   });
@@ -2804,6 +2817,7 @@ function bindViewEvents() {
   document.querySelectorAll("[data-plan-day]").forEach((button) => {
     button.addEventListener("click", () => {
       const date = new Date(`${planSelectedDate}T00:00:00`);
+      planEditingDailyTaskId = null;
       if (button.dataset.planDay === "prev") date.setDate(date.getDate() - 1);
       else if (button.dataset.planDay === "next") date.setDate(date.getDate() + 1);
       else { planSelectedDate = dateKey(new Date()); render(); return; }
@@ -2812,11 +2826,44 @@ function bindViewEvents() {
     });
   });
 
+  $("#cancelPlanTaskEditButton")?.addEventListener("click", () => {
+    planEditingDailyTaskId = null;
+    render();
+  });
+
+  (() => {
+    const form = $("#planTaskForm");
+    if (!form || planActiveBucket !== "daily") return;
+    const startInput = form.querySelector('[name="startTime"]');
+    const durationInput = form.querySelector('[name="durationMinutes"]');
+    const endDisplay = form.querySelector('[name="endTimeDisplay"]');
+    const updateEndTime = () => {
+      if (!endDisplay) return;
+      if (!startInput.value) { endDisplay.value = ""; return; }
+      endDisplay.value = minutesToTime(timeToMinutes(startInput.value) + Number(durationInput.value || 30));
+    };
+    startInput?.addEventListener("input", updateEndTime);
+    durationInput?.addEventListener("input", updateEndTime);
+  })();
+
   $("#planTaskForm")?.addEventListener("submit", (event) => {
     event.preventDefault();
     const form = event.currentTarget;
     const data = Object.fromEntries(new FormData(form));
     if (!data.title || !data.title.trim()) return;
+    if (planActiveBucket === "daily" && planEditingDailyTaskId) {
+      const task = privateData.plans.tasks.find((item) => item.id === planEditingDailyTaskId);
+      if (task) {
+        task.title = data.title.trim();
+        task.startTime = data.startTime || "";
+        task.durationMinutes = Math.max(5, Number(data.durationMinutes || 30));
+        task.recurrence = data.recurrence || "none";
+      }
+      planEditingDailyTaskId = null;
+      autosavePlans();
+      render();
+      return;
+    }
     const task = {
       id: uniqueId("plan"),
       title: data.title.trim(),
@@ -2923,6 +2970,8 @@ function bindViewEvents() {
       if (task && planDragState.moved && planDragState.pendingMinutes != null) {
         task.startTime = minutesToTime(planDragState.pendingMinutes);
         autosavePlans();
+      } else if (task && !planDragState.moved) {
+        planEditingDailyTaskId = task.id;
       }
       planDragState = null;
       render();
@@ -2962,6 +3011,7 @@ function bindViewEvents() {
   document.querySelectorAll("[data-delete-plan-task]").forEach((button) => {
     button.addEventListener("click", () => {
       privateData.plans.tasks = privateData.plans.tasks.filter((task) => task.id !== button.dataset.deletePlanTask);
+      if (planEditingDailyTaskId === button.dataset.deletePlanTask) planEditingDailyTaskId = null;
       autosavePlans();
       render();
     });

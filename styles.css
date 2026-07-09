@@ -3592,7 +3592,13 @@ main {
 }
 
 .plan-task-form-daily {
-  grid-template-columns: minmax(160px, 1fr) 130px 110px 160px auto;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: end;
+}
+
+.plan-task-form-daily > input[name="title"] {
+  flex: 1 1 200px;
 }
 
 .plan-task-form-daily label {
@@ -3601,6 +3607,19 @@ main {
   color: var(--muted);
   font-size: 0.72rem;
   font-weight: 800;
+  flex: 0 0 auto;
+}
+
+.plan-task-form-daily label input[type="time"] {
+  width: 130px;
+}
+
+.plan-task-form-daily label input[type="number"] {
+  width: 90px;
+}
+
+.plan-task-form-daily label select {
+  width: 160px;
 }
 
 .plan-unscheduled {
@@ -3665,6 +3684,44 @@ main {
 .plan-timeline-block.done .plan-task-title {
   text-decoration: line-through;
   color: var(--muted);
+}
+
+.plan-timeline-block.editing {
+  border-left-color: var(--coral);
+  box-shadow: 0 0 0 2px var(--coral) inset;
+}
+
+.plan-timeline-block.compact {
+  padding: 2px 6px;
+  align-items: center;
+  gap: 0.3rem;
+}
+
+.plan-timeline-block.compact input[type="checkbox"] {
+  width: 12px;
+  height: 12px;
+  min-width: 0;
+  min-height: 0;
+}
+
+.plan-timeline-block.compact .plan-task-title {
+  min-height: 0;
+  height: 16px;
+  padding: 0 2px;
+  font-size: 0.68rem;
+  line-height: 16px;
+}
+
+.plan-timeline-block.compact .plan-block-resize-handle {
+  height: 4px;
+}
+
+.plan-timeline-block .icon-button.danger-button {
+  width: 20px;
+  min-width: 20px;
+  height: 20px;
+  min-height: 20px;
+  font-size: 0.75rem;
 }
 
 .plan-block-copy {
