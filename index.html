@@ -88,6 +88,8 @@
             <label>Invite code<input name="inviteCode" autocomplete="one-time-code" placeholder="HUB-123ABC" required></label>
             <label>Password<input name="password" type="password" minlength="12" autocomplete="current-password" required></label>
             <small>Existing users enter their current password. New users create a password of at least 12 characters.</small>
+            <label>Mobile phone (optional)<input name="phone" type="tel" autocomplete="tel" placeholder="For text reminders"></label>
+            <label>Mobile carrier (optional)<select name="carrier" data-carrier-select><option value="">No text reminders</option></select></label>
             <button type="submit">Join household</button>
             <button class="text-button" data-show-signin type="button">Back to sign in</button>
             <p class="form-message" data-invitation-message></p>
@@ -99,6 +101,8 @@
             <label>Country<select name="country" data-country-select required></select></label>
             <label>Email<input name="email" type="email" required></label>
             <label>Password<input name="password" type="password" minlength="8" required></label>
+            <label>Mobile phone (optional)<input name="phone" type="tel" autocomplete="tel" placeholder="For text reminders"></label>
+            <label>Mobile carrier (optional)<select name="carrier" data-carrier-select><option value="">No text reminders</option></select></label>
             <button type="submit">Create account</button>
           </form>
         </section>

@@ -4972,6 +4972,22 @@ function populateCountrySelects() {
   });
 }
 
+function populateCarrierSelects() {
+  document.querySelectorAll("[data-carrier-select]").forEach((select) => {
+    const previousValue = select.value || "";
+    const blankOption = document.createElement("option");
+    blankOption.value = "";
+    blankOption.textContent = "No text reminders";
+    select.replaceChildren(blankOption, ...SMS_CARRIERS.map((carrier) => {
+      const option = document.createElement("option");
+      option.value = carrier.value;
+      option.textContent = carrier.label;
+      return option;
+    }));
+    select.value = SMS_CARRIERS.some((carrier) => carrier.value === previousValue) ? previousValue : "";
+  });
+}
+
 async function loadApp() {
   const session = await api("/api/session");
   if (!session.authenticated) {
@@ -5122,6 +5138,7 @@ function downloadCsv() {
 async function initializeApp() {
   countryCatalog = await api("/api/countries");
   populateCountrySelects();
+  populateCarrierSelects();
   const resetParams = new URLSearchParams(location.search);
   const resetToken = resetParams.get("resetToken");
   const resetEmail = resetParams.get("email");

@@ -4,7 +4,8 @@ const {
   applyChecklistToggle, bucketChecklistItems, findChecklistDuplicate, mealWeeksForMonth, groupPlanTasksByBucket, validateJournalPayload,
   dailyTaskOccursOnDate, isDailyTaskDoneOnDate, toggleDailyTaskDoneOnDate,
   timeToMinutes, minutesToTime, snapMinutes, layoutTimelineBlocks, comparePlannedToActual,
-  sanitizeFilename, buildDocumentObjectPath, wouldCreateFolderCycle, buildFolderTree
+  sanitizeFilename, buildDocumentObjectPath, wouldCreateFolderCycle, buildFolderTree,
+  smsGatewayAddress
 } = require("../lib/shared-logic");
 
 test("layoutTimelineBlocks gives non-overlapping tasks full width", () => {
@@ -376,4 +377,18 @@ test("comparePlannedToActual returns null deltas when planned or actual times ar
   assert.deepEqual(comparePlannedToActual({ plannedStartTime: "", plannedDurationMinutes: 30, actualStartTime: "09:15", actualEndTime: "09:45" }), { startDeltaMinutes: null, durationDeltaMinutes: 0 });
   assert.deepEqual(comparePlannedToActual({ plannedStartTime: "09:00", plannedDurationMinutes: 30, actualStartTime: "", actualEndTime: "" }), { startDeltaMinutes: null, durationDeltaMinutes: null });
   assert.deepEqual(comparePlannedToActual({ plannedStartTime: "09:00", plannedDurationMinutes: 30, actualStartTime: "09:15", actualEndTime: "" }), { startDeltaMinutes: 15, durationDeltaMinutes: null });
+});
+
+test("smsGatewayAddress builds a carrier gateway address from digits-only phone and a known carrier", () => {
+  assert.equal(smsGatewayAddress("(555) 123-4567", "verizon"), "5551234567@vtext.com");
+  assert.equal(smsGatewayAddress("555-987-6543", "tmobile"), "5559876543@tmomail.net");
+});
+
+test("smsGatewayAddress returns null for an unknown carrier", () => {
+  assert.equal(smsGatewayAddress("5551234567", "not-a-real-carrier"), null);
+});
+
+test("smsGatewayAddress returns null when the phone number has no digits", () => {
+  assert.equal(smsGatewayAddress("", "verizon"), null);
+  assert.equal(smsGatewayAddress("   ", "verizon"), null);
 });

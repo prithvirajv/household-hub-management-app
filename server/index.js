@@ -13,7 +13,7 @@ try {
 const { Pool } = require("pg");
 const { countries } = require("countries-list");
 const { defaultState } = require("./default-state");
-const { validateJournalPayload, buildDocumentObjectPath, wouldCreateFolderCycle } = require("../lib/shared-logic");
+const { validateJournalPayload, buildDocumentObjectPath, wouldCreateFolderCycle, SMS_CARRIERS, smsGatewayAddress } = require("../lib/shared-logic");
 const { createSignedUploadUrl, createSignedDownloadUrl, deleteObject } = require("./gcs");
 
 const PORT = Number(process.env.PORT || 8080);
@@ -236,6 +236,17 @@ function sendReminderEmail({ email, title, dueAt }) {
   });
 }
 
+function sendReminderSms({ phone, carrier, title, dueAt }) {
+  const gatewayAddress = smsGatewayAddress(phone, carrier);
+  if (!gatewayAddress) return Promise.resolve({ skipped: true });
+  if (TEST_FORCE_EMAIL_FAILURE) {
+    return Promise.resolve({ queued: false, preview: false, accepted: [], rejected: [], error: "Forced test failure" });
+  }
+  const dueLabel = new Date(dueAt).toLocaleString("en-US", { dateStyle: "short", timeStyle: "short" });
+  const body = `FamilyLoop: ${title} - due ${dueLabel}`;
+  return sendTransactionalEmail({ to: gatewayAddress, subject: "", text: body, html: body });
+}
+
 function claimDueNotificationJobsMemory(limit) {
   const now = Date.now();
   const eligible = memoryDb.notificationJobs.filter((job) => {
@@ -414,7 +425,17 @@ async function databasePrimaryOwnerId(client, householdId) {
 }
 
 function publicUser(row) {
-  return row ? { id: row.id, email: row.email, name: row.name, isAdmin: Boolean(row.is_admin) } : null;
+  return row ? { id: row.id, email: row.email, name: row.name, isAdmin: Boolean(row.is_admin), phone: row.phone || "", carrier: row.carrier || "" } : null;
+}
+
+function normalizePhoneAndCarrier(rawPhone, rawCarrier) {
+  const phone = String(rawPhone || "").replace(/\D/g, "");
+  const carrier = String(rawCarrier || "").trim().toLowerCase();
+  if (!phone && !carrier) return { phone: "", carrier: "" };
+  if (carrier && !SMS_CARRIERS.some((item) => item.value === carrier)) {
+    throw Object.assign(new Error("Choose a valid mobile carrier"), { statusCode: 400 });
+  }
+  return { phone, carrier };
 }
 
 function sessionCookieOptions() {
@@ -965,6 +986,12 @@ app.post("/api/auth/signup", async (req, res, next) => {
   if (email === DEMO_EMAIL || email === LEGACY_DEMO_EMAIL || (ADMIN_EMAIL && email === ADMIN_EMAIL)) {
     return res.status(409).json({ error: "That email is reserved" });
   }
+  let phone, carrier;
+  try {
+    ({ phone, carrier } = normalizePhoneAndCarrier(req.body.phone, req.body.carrier));
+  } catch (error) {
+    return res.status(error.statusCode || 400).json({ error: error.message });
+  }
 
   if (MEMORY_DB) {
     if (memoryDb.users.some((user) => user.email === email)) {
@@ -979,6 +1006,8 @@ app.post("/api/auth/signup", async (req, res, next) => {
       login_count: 0,
       last_login_at: null,
       disabled_at: null,
+      phone,
+      carrier,
       created_at: new Date().toISOString()
     };
     const state = householdState(householdName, country, currency);
@@ -1004,8 +1033,8 @@ app.post("/api/auth/signup", async (req, res, next) => {
     await client.query("BEGIN");
     const hash = await bcrypt.hash(password, 12);
     const user = await client.query(
-      "INSERT INTO users (email, password_hash, name, is_admin) VALUES ($1, $2, $3, $4) RETURNING id, email, name, is_admin",
-      [email, hash, name, false]
+      "INSERT INTO users (email, password_hash, name, is_admin, phone, carrier) VALUES ($1, $2, $3, $4, $5, $6) RETURNING id, email, name, is_admin, phone, carrier",
+      [email, hash, name, false, phone || null, carrier || null]
     );
     const state = householdState(householdName, country, currency);
     const household = await createHouseholdForUser(client, user.rows[0].id, householdName, state);
@@ -1215,6 +1244,12 @@ app.post("/api/auth/invitations/accept", async (req, res, next) => {
     if (email === DEMO_EMAIL) {
       return res.status(400).json({ error: "The consumer demo cannot accept household invitations" });
     }
+    let phone, carrier;
+    try {
+      ({ phone, carrier } = normalizePhoneAndCarrier(req.body.phone, req.body.carrier));
+    } catch (error) {
+      return res.status(error.statusCode || 400).json({ error: error.message });
+    }
 
     let user;
     let household;
@@ -1247,6 +1282,8 @@ app.post("/api/auth/invitations/accept", async (req, res, next) => {
           login_count: 0,
           last_login_at: null,
           disabled_at: null,
+          phone,
+          carrier,
           created_at: new Date().toISOString()
         };
         memoryDb.users.push(user);
@@ -1317,10 +1354,10 @@ app.post("/api/auth/invitations/accept", async (req, res, next) => {
             return res.status(400).json({ error: "Create a password of at least 12 characters" });
           }
           const created = await client.query(
-            `INSERT INTO users (email, password_hash, name, is_admin)
-             VALUES ($1, $2, $3, false)
-             RETURNING id, email, name, is_admin, disabled_at`,
-            [email, await bcrypt.hash(password, 12), requestedName || invitation.name || "Household member"]
+            `INSERT INTO users (email, password_hash, name, is_admin, phone, carrier)
+             VALUES ($1, $2, $3, false, $4, $5)
+             RETURNING id, email, name, is_admin, disabled_at, phone, carrier`,
+            [email, await bcrypt.hash(password, 12), requestedName || invitation.name || "Household member", phone || null, carrier || null]
           );
           user = created.rows[0];
         }
@@ -2608,9 +2645,21 @@ app.post("/api/internal/notifications/process", requireNotificationSecret, async
     }
     if (allInvalidTokens.size) await prunePushDevices([...allInvalidTokens]);
 
+    const phoneByUser = new Map();
+    if (jobsByUser.size) {
+      const userIds = [...jobsByUser.keys()];
+      const rows = MEMORY_DB
+        ? memoryDb.users.filter((user) => userIds.includes(user.id))
+        : (await pool.query("SELECT id, phone, carrier FROM users WHERE id = ANY($1)", [userIds])).rows;
+      for (const row of rows) {
+        if (row.phone && row.carrier) phoneByUser.set(row.id, { phone: row.phone, carrier: row.carrier });
+      }
+    }
+
     let sent = 0;
     let failed = 0;
     let retried = 0;
+    let smsSent = 0;
     for (const job of jobs) {
       try {
         const delivery = await sendReminderEmail({ email: job.recipient_email, title: job.title, dueAt: job.due_at });
@@ -2626,9 +2675,18 @@ app.post("/api/internal/notifications/process", requireNotificationSecret, async
           retried += 1;
         }
       }
+      const phoneInfo = job.user_id ? phoneByUser.get(job.user_id) : null;
+      if (phoneInfo) {
+        try {
+          const smsDelivery = await sendReminderSms({ phone: phoneInfo.phone, carrier: phoneInfo.carrier, title: job.title, dueAt: job.due_at });
+          if (!smsDelivery.skipped && !smsDelivery.error) smsSent += 1;
+        } catch (_error) {
+          // SMS is a best-effort bonus channel; failures here shouldn't affect the job's email retry bookkeeping.
+        }
+      }
     }
 
-    res.json({ processed: jobs.length, sent, failed, retried, pushSent, pushPruned: allInvalidTokens.size });
+    res.json({ processed: jobs.length, sent, failed, retried, pushSent, pushPruned: allInvalidTokens.size, smsSent });
   } catch (error) {
     next(error);
   }

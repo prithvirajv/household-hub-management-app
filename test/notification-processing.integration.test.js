@@ -253,3 +253,41 @@ test("push notifications are sent and invalid tokens are pruned", async () => {
     await new Promise((resolve) => stub.close(resolve));
   }
 });
+
+test("a reminder is also sent as a carrier-gateway SMS when the recipient has a phone and carrier on file", async () => {
+  const signup = await server.request("/api/auth/signup", {
+    method: "POST",
+    body: JSON.stringify({
+      email: "sms-owner@example.com", password: "Sms-Owner-Password-123!", name: "SMS Owner", householdName: "SMS Household", country: "US",
+      phone: "(555) 234-5678", carrier: "verizon"
+    })
+  });
+  assert.equal(signup.status, 201);
+  assert.equal(signup.body.user.phone, "5552345678");
+  assert.equal(signup.body.user.carrier, "verizon");
+  const cookie = signup.cookie;
+  const current = await server.request("/api/state", { headers: { cookie } });
+  const state = current.body;
+  state.calendar.events = [{ id: "evt-sms-1", title: "SMS reminder", type: "event", owner: "sms-owner@example.com", notifyAt: new Date(Date.now() - 60_000).toISOString() }];
+  await server.request("/api/state", { method: "PUT", headers: { cookie }, body: JSON.stringify(state) });
+
+  const run = await server.request("/api/internal/notifications/process", {
+    method: "POST",
+    headers: { authorization: `Bearer ${NOTIFICATION_SECRET}` },
+    body: "{}"
+  });
+  assert.equal(run.status, 200);
+  assert.equal(run.body.smsSent, 1);
+});
+
+test("a reminder is not sent as SMS when the recipient has no phone/carrier on file", async () => {
+  await signupAndSeedPastDueEvent("no-sms-owner@example.com", "evt-no-sms-1");
+
+  const run = await server.request("/api/internal/notifications/process", {
+    method: "POST",
+    headers: { authorization: `Bearer ${NOTIFICATION_SECRET}` },
+    body: "{}"
+  });
+  assert.equal(run.status, 200);
+  assert.equal(run.body.smsSent, 0);
+});

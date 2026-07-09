@@ -167,6 +167,27 @@ test("public signup cannot claim reserved administrator or demo identities", asy
   }
 });
 
+test("signup rejects an unrecognized mobile carrier but allows leaving phone/carrier blank", async () => {
+  const badCarrier = await request("/api/auth/signup", {
+    method: "POST",
+    body: JSON.stringify({
+      email: "bad-carrier@example.com", password: "Consumer-Password-123!", name: "Bad Carrier", householdName: "Bad Carrier Household", country: "US",
+      phone: "5551234567", carrier: "not-a-real-carrier"
+    })
+  });
+  assert.equal(badCarrier.status, 400);
+
+  const noPhone = await request("/api/auth/signup", {
+    method: "POST",
+    body: JSON.stringify({
+      email: "no-phone@example.com", password: "Consumer-Password-123!", name: "No Phone", householdName: "No Phone Household", country: "US"
+    })
+  });
+  assert.equal(noPhone.status, 201);
+  assert.equal(noPhone.body.user.phone, "");
+  assert.equal(noPhone.body.user.carrier, "");
+});
+
 test("a user cannot create multiple households with the same currency", async () => {
   const signin = await request("/api/auth/signin", {
     method: "POST",
