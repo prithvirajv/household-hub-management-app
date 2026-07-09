@@ -3029,14 +3029,20 @@ function bindViewEvents() {
   });
 
   document.querySelectorAll("[data-edit-actual-log]").forEach((block) => {
-    const openEditor = () => {
-      planEditingActualLogId = block.dataset.editActualLog;
+    const toggleEditor = () => {
+      const logId = block.dataset.editActualLog;
+      if (planEditingActualLogId === logId) {
+        planEditingActualLogId = null;
+        render();
+        return;
+      }
+      planEditingActualLogId = logId;
       render();
       $("#actualLogForm")?.scrollIntoView({ behavior: "smooth", block: "center" });
     };
-    block.addEventListener("click", openEditor);
+    block.addEventListener("click", toggleEditor);
     block.addEventListener("keydown", (event) => {
-      if (event.key === "Enter" || event.key === " ") { event.preventDefault(); openEditor(); }
+      if (event.key === "Enter" || event.key === " ") { event.preventDefault(); toggleEditor(); }
     });
   });
 
@@ -3203,7 +3209,7 @@ function bindViewEvents() {
         task.startTime = minutesToTime(planDragState.pendingMinutes);
         autosavePlans();
       } else if (task && !planDragState.moved) {
-        planEditingDailyTaskId = task.id;
+        planEditingDailyTaskId = planEditingDailyTaskId === task.id ? null : task.id;
       }
       planDragState = null;
       render();
