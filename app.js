@@ -1829,15 +1829,38 @@ function renderSharing() {
             <label>Name<input name="name" placeholder="Household member" required></label>
             <label>Email<input name="email" type="email" placeholder="name@example.com" required></label>
             <label>Access<select name="role">${accessRoles.map((role) => `<option value="${role}">${role}</option>`).join("")}</select></label>
+            ${households.filter((household) => household.role === "owner").length > 1 ? `
+              <div class="invite-household-picker">
+                <span>Also invite to</span>
+                ${households.filter((household) => household.role === "owner").map((household) => `
+                  <label class="invite-household-option">
+                    <input type="checkbox" name="householdIds" value="${household.id}" ${household.selected ? "checked" : ""}>
+                    ${escapeHtml(household.name)}${household.selected ? " (current)" : ""}
+                  </label>`).join("")}
+              </div>` : ""}
             <button type="submit">Send invite</button>
             <p id="inviteEmailStatus" class="form-message invite-email-status">${inviteEmailStatus}</p>
           </form>
           <div class="sharing-member-list">
-            ${members.map((member) => `<div class="sharing-member-row">
+            ${members.map((member) => {
+              const otherOwnedHouseholds = households.filter((household) => household.role === "owner" && !household.selected);
+              const canAddHousehold = sharingAccess?.canManage && !member.isOwner && otherOwnedHouseholds.length > 0;
+              return `<div class="sharing-member-row">
               <div><strong>${escapeHtml(member.name)}</strong><small>${escapeHtml(member.email)}</small></div>
               <span class="pill">${escapeHtml(member.role)} · ${member.status === "pending" ? "Invited" : "Active"}${member.isOwner ? " · Owner" : ""}</span>
-              ${sharingAccess?.canManage && !member.isOwner ? `<button class="danger-button revoke-access-button" data-revoke-household-access="${escapeHtml(member.email)}" type="button">Revoke access</button>` : ""}
-            </div>`).join("")}
+              <div class="sharing-member-actions">
+                ${canAddHousehold ? `<details class="member-add-household-picker">
+                  <summary class="ghost-summary">+ Add household</summary>
+                  <div class="member-add-household-panel" data-member-email="${escapeHtml(member.email)}" data-member-name="${escapeHtml(member.name)}">
+                    ${otherOwnedHouseholds.map((household) => `<label><input type="checkbox" value="${household.id}"> ${escapeHtml(household.name)}</label>`).join("")}
+                    <label>Access<select>${accessRoles.map((role) => `<option value="${role}">${role}</option>`).join("")}</select></label>
+                    <button type="button" class="ghost" data-send-additional-invite>Send invite</button>
+                  </div>
+                </details>` : ""}
+                ${sharingAccess?.canManage && !member.isOwner ? `<button class="danger-button revoke-access-button" data-revoke-household-access="${escapeHtml(member.email)}" type="button">Revoke access</button>` : ""}
+              </div>
+            </div>`;
+            }).join("")}
           </div>
         </section>
       </div>
@@ -3858,8 +3881,10 @@ function bindViewEvents() {
 
   $("#inviteMemberForm")?.addEventListener("submit", async (event) => {
     event.preventDefault();
-    const data = Object.fromEntries(new FormData(event.currentTarget));
-    const submitButton = event.currentTarget.querySelector('[type="submit"]');
+    const form = event.currentTarget;
+    const data = Object.fromEntries(new FormData(form));
+    const householdIds = new FormData(form).getAll("householdIds");
+    const submitButton = form.querySelector('[type="submit"]');
     submitButton.disabled = true;
     inviteEmailStatus = "Sending invitation...";
     $("#inviteEmailStatus").textContent = inviteEmailStatus;
@@ -3871,24 +3896,29 @@ function bindViewEvents() {
           name: data.name,
           email: data.email,
           role: data.role,
-          scopes: state.household.sharedScopes || []
+          scopes: state.household.sharedScopes || [],
+          householdIds: householdIds.length ? householdIds : undefined
         })
       });
-      const invitation = result.invitation;
-      const member = state.household.members.find((item) => item.email.toLowerCase() === invitation.email.toLowerCase());
-      const invitedRole = `${invitation.role} - Invited`;
+      const invitations = result.invitations || [result.invitation];
+      const currentInvitation = invitations.find((item) => item.householdName === state.household.name) || invitations[0];
+      if (currentInvitation.inviteCode) state.household.inviteCode = currentInvitation.inviteCode;
+      const member = state.household.members.find((item) => item.email.toLowerCase() === currentInvitation.email.toLowerCase());
+      const invitedRole = `${currentInvitation.role} - Invited`;
       if (member) {
-        Object.assign(member, { name: invitation.name, email: invitation.email, role: invitedRole });
+        Object.assign(member, { name: currentInvitation.name, email: currentInvitation.email, role: invitedRole });
       } else {
-        state.household.members.push({ name: invitation.name, email: invitation.email, role: invitedRole });
+        state.household.members.push({ name: currentInvitation.name, email: currentInvitation.email, role: invitedRole });
       }
-      state.household.inviteCode = invitation.inviteCode;
-      state.household.activity.unshift(`${invitation.name} was invited to ${state.household.name}`);
+      state.household.activity.unshift(invitations.length > 1
+        ? `${currentInvitation.name} was invited to ${invitations.length} households`
+        : `${currentInvitation.name} was invited to ${state.household.name}`);
+      const householdNames = invitations.map((item) => item.householdName).filter(Boolean);
       inviteEmailStatus = result.email.queued
-        ? `Invitation queued by the email provider for ${invitation.email}. Check Inbox, Spam, and All Mail.`
+        ? `Invitation${invitations.length > 1 ? "s" : ""} queued by the email provider for ${currentInvitation.email}${householdNames.length > 1 ? ` (${householdNames.join(", ")})` : ""}. Check Inbox, Spam, and All Mail.`
         : result.email.preview
-          ? `Invitation saved. SMTP is not configured, so a local email preview was created for ${invitation.email}.`
-          : `Invitation saved, but the email provider did not accept mail for ${invitation.email}.`;
+          ? `Invitation saved. SMTP is not configured, so a local email preview was created for ${currentInvitation.email}.`
+          : `Invitation saved, but the email provider did not accept mail for ${currentInvitation.email}.`;
       await saveStateNow();
       sharingAccess = null;
       await loadSharingAccess(false);
@@ -3920,6 +3950,42 @@ function bindViewEvents() {
         await saveStateNow();
         sharingAccess = null;
         await loadSharingAccess(false);
+        render();
+      } catch (error) {
+        inviteEmailStatus = error.message;
+        button.disabled = false;
+        render();
+      }
+    });
+  });
+
+  document.querySelectorAll("[data-send-additional-invite]").forEach((button) => {
+    button.addEventListener("click", async () => {
+      const panel = button.closest(".member-add-household-panel");
+      const email = panel.dataset.memberEmail;
+      const name = panel.dataset.memberName;
+      const role = panel.querySelector("select").value;
+      const householdIds = [...panel.querySelectorAll('input[type="checkbox"]:checked')].map((checkbox) => checkbox.value);
+      if (!householdIds.length) {
+        inviteEmailStatus = "Choose at least one household to add.";
+        $("#inviteEmailStatus").textContent = inviteEmailStatus;
+        return;
+      }
+      button.disabled = true;
+      try {
+        const result = await api("/api/households/invitations", {
+          method: "POST",
+          body: JSON.stringify({ name, email, role, scopes: state.household.sharedScopes || [], householdIds })
+        });
+        const invitations = result.invitations || [result.invitation];
+        const householdNames = invitations.map((item) => item.householdName).filter(Boolean);
+        state.household.activity.unshift(`${name} was invited to ${householdNames.join(", ") || "another household"}`);
+        inviteEmailStatus = result.email.queued
+          ? `Invitation queued by the email provider for ${email}${householdNames.length ? ` (${householdNames.join(", ")})` : ""}. Check Inbox, Spam, and All Mail.`
+          : result.email.preview
+            ? `Invitation saved. SMTP is not configured, so a local email preview was created for ${email}.`
+            : `Invitation saved, but the email provider did not accept mail for ${email}.`;
+        await saveStateNow();
         render();
       } catch (error) {
         inviteEmailStatus = error.message;

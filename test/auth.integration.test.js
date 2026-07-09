@@ -395,6 +395,173 @@ test("invitation code creates a login, joins the household, and is single-use", 
   assert.equal(reused.status, 400);
 });
 
+test("a single invite can target multiple owned households at once, in one email", async () => {
+  const adminSignin = await request("/api/auth/signin", {
+    method: "POST",
+    body: JSON.stringify({ email: adminEmail, password: initialPassword })
+  });
+  assert.equal(adminSignin.status, 200);
+
+  const households = await request("/api/households", {
+    headers: { cookie: adminSignin.cookie }
+  });
+  const usdHousehold = households.body.find((household) => household.currency === "USD");
+  const inrHousehold = households.body.find((household) => household.currency === "INR");
+  assert.ok(usdHousehold, "admin should already own a pre-provisioned USD household");
+  assert.ok(inrHousehold, "admin should already own a pre-provisioned INR household");
+
+  const coOwnerEmail = "family-co-owner@example.com";
+  const invitation = await request("/api/households/invitations", {
+    method: "POST",
+    headers: { cookie: adminSignin.cookie },
+    body: JSON.stringify({
+      email: coOwnerEmail,
+      name: "Family Co-owner",
+      role: "Co-owner, full edit",
+      scopes: ["Budget"],
+      householdIds: [usdHousehold.id, inrHousehold.id]
+    })
+  });
+  assert.equal(invitation.status, 201, JSON.stringify(invitation.body));
+  assert.equal(invitation.body.invitations.length, 2);
+  const usdInvite = invitation.body.invitations.find((item) => item.householdName === usdHousehold.name);
+  const inrInvite = invitation.body.invitations.find((item) => item.householdName === inrHousehold.name);
+  assert.ok(usdInvite.inviteCode);
+  assert.ok(inrInvite.inviteCode);
+  assert.notEqual(usdInvite.inviteCode, inrInvite.inviteCode);
+
+  const acceptFirst = await request("/api/auth/invitations/accept", {
+    method: "POST",
+    body: JSON.stringify({
+      email: coOwnerEmail,
+      inviteCode: usdInvite.inviteCode,
+      password: "Family-Co-Owner-Password-123!"
+    })
+  });
+  assert.equal(acceptFirst.status, 200, JSON.stringify(acceptFirst.body));
+
+  const acceptSecond = await request("/api/auth/invitations/accept", {
+    method: "POST",
+    body: JSON.stringify({
+      email: coOwnerEmail,
+      inviteCode: inrInvite.inviteCode,
+      password: "Family-Co-Owner-Password-123!"
+    })
+  });
+  assert.equal(acceptSecond.status, 200, JSON.stringify(acceptSecond.body));
+
+  const memberHouseholds = await request("/api/households", {
+    headers: { cookie: acceptSecond.cookie }
+  });
+  assert.equal(memberHouseholds.status, 200);
+  assert.equal(memberHouseholds.body.length, 2);
+  assert.ok(memberHouseholds.body.every((household) => household.role === "owner"));
+});
+
+test("a household can be added to an invite later, after the first invite was already sent", async () => {
+  const adminSignin = await request("/api/auth/signin", {
+    method: "POST",
+    body: JSON.stringify({ email: adminEmail, password: initialPassword })
+  });
+  assert.equal(adminSignin.status, 200);
+
+  const households = await request("/api/households", {
+    headers: { cookie: adminSignin.cookie }
+  });
+  const usdHousehold = households.body.find((household) => household.currency === "USD");
+  const inrHousehold = households.body.find((household) => household.currency === "INR");
+
+  const laterEmail = "later-household-member@example.com";
+  const firstInvite = await request("/api/households/invitations", {
+    method: "POST",
+    headers: { cookie: adminSignin.cookie },
+    body: JSON.stringify({
+      email: laterEmail,
+      name: "Later Member",
+      role: "Co-owner, full edit",
+      scopes: ["Budget"],
+      householdIds: [usdHousehold.id]
+    })
+  });
+  assert.equal(firstInvite.status, 201);
+  assert.equal(firstInvite.body.invitations.length, 1);
+
+  const acceptFirst = await request("/api/auth/invitations/accept", {
+    method: "POST",
+    body: JSON.stringify({
+      email: laterEmail,
+      inviteCode: firstInvite.body.invitations[0].inviteCode,
+      password: "Later-Member-Password-123!"
+    })
+  });
+  assert.equal(acceptFirst.status, 200, JSON.stringify(acceptFirst.body));
+
+  const secondInvite = await request("/api/households/invitations", {
+    method: "POST",
+    headers: { cookie: adminSignin.cookie },
+    body: JSON.stringify({
+      email: laterEmail,
+      name: "Later Member",
+      role: "Co-owner, full edit",
+      scopes: ["Budget"],
+      householdIds: [inrHousehold.id]
+    })
+  });
+  assert.equal(secondInvite.status, 201, JSON.stringify(secondInvite.body));
+  assert.equal(secondInvite.body.invitations.length, 1);
+  assert.equal(secondInvite.body.invitations[0].householdName, inrHousehold.name);
+
+  const acceptSecond = await request("/api/auth/invitations/accept", {
+    method: "POST",
+    body: JSON.stringify({
+      email: laterEmail,
+      inviteCode: secondInvite.body.invitations[0].inviteCode,
+      password: "Later-Member-Password-123!"
+    })
+  });
+  assert.equal(acceptSecond.status, 200, JSON.stringify(acceptSecond.body));
+
+  const memberHouseholds = await request("/api/households", {
+    headers: { cookie: acceptSecond.cookie }
+  });
+  assert.equal(memberHouseholds.body.length, 2);
+});
+
+test("only owned households can be targeted by an invite, even if requested", async () => {
+  const outsiderSignup = await request("/api/auth/signup", {
+    method: "POST",
+    body: JSON.stringify({
+      email: "outsider-owner@example.com",
+      password: "Outsider-Owner-Password-123!",
+      name: "Outsider Owner",
+      householdName: "Outsider Household",
+      country: "GB"
+    })
+  });
+  assert.equal(outsiderSignup.status, 201);
+  const outsiderHouseholds = await request("/api/households", {
+    headers: { cookie: outsiderSignup.cookie }
+  });
+  const outsiderHouseholdId = outsiderHouseholds.body[0].id;
+
+  const adminSignin = await request("/api/auth/signin", {
+    method: "POST",
+    body: JSON.stringify({ email: adminEmail, password: initialPassword })
+  });
+  const blocked = await request("/api/households/invitations", {
+    method: "POST",
+    headers: { cookie: adminSignin.cookie },
+    body: JSON.stringify({
+      email: "someone@example.com",
+      name: "Someone",
+      role: "Member",
+      scopes: [],
+      householdIds: [outsiderHouseholdId]
+    })
+  });
+  assert.equal(blocked.status, 403);
+});
+
 test("the primary owner can revoke household access and the removed user loses access", async () => {
   const ownerSignin = await request("/api/auth/signin", {
     method: "POST",

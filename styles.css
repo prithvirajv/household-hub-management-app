@@ -1151,6 +1151,33 @@ main {
   margin-top: 0.25rem;
 }
 
+.invite-household-picker {
+  grid-column: 1 / -1;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.6rem;
+  font-size: 0.8rem;
+  color: var(--muted);
+}
+
+.invite-household-picker > span {
+  font-weight: 800;
+}
+
+.invite-household-option {
+  display: flex;
+  align-items: center;
+  gap: 0.3rem;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.invite-household-option input {
+  width: auto;
+  min-height: 0;
+}
+
 .sharing-member-list {
   display: grid;
   gap: 10px;
@@ -1182,6 +1209,55 @@ main {
   white-space: nowrap;
 }
 
+.sharing-member-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  position: relative;
+}
+
+.member-add-household-picker > summary {
+  list-style: none;
+  cursor: pointer;
+}
+
+.member-add-household-picker > summary::-webkit-details-marker {
+  display: none;
+}
+
+.ghost-summary {
+  display: inline-flex;
+  align-items: center;
+  min-height: 42px;
+  padding: 0.55rem 0.75rem;
+  border-radius: 6px;
+  border: 1px solid var(--line);
+  background: white;
+  color: var(--text);
+  font-weight: 800;
+  font-size: 0.85rem;
+  white-space: nowrap;
+}
+
+.member-add-household-panel {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  z-index: 5;
+  display: grid;
+  gap: 8px;
+  min-width: 220px;
+  padding: 12px;
+  border-radius: 8px;
+  border: 1px solid var(--line);
+  background: white;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.12);
+}
+
+.member-add-household-panel label {
+  font-size: 0.8rem;
+}
+
 @media (max-width: 720px) {
   .sharing-member-row {
     grid-template-columns: minmax(0, 1fr);
@@ -1189,8 +1265,13 @@ main {
   }
 
   .sharing-member-row .pill,
-  .revoke-access-button {
+  .sharing-member-actions {
     justify-self: start;
+  }
+
+  .member-add-household-panel {
+    position: static;
+    box-shadow: none;
   }
 }
 

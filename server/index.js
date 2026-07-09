@@ -343,14 +343,24 @@ function sendPasswordResetEmail({ email, name, token }) {
   });
 }
 
-function sendHouseholdInviteEmail({ email, name, inviterName, householdName, inviteCode, role, scopes }) {
-  const scopeText = scopes.length ? scopes.join(", ") : "household workspace";
-  const acceptUrl = `${APP_BASE_URL}/index.html?inviteCode=${encodeURIComponent(inviteCode)}&email=${encodeURIComponent(email)}`;
+function sendHouseholdInvitesEmail({ email, name, inviterName, invites }) {
+  const blocks = invites.map(({ householdName, inviteCode, role, scopes }) => {
+    const scopeText = scopes.length ? scopes.join(", ") : "household workspace";
+    const acceptUrl = `${APP_BASE_URL}/index.html?inviteCode=${encodeURIComponent(inviteCode)}&email=${encodeURIComponent(email)}`;
+    return {
+      householdName,
+      text: `${householdName} as ${role}. Invite code: ${inviteCode}. Shared areas: ${scopeText}. Accept: ${acceptUrl}`,
+      html: `<p><strong>${escapeHtml(householdName)}</strong> as ${escapeHtml(role)}.<br>Invite code: <strong>${escapeHtml(inviteCode)}</strong><br>Shared areas: ${escapeHtml(scopeText)}<br><a href="${escapeHtml(acceptUrl)}">Accept invitation</a></p>`
+    };
+  });
+  const subject = invites.length > 1
+    ? `${inviterName} shared ${invites.length} households with you`
+    : `${inviterName} shared ${invites[0].householdName} with you`;
   return sendTransactionalEmail({
     to: email,
-    subject: `${inviterName} shared ${householdName} with you`,
-    text: `Hi ${name}, ${inviterName} invited you to ${householdName} in Famelo as ${role}. Invite code: ${inviteCode}. Shared areas: ${scopeText}. Accept the invitation: ${acceptUrl}`,
-    html: `<h2>You have been invited to Famelo</h2><p>Hi ${escapeHtml(name)},</p><p><strong>${escapeHtml(inviterName)}</strong> shared <strong>${escapeHtml(householdName)}</strong> with you as ${escapeHtml(role)}.</p><p>Invite code: <strong>${escapeHtml(inviteCode)}</strong></p><p>Shared areas: ${escapeHtml(scopeText)}</p><p><a href="${escapeHtml(acceptUrl)}">Accept invitation</a></p>`
+    subject,
+    text: `Hi ${name}, ${inviterName} invited you to Famelo:\n\n${blocks.map((block) => block.text).join("\n\n")}\n\nEach household needs its own invite code accepted separately.`,
+    html: `<h2>You have been invited to Famelo</h2><p>Hi ${escapeHtml(name)},</p><p><strong>${escapeHtml(inviterName)}</strong> invited you to:</p>${blocks.map((block) => block.html).join("")}${invites.length > 1 ? "<p>Each household needs its own invite code accepted separately.</p>" : ""}`
   });
 }
 
@@ -1728,76 +1738,85 @@ app.post("/api/households/invitations", requireSession, async (req, res, next) =
       return res.status(400).json({ error: "Enter a valid invitation email" });
     }
 
-    let household;
-    let inviteCode;
+    const requestedHouseholdIds = Array.isArray(req.body.householdIds)
+      ? [...new Set(req.body.householdIds.map((id) => String(id).trim()).filter(Boolean))].slice(0, 20)
+      : [];
+    const targetHouseholdIds = requestedHouseholdIds.length ? requestedHouseholdIds : [req.sessionUser.household_id];
+
+    const invites = [];
 
     if (MEMORY_DB) {
-      const membership = memoryDb.memberships.find((item) =>
-        item.user_id === req.sessionUser.id && item.household_id === req.sessionUser.household_id
-      );
-      if (!membership || membership.role !== "owner") {
-        return res.status(403).json({ error: "Only the household owner can send invitations" });
+      for (const householdId of targetHouseholdIds) {
+        const membership = memoryDb.memberships.find((item) =>
+          item.user_id === req.sessionUser.id && item.household_id === householdId
+        );
+        if (!membership || membership.role !== "owner") continue;
+        const household = memoryDb.households.find((item) => item.id === householdId);
+        if (!household) continue;
+        const inviteCode = household.invite_code || makeInviteCode();
+        household.invite_code = inviteCode;
+        const existing = memoryDb.invitations.find((item) =>
+          item.household_id === household.id && item.email === email
+        );
+        const invitation = existing || { id: crypto.randomUUID(), household_id: household.id, email };
+        Object.assign(invitation, {
+          name,
+          role,
+          scopes,
+          invite_code: inviteCode,
+          status: "pending",
+          invited_by: req.sessionUser.id,
+          updated_at: new Date().toISOString()
+        });
+        if (!existing) memoryDb.invitations.push(invitation);
+        invites.push({ householdName: household.name, inviteCode, role, scopes });
       }
-      household = memoryDb.households.find((item) => item.id === req.sessionUser.household_id);
-      if (!household) return res.status(404).json({ error: "Household not found" });
-      inviteCode = household.invite_code || makeInviteCode();
-      const existing = memoryDb.invitations.find((item) =>
-        item.household_id === household.id && item.email === email
-      );
-      const invitation = existing || { id: crypto.randomUUID(), household_id: household.id, email };
-      Object.assign(invitation, {
-        name,
-        role,
-        scopes,
-        invite_code: inviteCode,
-        status: "pending",
-        invited_by: req.sessionUser.id,
-        updated_at: new Date().toISOString()
-      });
-      if (!existing) memoryDb.invitations.push(invitation);
     } else {
-      const result = await pool.query(
-        `SELECT h.id, h.name, h.invite_code, hm.role
-         FROM households h
-         JOIN household_memberships hm ON hm.household_id = h.id
-         WHERE h.id = $1 AND hm.user_id = $2`,
-        [req.sessionUser.household_id, req.sessionUser.id]
-      );
-      household = result.rows[0];
-      if (!household) return res.status(404).json({ error: "Household not found" });
-      if (household.role !== "owner") {
-        return res.status(403).json({ error: "Only the household owner can send invitations" });
+      for (const householdId of targetHouseholdIds) {
+        const result = await pool.query(
+          `SELECT h.id, h.name, h.invite_code, hm.role
+           FROM households h
+           JOIN household_memberships hm ON hm.household_id = h.id
+           WHERE h.id = $1 AND hm.user_id = $2`,
+          [householdId, req.sessionUser.id]
+        );
+        const household = result.rows[0];
+        if (!household || household.role !== "owner") continue;
+        const inviteCode = household.invite_code;
+        await pool.query(
+          `INSERT INTO household_invitations
+            (household_id, invited_by, email, name, role, scopes, invite_code, status)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, 'pending')
+           ON CONFLICT (household_id, email)
+           DO UPDATE SET
+             invited_by = EXCLUDED.invited_by,
+             name = EXCLUDED.name,
+             role = EXCLUDED.role,
+             scopes = EXCLUDED.scopes,
+             invite_code = EXCLUDED.invite_code,
+             status = 'pending',
+             updated_at = now()`,
+          [household.id, req.sessionUser.id, email, name, role, JSON.stringify(scopes), inviteCode]
+        );
+        invites.push({ householdName: household.name, inviteCode, role, scopes });
       }
-      inviteCode = household.invite_code;
-      await pool.query(
-        `INSERT INTO household_invitations
-          (household_id, invited_by, email, name, role, scopes, invite_code, status)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, 'pending')
-         ON CONFLICT (household_id, email)
-         DO UPDATE SET
-           invited_by = EXCLUDED.invited_by,
-           name = EXCLUDED.name,
-           role = EXCLUDED.role,
-           scopes = EXCLUDED.scopes,
-           invite_code = EXCLUDED.invite_code,
-           status = 'pending',
-           updated_at = now()`,
-        [household.id, req.sessionUser.id, email, name, role, JSON.stringify(scopes), inviteCode]
-      );
     }
 
-    const emailDelivery = await sendHouseholdInviteEmail({
+    if (!invites.length) {
+      return res.status(403).json({ error: "Only the household owner can send invitations" });
+    }
+
+    const emailDelivery = await sendHouseholdInvitesEmail({
       email,
       name,
       inviterName: req.sessionUser.name,
-      householdName: household.name,
-      inviteCode,
-      role,
-      scopes
+      invites
     });
 
+    const inviteCode = invites[0].inviteCode;
     res.status(201).json({
       invitation: { email, name, role, scopes, inviteCode, status: "pending" },
+      invitations: invites.map((invite) => ({ email, name, role, scopes, householdName: invite.householdName, inviteCode: invite.inviteCode, status: "pending" })),
       email: emailDelivery
     });
   } catch (error) {
