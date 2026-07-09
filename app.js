@@ -1337,20 +1337,27 @@ function renderDailyPlan() {
         <button class="ghost" data-plan-day="today" type="button">Today</button>
       </div>
       <form id="planTaskForm" class="plan-task-form plan-task-form-daily card">
-        <input name="title" placeholder="Add a task for this day" value="${escapeHtml(editingTask?.title || "")}" required>
-        <label>Start time (optional)<input name="startTime" type="time" value="${editingTask?.startTime || ""}"></label>
-        <label>Duration (min)<input name="durationMinutes" type="number" min="5" step="5" value="${formDuration}"></label>
-        <label>End time<input name="endTimeDisplay" type="time" value="${formEndTime}" readonly tabindex="-1"></label>
-        <label>Repeat<select name="recurrence">${Object.entries(planRecurrenceLabels).map(([value, label]) => `<option value="${value}" ${editingTask && editingTask.recurrence === value ? "selected" : ""}>${label}</option>`).join("")}</select></label>
-        <button type="submit">${editingTask ? "Save changes" : "Add"}</button>
-        ${editingTask ? `<button class="ghost" id="cancelPlanTaskEditButton" type="button">Cancel</button>` : ""}
-        ${editingTask ? `
-          <div class="plan-actual-time-fields">
-            <span>What actually happened on ${dayLabel}</span>
-            <label>Actual start<input name="actualStartTime" type="time" value="${editingTask.actuals?.[planSelectedDate]?.startTime || ""}"></label>
-            <label>Actual end<input name="actualEndTime" type="time" value="${editingTask.actuals?.[planSelectedDate]?.endTime || ""}"></label>
-            <label>What did you actually work on? (if different)<input name="actualNote" placeholder="e.g. Replied to emails instead" value="${escapeHtml(editingTask.actuals?.[planSelectedDate]?.note || "")}"></label>
-          </div>` : ""}
+        <div class="plan-form-columns">
+          <div class="plan-form-col">
+            ${editingTask ? `<span class="plan-form-col-label">Planned</span>` : ""}
+            <input name="title" placeholder="Add a task for this day" value="${escapeHtml(editingTask?.title || "")}" required>
+            <label>Start time (optional)<input name="startTime" type="time" value="${editingTask?.startTime || ""}"></label>
+            <label>Duration (min)<input name="durationMinutes" type="number" min="5" step="5" value="${formDuration}"></label>
+            <label>End time<input name="endTimeDisplay" type="time" value="${formEndTime}" readonly tabindex="-1"></label>
+            <label>Repeat<select name="recurrence">${Object.entries(planRecurrenceLabels).map(([value, label]) => `<option value="${value}" ${editingTask && editingTask.recurrence === value ? "selected" : ""}>${label}</option>`).join("")}</select></label>
+            <div class="plan-form-actions">
+              <button type="submit">${editingTask ? "Save changes" : "Add"}</button>
+              ${editingTask ? `<button class="ghost" id="cancelPlanTaskEditButton" type="button">Cancel</button>` : ""}
+            </div>
+          </div>
+          ${editingTask ? `
+            <div class="plan-form-col plan-form-col-actual">
+              <span class="plan-form-col-label">Actual (${dayLabel})</span>
+              <label>Actual start<input name="actualStartTime" type="time" value="${editingTask.actuals?.[planSelectedDate]?.startTime || ""}"></label>
+              <label>Actual end<input name="actualEndTime" type="time" value="${editingTask.actuals?.[planSelectedDate]?.endTime || ""}"></label>
+              <label>What did you actually work on? (if different)<input name="actualNote" placeholder="e.g. Replied to emails instead" value="${escapeHtml(editingTask.actuals?.[planSelectedDate]?.note || "")}"></label>
+            </div>` : ""}
+        </div>
       </form>
       ${unscheduled.length ? `<div class="plan-unscheduled"><h4>Unscheduled</h4>${unscheduled.map((task) => renderPlanTaskDaily(task)).join("")}</div>` : ""}
       <div class="plan-timeline" style="height:${timelineHeight + 28}px">
@@ -1470,7 +1477,7 @@ function renderActualTimelineBlock(task, layoutInfo) {
   const displayTitle = actual.note ? actual.note : task.title;
   const secondaryLabel = actual.note ? `Planned: ${task.title}` : "";
   const tooltip = [`${displayTitle}: ${timeRangeLabel}`, deviationLabel, secondaryLabel].filter(Boolean).join(" · ");
-  return `<div class="plan-timeline-block plan-actual-block ${compact ? "compact" : ""} ${deviationClass}" style="top:${top}px;height:${height}px;left:${left};width:${width}" title="${escapeHtml(tooltip)}">
+  return `<div class="plan-timeline-block plan-actual-block ${compact ? "compact" : ""} ${deviationClass}" data-edit-actual-task="${task.id}" role="button" tabindex="0" aria-label="Edit actual time for ${escapeHtml(displayTitle)}" style="top:${top}px;height:${height}px;left:${left};width:${width}" title="${escapeHtml(tooltip)}">
     <div class="plan-block-copy">
       <strong class="plan-actual-title">${escapeHtml(displayTitle)}</strong>
       ${compact
@@ -2953,6 +2960,18 @@ function bindViewEvents() {
       planEditingDailyTaskId = button.dataset.logActualTime;
       render();
       $("#planTaskForm")?.scrollIntoView({ behavior: "smooth", block: "center" });
+    });
+  });
+
+  document.querySelectorAll("[data-edit-actual-task]").forEach((block) => {
+    const openEditor = () => {
+      planEditingDailyTaskId = block.dataset.editActualTask;
+      render();
+      $("#planTaskForm")?.scrollIntoView({ behavior: "smooth", block: "center" });
+    };
+    block.addEventListener("click", openEditor);
+    block.addEventListener("keydown", (event) => {
+      if (event.key === "Enter" || event.key === " ") { event.preventDefault(); openEditor(); }
     });
   });
 

@@ -3658,17 +3658,44 @@ main {
   cursor: pointer;
 }
 
-.plan-task-form-daily {
+.plan-form-columns {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 1.2rem;
+  align-items: start;
+}
+
+@media (min-width: 640px) {
+  .plan-form-columns:has(.plan-form-col-actual) {
+    grid-template-columns: 1fr 1fr;
+  }
+}
+
+.plan-form-col {
   display: flex;
   flex-wrap: wrap;
   align-items: end;
+  gap: 0.6rem;
 }
 
-.plan-task-form-daily > input[name="title"] {
+.plan-form-col-actual {
+  padding-left: 1.2rem;
+  border-left: 1px dashed var(--line);
+}
+
+.plan-form-col-label {
+  flex: 1 0 100%;
+  font-size: 0.72rem;
+  font-weight: 800;
+  color: var(--muted);
+  text-transform: uppercase;
+}
+
+.plan-form-col > input[name="title"] {
   flex: 1 1 200px;
 }
 
-.plan-task-form-daily label {
+.plan-form-col label {
   display: grid;
   gap: 0.25rem;
   color: var(--muted);
@@ -3677,48 +3704,22 @@ main {
   flex: 0 0 auto;
 }
 
-.plan-task-form-daily label input[type="time"] {
+.plan-form-col label input[type="time"] {
   width: 130px;
 }
 
-.plan-task-form-daily label input[type="number"] {
+.plan-form-col label input[type="number"] {
   width: 90px;
 }
 
-.plan-task-form-daily label select {
+.plan-form-col label select {
   width: 160px;
 }
 
-.plan-actual-time-fields {
-  flex: 1 0 100%;
+.plan-form-actions {
   display: flex;
-  flex-wrap: wrap;
-  align-items: end;
   gap: 0.6rem;
-  padding-top: 0.6rem;
-  margin-top: 0.4rem;
-  border-top: 1px dashed var(--line);
-}
-
-.plan-actual-time-fields > span {
   flex: 1 0 100%;
-  font-size: 0.72rem;
-  font-weight: 800;
-  color: var(--muted);
-  text-transform: uppercase;
-}
-
-.plan-actual-time-fields input[type="time"] {
-  width: 130px;
-}
-
-.plan-actual-time-fields input[type="text"],
-.plan-actual-time-fields input:not([type]) {
-  width: 220px;
-}
-
-.plan-actual-time {
-  color: var(--coral);
 }
 
 .plan-unscheduled {
@@ -3794,8 +3795,13 @@ main {
 
 .plan-actual-block {
   display: block;
-  cursor: default;
+  cursor: pointer;
   touch-action: auto;
+}
+
+.plan-actual-block:focus-visible {
+  outline: 2px solid var(--text);
+  outline-offset: 1px;
 }
 
 .plan-actual-block.on-time {
