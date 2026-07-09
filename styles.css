@@ -104,12 +104,8 @@ label {
 .brand-mark {
   width: 34px;
   height: 34px;
-  display: grid;
-  place-items: center;
   border-radius: 8px;
-  background: linear-gradient(135deg, #86efac, #20c997);
-  color: #0f2540;
-  font-weight: 900;
+  flex-shrink: 0;
 }
 
 .brand h1,
