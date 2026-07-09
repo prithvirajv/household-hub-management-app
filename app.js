@@ -83,6 +83,13 @@ function escapeHtml(value) {
     .replaceAll("'", "&#039;");
 }
 
+function initialsFromName(name) {
+  const words = String(name || "").trim().split(/\s+/).filter(Boolean);
+  if (!words.length) return "?";
+  const initials = words.length === 1 ? words[0].slice(0, 2) : words[0][0] + words[words.length - 1][0];
+  return initials.toUpperCase();
+}
+
 async function handleAuthExpired() {
   state = null;
   sessionUser = null;
@@ -465,6 +472,7 @@ function renderShell() {
   $("#householdName").textContent = title.toUpperCase();
   $("#userName").textContent = sessionUser?.name || "Demo User";
   $("#userEmail").textContent = sessionUser?.email || "demo@familyloop.net";
+  $("#userInitials").textContent = initialsFromName(sessionUser?.name || "Demo User");
   $("#monthPicker").value = state.budget.month;
   const isMealsView = currentView === "meals";
   $("#mealWeekHeaderControl").hidden = !isMealsView;
@@ -1336,6 +1344,13 @@ function renderDailyPlan() {
         <label>Repeat<select name="recurrence">${Object.entries(planRecurrenceLabels).map(([value, label]) => `<option value="${value}" ${editingTask && editingTask.recurrence === value ? "selected" : ""}>${label}</option>`).join("")}</select></label>
         <button type="submit">${editingTask ? "Save changes" : "Add"}</button>
         ${editingTask ? `<button class="ghost" id="cancelPlanTaskEditButton" type="button">Cancel</button>` : ""}
+        ${editingTask ? `
+          <div class="plan-actual-time-fields">
+            <span>What actually happened on ${dayLabel}</span>
+            <label>Actual start<input name="actualStartTime" type="time" value="${editingTask.actuals?.[planSelectedDate]?.startTime || ""}"></label>
+            <label>Actual end<input name="actualEndTime" type="time" value="${editingTask.actuals?.[planSelectedDate]?.endTime || ""}"></label>
+            <label>What did you actually work on? (if different)<input name="actualNote" placeholder="e.g. Replied to emails instead" value="${escapeHtml(editingTask.actuals?.[planSelectedDate]?.note || "")}"></label>
+          </div>` : ""}
       </form>
       ${unscheduled.length ? `<div class="plan-unscheduled"><h4>Unscheduled</h4>${unscheduled.map((task) => renderPlanTaskDaily(task)).join("")}</div>` : ""}
       <div class="plan-timeline" style="height:${timelineHeight}px">
@@ -1362,6 +1377,22 @@ function formatHourLabel(hour) {
   return `${displayHour} ${period}`;
 }
 
+function formatActualComparison(task, timeRangeLabel) {
+  const actual = task.actuals?.[planSelectedDate];
+  if (!actual) return "";
+  const { startDeltaMinutes, durationDeltaMinutes } = comparePlannedToActual({
+    plannedStartTime: task.startTime,
+    plannedDurationMinutes: Number(task.durationMinutes || 30),
+    actualStartTime: actual.startTime,
+    actualEndTime: actual.endTime
+  });
+  const parts = [`Actual ${actual.startTime || "?"}–${actual.endTime || "?"}`];
+  if (startDeltaMinutes) parts.push(`started ${Math.abs(startDeltaMinutes)} min ${startDeltaMinutes > 0 ? "late" : "early"}`);
+  if (durationDeltaMinutes) parts.push(`ran ${Math.abs(durationDeltaMinutes)} min ${durationDeltaMinutes > 0 ? "over" : "under"}`);
+  if (actual.note) parts.push(actual.note);
+  return parts.join(" · ");
+}
+
 function renderTimelineBlock(task, layoutInfo) {
   const startMinutes = timeToMinutes(task.startTime) - PLAN_TIMELINE_START_HOUR * 60;
   const duration = Number(task.durationMinutes || 30);
@@ -1379,13 +1410,15 @@ function renderTimelineBlock(task, layoutInfo) {
   const left = `calc(${gutter}px + (100% - ${gutter * 2}px) * ${column} / ${columns})`;
   const width = `calc((100% - ${gutter * 2}px) / ${columns} - ${gap}px)`;
   const timeRangeLabel = `${task.startTime}–${endTime}`;
-  return `<div class="plan-timeline-block ${done ? "done" : ""} ${compact ? "compact" : ""} ${editing ? "editing" : ""}" data-plan-task-id="${task.id}" style="top:${top}px;height:${height}px;left:${left};width:${width}" title="${escapeHtml(task.title)}: ${escapeHtml(timeRangeLabel)}">
+  const actualComparison = formatActualComparison(task, timeRangeLabel);
+  const tooltip = actualComparison ? `${task.title}: ${timeRangeLabel} · ${actualComparison}` : `${task.title}: ${timeRangeLabel}`;
+  return `<div class="plan-timeline-block ${done ? "done" : ""} ${compact ? "compact" : ""} ${editing ? "editing" : ""}" data-plan-task-id="${task.id}" style="top:${top}px;height:${height}px;left:${left};width:${width}" title="${escapeHtml(tooltip)}">
     <input type="checkbox" data-plan-task-check="${task.id}" ${done ? "checked" : ""} aria-label="Complete ${escapeHtml(task.title)}">
     <div class="plan-block-copy">
       <input class="plan-task-title" data-plan-task-title="${task.id}" value="${escapeHtml(task.title)}" aria-label="Task title">
       ${compact
         ? (compactSubtitle ? `<small>${escapeHtml(timeRangeLabel)}</small>` : "")
-        : `<small>${escapeHtml(timeRangeLabel)} · ${duration} min${task.recurrence && task.recurrence !== "none" ? ` · ${planRecurrenceLabels[task.recurrence]}` : ""}${task.subtasks?.length ? ` · ${task.subtasks.filter((item) => item.done).length}/${task.subtasks.length} subtasks` : ""}</small>`}
+        : `<small>${escapeHtml(timeRangeLabel)} · ${duration} min${task.recurrence && task.recurrence !== "none" ? ` · ${planRecurrenceLabels[task.recurrence]}` : ""}${task.subtasks?.length ? ` · ${task.subtasks.filter((item) => item.done).length}/${task.subtasks.length} subtasks` : ""}</small>${actualComparison ? `<small class="plan-actual-time">${escapeHtml(actualComparison)}</small>` : ""}`}
     </div>
     <button class="icon-button danger-button" data-delete-plan-task="${task.id}" type="button" aria-label="Delete task">×</button>
     <div class="plan-block-resize-handle" data-plan-resize="${task.id}"></div>
@@ -1394,12 +1427,15 @@ function renderTimelineBlock(task, layoutInfo) {
 
 function renderPlanTaskDaily(task) {
   const done = isDailyTaskDoneOnDate(task, planSelectedDate);
+  const actual = task.actuals?.[planSelectedDate];
   return `<div class="plan-task-row ${done ? "done" : ""}" data-plan-task-id="${task.id}">
     <input type="checkbox" data-plan-task-check="${task.id}" ${done ? "checked" : ""} aria-label="Complete ${escapeHtml(task.title)}">
     <div class="plan-task-copy">
       <input class="plan-task-title" data-plan-task-title="${task.id}" value="${escapeHtml(task.title)}" aria-label="Task title">
       ${task.recurrence && task.recurrence !== "none" ? `<small>${planRecurrenceLabels[task.recurrence]}</small>` : ""}
+      ${actual ? `<small>Actual: ${escapeHtml(actual.startTime || "?")}–${escapeHtml(actual.endTime || "?")}${actual.note ? ` · ${escapeHtml(actual.note)}` : ""}</small>` : ""}
     </div>
+    <button class="ghost" data-log-actual-time="${task.id}" type="button">Log actual time</button>
     <button class="icon-button danger-button" data-delete-plan-task="${task.id}" type="button" aria-label="Delete task">×</button>
   </div>${renderSubtasks(task)}`;
 }
@@ -2857,6 +2893,14 @@ function bindViewEvents() {
     render();
   });
 
+  document.querySelectorAll("[data-log-actual-time]").forEach((button) => {
+    button.addEventListener("click", () => {
+      planEditingDailyTaskId = button.dataset.logActualTime;
+      render();
+      $("#planTaskForm")?.scrollIntoView({ behavior: "smooth", block: "center" });
+    });
+  });
+
   (() => {
     const form = $("#planTaskForm");
     if (!form || planActiveBucket !== "daily") return;
@@ -2884,6 +2928,15 @@ function bindViewEvents() {
         task.startTime = data.startTime || "";
         task.durationMinutes = Math.max(5, Number(data.durationMinutes || 30));
         task.recurrence = data.recurrence || "none";
+        const actualStartTime = (data.actualStartTime || "").trim();
+        const actualEndTime = (data.actualEndTime || "").trim();
+        const actualNote = (data.actualNote || "").trim();
+        task.actuals ||= {};
+        if (actualStartTime || actualEndTime || actualNote) {
+          task.actuals[planSelectedDate] = { startTime: actualStartTime, endTime: actualEndTime, note: actualNote };
+        } else {
+          delete task.actuals[planSelectedDate];
+        }
       }
       planEditingDailyTaskId = null;
       autosavePlans();

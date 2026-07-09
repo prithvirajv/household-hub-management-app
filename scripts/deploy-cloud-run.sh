@@ -44,6 +44,15 @@ REQUIRE_SMTP="${REQUIRE_SMTP:-true}"
 NOTIFICATION_SECRET="${NOTIFICATION_SECRET:?Set NOTIFICATION_SECRET to authorize the scheduled notification worker}"
 GCS_BUCKET="${GCS_BUCKET:-}"
 
+# Every credential above is stored in Secret Manager, not passed to Cloud Run
+# as a plaintext env var — this script only reads them from the environment
+# once, to seed/update the corresponding secret.
+DB_PASSWORD_SECRET="${DB_PASSWORD_SECRET:-familyloop-db-password}"
+SESSION_SECRET_NAME="${SESSION_SECRET_NAME:-familyloop-session-secret}"
+ADMIN_PASSWORD_SECRET="${ADMIN_PASSWORD_SECRET:-familyloop-admin-password}"
+SMTP_PASS_SECRET="${SMTP_PASS_SECRET:-familyloop-smtp-pass}"
+NOTIFICATION_SECRET_NAME="${NOTIFICATION_SECRET_NAME:-familyloop-notification-secret}"
+
 if [[ -z "${DB_PASSWORD}" ]]; then
   echo "Set DB_PASSWORD or POSTGRES_PASSWORD for Cloud SQL" >&2
   exit 1
@@ -64,7 +73,24 @@ gcloud services enable \
   cloudbuild.googleapis.com \
   run.googleapis.com \
   sqladmin.googleapis.com \
+  secretmanager.googleapis.com \
   --project "${PROJECT_ID}"
+
+RUNTIME_SERVICE_ACCOUNT="$(gcloud iam service-accounts list --project "${PROJECT_ID}" --filter="displayName:'Compute Engine default service account'" --format='value(email)')"
+
+put_secret() {
+  local secret_name="$1"
+  local secret_value="$2"
+  if ! gcloud secrets describe "${secret_name}" --project "${PROJECT_ID}" >/dev/null 2>&1; then
+    printf '%s' "${secret_value}" | gcloud secrets create "${secret_name}" --project "${PROJECT_ID}" --data-file=-
+  else
+    printf '%s' "${secret_value}" | gcloud secrets versions add "${secret_name}" --project "${PROJECT_ID}" --data-file=-
+  fi
+  gcloud secrets add-iam-policy-binding "${secret_name}" \
+    --project "${PROJECT_ID}" \
+    --member="serviceAccount:${RUNTIME_SERVICE_ACCOUNT}" \
+    --role="roles/secretmanager.secretAccessor" >/dev/null
+}
 
 if ! gcloud artifacts repositories describe "${REPOSITORY}" --location "${REGION}" --project "${PROJECT_ID}" >/dev/null 2>&1; then
   gcloud artifacts repositories create "${REPOSITORY}" \
@@ -116,7 +142,20 @@ if [[ "${SETUP_ONLY}" == "true" ]]; then
   exit 0
 fi
 
+put_secret "${DB_PASSWORD_SECRET}" "${DB_PASSWORD}"
+put_secret "${SESSION_SECRET_NAME}" "${SESSION_SECRET}"
+put_secret "${ADMIN_PASSWORD_SECRET}" "${ADMIN_PASSWORD}"
+put_secret "${NOTIFICATION_SECRET_NAME}" "${NOTIFICATION_SECRET}"
+if [[ -n "${SMTP_PASS}" ]]; then
+  put_secret "${SMTP_PASS_SECRET}" "${SMTP_PASS}"
+fi
+
 gcloud builds submit --tag "${IMAGE}" --project "${PROJECT_ID}" .
+
+SECRET_REFS="DB_PASSWORD=${DB_PASSWORD_SECRET}:latest,SESSION_SECRET=${SESSION_SECRET_NAME}:latest,ADMIN_PASSWORD=${ADMIN_PASSWORD_SECRET}:latest,NOTIFICATION_SECRET=${NOTIFICATION_SECRET_NAME}:latest"
+if [[ -n "${SMTP_PASS}" ]]; then
+  SECRET_REFS="${SECRET_REFS},SMTP_PASS=${SMTP_PASS_SECRET}:latest"
+fi
 
 gcloud run deploy "${SERVICE_NAME}" \
   --project "${PROJECT_ID}" \
@@ -132,7 +171,8 @@ gcloud run deploy "${SERVICE_NAME}" \
   --cpu-throttling \
   --no-cpu-boost \
   --add-cloudsql-instances "${CONNECTION_NAME}" \
-  --set-env-vars "CLOUD_SQL_CONNECTION_NAME=${CONNECTION_NAME},DB_NAME=${DB_NAME},DB_USER=${DB_USER},DB_PASSWORD=${DB_PASSWORD},SESSION_SECRET=${SESSION_SECRET},ADMIN_EMAIL=${ADMIN_EMAIL},ADMIN_PASSWORD=${ADMIN_PASSWORD},ADMIN_NAME=${ADMIN_NAME},APP_BASE_URL=${APP_BASE_URL},EMAIL_FROM=${EMAIL_FROM},SMTP_HOST=${SMTP_HOST},SMTP_PORT=${SMTP_PORT},SMTP_SECURE=${SMTP_SECURE},SMTP_USER=${SMTP_USER},SMTP_PASS=${SMTP_PASS},NOTIFICATION_SECRET=${NOTIFICATION_SECRET},GCS_BUCKET=${GCS_BUCKET}"
+  --set-secrets "${SECRET_REFS}" \
+  --set-env-vars "CLOUD_SQL_CONNECTION_NAME=${CONNECTION_NAME},DB_NAME=${DB_NAME},DB_USER=${DB_USER},ADMIN_EMAIL=${ADMIN_EMAIL},ADMIN_NAME=${ADMIN_NAME},APP_BASE_URL=${APP_BASE_URL},EMAIL_FROM=${EMAIL_FROM},SMTP_HOST=${SMTP_HOST},SMTP_PORT=${SMTP_PORT},SMTP_SECURE=${SMTP_SECURE},SMTP_USER=${SMTP_USER},GCS_BUCKET=${GCS_BUCKET}"
 
 SERVICE_URL="$(gcloud run services describe "${SERVICE_NAME}" --project "${PROJECT_ID}" --region "${REGION}" --format='value(status.url)')"
 

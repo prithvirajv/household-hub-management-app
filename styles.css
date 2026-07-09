@@ -3693,6 +3693,38 @@ main {
   width: 160px;
 }
 
+.plan-actual-time-fields {
+  flex: 1 0 100%;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: end;
+  gap: 0.6rem;
+  padding-top: 0.6rem;
+  margin-top: 0.4rem;
+  border-top: 1px dashed var(--line);
+}
+
+.plan-actual-time-fields > span {
+  flex: 1 0 100%;
+  font-size: 0.72rem;
+  font-weight: 800;
+  color: var(--muted);
+  text-transform: uppercase;
+}
+
+.plan-actual-time-fields input[type="time"] {
+  width: 130px;
+}
+
+.plan-actual-time-fields input[type="text"],
+.plan-actual-time-fields input:not([type]) {
+  width: 220px;
+}
+
+.plan-actual-time {
+  color: var(--coral);
+}
+
 .plan-unscheduled {
   display: grid;
   gap: 0.5rem;

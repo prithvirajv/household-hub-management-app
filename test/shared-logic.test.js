@@ -3,7 +3,7 @@ const test = require("node:test");
 const {
   applyChecklistToggle, bucketChecklistItems, findChecklistDuplicate, mealWeeksForMonth, groupPlanTasksByBucket, validateJournalPayload,
   dailyTaskOccursOnDate, isDailyTaskDoneOnDate, toggleDailyTaskDoneOnDate,
-  timeToMinutes, minutesToTime, snapMinutes, layoutTimelineBlocks,
+  timeToMinutes, minutesToTime, snapMinutes, layoutTimelineBlocks, comparePlannedToActual,
   sanitizeFilename, buildDocumentObjectPath, wouldCreateFolderCycle, buildFolderTree
 } = require("../lib/shared-logic");
 
@@ -352,4 +352,28 @@ test("snapMinutes rounds to the nearest step", () => {
   assert.equal(snapMinutes(52, 15), 45);
   assert.equal(snapMinutes(58, 15), 60);
   assert.equal(snapMinutes(0, 15), 0);
+});
+
+test("comparePlannedToActual reports a positive start delta when the task started later than planned", () => {
+  const result = comparePlannedToActual({ plannedStartTime: "09:00", plannedDurationMinutes: 30, actualStartTime: "09:15", actualEndTime: "09:45" });
+  assert.equal(result.startDeltaMinutes, 15);
+  assert.equal(result.durationDeltaMinutes, 0);
+});
+
+test("comparePlannedToActual reports a negative start delta when the task started earlier than planned", () => {
+  const result = comparePlannedToActual({ plannedStartTime: "09:00", plannedDurationMinutes: 30, actualStartTime: "08:50", actualEndTime: "09:20" });
+  assert.equal(result.startDeltaMinutes, -10);
+  assert.equal(result.durationDeltaMinutes, 0);
+});
+
+test("comparePlannedToActual reports a positive duration delta when the task ran longer than planned", () => {
+  const result = comparePlannedToActual({ plannedStartTime: "09:00", plannedDurationMinutes: 30, actualStartTime: "09:00", actualEndTime: "09:50" });
+  assert.equal(result.startDeltaMinutes, 0);
+  assert.equal(result.durationDeltaMinutes, 20);
+});
+
+test("comparePlannedToActual returns null deltas when planned or actual times are missing", () => {
+  assert.deepEqual(comparePlannedToActual({ plannedStartTime: "", plannedDurationMinutes: 30, actualStartTime: "09:15", actualEndTime: "09:45" }), { startDeltaMinutes: null, durationDeltaMinutes: 0 });
+  assert.deepEqual(comparePlannedToActual({ plannedStartTime: "09:00", plannedDurationMinutes: 30, actualStartTime: "", actualEndTime: "" }), { startDeltaMinutes: null, durationDeltaMinutes: null });
+  assert.deepEqual(comparePlannedToActual({ plannedStartTime: "09:00", plannedDurationMinutes: 30, actualStartTime: "09:15", actualEndTime: "" }), { startDeltaMinutes: 15, durationDeltaMinutes: null });
 });
