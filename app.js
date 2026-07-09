@@ -1,7 +1,7 @@
 const views = [
   ["budget", "Budget", "▦"],
   ["transactions", "Transactions", "☰"],
-  ["paychecks", "Paychecks", "☑"],
+  ["paychecks", "Paycheck/Income", "☑"],
   ["calendar", "Calendar", "⌂"],
   ["notes", "Notes", "✎"],
   ["journal", "Journal", "✒"],
@@ -743,9 +743,9 @@ function renderPaychecks() {
     <section class="work-grid">
       <div class="main-stack">
         <section class="card">
-          <div class="section-head"><div><span class="card-label">Cash flow</span><h3>Paycheck plan</h3></div><button id="addPaycheckButton" type="button">+ Add paycheck</button></div>
+          <div class="section-head"><div><span class="card-label">Cash flow</span><h3>Paycheck/Income plan</h3></div><button id="addPaycheckButton" type="button">+ Add paycheck/income</button></div>
           <div class="paycheck-builder">
-            <label>Paycheck<select id="paycheckSelect">${paycheckOptions}</select></label>
+            <label>Paycheck/Income<select id="paycheckSelect">${paycheckOptions}</select></label>
             <label>Budget line<select id="paycheckLineSelect">${lineOptions}</select></label>
             <label>Amount<select id="paycheckAmountSelect">${amountOptions}</select></label>
             <button id="assignBillButton" type="button">Assign bill</button>
@@ -2201,7 +2201,7 @@ function scheduleItems() {
     .sort((a, b) => a.date.localeCompare(b.date));
 }
 
-const paycheckRecurrenceLabels = { once: "One-time", weekly: "Weekly", biweekly: "Biweekly", monthly: "Monthly" };
+const paycheckRecurrenceLabels = { once: "One-time", bonus: "Bonus (one-time)", weekly: "Weekly", biweekly: "Biweekly", monthly: "Monthly" };
 
 function ensurePaycheckRecurrenceData() {
   state.paychecks.forEach((paycheck) => {
@@ -3477,7 +3477,7 @@ function bindViewEvents() {
   });
 
   $("#addPaycheckButton")?.addEventListener("click", () => {
-    state.paychecks.push({ date: new Date().toISOString().slice(0, 10), name: `Paycheck ${state.paychecks.length + 1}`, amount: 0, assignedLineIds: [], recurrence: "monthly" });
+    state.paychecks.push({ date: new Date().toISOString().slice(0, 10), name: `Paycheck/Income ${state.paychecks.length + 1}`, amount: 0, assignedLineIds: [], recurrence: "monthly" });
     render();
   });
 
@@ -5141,7 +5141,7 @@ function downloadCsv() {
       const line = allLines().find((item) => item.id === transaction.lineId);
       return [transaction.date, transaction.payee, Number(transaction.amount || 0).toFixed(2), line?.category || transaction.categoryName || "", line?.name || "Unassigned", transaction.memo || ""];
     })],
-    paychecks: () => [["date", "paycheck", "amount", "assigned_subcategories"], ...state.paychecks.map((paycheck) => [paycheck.date, paycheck.name, Number(paycheck.amount || 0).toFixed(2), (paycheck.assignedLineIds || []).map((id) => allLines().find((line) => line.id === id)?.name || id).join("; ")])],
+    paychecks: () => [["date", "paycheck_income", "amount", "assigned_subcategories"], ...state.paychecks.map((paycheck) => [paycheck.date, paycheck.name, Number(paycheck.amount || 0).toFixed(2), (paycheck.assignedLineIds || []).map((id) => allLines().find((line) => line.id === id)?.name || id).join("; ")])],
     calendar: () => [["kind", "title", "date_time", "assigned_to", "repeat"], ...state.calendar.events.map((item) => [item.type, item.title, item.dateTime || item.date, item.ownerName || item.owner || "", item.annual ? "Yearly" : "Once"]), ...state.calendar.chores.map((item) => ["chore", item.title, `${item.startDate || item.nextDue}T${item.time || "09:00"}`, item.assigneeName || item.assignee || "", choreCadenceLabel(item)])],
     meals: () => [["month", "week", "day", "meal", "recipe", "servings"], ...state.meals.plannedWeek.map((item) => [item.month || state.budget.month, item.week || 1, item.day, item.slot || "Dinner", item.meal, item.servings])],
     recipes: () => [["recipe", "calories", "protein_g", "ingredients"], ...state.meals.recipes.map((recipe) => [recipe.name, recipe.calories, recipe.protein, (recipe.ingredients || []).join("; ")])],
