@@ -1,6 +1,6 @@
-# Famelo
+# FamilyLoop
 
-Famelo is a deployable household management SaaS: zero-based budgeting, shared notes and checklists, chores, birthdays, meals, groceries, goals, debt, net worth, and reports.
+FamilyLoop is a deployable household management SaaS: zero-based budgeting, shared notes and checklists, chores, birthdays, meals, groceries, goals, debt, net worth, and reports.
 
 ## Stack
 
@@ -63,7 +63,7 @@ The Compose database uses:
 
 ## Transactional Email
 
-Famelo sends a welcome email after signup and an invitation email when an owner shares a household. Configure an SMTP account with:
+FamilyLoop sends a welcome email after signup and an invitation email when an owner shares a household. Configure an SMTP account with:
 
 - `APP_BASE_URL`
 - `EMAIL_FROM`
@@ -91,14 +91,14 @@ SMTP_PORT="587"
 SMTP_SECURE="false"
 SMTP_USER="your-brevo-smtp-login"
 SMTP_PASS="your-brevo-smtp-key"
-EMAIL_FROM="Famelo <your-verified-sender@example.com>"
+EMAIL_FROM="FamilyLoop <your-verified-sender@example.com>"
 ```
 
 The SMTP key is a secret. Keep it in local environment variables or the Kubernetes Secret and never commit it.
 
 ## GKE Deployment
 
-The deployment script creates a small one-node zonal GKE cluster when the named cluster does not exist. It deploys one Famelo pod and, by default, one PostgreSQL StatefulSet with a 10 Gi persistent volume. This is suitable for an initial MVP; migrate PostgreSQL to Cloud SQL before relying on multi-zone availability.
+The deployment script creates a small one-node zonal GKE cluster when the named cluster does not exist. It deploys one FamilyLoop pod and, by default, one PostgreSQL StatefulSet with a 10 Gi persistent volume. This is suitable for an initial MVP; migrate PostgreSQL to Cloud SQL before relying on multi-zone availability.
 
 The application container runs as a non-root user with a read-only root filesystem, supports graceful termination, and uses separate liveness and database-aware readiness endpoints. The Deployment uses a rolling update strategy and can be scaled horizontally after PostgreSQL is moved to a managed, highly available service.
 
@@ -132,7 +132,7 @@ ADMIN_NAME="Application Owner" \
 POSTGRES_PASSWORD="$(openssl rand -hex 24)" \
 SMTP_USER="your-brevo-smtp-login" \
 SMTP_PASS="your-brevo-smtp-key" \
-EMAIL_FROM="Famelo <your-verified-sender@example.com>" \
+EMAIL_FROM="FamilyLoop <your-verified-sender@example.com>" \
 ./scripts/deploy-gke.sh
 ```
 
@@ -156,7 +156,7 @@ SETUP_ONLY=true ./scripts/deploy-cloud-run.sh
 # 2. Copy the existing in-cluster PostgreSQL data to Cloud SQL.
 ./scripts/migrate-gke-postgres-to-cloud-sql.sh
 
-# 3. Deploy Famelo to Cloud Run using the migrated Cloud SQL database.
+# 3. Deploy FamilyLoop to Cloud Run using the migrated Cloud SQL database.
 ./scripts/deploy-cloud-run.sh
 ```
 
@@ -164,7 +164,7 @@ Important notes:
 
 - Do not delete the GKE cluster until Cloud Run has been verified and DNS has been moved.
 - Cloud SQL is still an always-on database cost. If traffic stays under a few visits per day, an external free-tier PostgreSQL provider can be cheaper; set `CLOUD_SQL_CREATE=false` and deploy with provider-specific database environment variables after adapting the connection settings.
-- After Cloud Run is verified, point `famelo.net` and `www.famelo.net` to Cloud Run with a Cloud Run domain mapping or a small external HTTPS load balancer, then remove the old GKE ingress, static IP, and cluster.
+- After Cloud Run is verified, point `familyloop.net` and `www.familyloop.net` to Cloud Run with a Cloud Run domain mapping or a small external HTTPS load balancer, then remove the old GKE ingress, static IP, and cluster.
 
 ### Production DNS and HTTPS
 
@@ -174,14 +174,14 @@ The transition deployment keeps the existing reserved global IP and hostname ava
 
 The target branded domain is:
 
-`https://famelo.net`
+`https://familyloop.net`
 
 To activate it:
 
 1. Create an `A` record for `@` pointing to `8.233.48.73`.
-2. Create either an `A` record for `www` pointing to `8.233.48.73` or a `CNAME` from `www` to `famelo.net`.
-3. Apply `k8s/`; `famelo-certificate` provisions independently from the existing certificate.
+2. Create either an `A` record for `www` pointing to `8.233.48.73` or a `CNAME` from `www` to `familyloop.net`.
+3. Apply `k8s/`; `familyloop-certificate` provisions independently from the existing certificate.
 4. Wait for the `ManagedCertificate` status to become `Active`.
-5. Set `APP_BASE_URL=https://famelo.net` in the Kubernetes Secret so invitation and password-reset links use the branded domain.
+5. Set `APP_BASE_URL=https://familyloop.net` in the Kubernetes Secret so invitation and password-reset links use the branded domain.
 
 Do not remove the existing hostname until the replacement certificate is active.

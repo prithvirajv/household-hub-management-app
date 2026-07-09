@@ -464,7 +464,7 @@ function renderShell() {
           : `${monthLabel()} plan`;
   $("#householdName").textContent = title.toUpperCase();
   $("#userName").textContent = sessionUser?.name || "Demo User";
-  $("#userEmail").textContent = sessionUser?.email || "demo@famelo.net";
+  $("#userEmail").textContent = sessionUser?.email || "demo@familyloop.net";
   $("#monthPicker").value = state.budget.month;
   const isMealsView = currentView === "meals";
   $("#mealWeekHeaderControl").hidden = !isMealsView;
@@ -1906,7 +1906,7 @@ function renderHelp() {
     <section class="help-layout">
       <section class="help-visual-hero">
         <div>
-          <span class="card-label">Famelo guide</span>
+          <span class="card-label">FamilyLoop guide</span>
           <h3>One household plan, shared clearly</h3>
           <p>Follow practical steps for money, meals, schedules, notes, and family access.</p>
         </div>
@@ -1925,7 +1925,7 @@ function renderHelp() {
         `).join("")}
       </section>
       <section class="help-visual-feature">
-        <img src="assets/famelo-help-calendar-meals.jpg" alt="A shared weekly calendar, meal plan, and grocery checklist">
+        <img src="assets/familyloop-help-calendar-meals.jpg" alt="A shared weekly calendar, meal plan, and grocery checklist">
         <div><span class="card-label">Plan once, use it everywhere</span><h3>Connect the weekly details</h3><p>Add recurring chores in Calendar, save reusable recipes, then plan meals and groceries for the selected week. Each area stays editable by the household.</p></div>
       </section>
       <section class="help-columns">
@@ -1945,10 +1945,10 @@ function renderHelp() {
           <h3>Password and sign-in</h3>
           <ol>
             <li>Select <strong>Forgot password?</strong> on the sign-in screen.</li>
-            <li>Open the one-time reset link sent by Famelo. It expires after 30 minutes.</li>
+            <li>Open the one-time reset link sent by FamilyLoop. It expires after 30 minutes.</li>
             <li>Choose a password with at least 12 characters, then sign in normally.</li>
           </ol>
-          <p class="help-note">Check Spam and All Mail if a Famelo email is not visible in the inbox.</p>
+          <p class="help-note">Check Spam and All Mail if a FamilyLoop email is not visible in the inbox.</p>
         </article>
       </section>
       <section class="help-footer">
@@ -4786,7 +4786,7 @@ async function loadApp() {
 
 function setAuthShell(title) {
   document.body.classList.add("auth-mode");
-  $("#householdName").textContent = "Famelo";
+  $("#householdName").textContent = "FamilyLoop";
   $("#viewTitle").textContent = title;
 }
 
@@ -4900,7 +4900,7 @@ function downloadCsv() {
   const url = URL.createObjectURL(blob);
   const link = document.createElement("a");
   link.href = url;
-  link.download = `famelo-${currentView}-${state.budget.month}.csv`;
+  link.download = `familyloop-${currentView}-${state.budget.month}.csv`;
   document.body.appendChild(link);
   link.click();
   link.remove();

@@ -6,7 +6,7 @@ resources:
   - deployment.yaml
   - service.yaml
   - managed-certificate.yaml
-  - famelo-managed-certificate.yaml
+  - familyloop-managed-certificate.yaml
   - frontend-config.yaml
   - ingress.yaml
 images:

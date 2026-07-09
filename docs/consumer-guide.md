@@ -1,6 +1,6 @@
-# Famelo Consumer Guide
+# FamilyLoop Consumer Guide
 
-Famelo brings household budgets, transactions, calendars, chores, meals, goals, and shared planning into one workspace.
+FamilyLoop brings household budgets, transactions, calendars, chores, meals, goals, and shared planning into one workspace.
 
 ## Getting Started
 
@@ -28,7 +28,7 @@ Invitation codes become invalid after acceptance.
 
 ## Password Recovery
 
-Select **Forgot password?** on the sign-in screen. Famelo sends a one-time reset link that expires after 30 minutes. Check Spam and All Mail if the message does not appear in the inbox.
+Select **Forgot password?** on the sign-in screen. FamilyLoop sends a one-time reset link that expires after 30 minutes. Check Spam and All Mail if the message does not appear in the inbox.
 
 ## Budget and Transactions
 

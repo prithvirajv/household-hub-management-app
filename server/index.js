@@ -27,17 +27,17 @@ const DB_USER = String(process.env.DB_USER || "").trim();
 const DB_PASSWORD = String(process.env.DB_PASSWORD || "");
 const DB_NAME = String(process.env.DB_NAME || "").trim();
 const MEMORY_DB = String(process.env.MEMORY_DB || "false").toLowerCase() === "true";
-const DEMO_EMAIL = "demo@famelo.net";
+const DEMO_EMAIL = "demo@familyloop.net";
 const LEGACY_DEMO_EMAIL = "demo@householdhub.app";
 const ADMIN_EMAIL = String(process.env.ADMIN_EMAIL || "").trim().toLowerCase();
 const ADMIN_PASSWORD = String(process.env.ADMIN_PASSWORD || "");
-const ADMIN_NAME = String(process.env.ADMIN_NAME || "Famelo Administrator").trim();
+const ADMIN_NAME = String(process.env.ADMIN_NAME || "FamilyLoop Administrator").trim();
 const SMTP_HOST = String(process.env.SMTP_HOST || "").trim();
 const SMTP_PORT = Number(process.env.SMTP_PORT || 587);
 const SMTP_SECURE = String(process.env.SMTP_SECURE || "false").toLowerCase() === "true";
 const SMTP_USER = String(process.env.SMTP_USER || "").trim();
 const SMTP_PASS = String(process.env.SMTP_PASS || "");
-const EMAIL_FROM = String(process.env.EMAIL_FROM || "Famelo <no_reply@famelo.net>").trim();
+const EMAIL_FROM = String(process.env.EMAIL_FROM || "FamilyLoop <no_reply@familyloop.net>").trim();
 const APP_BASE_URL = String(process.env.APP_BASE_URL || `http://localhost:${PORT}`).replace(/\/+$/, "");
 const NOTIFICATION_SECRET = String(process.env.NOTIFICATION_SECRET || "").trim();
 const NOTIFICATION_LEASE_MS = Math.max(50, Number(process.env.NOTIFICATION_LEASE_MS || "") || 10 * 60 * 1000);
@@ -196,7 +196,7 @@ async function sendExpoPush(tokens, title) {
     const response = await fetch(EXPO_PUSH_URL, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(tokens.map((token) => ({ to: token, title: "Famelo reminder", body: title, sound: "default" })))
+      body: JSON.stringify(tokens.map((token) => ({ to: token, title: "FamilyLoop reminder", body: title, sound: "default" })))
     });
     const body = await response.json().catch(() => ({}));
     const tickets = Array.isArray(body.data) ? body.data : [];
@@ -231,8 +231,8 @@ function sendReminderEmail({ email, title, dueAt }) {
   return sendTransactionalEmail({
     to: email,
     subject: `Reminder: ${title}`,
-    text: `Famelo reminder: ${title}, due ${dueLabel}. Open ${APP_BASE_URL} for details.`,
-    html: `<h2>Famelo reminder</h2><p>${escapeHtml(title)}</p><p>Due ${escapeHtml(dueLabel)}</p><p><a href="${escapeHtml(APP_BASE_URL)}">Open Famelo</a></p>`
+    text: `FamilyLoop reminder: ${title}, due ${dueLabel}. Open ${APP_BASE_URL} for details.`,
+    html: `<h2>FamilyLoop reminder</h2><p>${escapeHtml(title)}</p><p>Due ${escapeHtml(dueLabel)}</p><p><a href="${escapeHtml(APP_BASE_URL)}">Open FamilyLoop</a></p>`
   });
 }
 
@@ -327,9 +327,9 @@ function sendWelcomeEmail({ email, name, householdName }) {
   const safeHousehold = escapeHtml(householdName);
   return sendTransactionalEmail({
     to: email,
-    subject: "Welcome to Famelo",
-    text: `Hi ${name}, your Famelo login has been created for ${householdName}. Open ${APP_BASE_URL} to get started.`,
-    html: `<h2>Welcome to Famelo</h2><p>Hi ${safeName},</p><p>Your login has been created for <strong>${safeHousehold}</strong>.</p><p><a href="${escapeHtml(APP_BASE_URL)}">Open Famelo</a> to get started.</p>`
+    subject: "Welcome to FamilyLoop",
+    text: `Hi ${name}, your FamilyLoop login has been created for ${householdName}. Open ${APP_BASE_URL} to get started.`,
+    html: `<h2>Welcome to FamilyLoop</h2><p>Hi ${safeName},</p><p>Your login has been created for <strong>${safeHousehold}</strong>.</p><p><a href="${escapeHtml(APP_BASE_URL)}">Open FamilyLoop</a> to get started.</p>`
   });
 }
 
@@ -337,9 +337,9 @@ function sendPasswordResetEmail({ email, name, token }) {
   const resetUrl = `${APP_BASE_URL}/index.html?resetToken=${encodeURIComponent(token)}&email=${encodeURIComponent(email)}`;
   return sendTransactionalEmail({
     to: email,
-    subject: "Reset your Famelo password",
-    text: `Hi ${name}, use this one-time link within 30 minutes to reset your Famelo password: ${resetUrl}`,
-    html: `<h2>Reset your Famelo password</h2><p>Hi ${escapeHtml(name)},</p><p>This one-time link expires in 30 minutes.</p><p><a href="${escapeHtml(resetUrl)}">Reset password</a></p><p>If you did not request this, you can ignore this email.</p>`
+    subject: "Reset your FamilyLoop password",
+    text: `Hi ${name}, use this one-time link within 30 minutes to reset your FamilyLoop password: ${resetUrl}`,
+    html: `<h2>Reset your FamilyLoop password</h2><p>Hi ${escapeHtml(name)},</p><p>This one-time link expires in 30 minutes.</p><p><a href="${escapeHtml(resetUrl)}">Reset password</a></p><p>If you did not request this, you can ignore this email.</p>`
   });
 }
 
@@ -359,8 +359,8 @@ function sendHouseholdInvitesEmail({ email, name, inviterName, invites }) {
   return sendTransactionalEmail({
     to: email,
     subject,
-    text: `Hi ${name}, ${inviterName} invited you to Famelo:\n\n${blocks.map((block) => block.text).join("\n\n")}\n\nEach household needs its own invite code accepted separately.`,
-    html: `<h2>You have been invited to Famelo</h2><p>Hi ${escapeHtml(name)},</p><p><strong>${escapeHtml(inviterName)}</strong> invited you to:</p>${blocks.map((block) => block.html).join("")}${invites.length > 1 ? "<p>Each household needs its own invite code accepted separately.</p>" : ""}`
+    text: `Hi ${name}, ${inviterName} invited you to FamilyLoop:\n\n${blocks.map((block) => block.text).join("\n\n")}\n\nEach household needs its own invite code accepted separately.`,
+    html: `<h2>You have been invited to FamilyLoop</h2><p>Hi ${escapeHtml(name)},</p><p><strong>${escapeHtml(inviterName)}</strong> invited you to:</p>${blocks.map((block) => block.html).join("")}${invites.length > 1 ? "<p>Each household needs its own invite code accepted separately.</p>" : ""}`
   });
 }
 
@@ -368,8 +368,8 @@ function sendHouseholdAccessRevokedEmail({ email, name, ownerName, householdName
   return sendTransactionalEmail({
     to: email,
     subject: `Your access to ${householdName} was removed`,
-    text: `Hi ${name}, ${ownerName} removed your access to ${householdName} in Famelo. Contact the household owner if you believe this was a mistake.`,
-    html: `<h2>Household access removed</h2><p>Hi ${escapeHtml(name)},</p><p><strong>${escapeHtml(ownerName)}</strong> removed your access to <strong>${escapeHtml(householdName)}</strong> in Famelo.</p><p>Contact the household owner if you believe this was a mistake.</p>`
+    text: `Hi ${name}, ${ownerName} removed your access to ${householdName} in FamilyLoop. Contact the household owner if you believe this was a mistake.`,
+    html: `<h2>Household access removed</h2><p>Hi ${escapeHtml(name)},</p><p><strong>${escapeHtml(ownerName)}</strong> removed your access to <strong>${escapeHtml(householdName)}</strong> in FamilyLoop.</p><p>Contact the household owner if you believe this was a mistake.</p>`
   });
 }
 
@@ -2601,7 +2601,7 @@ app.post("/api/internal/notifications/process", requireNotificationSecret, async
     for (const [userId, userJobs] of jobsByUser) {
       const tokens = pushTokensByUser.get(userId) || [];
       if (!tokens.length) continue;
-      const title = userJobs.length === 1 ? userJobs[0].title : `${userJobs.length} Famelo reminders`;
+      const title = userJobs.length === 1 ? userJobs[0].title : `${userJobs.length} FamilyLoop reminders`;
       const { sentCount, invalidTokens } = await sendExpoPush(tokens, title);
       pushSent += sentCount;
       invalidTokens.forEach((token) => allInvalidTokens.add(token));
@@ -2659,7 +2659,7 @@ async function main() {
   await seedDemoUser();
   await seedAdminUser();
   httpServer = app.listen(PORT, () => {
-    console.log(`Famelo listening on ${PORT}`);
+    console.log(`FamilyLoop listening on ${PORT}`);
   });
 }
 

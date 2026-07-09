@@ -1,9 +1,9 @@
 apiVersion: networking.gke.io/v1
 kind: ManagedCertificate
 metadata:
-  name: famelo-certificate
+  name: familyloop-certificate
   namespace: household-hub
 spec:
   domains:
-    - famelo.net
-    - www.famelo.net
+    - familyloop.net
+    - www.familyloop.net
