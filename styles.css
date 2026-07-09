@@ -882,11 +882,27 @@ main {
 
 .budget-money-row {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 150px 150px;
+  grid-template-columns: minmax(0, 1fr) 150px 150px 140px;
   gap: 0.75rem;
   align-items: center;
   padding: 0.55rem 0;
   border-bottom: 1px solid #1f8ee8;
+}
+
+.income-recurrence-select {
+  border: 1px solid transparent;
+  border-radius: 4px;
+  min-height: 32px;
+  background: transparent;
+  padding: 0.2rem 0.35rem;
+  color: var(--text);
+  font-weight: 700;
+}
+
+.income-recurrence-select:focus {
+  border-color: #1f8ee8;
+  background: white;
+  outline: 0;
 }
 
 .line-name-input,
@@ -1456,6 +1472,22 @@ main {
   align-items: center;
   gap: 0.5rem;
   flex-shrink: 0;
+}
+
+.paycheck-amount-input {
+  width: 110px;
+  text-align: right;
+  font-weight: 800;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 0.3rem 0.5rem;
+  background: white;
+  color: var(--text);
+}
+
+.paycheck-amount-input:focus {
+  border-color: var(--green);
+  outline: 0;
 }
 
 .paycheck-recurrence-field {

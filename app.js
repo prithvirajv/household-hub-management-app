@@ -565,6 +565,7 @@ const renderers = {
 };
 
 function renderBudget() {
+  ensurePaycheckRecurrenceData();
   const setupStarted = state.budget.setupStarted ?? (state.paychecks.length > 0 || state.budget.categories.length > 0);
   if (!setupStarted) {
     return `<section class="onboarding-empty budget-onboarding">
@@ -590,6 +591,7 @@ function renderBudget() {
               <input class="line-name-input" data-income-name="${index}" value="${paycheck.name}">
               <input class="money-input" data-income-amount="${index}" type="number" step="0.01" value="${paycheck.amount}">
               <strong data-income-remaining="${index}">${exactMoney.format(paycheck.amount)}</strong>
+              <select class="income-recurrence-select" data-income-recurrence="${index}" aria-label="How often ${escapeHtml(paycheck.name)} repeats">${Object.entries(paycheckRecurrenceLabels).map(([value, label]) => `<option value="${value}" ${paycheck.recurrence === value ? "selected" : ""}>${label}</option>`).join("")}</select>
             </div>
           `).join("")}
           <button id="addIncomeButton" class="link-button" type="button">Add income</button>
@@ -755,14 +757,14 @@ function renderPaychecks() {
                 <div class="section-head">
                   <h3>${paycheck.name}</h3>
                   <div class="paycheck-card-actions">
-                    <span class="pill">${money.format(paycheck.amount)}</span>
+                    <input class="money-input paycheck-amount-input" data-paycheck-amount="${index}" type="number" step="0.01" value="${paycheck.amount}" aria-label="Amount for ${escapeHtml(paycheck.name)}">
                     <button class="icon-button danger-button" data-delete-paycheck="${index}" type="button" aria-label="Delete ${escapeHtml(paycheck.name)}">×</button>
                   </div>
                 </div>
                 <small>${paycheck.date}</small>
                 <label class="paycheck-recurrence-field">Repeat<select data-paycheck-recurrence="${index}" aria-label="How often ${escapeHtml(paycheck.name)} repeats">${Object.entries(paycheckRecurrenceLabels).map(([value, label]) => `<option value="${value}" ${paycheck.recurrence === value ? "selected" : ""}>${label}</option>`).join("")}</select></label>
                 <div class="mini-tags">${paycheck.assignedLineIds.map((id) => `<span>${lineName(id)}</span>`).join("")}</div>
-                <div class="split-stat"><span>Income ${money.format(paycheck.amount)}</span><b>Assigned ${money.format(assigned)}</b></div>
+                <div class="split-stat" data-paycheck-split="${index}"><span>Income ${money.format(paycheck.amount)}</span><b>Assigned ${money.format(assigned)}</b></div>
               </article>`;
             }).join("")}
           </div>
@@ -3316,6 +3318,14 @@ function bindViewEvents() {
     });
   });
 
+  document.querySelectorAll("[data-income-recurrence]").forEach((select) => {
+    select.addEventListener("change", () => {
+      const paycheck = state.paychecks[Number(select.dataset.incomeRecurrence)];
+      if (paycheck) paycheck.recurrence = select.value;
+      autosaveState();
+    });
+  });
+
   $("#copyBudgetSelect")?.addEventListener("change", (event) => {
     if (!event.currentTarget.value) return;
     copyBudgetFromMonth(event.currentTarget.value);
@@ -3483,6 +3493,25 @@ function bindViewEvents() {
     select.addEventListener("change", () => {
       const paycheck = state.paychecks[Number(select.dataset.paycheckRecurrence)];
       if (paycheck) paycheck.recurrence = select.value;
+      render();
+    });
+  });
+
+  document.querySelectorAll("[data-paycheck-amount]").forEach((input) => {
+    input.addEventListener("input", () => {
+      const index = Number(input.dataset.paycheckAmount);
+      const paycheck = state.paychecks[index];
+      if (!paycheck) return;
+      paycheck.amount = Number(input.value || 0);
+      state.budget.income = state.paychecks.reduce((sum, item) => sum + Number(item.amount || 0), 0);
+      const splitEl = document.querySelector(`[data-paycheck-split="${index}"]`);
+      if (splitEl) {
+        const assigned = paycheck.assignedLineIds.reduce((sum, id) => sum + (allLines().find((line) => line.id === id)?.planned || 0), 0);
+        splitEl.innerHTML = `<span>Income ${money.format(paycheck.amount)}</span><b>Assigned ${money.format(assigned)}</b>`;
+      }
+      autosaveState();
+    });
+    input.addEventListener("change", () => {
       render();
     });
   });
