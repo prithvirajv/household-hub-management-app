@@ -1322,7 +1322,10 @@ function renderPlanTask(task) {
 }
 
 function renderDailyPlan() {
-  const dailyTasks = privateData.plans.tasks.filter((task) => task.bucket === "daily" && dailyTaskOccursOnDate(task, planSelectedDate));
+  const dailyTasks = privateData.plans.tasks
+    .filter((task) => task.bucket === "daily" && dailyTaskOccursOnDate(task, planSelectedDate))
+    .slice()
+    .sort((a, b) => (a.startTime ? timeToMinutes(a.startTime) : Infinity) - (b.startTime ? timeToMinutes(b.startTime) : Infinity));
   const scheduled = dailyTasks.filter((task) => task.startTime);
   const unscheduled = dailyTasks.filter((task) => !task.startTime);
   const dayLabel = new Date(`${planSelectedDate}T00:00:00`).toLocaleDateString("en-US", { weekday: "long", month: "short", day: "numeric" });
@@ -1346,31 +1349,33 @@ function renderDailyPlan() {
         <button class="icon-button" data-plan-day="next" type="button" aria-label="Next day">›</button>
         <button class="ghost" data-plan-day="today" type="button">Today</button>
       </div>
-      <form id="planTaskForm" class="plan-task-form plan-task-form-daily card">
-        <input name="title" placeholder="Add a task for this day" value="${escapeHtml(editingTask?.title || "")}" required>
-        <label>Start time (optional)<input name="startTime" type="time" value="${editingTask?.startTime || ""}"></label>
-        <label>Duration (min)<input name="durationMinutes" type="number" min="5" step="5" value="${formDuration}"></label>
-        <label>End time<input name="endTimeDisplay" type="time" value="${formEndTime}" readonly tabindex="-1"></label>
-        <label>Repeat<select name="recurrence">${Object.entries(planRecurrenceLabels).map(([value, label]) => `<option value="${value}" ${editingTask && editingTask.recurrence === value ? "selected" : ""}>${label}</option>`).join("")}</select></label>
-        <button type="submit">${editingTask ? "Save changes" : "Add"}</button>
-        ${editingTask ? `<button class="ghost" id="cancelPlanTaskEditButton" type="button">Cancel</button>` : ""}
-      </form>
+      <div class="plan-form-row">
+        <form id="planTaskForm" class="plan-task-form plan-task-form-daily card">
+          <input name="title" placeholder="Add a task for this day" value="${escapeHtml(editingTask?.title || "")}" required>
+          <label>Start time (optional)<input name="startTime" type="time" value="${editingTask?.startTime || ""}"></label>
+          <label>Duration (min)<input name="durationMinutes" type="number" min="5" step="5" value="${formDuration}"></label>
+          <label>End time<input name="endTimeDisplay" type="time" value="${formEndTime}" readonly tabindex="-1"></label>
+          <label>Repeat<select name="recurrence">${Object.entries(planRecurrenceLabels).map(([value, label]) => `<option value="${value}" ${editingTask && editingTask.recurrence === value ? "selected" : ""}>${label}</option>`).join("")}</select></label>
+          <button type="submit">${editingTask ? "Save changes" : "Add"}</button>
+          ${editingTask ? `<button class="ghost" id="cancelPlanTaskEditButton" type="button">Cancel</button>` : ""}
+        </form>
+        <form id="actualLogForm" class="plan-task-form plan-task-form-daily card plan-actual-log-form">
+          <span class="plan-form-col-label">${editingLog ? "Edit what actually happened" : "Log what actually happened"} (${dayLabel})</span>
+          <label>Start time<input name="logStartTime" type="time" value="${editingLog?.startTime || ""}" required></label>
+          <label>End time<input name="logEndTime" type="time" value="${editingLog?.endTime || ""}" required></label>
+          <input name="logNote" placeholder="What did you actually do?" value="${escapeHtml(editingLog?.note || "")}" required>
+          ${dailyTasks.length ? `
+            <details class="plan-log-link-tasks" ${editingLog?.linkedTaskIds?.length ? "open" : ""}>
+              <summary>Link to planned task(s) — optional${editingLog?.linkedTaskIds?.length ? ` (${editingLog.linkedTaskIds.length} selected)` : ""}</summary>
+              ${dailyTasks.map((task) => `<label class="plan-log-link-option"><input type="checkbox" name="linkedTaskIds" value="${task.id}" ${editingLog?.linkedTaskIds?.includes(task.id) ? "checked" : ""}> ${escapeHtml(task.title)}</label>`).join("")}
+            </details>` : ""}
+          <div class="plan-form-actions">
+            <button type="submit">${editingLog ? "Save changes" : "Log it"}</button>
+            ${editingLog ? `<button class="ghost" id="cancelActualLogEditButton" type="button">Cancel</button><button class="danger-button" id="deleteActualLogButton" type="button">Delete</button>` : ""}
+          </div>
+        </form>
+      </div>
       ${unscheduled.length ? `<div class="plan-unscheduled"><h4>Unscheduled</h4>${unscheduled.map((task) => renderPlanTaskDaily(task)).join("")}</div>` : ""}
-      <form id="actualLogForm" class="plan-task-form plan-task-form-daily card plan-actual-log-form">
-        <span class="plan-form-col-label">${editingLog ? "Edit what actually happened" : "Log what actually happened"} (${dayLabel})</span>
-        <label>Start time<input name="logStartTime" type="time" value="${editingLog?.startTime || ""}" required></label>
-        <label>End time<input name="logEndTime" type="time" value="${editingLog?.endTime || ""}" required></label>
-        <input name="logNote" placeholder="What did you actually do?" value="${escapeHtml(editingLog?.note || "")}" required>
-        ${dailyTasks.length ? `
-          <div class="plan-log-link-tasks">
-            <span>Link to planned task(s) — optional</span>
-            ${dailyTasks.map((task) => `<label class="plan-log-link-option"><input type="checkbox" name="linkedTaskIds" value="${task.id}" ${editingLog?.linkedTaskIds?.includes(task.id) ? "checked" : ""}> ${escapeHtml(task.title)}</label>`).join("")}
-          </div>` : ""}
-        <div class="plan-form-actions">
-          <button type="submit">${editingLog ? "Save changes" : "Log it"}</button>
-          ${editingLog ? `<button class="ghost" id="cancelActualLogEditButton" type="button">Cancel</button><button class="danger-button" id="deleteActualLogButton" type="button">Delete</button>` : ""}
-        </div>
-      </form>
       <div class="plan-timeline" style="height:${timelineHeight + 28}px">
         <div class="plan-timeline-hours-label"></div>
         <div class="plan-timeline-col-label plan-timeline-col-label-planned">Planned</div>

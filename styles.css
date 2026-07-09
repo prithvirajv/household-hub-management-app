@@ -3713,10 +3713,17 @@ main {
   flex: 1 0 100%;
 }
 
-.plan-actual-log-form {
-  margin-top: 1rem;
-  padding-top: 1rem;
-  border-top: 1px dashed var(--line);
+.plan-form-row {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 1rem;
+  align-items: start;
+}
+
+@media (min-width: 900px) {
+  .plan-form-row {
+    grid-template-columns: 1fr 1fr;
+  }
 }
 
 .plan-log-link-tasks {
@@ -3726,7 +3733,8 @@ main {
   flex: 1 0 100%;
 }
 
-.plan-log-link-tasks > span {
+.plan-log-link-tasks > summary {
+  cursor: pointer;
   font-size: 0.72rem;
   font-weight: 800;
   color: var(--muted);
