@@ -1247,7 +1247,7 @@ let planEditingDailyTaskId = null;
 
 const PLAN_TIMELINE_START_HOUR = 6;
 const PLAN_TIMELINE_END_HOUR = 23;
-const PLAN_PIXELS_PER_MINUTE = 1;
+const PLAN_PIXELS_PER_MINUTE = 2;
 
 function ensurePlanData() {
   privateData.plans ||= { tasks: [] };
@@ -1369,6 +1369,7 @@ function renderTimelineBlock(task, layoutInfo) {
   const top = Math.max(0, startMinutes * PLAN_PIXELS_PER_MINUTE);
   const height = Math.max(24, duration * PLAN_PIXELS_PER_MINUTE);
   const compact = height < 56;
+  const compactSubtitle = compact && height >= 34;
   const done = isDailyTaskDoneOnDate(task, planSelectedDate);
   const editing = task.id === planEditingDailyTaskId;
   const columns = layoutInfo?.columns || 1;
@@ -1382,7 +1383,9 @@ function renderTimelineBlock(task, layoutInfo) {
     <input type="checkbox" data-plan-task-check="${task.id}" ${done ? "checked" : ""} aria-label="Complete ${escapeHtml(task.title)}">
     <div class="plan-block-copy">
       <input class="plan-task-title" data-plan-task-title="${task.id}" value="${escapeHtml(task.title)}" aria-label="Task title">
-      ${compact ? "" : `<small>${escapeHtml(timeRangeLabel)} · ${duration} min${task.recurrence && task.recurrence !== "none" ? ` · ${planRecurrenceLabels[task.recurrence]}` : ""}${task.subtasks?.length ? ` · ${task.subtasks.filter((item) => item.done).length}/${task.subtasks.length} subtasks` : ""}</small>`}
+      ${compact
+        ? (compactSubtitle ? `<small>${escapeHtml(timeRangeLabel)}</small>` : "")
+        : `<small>${escapeHtml(timeRangeLabel)} · ${duration} min${task.recurrence && task.recurrence !== "none" ? ` · ${planRecurrenceLabels[task.recurrence]}` : ""}${task.subtasks?.length ? ` · ${task.subtasks.filter((item) => item.done).length}/${task.subtasks.length} subtasks` : ""}</small>`}
     </div>
     <button class="icon-button danger-button" data-delete-plan-task="${task.id}" type="button" aria-label="Delete task">×</button>
     <div class="plan-block-resize-handle" data-plan-resize="${task.id}"></div>
