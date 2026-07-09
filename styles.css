@@ -1618,16 +1618,6 @@ main {
   gap: 0.45rem;
 }
 
-.meal-day h4 {
-  display: flex;
-  justify-content: space-between;
-}
-
-.meal-day h4 span:last-child {
-  color: var(--green);
-  font-size: 0.66rem;
-}
-
 .meal-day-date {
   margin-top: -0.3rem;
   color: var(--muted);

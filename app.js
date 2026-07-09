@@ -1644,7 +1644,7 @@ function renderMeals() {
                 const dayDate = new Date(selectedWeekInfo.start);
                 dayDate.setDate(dayDate.getDate() + dayIndex);
                 const dayDateLabel = dayDate.toLocaleDateString("en-US", { month: "short", day: "numeric" });
-                return `<div class="meal-day"><h4><span>${day}</span><span>${dayIndex < 5 ? "Planned" : "Weekend"}</span></h4><div class="meal-day-date">${dayDateLabel}</div>${meals.map((meal) => {
+                return `<div class="meal-day"><h4><span>${day}</span></h4><div class="meal-day-date">${dayDateLabel}</div>${meals.map((meal) => {
                 const plannedItems = plannedMeals(day, meal);
                 const slots = plannedItems.map((planned) => {
                   const plannedIndex = state.meals.plannedWeek.indexOf(planned);
