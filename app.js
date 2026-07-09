@@ -1353,9 +1353,12 @@ function renderDailyPlan() {
           </div>` : ""}
       </form>
       ${unscheduled.length ? `<div class="plan-unscheduled"><h4>Unscheduled</h4>${unscheduled.map((task) => renderPlanTaskDaily(task)).join("")}</div>` : ""}
-      <div class="plan-timeline" style="height:${timelineHeight}px">
+      <div class="plan-timeline" style="height:${timelineHeight + 28}px">
+        <div class="plan-timeline-hours-label"></div>
+        <div class="plan-timeline-col-label plan-timeline-col-label-planned">Planned</div>
+        <div class="plan-timeline-col-label plan-timeline-col-label-actual">Actual</div>
         <div class="plan-timeline-hours">${hours.map((hour) => `<div class="plan-timeline-hour" style="height:${60 * PLAN_PIXELS_PER_MINUTE}px">${formatHourLabel(hour)}</div>`).join("")}</div>
-        <div class="plan-timeline-body" style="height:${timelineHeight}px" data-plan-timeline>
+        <div class="plan-timeline-body plan-timeline-body-planned" style="height:${timelineHeight}px" data-plan-timeline>
           ${(() => {
             const layout = layoutTimelineBlocks(scheduled.map((task) => ({
               id: task.id,
@@ -1364,6 +1367,17 @@ function renderDailyPlan() {
             })));
             const layoutById = new Map(layout.map((item) => [item.id, item]));
             return scheduled.map((task) => renderTimelineBlock(task, layoutById.get(task.id))).join("");
+          })()}
+        </div>
+        <div class="plan-timeline-body plan-timeline-body-actual" style="height:${timelineHeight}px">
+          ${(() => {
+            const withActuals = dailyTasks.filter((task) => task.actuals?.[planSelectedDate]?.startTime && task.actuals?.[planSelectedDate]?.endTime);
+            const layout = layoutTimelineBlocks(withActuals.map((task) => {
+              const actual = task.actuals[planSelectedDate];
+              return { id: task.id, start: timeToMinutes(actual.startTime), end: timeToMinutes(actual.endTime) };
+            }));
+            const layoutById = new Map(layout.map((item) => [item.id, item]));
+            return withActuals.map((task) => renderActualTimelineBlock(task, layoutById.get(task.id))).join("");
           })()}
         </div>
       </div>
@@ -1411,17 +1425,56 @@ function renderTimelineBlock(task, layoutInfo) {
   const width = `calc((100% - ${gutter * 2}px) / ${columns} - ${gap}px)`;
   const timeRangeLabel = `${task.startTime}–${endTime}`;
   const actualComparison = formatActualComparison(task, timeRangeLabel);
+  const deviationClass = actualComparison ? (/started|ran/.test(actualComparison) ? "deviated" : "on-time") : "";
   const tooltip = actualComparison ? `${task.title}: ${timeRangeLabel} · ${actualComparison}` : `${task.title}: ${timeRangeLabel}`;
-  return `<div class="plan-timeline-block ${done ? "done" : ""} ${compact ? "compact" : ""} ${editing ? "editing" : ""}" data-plan-task-id="${task.id}" style="top:${top}px;height:${height}px;left:${left};width:${width}" title="${escapeHtml(tooltip)}">
+  return `<div class="plan-timeline-block ${done ? "done" : ""} ${compact ? "compact" : ""} ${editing ? "editing" : ""} ${actualComparison ? `has-actual ${deviationClass}` : ""}" data-plan-task-id="${task.id}" style="top:${top}px;height:${height}px;left:${left};width:${width}" title="${escapeHtml(tooltip)}">
     <input type="checkbox" data-plan-task-check="${task.id}" ${done ? "checked" : ""} aria-label="Complete ${escapeHtml(task.title)}">
     <div class="plan-block-copy">
       <input class="plan-task-title" data-plan-task-title="${task.id}" value="${escapeHtml(task.title)}" aria-label="Task title">
       ${compact
         ? (compactSubtitle ? `<small>${escapeHtml(timeRangeLabel)}</small>` : "")
-        : `<small>${escapeHtml(timeRangeLabel)} · ${duration} min${task.recurrence && task.recurrence !== "none" ? ` · ${planRecurrenceLabels[task.recurrence]}` : ""}${task.subtasks?.length ? ` · ${task.subtasks.filter((item) => item.done).length}/${task.subtasks.length} subtasks` : ""}</small>${actualComparison ? `<small class="plan-actual-time">${escapeHtml(actualComparison)}</small>` : ""}`}
+        : `<small>${escapeHtml(timeRangeLabel)} · ${duration} min${task.recurrence && task.recurrence !== "none" ? ` · ${planRecurrenceLabels[task.recurrence]}` : ""}${task.subtasks?.length ? ` · ${task.subtasks.filter((item) => item.done).length}/${task.subtasks.length} subtasks` : ""}</small>`}
     </div>
     <button class="icon-button danger-button" data-delete-plan-task="${task.id}" type="button" aria-label="Delete task">×</button>
     <div class="plan-block-resize-handle" data-plan-resize="${task.id}"></div>
+  </div>`;
+}
+
+function renderActualTimelineBlock(task, layoutInfo) {
+  const actual = task.actuals[planSelectedDate];
+  const startMinutes = timeToMinutes(actual.startTime) - PLAN_TIMELINE_START_HOUR * 60;
+  const duration = timeToMinutes(actual.endTime) - timeToMinutes(actual.startTime);
+  const top = Math.max(0, startMinutes * PLAN_PIXELS_PER_MINUTE);
+  const height = Math.max(24, duration * PLAN_PIXELS_PER_MINUTE);
+  const compact = height < 56;
+  const compactSubtitle = compact && height >= 34;
+  const columns = layoutInfo?.columns || 1;
+  const column = layoutInfo?.column || 0;
+  const gutter = 6;
+  const gap = columns > 1 ? 4 : 0;
+  const left = `calc(${gutter}px + (100% - ${gutter * 2}px) * ${column} / ${columns})`;
+  const width = `calc((100% - ${gutter * 2}px) / ${columns} - ${gap}px)`;
+  const timeRangeLabel = `${actual.startTime}–${actual.endTime}`;
+  const isPlanned = Boolean(task.startTime);
+  const { startDeltaMinutes, durationDeltaMinutes } = comparePlannedToActual({
+    plannedStartTime: task.startTime,
+    plannedDurationMinutes: Number(task.durationMinutes || 30),
+    actualStartTime: actual.startTime,
+    actualEndTime: actual.endTime
+  });
+  const deviationClass = !isPlanned ? "unplanned" : (startDeltaMinutes || durationDeltaMinutes) ? "deviated" : "on-time";
+  const deviationParts = [];
+  if (startDeltaMinutes) deviationParts.push(`started ${Math.abs(startDeltaMinutes)} min ${startDeltaMinutes > 0 ? "late" : "early"}`);
+  if (durationDeltaMinutes) deviationParts.push(`ran ${Math.abs(durationDeltaMinutes)} min ${durationDeltaMinutes > 0 ? "over" : "under"}`);
+  const deviationLabel = deviationParts.join(" · ");
+  const tooltip = [`${task.title}: ${timeRangeLabel}`, deviationLabel, actual.note].filter(Boolean).join(" · ");
+  return `<div class="plan-timeline-block plan-actual-block ${compact ? "compact" : ""} ${deviationClass}" style="top:${top}px;height:${height}px;left:${left};width:${width}" title="${escapeHtml(tooltip)}">
+    <div class="plan-block-copy">
+      <strong class="plan-actual-title">${escapeHtml(task.title)}</strong>
+      ${compact
+        ? (compactSubtitle ? `<small>${escapeHtml(timeRangeLabel)}</small>` : "")
+        : `<small>${escapeHtml(timeRangeLabel)}${deviationLabel ? ` · ${escapeHtml(deviationLabel)}` : ""}</small>${actual.note ? `<small class="plan-actual-note">${escapeHtml(actual.note)}</small>` : ""}`}
+    </div>
   </div>`;
 }
 

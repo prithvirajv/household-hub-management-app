@@ -3740,11 +3740,31 @@ main {
 .plan-timeline {
   position: relative;
   display: grid;
-  grid-template-columns: 56px minmax(0, 1fr);
+  grid-template-columns: 56px minmax(0, 1fr) minmax(0, 1fr);
+  grid-template-rows: auto 1fr;
   border: 1px solid var(--line);
   border-radius: 8px;
   background: white;
   overflow: hidden;
+}
+
+.plan-timeline-hours-label {
+  border-right: 1px solid var(--line);
+  border-bottom: 1px solid var(--line);
+}
+
+.plan-timeline-col-label {
+  padding: 0.4rem 0.6rem;
+  font-size: 0.72rem;
+  font-weight: 800;
+  text-transform: uppercase;
+  color: var(--muted);
+  background: #fbfdff;
+  border-bottom: 1px solid var(--line);
+}
+
+.plan-timeline-col-label-planned {
+  border-right: 1px solid var(--line);
 }
 
 .plan-timeline-hours {
@@ -3762,6 +3782,51 @@ main {
 
 .plan-timeline-body {
   position: relative;
+}
+
+.plan-timeline-body-planned {
+  border-right: 1px solid var(--line);
+}
+
+.plan-timeline-block.has-actual.on-time {
+  border-left-color: var(--green);
+}
+
+.plan-timeline-block.has-actual.deviated {
+  border-left-color: var(--coral);
+}
+
+.plan-actual-block {
+  display: block;
+  cursor: default;
+  touch-action: auto;
+}
+
+.plan-actual-block.on-time {
+  border-left-color: var(--green);
+  background: var(--green-soft);
+}
+
+.plan-actual-block.deviated {
+  border-left-color: var(--coral);
+  background: #fdf1ee;
+}
+
+.plan-actual-block.unplanned {
+  border-left-color: var(--muted);
+  background: #f2f3f5;
+}
+
+.plan-actual-title {
+  font-weight: 700;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.plan-actual-note {
+  font-style: italic;
 }
 
 .plan-timeline-block {
@@ -3823,6 +3888,11 @@ main {
   font-size: 0.62rem;
   line-height: 1.1;
   padding-left: 2px;
+}
+
+.plan-timeline-block.compact .plan-actual-title {
+  font-size: 0.82rem;
+  line-height: 19px;
 }
 
 .plan-timeline-block.compact .plan-block-resize-handle {
