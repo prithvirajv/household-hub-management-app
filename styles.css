@@ -1470,8 +1470,27 @@ main {
 .paycheck-card-actions {
   display: flex;
   align-items: center;
+  justify-content: flex-end;
   gap: 0.5rem;
-  flex-shrink: 0;
+}
+
+.paycheck-name-input {
+  width: 100%;
+  min-width: 0;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  padding: 0.2rem 0.35rem;
+  margin: -0.2rem -0.35rem;
+  font-size: 1.05rem;
+  font-weight: 800;
+  color: var(--text);
+  background: transparent;
+}
+
+.paycheck-name-input:focus {
+  border-color: var(--green);
+  background: white;
+  outline: 0;
 }
 
 .paycheck-amount-input {

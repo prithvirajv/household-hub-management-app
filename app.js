@@ -754,12 +754,10 @@ function renderPaychecks() {
             ${state.paychecks.map((paycheck, index) => {
               const assigned = paycheck.assignedLineIds.reduce((sum, id) => sum + (allLines().find((line) => line.id === id)?.planned || 0), 0);
               return `<article class="paycheck-card">
-                <div class="section-head">
-                  <h3>${paycheck.name}</h3>
-                  <div class="paycheck-card-actions">
-                    <input class="money-input paycheck-amount-input" data-paycheck-amount="${index}" type="number" step="0.01" value="${paycheck.amount}" aria-label="Amount for ${escapeHtml(paycheck.name)}">
-                    <button class="icon-button danger-button" data-delete-paycheck="${index}" type="button" aria-label="Delete ${escapeHtml(paycheck.name)}">×</button>
-                  </div>
+                <input class="paycheck-name-input" data-income-name="${index}" value="${escapeHtml(paycheck.name)}" aria-label="Name for this paycheck/income entry">
+                <div class="paycheck-card-actions">
+                  <input class="money-input paycheck-amount-input" data-paycheck-amount="${index}" type="number" step="0.01" value="${paycheck.amount}" aria-label="Amount for ${escapeHtml(paycheck.name)}">
+                  <button class="icon-button danger-button" data-delete-paycheck="${index}" type="button" aria-label="Delete ${escapeHtml(paycheck.name)}">×</button>
                 </div>
                 <small>${paycheck.date}</small>
                 <label class="paycheck-recurrence-field">Repeat<select data-paycheck-recurrence="${index}" aria-label="How often ${escapeHtml(paycheck.name)} repeats">${Object.entries(paycheckRecurrenceLabels).map(([value, label]) => `<option value="${value}" ${paycheck.recurrence === value ? "selected" : ""}>${label}</option>`).join("")}</select></label>
