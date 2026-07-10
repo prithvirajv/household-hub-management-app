@@ -1138,6 +1138,30 @@ main {
   white-space: nowrap;
 }
 
+.pill-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 22px;
+  border: 0;
+  border-radius: 999px;
+  padding: 0.2rem 0.5rem;
+  background: var(--green-soft);
+  color: var(--green);
+  font-size: 0.72rem;
+  font-weight: 900;
+  white-space: nowrap;
+  cursor: pointer;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.pill-button:hover {
+  background: var(--green);
+  color: white;
+}
+
 .mini-form,
 .paycheck-builder,
 .meal-toolbar,

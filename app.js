@@ -205,6 +205,55 @@ function spentTotal() {
   return state.transactions.reduce((sum, transaction) => sum + Number(transaction.amount || 0), 0);
 }
 
+function lowerActivityMargin() {
+  const lowerActivity = allLines()
+    .filter((line) => Number(line.planned || 0) > 0 && spentByLine(line.id) < Number(line.planned || 0) * 0.5);
+  const margin = lowerActivity.reduce((sum, line) => sum + (Number(line.planned || 0) - spentByLine(line.id)), 0);
+  return { margin, count: lowerActivity.length };
+}
+
+function tightestBudgetLine() {
+  const candidates = allLines()
+    .filter((line) => Number(line.planned || 0) > 0)
+    .map((line) => ({ line, remaining: Number(line.planned || 0) - spentByLine(line.id) }));
+  if (!candidates.length) return null;
+  return candidates.sort((a, b) => a.remaining - b.remaining)[0];
+}
+
+function unassignedTransactionSummary() {
+  const items = transactionInboxItems().filter((item) => !(state.transactionInboxDone || []).includes(item.id));
+  return { count: items.length, payees: items.map((item) => item.payee) };
+}
+
+function billAndGoalReminders() {
+  const dismissed = state.budget.dismissedReminders?.[state.budget.month] || [];
+  const billReminders = allLines()
+    .filter((line) => line.dueDay && Number(line.planned || 0) > spentByLine(line.id))
+    .map((line) => ({
+      id: `bill:${line.id}`,
+      title: `${line.name} payoff due`,
+      detail: `Due day ${line.dueDay} · ${money.format(Number(line.planned || 0) - spentByLine(line.id))} left`
+    }));
+  const goalReminders = (state.goals?.sinkingFunds || [])
+    .filter((fund) => Number(fund.saved || 0) < Number(fund.target || 0))
+    .map((fund, index) => ({
+      id: `goal:${fund.name || index}`,
+      title: `${fund.name || "Goal"} needs funding`,
+      detail: `${money.format(Number(fund.target || 0) - Number(fund.saved || 0))} remaining${fund.targetDate ? ` · by ${fund.targetDate}` : ""}`
+    }));
+  return [...billReminders, ...goalReminders].filter((reminder) => !dismissed.includes(reminder.id));
+}
+
+function dismissBudgetReminder(id) {
+  state.budget.dismissedReminders ||= {};
+  state.budget.dismissedReminders[state.budget.month] ||= [];
+  if (!state.budget.dismissedReminders[state.budget.month].includes(id)) {
+    state.budget.dismissedReminders[state.budget.month].push(id);
+  }
+  autosaveState();
+  render();
+}
+
 function remainingTotal() {
   return state.budget.income - spentTotal();
 }
@@ -655,9 +704,20 @@ function renderBudget() {
         <section class="card">
           <div class="card-label">Insights</div>
           <h3>Margin moves</h3>
-          ${compactRow(`${money.format(300)} flexible margin`, "Available across lower-activity lines", "Move")}
-          ${compactRow("Groceries has $406 left", "Based on planned meal list", "Watch")}
-          ${compactRow("2 unassigned transactions", "Coffee House and Bookstore", "Assign")}
+          ${(() => {
+            const { margin, count } = lowerActivityMargin();
+            return count ? compactRow(`${money.format(margin)} flexible margin`, `Available across ${count} lower-activity line${count === 1 ? "" : "s"}`, "Info") : "";
+          })()}
+          ${(() => {
+            const tightest = tightestBudgetLine();
+            if (!tightest) return "";
+            return compactRow(`${escapeHtml(tightest.line.name)} has ${money.format(tightest.remaining)} left`, "Tightest line this month", tightest.remaining < 0 ? "Over" : "Watch");
+          })()}
+          ${(() => {
+            const { count, payees } = unassignedTransactionSummary();
+            if (!count) return compactRow("No unassigned transactions", "You're all caught up", "Done");
+            return `<div class="compact-row"><div><strong>${count} unassigned transaction${count === 1 ? "" : "s"}</strong><small>${escapeHtml(payees.join(", "))}</small></div><button class="pill-button" data-goto-view="transactions" type="button">Assign</button></div>`;
+          })()}
         </section>
       </aside>
     </section>
@@ -770,7 +830,11 @@ function renderPaychecks() {
       </div>
       <aside class="side-stack">
         <section class="card"><div class="card-label">Calendar</div><h3>Due-date flow</h3>${dueDateRows().map((item) => compactRow(item.name, item.date, item.type)).join("")}</section>
-        <section class="card"><div class="card-label">Reminders</div><h3>Bills and goals</h3>${["Credit card payoff due", "Plan next month", "Move money to emergency fund"].map((item) => compactRow(item, "May", "Done")).join("")}</section>
+        <section class="card"><div class="card-label">Reminders</div><h3>Bills and goals</h3>${
+          billAndGoalReminders().length
+            ? billAndGoalReminders().map((reminder) => `<div class="compact-row"><div><strong>${escapeHtml(reminder.title)}</strong><small>${escapeHtml(reminder.detail)}</small></div><button class="pill-button" data-dismiss-reminder="${escapeHtml(reminder.id)}" type="button">Done</button></div>`).join("")
+            : `<div class="empty-inline">No open bills or goals right now</div>`
+        }</section>
       </aside>
     </section>`;
 }
@@ -2478,6 +2542,17 @@ function bindViewEvents() {
     state.budget.setupStarted = true;
     autosaveState();
     render();
+  });
+
+  document.querySelectorAll("[data-goto-view]").forEach((button) => {
+    button.addEventListener("click", () => {
+      currentView = button.dataset.gotoView;
+      render();
+    });
+  });
+
+  document.querySelectorAll("[data-dismiss-reminder]").forEach((button) => {
+    button.addEventListener("click", () => dismissBudgetReminder(button.dataset.dismissReminder));
   });
 
   $("#notesSearch")?.addEventListener("input", (event) => {
