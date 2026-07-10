@@ -4043,6 +4043,18 @@ function bindViewEvents() {
   $("#calendarQuickAdd select[name='type']")?.addEventListener("change", updateCalendarQuickAddFields);
   updateCalendarQuickAddFields();
 
+  // Once the user starts editing the form again after a completed add/update,
+  // clear the leftover confirmation message so it doesn't look stuck/stale
+  // while they're drafting a different entry.
+  const calendarStatus = $("#calendarQuickAdd .calendar-form-status");
+  ["input", "change"].forEach((eventName) => {
+    $("#calendarQuickAdd")?.addEventListener(eventName, () => {
+      if (!state.calendar.feedback) return;
+      state.calendar.feedback = "";
+      if (calendarStatus) calendarStatus.textContent = "";
+    });
+  });
+
   document.querySelectorAll("[data-complete-chore]").forEach((button) => {
     button.addEventListener("click", () => {
       const separator = button.dataset.completeChore.indexOf(":");
