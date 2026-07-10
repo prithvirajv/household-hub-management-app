@@ -727,14 +727,7 @@ function renderBudget() {
 
 function renderTransactions() {
   const imported = transactionInboxItems().filter((transaction) => !(state.transactionInboxDone || []).includes(transaction.id));
-  const unassignedLedger = [
-    { id: "bookstore-may21", payee: "Bookstore", amount: 42.10, date: "2026-05-21" },
-    { id: "coffee-house-may20", payee: "Coffee House", amount: 18.72, date: "2026-05-20" }
-  ].filter((item) => !state.transactions.some((transaction) =>
-    transaction.payee === item.payee
-    && transaction.date === item.date
-    && Number(transaction.amount) === Number(item.amount)
-  ));
+  const unassignedLedger = [];
   const lineOptions = (selectedLineId) => allLines().map((line) => `<option value="${line.id}" ${line.id === selectedLineId ? "selected" : ""}>${line.category} - ${line.name}</option>`).join("");
   const firstCategory = state.budget.categories[0];
   return `
@@ -785,11 +778,11 @@ function renderTransactions() {
               <button data-assign-ledger="${transaction.id}:${transaction.payee}:${transaction.amount}:${transaction.date}" type="button">Assign</button>
             </div>
           `).join("")}
-          ${[
-            { payee: "Power and Water", amount: -211.38, date: "2026-05-17", tag: "Housing - Utilities" },
-            { payee: "Green Market", amount: -96.80, date: "2026-05-14", tag: "Food - Groceries" },
-            ...state.transactions.slice(0, 6).map((transaction) => ({ payee: transaction.payee, amount: -transaction.amount, date: transaction.date, tag: transactionAssignmentLabel(transaction) }))
-          ].map((transaction) => compactRow(transaction.payee, formatShortDate(transaction.date), `${exactMoney.format(transaction.amount)} · ${transaction.tag}`, "danger")).join("")}
+          ${state.transactions.length ? state.transactions
+            .map((transaction, index) => ({ payee: transaction.payee, amount: -transaction.amount, date: transaction.date, tag: transactionAssignmentLabel(transaction), index }))
+            .slice(0, 6)
+            .map((transaction) => compactRow(transaction.payee, formatShortDate(transaction.date), `${exactMoney.format(transaction.amount)} · ${transaction.tag}`, "danger", `data-delete-transaction="${transaction.index}" aria-label="Delete ${escapeHtml(transaction.payee)}"`))
+            .join("") : `<div class="empty-inline">No transactions yet</div>`}
         </section>
       </aside>
     </section>`;
@@ -2531,11 +2524,7 @@ function reportCategories() {
 }
 
 function transactionInboxItems() {
-  return [
-    { id: "bank-coffee-house-may10", payee: "Coffee House", amount: 18.72, lineId: "church-charity", date: "2026-05-10" },
-    { id: "bank-bookstore-may12", payee: "Bookstore", amount: 42.10, lineId: "church-charity", date: "2026-05-12" },
-    ...(state.transactionInboxDrafts || [])
-  ];
+  return [...(state.transactionInboxDrafts || [])];
 }
 
 function bindViewEvents() {
@@ -4791,6 +4780,14 @@ view.addEventListener("click", (event) => {
   const dismissButton = event.target.closest("[data-dismiss-import]");
   if (dismissButton) {
     dismissImportTransaction(dismissButton);
+    return;
+  }
+
+  const deleteTransactionButton = event.target.closest("[data-delete-transaction]");
+  if (deleteTransactionButton) {
+    state.transactions.splice(Number(deleteTransactionButton.dataset.deleteTransaction), 1);
+    autosaveState();
+    render();
     return;
   }
 
