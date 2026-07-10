@@ -1745,11 +1745,11 @@ app.post("/api/households/default", requireSession, async (req, res, next) => {
     } else {
       const result = await pool.query(
         `UPDATE users u
-         SET default_household_id = $2
+         SET default_household_id = $2::uuid
          WHERE u.id = $1
            AND EXISTS (
              SELECT 1 FROM household_memberships hm
-             WHERE hm.user_id = u.id AND hm.household_id::text = $2
+             WHERE hm.user_id = u.id AND hm.household_id = $2::uuid
            )`,
         [req.sessionUser.id, householdId]
       );
