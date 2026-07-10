@@ -28,6 +28,7 @@ let currentView = "budget";
 let autosaveTimer = null;
 let inviteEmailStatus = "";
 let calendarFilterOwner = "";
+let calendarFeedback = "";
 // privateData is scoped to the signed-in user (not the household) and is never part
 // of `state` or autosaveState() — it must never reach the shared household blob.
 let privateData = null;
@@ -892,7 +893,7 @@ function renderCalendar() {
             <button data-calendar-submit type="submit">Add</button>
             <button data-calendar-delete class="danger-button" type="button" hidden>Delete</button>
             <button data-calendar-cancel class="ghost" type="button" hidden>Cancel</button>
-            <p class="calendar-form-status" role="status">${escapeHtml(state.calendar.feedback || "")}</p>
+            <p class="calendar-form-status" role="status">${escapeHtml(calendarFeedback || "")}</p>
           </form>
           <div class="calendar-grid">
             ${["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"].map((day) => `<div class="calendar-weekday">${day}</div>`).join("")}
@@ -4111,7 +4112,7 @@ function bindViewEvents() {
       if (existing) Object.assign(existing, calendarEvent);
       else state.calendar.events.push(calendarEvent);
     }
-    state.calendar.feedback = `${data.type === "chore" ? "Chore" : data.type === "birthday" ? "Birthday" : "Reminder"} ${wasEditing ? "updated" : "added"}.`;
+    calendarFeedback = `${data.type === "chore" ? "Chore" : data.type === "birthday" ? "Birthday" : "Reminder"} ${wasEditing ? "updated" : "added"}.`;
     render();
   });
 
@@ -4124,8 +4125,8 @@ function bindViewEvents() {
   const calendarStatus = $("#calendarQuickAdd .calendar-form-status");
   ["input", "change"].forEach((eventName) => {
     $("#calendarQuickAdd")?.addEventListener(eventName, () => {
-      if (!state.calendar.feedback) return;
-      state.calendar.feedback = "";
+      if (!calendarFeedback) return;
+      calendarFeedback = "";
       if (calendarStatus) calendarStatus.textContent = "";
     });
   });
@@ -4183,7 +4184,7 @@ function bindViewEvents() {
     if (!kind || !id) return;
     if (kind === "event") state.calendar.events = state.calendar.events.filter((item) => item.id !== id);
     if (kind === "chore") state.calendar.chores = state.calendar.chores.filter((item) => item.id !== id);
-    state.calendar.feedback = "Calendar item deleted.";
+    calendarFeedback = "Calendar item deleted.";
     render();
   });
 
@@ -4617,7 +4618,7 @@ function editCalendarItem(reference) {
   form.querySelector("[data-calendar-delete]").textContent = `Delete ${form.type.value === "chore" ? "chore" : form.type.value === "birthday" ? "birthday" : "reminder"}`;
   form.querySelector("[data-calendar-delete]").hidden = false;
   form.querySelector("[data-calendar-cancel]").hidden = false;
-  state.calendar.feedback = "";
+  calendarFeedback = "";
   form.querySelector(".calendar-form-status").textContent = "";
   updateCalendarQuickAddFields();
   form.scrollIntoView({ behavior: "smooth", block: "center" });
@@ -4630,11 +4631,11 @@ function resetCalendarEditor() {
   form.reset();
   form.editingKind.value = "";
   form.editingId.value = "";
-  form.date.value = `${state.budget.month}-01`;
+  form.date.value = `${state.budget.month}-01T09:00`;
   form.querySelector("[data-calendar-submit]").textContent = "Add";
   form.querySelector("[data-calendar-delete]").hidden = true;
   form.querySelector("[data-calendar-cancel]").hidden = true;
-  state.calendar.feedback = "";
+  calendarFeedback = "";
   form.querySelector(".calendar-form-status").textContent = "";
   updateCalendarQuickAddFields();
 }
@@ -4955,6 +4956,7 @@ $("#signOutButton").addEventListener("click", async () => {
   adminData = null;
   sharingAccess = null;
   households = [];
+  calendarFeedback = "";
   $("#householdWorkspaceControl").hidden = true;
   $("#workspace").hidden = true;
   $("#authPanel").hidden = false;
@@ -5178,6 +5180,7 @@ async function reloadSelectedHousehold() {
   adminData = null;
   sharingAccess = null;
   sharedCalendarMembers = [];
+  calendarFeedback = "";
   render();
 }
 
