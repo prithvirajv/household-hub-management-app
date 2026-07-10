@@ -2229,7 +2229,14 @@ function progressNumberBlock(label, value, target, unit) {
 }
 
 function dueDateRows() {
-  return allLines().sort((a, b) => (a.dueDay || 31) - (b.dueDay || 31)).map((line) => ({ name: line.name, date: `${String(line.dueDay || 28).padStart(2, "0")} · Bill ${money.format(line.planned)}`, type: line.dueDay % 2 ? "Pay" : "Due" }));
+  return allLines()
+    .filter((line) => line.dueDay)
+    .sort((a, b) => a.dueDay - b.dueDay)
+    .map((line) => ({
+      name: line.name,
+      date: `${String(line.dueDay).padStart(2, "0")} · Bill ${money.format(line.planned)}`,
+      type: spentByLine(line.id) >= Number(line.planned || 0) ? "Paid" : "Due"
+    }));
 }
 
 function scheduleItems() {
