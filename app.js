@@ -897,7 +897,7 @@ function renderCalendar() {
           <div class="calendar-grid">
             ${["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"].map((day) => `<div class="calendar-weekday">${day}</div>`).join("")}
             ${calendarCells().map((cell) => `
-            <div class="day-cell ${cell.muted ? "muted-cell" : ""} ${cell.currentMonth ? "" : "outside-month"}" data-calendar-day="${cell.dateKey}" role="button" tabindex="0" aria-label="Add an item on ${cell.dateKey}">
+            <div class="day-cell ${cell.muted ? "muted-cell" : ""} ${cell.currentMonth ? "" : "outside-month"} ${cell.dateKey === dateKey(new Date()) ? "today-cell" : ""}" data-calendar-day="${cell.dateKey}" role="button" tabindex="0" aria-label="Add an item on ${cell.dateKey}">
               <b>${cell.day}</b>
               ${cell.items.map((item) => `<button class="event ${item.eventType || item.type}" style="border-left:3px solid ${memberColor(item.owner)}" data-edit-calendar-item="${item.sourceKind}:${item.sourceId}" type="button" title="Edit ${escapeHtml(item.title)}${item.ownerName ? ` · ${escapeHtml(item.ownerName)}` : ""}">${escapeHtml(item.title)}</button>`).join("")}
             </div>
@@ -4995,19 +4995,33 @@ $("#mealWeekHeaderSelect").addEventListener("change", (event) => {
 });
 
 $("#householdPicker").addEventListener("change", async (event) => {
-  await saveStateNow();
-  await api("/api/households/select", {
-    method: "POST",
-    body: JSON.stringify({ householdId: event.target.value })
-  });
-  sharingAccess = null;
-  await reloadSelectedHousehold();
+  const picker = event.currentTarget;
+  const message = $("#householdWorkspaceMessage");
+  const previousValue = households.find((household) => household.selected)?.id || "";
+  if (message) message.textContent = "";
+  picker.disabled = true;
+  try {
+    await saveStateNow();
+    await api("/api/households/select", {
+      method: "POST",
+      body: JSON.stringify({ householdId: picker.value })
+    });
+    sharingAccess = null;
+    await reloadSelectedHousehold();
+  } catch (error) {
+    picker.value = previousValue;
+    if (message) message.textContent = error.message;
+  } finally {
+    picker.disabled = false;
+  }
 });
 
 $("#defaultHouseholdButton").addEventListener("click", async () => {
   const selected = households.find((household) => household.selected);
   if (!selected || selected.isDefault) return;
   const button = $("#defaultHouseholdButton");
+  const message = $("#householdWorkspaceMessage");
+  if (message) message.textContent = "";
   button.disabled = true;
   try {
     await api("/api/households/default", {
@@ -5017,6 +5031,8 @@ $("#defaultHouseholdButton").addEventListener("click", async () => {
     households.forEach((household) => {
       household.isDefault = household.id === selected.id;
     });
+  } catch (error) {
+    if (message) message.textContent = error.message;
   } finally {
     renderShell();
   }
