@@ -833,7 +833,7 @@ function renderCalendar() {
           <div class="calendar-grid">
             ${["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"].map((day) => `<div class="calendar-weekday">${day}</div>`).join("")}
             ${calendarCells().map((cell) => `
-            <div class="day-cell ${cell.muted ? "muted-cell" : ""} ${cell.currentMonth ? "" : "outside-month"}">
+            <div class="day-cell ${cell.muted ? "muted-cell" : ""} ${cell.currentMonth ? "" : "outside-month"}" data-calendar-day="${cell.dateKey}" role="button" tabindex="0" aria-label="Add an item on ${cell.dateKey}">
               <b>${cell.day}</b>
               ${cell.items.map((item) => `<button class="event ${item.eventType || item.type}" style="border-left:3px solid ${memberColor(item.owner)}" data-edit-calendar-item="${item.sourceKind}:${item.sourceId}" type="button" title="Edit ${escapeHtml(item.title)}${item.ownerName ? ` · ${escapeHtml(item.ownerName)}` : ""}">${escapeHtml(item.title)}</button>`).join("")}
             </div>
@@ -2357,12 +2357,13 @@ function calendarCells() {
   const cells = [];
   for (let index = 0; index < cellCount; index += 1) {
     const relativeDay = index - leadingDays + 1;
+    const cellDateKey = dateKey(new Date(year, month - 1, relativeDay));
     if (relativeDay < 1) {
-      cells.push({ day: previousMonthLastDay + relativeDay, currentMonth: false, muted: true, items: [] });
+      cells.push({ day: previousMonthLastDay + relativeDay, currentMonth: false, muted: true, items: [], dateKey: cellDateKey });
     } else if (relativeDay > lastDay.getDate()) {
-      cells.push({ day: relativeDay - lastDay.getDate(), currentMonth: false, muted: true, items: [] });
+      cells.push({ day: relativeDay - lastDay.getDate(), currentMonth: false, muted: true, items: [], dateKey: cellDateKey });
     } else {
-      cells.push({ day: relativeDay, currentMonth: true, muted: false, items: eventMap.get(relativeDay) || [] });
+      cells.push({ day: relativeDay, currentMonth: true, muted: false, items: eventMap.get(relativeDay) || [], dateKey: cellDateKey });
     }
   }
   return cells;
@@ -4069,6 +4070,21 @@ function bindViewEvents() {
 
   document.querySelectorAll("[data-edit-calendar-item]").forEach((button) => {
     button.addEventListener("click", () => editCalendarItem(button.dataset.editCalendarItem));
+  });
+
+  document.querySelectorAll("[data-calendar-day]").forEach((cell) => {
+    const applyDay = (event) => {
+      if (event.target.closest(".event")) return;
+      const dateInput = $("#calendarQuickAdd [name='date']");
+      if (!dateInput) return;
+      const existingTime = dateInput.value.includes("T") ? dateInput.value.split("T")[1] : "09:00";
+      dateInput.value = `${cell.dataset.calendarDay}T${existingTime}`;
+      $("#calendarQuickAdd [name='title']")?.focus();
+    };
+    cell.addEventListener("click", applyDay);
+    cell.addEventListener("keydown", (event) => {
+      if (event.key === "Enter" || event.key === " ") { event.preventDefault(); applyDay(event); }
+    });
   });
 
   $("[data-calendar-cancel]")?.addEventListener("click", resetCalendarEditor);

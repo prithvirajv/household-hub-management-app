@@ -1595,6 +1595,16 @@ main {
   border-right: 1px solid var(--line);
   border-bottom: 1px solid var(--line);
   background: white;
+  cursor: pointer;
+}
+
+.day-cell:hover {
+  background: var(--green-soft);
+}
+
+.day-cell:focus-visible {
+  outline: 2px solid var(--green);
+  outline-offset: -2px;
 }
 
 .day-cell:nth-child(7n) {
