@@ -2026,8 +2026,10 @@ function accountItemRow(account, index) {
       <label>Type<select data-account-type="${index}" aria-label="Type for ${escapeHtml(account.name)}">${Object.entries(typeLabels).map(([value, label]) => `<option value="${value}" ${account.type === value ? "selected" : ""}>${label}</option>`).join("")}</select></label>
       <label>Opening balance<input data-account-opening-balance="${index}" type="number" step="0.01" inputmode="decimal" value="${account.openingBalance}" aria-label="Opening balance for ${escapeHtml(account.name)}"></label>
     </div>
-    <div class="split-stat"><span>${isLiability ? "Owed" : "Balance"}</span><b class="${isLiability && balance > 0 ? "danger" : ""}">${money.format(balance)}</b></div>
-    <button class="icon-button danger-button" data-delete-account="${index}" type="button" aria-label="Remove ${escapeHtml(account.name)}">×</button>
+    <div class="account-balance-row">
+      <div class="split-stat"><span>${isLiability ? "Owed" : "Balance"}</span><b class="${isLiability && balance > 0 ? "danger" : ""}">${money.format(balance)}</b></div>
+      <button class="icon-button danger-button" data-delete-account="${index}" type="button" aria-label="Remove ${escapeHtml(account.name)}">×</button>
+    </div>
   </article>`;
 }
 

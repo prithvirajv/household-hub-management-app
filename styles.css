@@ -1506,6 +1506,17 @@ main {
   background: var(--soft-blue);
 }
 
+.account-balance-row {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+}
+
+.account-balance-row .split-stat {
+  flex: 1;
+  min-width: 0;
+}
+
 .paycheck-card-actions {
   display: flex;
   align-items: center;
