@@ -184,7 +184,8 @@ const defaultState = {
       { date: "2026-05-04", title: "Soccer practice", type: "event" },
       { date: "2026-05-12", title: "Credit card payoff due", type: "reminder" },
       { date: "2026-05-28", monthDay: "05-28", title: "Mimi birthday", type: "birthday", annual: true, reminderDays: 7 },
-      { date: "2026-05-31", monthDay: "05-31", title: "Sam Carter's birthday", type: "birthday", annual: true, reminderDays: 7 }
+      { date: "2026-05-31", monthDay: "05-31", title: "Sam Carter's birthday", type: "birthday", annual: true, reminderDays: 7 },
+      { date: "2026-06-14", monthDay: "06-14", title: "Wedding anniversary", type: "anniversary", annual: true, reminderDays: 7 }
     ],
     chores: [
       { title: "Clean kitchen", assignee: "Alex", cadence: "Weekly", recurrence: "weekly", startDate: "2026-05-23", nextDue: "2026-05-23", completedDates: [] },

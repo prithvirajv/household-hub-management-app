@@ -611,8 +611,8 @@ function metricsForView() {
   const upcoming = scheduleItems().length;
   const groceries = groceryList().length;
   if (currentView === "calendar") {
-    const birthdaysThisMonth = birthdayOccurrencesForMonth().length;
-    return [["Chore rotation", String(state.calendar.chores.length), "household chores"], ["Birthday reminders", String(birthdaysThisMonth), `annual birthdays in ${monthLabel()}`], [`${monthLabel()} events`, String(upcoming), "chores, birthdays and reminders"], ["Shared calendar", "Household", "tasks in every member"]];
+    const annualEventsThisMonth = annualEventOccurrencesForMonth().length;
+    return [["Chore rotation", String(state.calendar.chores.length), "household chores"], ["Birthdays & anniversaries", String(annualEventsThisMonth), `annual events in ${monthLabel()}`], [`${monthLabel()} events`, String(upcoming), "chores, birthdays, anniversaries and reminders"], ["Shared calendar", "Household", "tasks in every member"]];
   }
   if (currentView === "notes") return [];
   if (currentView === "journal") return [];
@@ -919,8 +919,8 @@ function renderCalendar() {
       <div class="main-stack">
         <section class="card calendar-main-card">
           <div class="section-head">
-            <div><span class="card-label">Household calendar</span><h3>Chores, birthdays and reminders</h3></div>
-            <div class="button-row"><button id="addChoreButton" class="ghost" type="button">+ Add chore</button><button id="addBirthdayButton" class="ghost" type="button">+ Add birthday</button><button id="addReminderButton" type="button">+ Add reminder</button></div>
+            <div><span class="card-label">Household calendar</span><h3>Chores, birthdays, anniversaries and reminders</h3></div>
+            <div class="button-row"><button id="addChoreButton" class="ghost" type="button">+ Add chore</button><button id="addBirthdayButton" class="ghost" type="button">+ Add birthday/anniversary</button><button id="addReminderButton" type="button">+ Add reminder</button></div>
           </div>
           <div class="calendar-member-filter" role="group" aria-label="Filter calendar by person">
             <button type="button" class="member-chip ${calendarFilterOwner ? "" : "active"}" data-calendar-filter-owner="">All people</button>
@@ -932,12 +932,12 @@ function renderCalendar() {
           <form id="calendarQuickAdd" class="calendar-quick-add">
             <input name="editingKind" type="hidden">
             <input name="editingId" type="hidden">
-            <label>Type<select name="type"><option value="chore">Chore</option><option value="birthday">Birthday reminder</option><option value="reminder">Reminder</option></select></label>
+            <label>Type<select name="type"><option value="chore">Chore</option><option value="birthday">Birthday reminder</option><option value="anniversary">Anniversary reminder</option><option value="reminder">Reminder</option></select></label>
             <label>Title<input name="title" placeholder="Mom birthday reminder" required></label>
             <label>Date and time<input name="date" type="datetime-local" value="${state.budget.month}-01T09:00" required></label>
             <label>Assign to<select name="owner">${calendarMembers.map((member) => `<option value="${escapeHtml(member.email || member.name)}">${escapeHtml(member.name)}${member.email ? ` · ${escapeHtml(member.email)}` : ""}${member.status && member.status !== "active" ? " (invited)" : ""}</option>`).join("")}</select></label>
             <label data-chore-recurrence-field>Repeat<select name="recurrence"><option value="once">Once</option><option value="weekly" selected>Weekly</option><option value="biweekly">Every 2 weeks</option><option value="triweekly">Every 3 weeks</option><option value="monthly">Monthly</option></select></label>
-            <label data-birthday-reminder-field hidden>Remind before<select name="reminderDays"><option value="0">Same day</option><option value="1">1 day</option><option value="3">3 days</option><option value="7" selected>7 days</option><option value="14">14 days</option></select></label>
+            <label data-annual-reminder-field hidden>Remind before<select name="reminderDays"><option value="0">Same day</option><option value="1">1 day</option><option value="3">3 days</option><option value="7" selected>7 days</option><option value="14">14 days</option></select></label>
             <button data-calendar-submit type="submit">Add</button>
             <button data-calendar-delete class="danger-button" type="button" hidden>Delete</button>
             <button data-calendar-cancel class="ghost" type="button" hidden>Cancel</button>
@@ -968,8 +968,8 @@ function renderCalendar() {
           }).join("") : `<div class="empty-inline">No recurring chores</div>`}
         </section>
         <section class="card">
-          <div class="section-head"><div><span class="card-label">Birthdays</span><h3>Birthday reminders</h3></div><button id="sideAddBirthdayButton" class="ghost" type="button">Add birthday</button></div>
-          ${state.calendar.events.filter((event) => event.type === "birthday").length ? state.calendar.events.filter((event) => event.type === "birthday").map((event) => calendarManageRow(birthdayDisplayTitle(event), `${formatBirthdayMonthDay(event)} · every year · ${Number(event.reminderDays || 0)} days before`, "Annual", "event", event.id)).join("") : `<div class="empty-inline">No birthdays added</div>`}
+          <div class="section-head"><div><span class="card-label">Remember</span><h3>Birthdays &amp; anniversaries</h3></div><button id="sideAddBirthdayButton" class="ghost" type="button">Add birthday/anniversary</button></div>
+          ${state.calendar.events.filter((event) => ANNUAL_EVENT_TYPES.includes(event.type)).length ? state.calendar.events.filter((event) => ANNUAL_EVENT_TYPES.includes(event.type)).map((event) => calendarManageRow(annualEventDisplayTitle(event), `${formatAnnualEventMonthDay(event)} · every year · ${Number(event.reminderDays || 0)} days before`, annualEventLabels[event.type] || "Annual", "event", event.id)).join("") : `<div class="empty-inline">No birthdays or anniversaries added</div>`}
         </section>
       </aside>
     </section>`;
@@ -2078,6 +2078,7 @@ function renderSharing() {
     "Calendar",
     "Chores",
     "Birthday reminders",
+    "Anniversary reminders",
     "Notes",
     "Documents",
     "Meals",
@@ -2180,7 +2181,7 @@ function renderHelp() {
     ["Start here", "Create a household, choose its country and currency, then add income and assign every planned dollar in Budget."],
     ["Households", "Use Current household in the sidebar to switch between homes, countries, or family workspaces. Each household keeps separate budgets and records."],
     ["Budget and transactions", "Create categories and subcategories in Budget. Add or import transactions, then assign each transaction to the matching budget line."],
-    ["Calendar and chores", "Add events, annual birthdays, reminders, and recurring chores. Weekly chores automatically appear on future calendar dates."],
+    ["Calendar and chores", "Add events, annual birthdays and anniversaries, reminders, and recurring chores. Weekly chores automatically appear on future calendar dates."],
     ["Meals and recipes", "Save recipes in Recipes, then select them in the weekly Meals planner. Planned ingredients feed the grocery list."],
     ["Goals and wealth", "Track sinking funds in Goals. Use Wealth for debts, assets, liabilities, payoff progress, and net worth."],
     ["Sharing", "Choose the household areas to share, send an invitation, and ask the recipient to use the exact invited email and one-time code."],
@@ -2343,11 +2344,11 @@ function dueDateRows() {
 }
 
 function scheduleItems() {
-  ensureBirthdayRecurrenceData();
+  ensureAnnualEventRecurrenceData();
   ensureChoreRecurrenceData();
   const selectedMonth = state.budget.month;
   const oneTimeEvents = state.calendar.events
-    .filter((event) => event.type !== "birthday" && event.date?.startsWith(selectedMonth))
+    .filter((event) => !ANNUAL_EVENT_TYPES.includes(event.type) && event.date?.startsWith(selectedMonth))
     .map((event) => ({ title: event.title, date: event.date.slice(5), displayDate: `${event.date.slice(5)}${event.dateTime ? ` · ${formatReminderTime(event.dateTime)}` : ""}`, type: event.type, sourceKind: "event", sourceId: event.id, owner: event.owner || "", ownerName: event.ownerName || event.owner || "" }));
   const chores = state.calendar.chores.flatMap((chore) =>
     choreOccurrencesForMonth(chore).map((occurrence) => ({
@@ -2362,8 +2363,8 @@ function scheduleItems() {
       ownerName: chore.assigneeName || chore.assignee || ""
     }))
   );
-  const annualBirthdays = birthdayScheduleItems();
-  return [...oneTimeEvents, ...chores, ...annualBirthdays]
+  const annualEvents = annualEventScheduleItems();
+  return [...oneTimeEvents, ...chores, ...annualEvents]
     .sort((a, b) => a.date.localeCompare(b.date));
 }
 
@@ -2444,17 +2445,20 @@ function nextChoreOccurrenceInMonth(chore) {
   return choreOccurrencesForMonth(chore)[0] || null;
 }
 
-function ensureBirthdayRecurrenceData() {
+const ANNUAL_EVENT_TYPES = ["birthday", "anniversary"];
+const annualEventLabels = { birthday: "Birthday", anniversary: "Anniversary" };
+
+function ensureAnnualEventRecurrenceData() {
   state.calendar.events.forEach((event) => {
     event.id ||= uniqueId("event");
-    if (event.type !== "birthday") return;
+    if (!ANNUAL_EVENT_TYPES.includes(event.type)) return;
     event.monthDay ||= event.date?.slice(5);
     event.annual = true;
     event.reminderDays = Number(event.reminderDays ?? 7);
   });
 }
 
-function annualBirthdayDate(event, year) {
+function annualEventDate(event, year) {
   const [month, requestedDay] = String(event.monthDay || event.date?.slice(5) || "01-01").split("-").map(Number);
   const lastDay = new Date(year, month, 0).getDate();
   return new Date(year, month - 1, Math.min(requestedDay, lastDay));
@@ -2464,42 +2468,44 @@ function dateKey(date) {
   return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
 }
 
-function birthdayOccurrencesForMonth() {
-  ensureBirthdayRecurrenceData();
+function annualEventOccurrencesForMonth() {
+  ensureAnnualEventRecurrenceData();
   const year = Number(state.budget.month.slice(0, 4));
   return state.calendar.events
-    .filter((event) => event.type === "birthday")
-    .map((event) => ({ event, date: annualBirthdayDate(event, year) }))
+    .filter((event) => ANNUAL_EVENT_TYPES.includes(event.type))
+    .map((event) => ({ event, date: annualEventDate(event, year) }))
     .filter(({ date }) => dateKey(date).startsWith(state.budget.month));
 }
 
-function birthdayScheduleItems() {
+function annualEventScheduleItems() {
   const selectedYear = Number(state.budget.month.slice(0, 4));
   return state.calendar.events
-    .filter((event) => event.type === "birthday")
+    .filter((event) => ANNUAL_EVENT_TYPES.includes(event.type))
     .flatMap((event) => {
-      const birthdayDate = annualBirthdayDate(event, selectedYear);
-      const reminderDate = new Date(birthdayDate);
+      const occursOn = annualEventDate(event, selectedYear);
+      const reminderDate = new Date(occursOn);
       reminderDate.setDate(reminderDate.getDate() - Number(event.reminderDays || 0));
-      const birthdayTitle = birthdayDisplayTitle(event);
+      const title = annualEventDisplayTitle(event);
+      const label = annualEventLabels[event.type] || "Annual event";
       const items = [];
-      if (dateKey(birthdayDate).startsWith(state.budget.month)) {
-        items.push({ title: birthdayTitle, date: dateKey(birthdayDate).slice(5), type: "birthday", label: "Birthday", eventType: "birthday", sourceKind: "event", sourceId: event.id, owner: event.owner || "", ownerName: event.ownerName || event.owner || "" });
+      if (dateKey(occursOn).startsWith(state.budget.month)) {
+        items.push({ title, date: dateKey(occursOn).slice(5), type: event.type, label, eventType: event.type, sourceKind: "event", sourceId: event.id, owner: event.owner || "", ownerName: event.ownerName || event.owner || "" });
       }
       if (Number(event.reminderDays || 0) > 0 && dateKey(reminderDate).startsWith(state.budget.month)) {
-        items.push({ title: `${birthdayTitle} reminder`, date: dateKey(reminderDate).slice(5), type: "birthday-reminder", label: "Birthday reminder", eventType: "birthday-reminder", sourceKind: "event", sourceId: event.id, owner: event.owner || "", ownerName: event.ownerName || event.owner || "" });
+        items.push({ title: `${title} reminder`, date: dateKey(reminderDate).slice(5), type: `${event.type}-reminder`, label: `${label} reminder`, eventType: `${event.type}-reminder`, sourceKind: "event", sourceId: event.id, owner: event.owner || "", ownerName: event.ownerName || event.owner || "" });
       }
       return items;
     });
 }
 
-function birthdayDisplayTitle(event) {
-  return String(event.title || "Birthday").replace(/\s+reminder$/i, "").trim();
+function annualEventDisplayTitle(event) {
+  const fallback = annualEventLabels[event.type] || "Event";
+  return String(event.title || fallback).replace(/\s+reminder$/i, "").trim();
 }
 
-function formatBirthdayMonthDay(event) {
-  ensureBirthdayRecurrenceData();
-  const date = annualBirthdayDate(event, 2000);
+function formatAnnualEventMonthDay(event) {
+  ensureAnnualEventRecurrenceData();
+  const date = annualEventDate(event, 2000);
   return date.toLocaleDateString("en-US", { month: "long", day: "numeric" });
 }
 
@@ -4328,9 +4334,9 @@ function bindViewEvents() {
       if (existing) Object.assign(existing, chore);
       else state.calendar.chores.push(chore);
     } else {
-      const isBirthday = data.type === "birthday";
+      const isAnnual = ANNUAL_EVENT_TYPES.includes(data.type);
       const notificationDate = new Date(selectedDateTime);
-      if (isBirthday) notificationDate.setDate(notificationDate.getDate() - Number(data.reminderDays || 7));
+      if (isAnnual) notificationDate.setDate(notificationDate.getDate() - Number(data.reminderDays || 7));
       const existing = editingKind === "event" ? state.calendar.events.find((item) => item.id === editingId) : null;
       const calendarEvent = {
         id: existing?.id || uniqueId("event"),
@@ -4338,17 +4344,17 @@ function bindViewEvents() {
         date: selectedDate,
         dateTime: selectedDateTime || `${selectedDate}T09:00`,
         notifyAt: selectedDateTime ? notificationDate.toISOString() : "",
-        monthDay: isBirthday ? selectedDate.slice(5) : undefined,
-        type: isBirthday ? "birthday" : "reminder",
-        annual: isBirthday,
-        reminderDays: isBirthday ? Number(data.reminderDays || 7) : undefined,
+        monthDay: isAnnual ? selectedDate.slice(5) : undefined,
+        type: isAnnual ? data.type : "reminder",
+        annual: isAnnual,
+        reminderDays: isAnnual ? Number(data.reminderDays || 7) : undefined,
         owner: data.owner || sessionUser?.email || "",
         ownerName: assignedMember?.name || sessionUser?.name || data.owner || ""
       };
       if (existing) Object.assign(existing, calendarEvent);
       else state.calendar.events.push(calendarEvent);
     }
-    calendarFeedback = `${data.type === "chore" ? "Chore" : data.type === "birthday" ? "Birthday" : "Reminder"} ${wasEditing ? "updated" : "added"}.`;
+    calendarFeedback = `${data.type === "chore" ? "Chore" : annualEventLabels[data.type] || "Reminder"} ${wasEditing ? "updated" : "added"}.`;
     render();
   });
 
@@ -4841,7 +4847,7 @@ function editCalendarItem(reference) {
 
   form.editingKind.value = kind;
   form.editingId.value = id;
-  form.type.value = kind === "chore" ? "chore" : item.type === "birthday" ? "birthday" : "reminder";
+  form.type.value = kind === "chore" ? "chore" : ANNUAL_EVENT_TYPES.includes(item.type) ? item.type : "reminder";
   form.title.value = item.title || "";
   form.date.value = kind === "chore"
     ? `${item.startDate || item.nextDue || `${state.budget.month}-01`}T${item.time || "09:00"}`
@@ -4849,9 +4855,9 @@ function editCalendarItem(reference) {
   form.owner.value = kind === "chore" ? item.assignee || "" : item.owner || "";
   if (![...form.owner.options].some((option) => option.value === form.owner.value)) form.owner.value = sessionUser?.email || form.owner.options[0]?.value || "";
   form.recurrence.value = kind === "chore" ? item.recurrence || "once" : "once";
-  form.reminderDays.value = kind === "event" && item.type === "birthday" ? String(item.reminderDays ?? 7) : "7";
+  form.reminderDays.value = kind === "event" && ANNUAL_EVENT_TYPES.includes(item.type) ? String(item.reminderDays ?? 7) : "7";
   form.querySelector("[data-calendar-submit]").textContent = "Save changes";
-  form.querySelector("[data-calendar-delete]").textContent = `Delete ${form.type.value === "chore" ? "chore" : form.type.value === "birthday" ? "birthday" : "reminder"}`;
+  form.querySelector("[data-calendar-delete]").textContent = `Delete ${form.type.value === "chore" ? "chore" : annualEventLabels[form.type.value]?.toLowerCase() || "reminder"}`;
   form.querySelector("[data-calendar-delete]").hidden = false;
   form.querySelector("[data-calendar-cancel]").hidden = false;
   calendarFeedback = "";
@@ -4881,11 +4887,11 @@ function updateCalendarQuickAddFields() {
   if (!form) return;
   const type = form.type.value;
   const recurrenceField = form.querySelector("[data-chore-recurrence-field]");
-  const reminderField = form.querySelector("[data-birthday-reminder-field]");
+  const reminderField = form.querySelector("[data-annual-reminder-field]");
   if (recurrenceField) recurrenceField.hidden = type !== "chore";
-  if (reminderField) reminderField.hidden = type !== "birthday";
+  if (reminderField) reminderField.hidden = !ANNUAL_EVENT_TYPES.includes(type);
   const deleteButton = form.querySelector("[data-calendar-delete]");
-  if (deleteButton && !deleteButton.hidden) deleteButton.textContent = `Delete ${type === "chore" ? "chore" : type === "birthday" ? "birthday" : "reminder"}`;
+  if (deleteButton && !deleteButton.hidden) deleteButton.textContent = `Delete ${type === "chore" ? "chore" : annualEventLabels[type]?.toLowerCase() || "reminder"}`;
 }
 
 function refreshBudgetTotals(categoryIndex, lineIndex) {

@@ -1718,6 +1718,17 @@ main {
   border-left: 2px solid var(--gold);
 }
 
+.event.anniversary {
+  background: #fde8ea;
+  color: #a3324a;
+}
+
+.event.anniversary-reminder {
+  background: #fef1f3;
+  color: #b34460;
+  border-left: 2px solid var(--coral);
+}
+
 .event.Chore,
 .event.chore {
   background: var(--green-soft);
