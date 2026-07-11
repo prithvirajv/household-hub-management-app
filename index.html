@@ -8,6 +8,7 @@
     <link rel="icon" type="image/svg+xml" href="/assets/favicon.svg">
     <link rel="apple-touch-icon" href="/assets/apple-touch-icon.png">
     <link rel="stylesheet" href="/styles.css?v=20260530-2">
+    <script src="https://accounts.google.com/gsi/client" async defer></script>
   </head>
   <body>
     <div class="app-shell">
@@ -58,6 +59,8 @@
             <button type="submit">Open household</button>
             <button id="forgotPasswordButton" class="text-button" type="button">Forgot password?</button>
             <button id="showInvitationButton" class="text-button" type="button">Accept invitation</button>
+            <div id="googleSigninDivider" class="auth-divider" hidden><span>or</span></div>
+            <div id="googleSigninButton" class="google-signin-button"></div>
             <div class="demo-access">
               <span>Exploring FamilyLoop?</span>
               <button id="demoLoginButton" class="ghost" type="button">Try demo</button>

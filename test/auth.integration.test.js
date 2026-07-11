@@ -65,7 +65,8 @@ test.before(async () => {
       ADMIN_PASSWORD: initialPassword,
       ADMIN_NAME: "Private Administrator",
       APP_BASE_URL: baseUrl,
-      SMTP_HOST: ""
+      SMTP_HOST: "",
+      TEST_BYPASS_GOOGLE_AUTH: "true"
     },
     stdio: ["ignore", "pipe", "pipe"]
   });
@@ -622,6 +623,106 @@ test("the primary owner can revoke household access and the removed user loses a
   assert.equal(removedAccess.status, 401);
   const accessAfter = await request("/api/households/access", { headers: { cookie: ownerSignin.cookie } });
   assert.equal(accessAfter.body.members.some((member) => member.email === invitedEmail), false);
+});
+
+function googlePayload(email, overrides = {}) {
+  return { email, email_verified: true, sub: `google-sub-${email}`, name: "Googly User", ...overrides };
+}
+
+test("Google sign-in requires a credential", async () => {
+  const attempt = await request("/api/auth/google", { method: "POST", body: JSON.stringify({}) });
+  assert.equal(attempt.status, 400);
+});
+
+test("Google sign-in rejects an unverified email", async () => {
+  const attempt = await request("/api/auth/google", {
+    method: "POST",
+    body: JSON.stringify({ testPayload: googlePayload("unverified@example.com", { email_verified: false }) })
+  });
+  assert.equal(attempt.status, 401);
+});
+
+test("Google sign-in creates a new account and household for a first-time user", async () => {
+  const email = "new-googler@example.com";
+  const signin = await request("/api/auth/google", {
+    method: "POST",
+    body: JSON.stringify({ testPayload: googlePayload(email, { name: "Googly Newcomer" }) })
+  });
+  assert.equal(signin.status, 201);
+  assert.equal(signin.body.user.email, email);
+  assert.equal(signin.body.user.isAdmin, false);
+
+  const state = await request("/api/state", { headers: { cookie: signin.cookie } });
+  assert.equal(state.status, 200);
+  assert.equal(state.body.household.name, "Googly Newcomer's Household");
+});
+
+test("a returning Google user signs back into the same account", async () => {
+  const email = "returning-googler@example.com";
+  const payload = googlePayload(email, { name: "Repeat Googler" });
+
+  const first = await request("/api/auth/google", { method: "POST", body: JSON.stringify({ testPayload: payload }) });
+  assert.equal(first.status, 201);
+
+  const second = await request("/api/auth/google", { method: "POST", body: JSON.stringify({ testPayload: payload }) });
+  assert.equal(second.status, 200);
+  assert.equal(second.body.user.id, first.body.user.id);
+});
+
+test("Google sign-in is blocked when the email already has a password account", async () => {
+  const email = "password-first@example.com";
+  const signup = await request("/api/auth/signup", {
+    method: "POST",
+    body: JSON.stringify({
+      email, password: "Consumer-Password-123!", name: "Password User",
+      householdName: "Password Household", country: "US"
+    })
+  });
+  assert.equal(signup.status, 201);
+
+  const googleAttempt = await request("/api/auth/google", {
+    method: "POST",
+    body: JSON.stringify({ testPayload: googlePayload(email) })
+  });
+  assert.equal(googleAttempt.status, 409);
+  assert.equal(googleAttempt.body.error, "An account with this email already exists. Sign in with your password instead.");
+});
+
+test("Google sign-in rejects reserved administrator and demo identities", async () => {
+  for (const email of [adminEmail, "demo@familyloop.net"]) {
+    const attempt = await request("/api/auth/google", {
+      method: "POST",
+      body: JSON.stringify({ testPayload: googlePayload(email) })
+    });
+    assert.equal(attempt.status, 409);
+  }
+});
+
+test("a disabled Google account is rejected on sign-in", async () => {
+  const email = "disabled-googler@example.com";
+  const payload = googlePayload(email, { name: "Disabled Googler" });
+  const created = await request("/api/auth/google", { method: "POST", body: JSON.stringify({ testPayload: payload }) });
+  assert.equal(created.status, 201);
+
+  const adminSignin = await request("/api/auth/signin", {
+    method: "POST",
+    body: JSON.stringify({ email: adminEmail, password: initialPassword })
+  });
+  assert.equal(adminSignin.status, 200);
+
+  const users = await request("/api/admin/users", { headers: { cookie: adminSignin.cookie } });
+  const target = users.body.find((user) => user.email === email);
+  assert.ok(target);
+
+  const disable = await request(`/api/admin/users/${target.id}`, {
+    method: "PATCH",
+    headers: { cookie: adminSignin.cookie },
+    body: JSON.stringify({ disabled: true })
+  });
+  assert.equal(disable.status, 200);
+
+  const blocked = await request("/api/auth/google", { method: "POST", body: JSON.stringify({ testPayload: payload }) });
+  assert.equal(blocked.status, 403);
 });
 
 test("password reset is generic, one-time, and preserves admin authorization", async () => {

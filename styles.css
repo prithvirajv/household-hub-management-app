@@ -393,6 +393,29 @@ main {
   font-weight: 700;
 }
 
+.auth-divider {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  color: var(--muted);
+  font-size: 0.72rem;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.auth-divider::before,
+.auth-divider::after {
+  content: "";
+  flex: 1;
+  height: 1px;
+  background: var(--line);
+}
+
+.google-signin-button {
+  display: flex;
+  justify-content: center;
+}
+
 .demo-access button {
   white-space: nowrap;
 }

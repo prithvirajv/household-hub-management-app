@@ -43,6 +43,7 @@ SMTP_PASS="${SMTP_PASS:-}"
 REQUIRE_SMTP="${REQUIRE_SMTP:-true}"
 NOTIFICATION_SECRET="${NOTIFICATION_SECRET:?Set NOTIFICATION_SECRET to authorize the scheduled notification worker}"
 GCS_BUCKET="${GCS_BUCKET:-}"
+GOOGLE_CLIENT_ID="${GOOGLE_CLIENT_ID:-}"
 
 # Every credential above is stored in Secret Manager, not passed to Cloud Run
 # as a plaintext env var — this script only reads them from the environment
@@ -172,7 +173,7 @@ gcloud run deploy "${SERVICE_NAME}" \
   --no-cpu-boost \
   --add-cloudsql-instances "${CONNECTION_NAME}" \
   --set-secrets "${SECRET_REFS}" \
-  --set-env-vars "CLOUD_SQL_CONNECTION_NAME=${CONNECTION_NAME},DB_NAME=${DB_NAME},DB_USER=${DB_USER},ADMIN_EMAIL=${ADMIN_EMAIL},ADMIN_NAME=${ADMIN_NAME},APP_BASE_URL=${APP_BASE_URL},EMAIL_FROM=${EMAIL_FROM},SMTP_HOST=${SMTP_HOST},SMTP_PORT=${SMTP_PORT},SMTP_SECURE=${SMTP_SECURE},SMTP_USER=${SMTP_USER},GCS_BUCKET=${GCS_BUCKET}"
+  --set-env-vars "CLOUD_SQL_CONNECTION_NAME=${CONNECTION_NAME},DB_NAME=${DB_NAME},DB_USER=${DB_USER},ADMIN_EMAIL=${ADMIN_EMAIL},ADMIN_NAME=${ADMIN_NAME},APP_BASE_URL=${APP_BASE_URL},EMAIL_FROM=${EMAIL_FROM},SMTP_HOST=${SMTP_HOST},SMTP_PORT=${SMTP_PORT},SMTP_SECURE=${SMTP_SECURE},SMTP_USER=${SMTP_USER},GCS_BUCKET=${GCS_BUCKET},GOOGLE_CLIENT_ID=${GOOGLE_CLIENT_ID}"
 
 SERVICE_URL="$(gcloud run services describe "${SERVICE_NAME}" --project "${PROJECT_ID}" --region "${REGION}" --format='value(status.url)')"
 

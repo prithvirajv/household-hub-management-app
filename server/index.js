@@ -11,6 +11,7 @@ try {
   bcrypt = require("bcryptjs");
 }
 const { Pool } = require("pg");
+const { OAuth2Client } = require("google-auth-library");
 const { countries } = require("countries-list");
 const { defaultState } = require("./default-state");
 const { validateJournalPayload, buildDocumentObjectPath, wouldCreateFolderCycle, SMS_CARRIERS, smsGatewayAddress, rollAnnualNotifyAtForward } = require("../lib/shared-logic");
@@ -34,6 +35,11 @@ const LEGACY_DEMO_EMAIL = "demo@householdhub.app";
 const ADMIN_EMAIL = String(process.env.ADMIN_EMAIL || "").trim().toLowerCase();
 const ADMIN_PASSWORD = String(process.env.ADMIN_PASSWORD || "");
 const ADMIN_NAME = String(process.env.ADMIN_NAME || "FamilyLoop Administrator").trim();
+const GOOGLE_CLIENT_ID = String(process.env.GOOGLE_CLIENT_ID || "").trim();
+// No client secret needed here: the browser's "Sign in with Google" button
+// returns a signed ID token directly, which this verifies against Google's
+// public keys (fetched automatically by the library) and our client ID.
+const googleAuthClient = GOOGLE_CLIENT_ID ? new OAuth2Client(GOOGLE_CLIENT_ID) : null;
 
 // The single source of truth for "is this the platform administrator" --
 // checked directly against the configured email rather than trusting the
@@ -68,6 +74,13 @@ const TEST_EXPOSE_NOTIFICATIONS = process.env.NODE_ENV === "test"
 const TEST_FORCE_EMAIL_FAILURE = process.env.NODE_ENV === "test"
   && MEMORY_DB
   && String(process.env.NOTIFICATION_TEST_FORCE_EMAIL_FAILURE || "false").toLowerCase() === "true";
+// Lets integration tests exercise the Google sign-in account-creation/linking
+// logic by supplying already-"verified" claims directly, instead of a real
+// signed Google credential -- avoids making real network calls to Google
+// (or mocking a third-party library) just to test our own account logic.
+const TEST_BYPASS_GOOGLE_AUTH = process.env.NODE_ENV === "test"
+  && MEMORY_DB
+  && String(process.env.TEST_BYPASS_GOOGLE_AUTH || "false").toLowerCase() === "true";
 
 const pool = MEMORY_DB
   ? null
@@ -1031,7 +1044,8 @@ app.get("/api/session", async (req, res, next) => {
     res.json({
       authenticated: Boolean(session),
       user: publicUser(session),
-      household: session ? { id: session.household_id, name: session.household_name } : null
+      household: session ? { id: session.household_id, name: session.household_name } : null,
+      googleClientId: GOOGLE_CLIENT_ID
     });
   } catch (error) {
     next(error);
@@ -1128,7 +1142,7 @@ app.post("/api/auth/signin", async (req, res, next) => {
     }
     if (MEMORY_DB) {
       const user = memoryDb.users.find((item) => item.email === email);
-      if (!user || !(await bcrypt.compare(password, user.password_hash))) {
+      if (!user || !user.password_hash || !(await bcrypt.compare(password, user.password_hash))) {
         return res.status(401).json({ error: "Invalid email or password" });
       }
       if (user.disabled_at) return res.status(403).json({ error: "This login has been disabled" });
@@ -1142,7 +1156,7 @@ app.post("/api/auth/signin", async (req, res, next) => {
 
     const result = await pool.query("SELECT id, email, name, password_hash, is_admin, disabled_at, default_household_id FROM users WHERE email = $1", [email]);
     const user = result.rows[0];
-    if (!user || !(await bcrypt.compare(password, user.password_hash))) {
+    if (!user || !user.password_hash || !(await bcrypt.compare(password, user.password_hash))) {
       return res.status(401).json({ error: "Invalid email or password" });
     }
     if (user.disabled_at) return res.status(403).json({ error: "This login has been disabled" });
@@ -1158,6 +1172,133 @@ app.post("/api/auth/signin", async (req, res, next) => {
     );
     if (defaultResult.rows[0]) selectHousehold(res, defaultResult.rows[0].household_id);
     res.json({ user: publicUser(user) });
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.post("/api/auth/google", async (req, res, next) => {
+  try {
+    if (!googleAuthClient && !TEST_BYPASS_GOOGLE_AUTH) return res.status(503).json({ error: "Google sign-in is not configured" });
+
+    let payload;
+    if (TEST_BYPASS_GOOGLE_AUTH) {
+      payload = req.body.testPayload || null;
+      if (!payload) return res.status(400).json({ error: "Missing Google credential" });
+    } else {
+      const credential = String(req.body.credential || "");
+      if (!credential) return res.status(400).json({ error: "Missing Google credential" });
+      try {
+        const ticket = await googleAuthClient.verifyIdToken({ idToken: credential, audience: GOOGLE_CLIENT_ID });
+        payload = ticket.getPayload();
+      } catch (_error) {
+        return res.status(401).json({ error: "Invalid Google credential" });
+      }
+    }
+    if (!payload?.email || !payload.email_verified) {
+      return res.status(401).json({ error: "Google account email is not verified" });
+    }
+
+    const email = String(payload.email).trim().toLowerCase();
+    const googleId = String(payload.sub);
+    const name = String(payload.name || payload.given_name || email.split("@")[0]);
+
+    if (email === DEMO_EMAIL || email === LEGACY_DEMO_EMAIL || (ADMIN_EMAIL && email === ADMIN_EMAIL)) {
+      return res.status(409).json({ error: "That email is reserved" });
+    }
+
+    if (MEMORY_DB) {
+      const existingUser = memoryDb.users.find((item) => item.email === email);
+      // Deliberately not linked: a password account and a Google account never
+      // merge just because the email matches, so signing in one way never
+      // silently grants access to data created the other way.
+      if (existingUser && !existingUser.google_id) {
+        return res.status(409).json({ error: "An account with this email already exists. Sign in with your password instead." });
+      }
+      if (existingUser) {
+        if (existingUser.disabled_at) return res.status(403).json({ error: "This login has been disabled" });
+        await recordLogin(existingUser.id);
+        signSession(res, existingUser.id);
+        const defaultHouseholdId = existingUser.default_household_id
+          || memoryDb.memberships.find((membership) => membership.user_id === existingUser.id)?.household_id;
+        if (defaultHouseholdId) selectHousehold(res, defaultHouseholdId);
+        return res.json({ user: publicUser(existingUser) });
+      }
+      const user = {
+        id: crypto.randomUUID(),
+        email,
+        name,
+        password_hash: null,
+        google_id: googleId,
+        is_admin: false,
+        login_count: 1,
+        last_login_at: new Date().toISOString(),
+        disabled_at: null,
+        phone: "",
+        carrier: "",
+        created_at: new Date().toISOString()
+      };
+      const state = householdState(`${name}'s Household`, "US", "USD");
+      const household = {
+        id: crypto.randomUUID(),
+        name: state.household.name,
+        invite_code: state.household.inviteCode,
+        app_state: state,
+        created_at: new Date().toISOString()
+      };
+      memoryDb.users.push(user);
+      memoryDb.households.push(household);
+      memoryDb.memberships.push({ user_id: user.id, household_id: household.id, role: "owner" });
+      user.default_household_id = household.id;
+      signSession(res, user.id);
+      selectHousehold(res, household.id);
+      return res.status(201).json({ user: publicUser(user) });
+    }
+
+    const existingResult = await pool.query(
+      "SELECT id, email, name, google_id, is_admin, disabled_at, default_household_id FROM users WHERE email = $1",
+      [email]
+    );
+    const existingUser = existingResult.rows[0];
+    if (existingUser && !existingUser.google_id) {
+      return res.status(409).json({ error: "An account with this email already exists. Sign in with your password instead." });
+    }
+    if (existingUser) {
+      if (existingUser.disabled_at) return res.status(403).json({ error: "This login has been disabled" });
+      await recordLogin(existingUser.id);
+      signSession(res, existingUser.id);
+      const defaultResult = await pool.query(
+        `SELECT hm.household_id
+         FROM household_memberships hm
+         WHERE hm.user_id = $1
+         ORDER BY (hm.household_id = $2) DESC, hm.created_at ASC
+         LIMIT 1`,
+        [existingUser.id, existingUser.default_household_id]
+      );
+      if (defaultResult.rows[0]) selectHousehold(res, defaultResult.rows[0].household_id);
+      return res.json({ user: publicUser(existingUser) });
+    }
+
+    const client = await pool.connect();
+    try {
+      await client.query("BEGIN");
+      const insertedUser = await client.query(
+        "INSERT INTO users (email, name, google_id, is_admin) VALUES ($1, $2, $3, false) RETURNING id, email, name, is_admin",
+        [email, name, googleId]
+      );
+      const state = householdState(`${name}'s Household`, "US", "USD");
+      const household = await createHouseholdForUser(client, insertedUser.rows[0].id, state.household.name, state);
+      await client.query("COMMIT");
+      signSession(res, insertedUser.rows[0].id);
+      selectHousehold(res, household.id);
+      res.status(201).json({ user: publicUser(insertedUser.rows[0]) });
+    } catch (error) {
+      await client.query("ROLLBACK");
+      if (error.code === "23505") return res.status(409).json({ error: "That Google account is already linked to another user" });
+      next(error);
+    } finally {
+      client.release();
+    }
   } catch (error) {
     next(error);
   }

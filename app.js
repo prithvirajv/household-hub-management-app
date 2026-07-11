@@ -27,6 +27,7 @@ let countryCatalog = [];
 let currentView = "budget";
 let autosaveTimer = null;
 let inviteEmailStatus = "";
+let googleSignInInitialized = false;
 let calendarFilterOwner = "";
 let calendarFeedback = "";
 // Kept out of state (like calendarFeedback) so a confirmation message never
@@ -5640,8 +5641,36 @@ function populateCarrierSelects() {
   });
 }
 
+// Polls briefly for the Google Identity Services script to finish loading
+// (it's fetched async, so it may not be ready the instant loadApp() runs)
+// before wiring up the "Sign in with Google" button. A no-op if the server
+// has no GOOGLE_CLIENT_ID configured, so the button just never appears.
+function initGoogleSignIn(clientId, attempt = 0) {
+  if (!clientId || googleSignInInitialized) return;
+  if (!window.google?.accounts?.id) {
+    if (attempt < 20) setTimeout(() => initGoogleSignIn(clientId, attempt + 1), 150);
+    return;
+  }
+  googleSignInInitialized = true;
+  google.accounts.id.initialize({ client_id: clientId, callback: handleGoogleCredential });
+  const container = $("#googleSigninButton");
+  if (container) google.accounts.id.renderButton(container, { theme: "outline", size: "large", width: 300 });
+  const divider = $("#googleSigninDivider");
+  if (divider) divider.hidden = false;
+}
+
+async function handleGoogleCredential(response) {
+  try {
+    await api("/api/auth/google", { method: "POST", body: JSON.stringify({ credential: response.credential }) });
+    await loadApp();
+  } catch (error) {
+    $("#authMessage").textContent = error.message;
+  }
+}
+
 async function loadApp() {
   const session = await api("/api/session");
+  initGoogleSignIn(session.googleClientId);
   if (!session.authenticated) {
     sessionUser = null;
     households = [];

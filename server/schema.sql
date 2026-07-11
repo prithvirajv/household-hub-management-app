@@ -18,7 +18,11 @@ ALTER TABLE users
   ADD COLUMN IF NOT EXISTS last_login_at TIMESTAMPTZ,
   ADD COLUMN IF NOT EXISTS disabled_at TIMESTAMPTZ,
   ADD COLUMN IF NOT EXISTS phone TEXT,
-  ADD COLUMN IF NOT EXISTS carrier TEXT;
+  ADD COLUMN IF NOT EXISTS carrier TEXT,
+  ADD COLUMN IF NOT EXISTS google_id TEXT UNIQUE;
+
+-- Google-authenticated accounts never set a password.
+ALTER TABLE users ALTER COLUMN password_hash DROP NOT NULL;
 
 CREATE TABLE IF NOT EXISTS households (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
