@@ -1492,13 +1492,18 @@ main {
 
 .paycheck-card,
 .goal-card,
-.debt-card {
+.debt-card,
+.account-item {
   display: grid;
   gap: 0.7rem;
   border: 1px solid var(--line);
   border-radius: 8px;
   background: #fbfdff;
   padding: 0.75rem;
+}
+
+.account-item.liability {
+  background: var(--soft-blue);
 }
 
 .paycheck-card-actions {
@@ -2080,7 +2085,8 @@ main {
   grid-template-columns: minmax(150px, 1.1fr) 100px 130px 110px 110px 130px minmax(130px, 0.85fr) 42px;
 }
 
-.stock-market-value {
+.stock-market-value,
+.net-worth-linked-value {
   display: grid;
   gap: 0.2rem;
   align-self: end;
@@ -2090,14 +2096,16 @@ main {
   padding: 0.45rem 0.65rem;
 }
 
-.stock-market-value span {
+.stock-market-value span,
+.net-worth-linked-value span {
   color: var(--muted);
   font-size: 0.64rem;
   font-weight: 900;
   text-transform: uppercase;
 }
 
-.stock-market-value strong {
+.stock-market-value strong,
+.net-worth-linked-value strong {
   color: var(--green);
 }
 

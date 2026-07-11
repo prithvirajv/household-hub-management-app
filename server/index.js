@@ -571,6 +571,8 @@ function householdState(name, country = "US", currency = "USD", seededDemo = fal
       debtNetWorthLinked: true,
       netWorth: { assets: [], liabilities: [] }
     };
+    state.accounts = [];
+    state.transfers = [];
   } else if (country === "IN") {
     state.budget.income = 320000;
     state.paychecks = [
@@ -583,16 +585,20 @@ function householdState(name, country = "US", currency = "USD", seededDemo = fal
     });
     state.transactions = [];
     state.goals.netWorth.assets = [
-      { name: "India bank account", value: 450000 },
+      { id: "india-bank", name: "India bank account", value: 450000 },
       { name: "India property", value: 8500000 },
       { name: "EPF", value: 1200000 }
     ];
     state.goals.netWorth.liabilities = [
-      { name: "India home loan", value: 3200000 }
+      { id: "india-home-loan", name: "India home loan", value: 3200000 }
     ];
     state.goals.debts = [
       { name: "India home loan", balance: 3200000, rate: 8.5, minimum: 32000 }
     ];
+    state.accounts = [
+      { id: "india-bank-account", name: "India bank account", type: "checking", openingBalance: 450000, netWorthAssetId: "india-bank", netWorthLiabilityId: "", createdAt: "2026-05-01" }
+    ];
+    state.transfers = [];
   }
   return state;
 }

@@ -5,7 +5,7 @@ const {
   dailyTaskOccursOnDate, isDailyTaskDoneOnDate, toggleDailyTaskDoneOnDate,
   timeToMinutes, minutesToTime, snapMinutes, layoutTimelineBlocks, comparePlannedToActual,
   sanitizeFilename, buildDocumentObjectPath, wouldCreateFolderCycle, buildFolderTree,
-  smsGatewayAddress
+  smsGatewayAddress, accountBalance, accountsWithBalances
 } = require("../lib/shared-logic");
 
 test("layoutTimelineBlocks gives non-overlapping tasks full width", () => {
@@ -391,4 +391,71 @@ test("smsGatewayAddress returns null for an unknown carrier", () => {
 test("smsGatewayAddress returns null when the phone number has no digits", () => {
   assert.equal(smsGatewayAddress("", "verizon"), null);
   assert.equal(smsGatewayAddress("   ", "verizon"), null);
+});
+
+test("accountBalance: checking account with one paycheck deposit and no purchases", () => {
+  const accounts = [{ id: "checking", type: "checking", openingBalance: 100 }];
+  const paychecks = [{ amount: 2600, depositAccountId: "checking" }];
+  const balance = accountBalance("checking", { accounts, transactions: [], paychecks, transfers: [] });
+  assert.equal(balance, 2700);
+});
+
+test("accountBalance: a purchase linked to the account reduces its balance, an unlinked purchase does not", () => {
+  const accounts = [{ id: "checking", type: "checking", openingBalance: 1000 }];
+  const transactions = [
+    { amount: 50, accountId: "checking" },
+    { amount: 999, accountId: "" }
+  ];
+  const balance = accountBalance("checking", { accounts, transactions, paychecks: [], transfers: [] });
+  assert.equal(balance, 950);
+});
+
+test("accountBalance: a credit card's owed balance increases with a purchase and no payments", () => {
+  const accounts = [{ id: "card", type: "credit_card", openingBalance: 0 }];
+  const transactions = [{ amount: 120, accountId: "card" }];
+  const balance = accountBalance("card", { accounts, transactions, paychecks: [], transfers: [] });
+  assert.equal(balance, 120);
+});
+
+test("accountBalance: paying off a credit card via one transfer reduces both the checking and card balances", () => {
+  const accounts = [
+    { id: "checking", type: "checking", openingBalance: 2000 },
+    { id: "card", type: "credit_card", openingBalance: 0 }
+  ];
+  const transactions = [{ amount: 300, accountId: "card" }];
+  const transfers = [{ fromAccountId: "checking", toAccountId: "card", amount: 300 }];
+  const context = { accounts, transactions, paychecks: [], transfers };
+  assert.equal(accountBalance("checking", context), 1700);
+  assert.equal(accountBalance("card", context), 0);
+});
+
+test("accountBalance: movements referencing a different account do not leak into the account under test", () => {
+  const accounts = [
+    { id: "checking", type: "checking", openingBalance: 500 },
+    { id: "savings", type: "savings", openingBalance: 500 }
+  ];
+  const transactions = [{ amount: 40, accountId: "savings" }];
+  const paychecks = [{ amount: 1000, depositAccountId: "savings" }];
+  const transfers = [{ fromAccountId: "savings", toAccountId: "checking", amount: 10 }];
+  const balance = accountBalance("checking", { accounts, transactions, paychecks, transfers });
+  assert.equal(balance, 510);
+});
+
+test("accountBalance returns 0 for an unknown or deleted account id", () => {
+  const balance = accountBalance("does-not-exist", { accounts: [], transactions: [], paychecks: [], transfers: [] });
+  assert.equal(balance, 0);
+});
+
+test("accountsWithBalances attaches a computed balance to every account", () => {
+  const state = {
+    accounts: [
+      { id: "checking", type: "checking", openingBalance: 100 },
+      { id: "card", type: "credit_card", openingBalance: 0 }
+    ],
+    transactions: [{ amount: 25, accountId: "card" }],
+    paychecks: [{ amount: 200, depositAccountId: "checking" }],
+    transfers: []
+  };
+  const result = accountsWithBalances(state);
+  assert.deepEqual(result.map((account) => [account.id, account.balance]), [["checking", 300], ["card", 25]]);
 });

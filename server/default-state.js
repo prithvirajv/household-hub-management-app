@@ -276,17 +276,22 @@ const defaultState = {
     ],
     netWorth: {
       assets: [
-        { name: "Checking", value: 2380, assetClass: "cash" },
+        { id: "checking", name: "Checking", value: 2380, assetClass: "cash" },
         { name: "Emergency savings", value: 650, assetClass: "cash" },
         { name: "401(k)", value: 18500, assetClass: "retirement" }
       ],
       liabilities: [
-        { name: "Credit card", value: 4280 },
+        { id: "credit-card", name: "Credit card", value: 4280 },
         { name: "Car loan", value: 7600 },
         { name: "Student loan", value: 11850 }
       ]
     }
-  }
+  },
+  accounts: [
+    { id: "checking-account", name: "Checking", type: "checking", openingBalance: 2380, netWorthAssetId: "checking", netWorthLiabilityId: "", createdAt: "2026-05-01" },
+    { id: "credit-card-account", name: "Credit card", type: "credit_card", openingBalance: 4280, netWorthAssetId: "", netWorthLiabilityId: "credit-card", createdAt: "2026-05-01" }
+  ],
+  transfers: []
 };
 
 module.exports = { defaultState };

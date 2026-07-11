@@ -180,8 +180,8 @@ function transactionAssignmentLabel(transaction) {
   return `${category} - ${subcategory}`;
 }
 
-function makeTransaction({ date, payee, amount, lineId, memo }) {
-  return { date, payee, amount, lineId, memo, ...lineSnapshot(lineId) };
+function makeTransaction({ date, payee, amount, lineId, memo, accountId = "" }) {
+  return { date, payee, amount, lineId, memo, accountId, ...lineSnapshot(lineId) };
 }
 
 function snapshotTransactionsForLine(line) {
@@ -337,6 +337,57 @@ function ensureDebtNetWorthSync() {
   state.goals.debts = state.goals.debts.filter((debt) => linkedDebtIds.has(debt.id));
   state.goals.debtNetWorthLinked = true;
   return true;
+}
+
+// Unlike ensureDebtNetWorthSync (which links once, then lets the two lists be
+// edited independently), a linked account must drive its paired net-worth
+// value on every render — the whole point is one computed number, never two
+// that can drift apart.
+function ensureAccountsData() {
+  state.accounts ||= [];
+  state.transfers ||= [];
+  state.accounts.forEach((account) => {
+    account.openingBalance = Number(account.openingBalance || 0);
+    account.netWorthAssetId ||= "";
+    account.netWorthLiabilityId ||= "";
+  });
+  state.accounts.forEach((account) => {
+    const balance = currentAccountBalance(account.id);
+    if (account.netWorthAssetId) {
+      const asset = state.goals.netWorth.assets.find((item) => item.id === account.netWorthAssetId);
+      if (asset) asset.value = balance;
+    }
+    if (account.netWorthLiabilityId) {
+      const liability = state.goals.netWorth.liabilities.find((item) => item.id === account.netWorthLiabilityId);
+      if (liability) liability.value = balance;
+    }
+  });
+}
+
+function currentAccountBalance(accountId) {
+  return accountBalance(accountId, {
+    accounts: state.accounts,
+    transactions: state.transactions,
+    paychecks: state.paychecks,
+    transfers: state.transfers
+  });
+}
+
+function accountName(accountId) {
+  return state.accounts.find((account) => account.id === accountId)?.name || "";
+}
+
+function isAccountLinked(type, id) {
+  return type === "asset"
+    ? state.accounts.some((account) => account.netWorthAssetId === id)
+    : state.accounts.some((account) => account.netWorthLiabilityId === id);
+}
+
+function accountOptions(selectedId, { excludeType } = {}) {
+  return state.accounts
+    .filter((account) => !excludeType || account.type !== excludeType)
+    .map((account) => `<option value="${account.id}" ${account.id === selectedId ? "selected" : ""}>${escapeHtml(account.name)}</option>`)
+    .join("");
 }
 
 function suggestedEmi(debt) {
@@ -584,7 +635,7 @@ function metricsForView() {
 function render() {
   if (!state) return;
   if (currentView === "admin" && !sessionUser?.isAdmin) currentView = "budget";
-  if (currentView === "wealth") ensureDebtNetWorthSync();
+  if (currentView === "wealth") { ensureDebtNetWorthSync(); ensureAccountsData(); }
   renderShell();
   view.innerHTML = (renderers[currentView] || renderers.budget)();
   bindViewEvents();
@@ -726,6 +777,7 @@ function renderBudget() {
 }
 
 function renderTransactions() {
+  ensureAccountsData();
   const imported = transactionInboxItems().filter((transaction) => !(state.transactionInboxDone || []).includes(transaction.id));
   const unassignedLedger = [];
   const lineOptions = (selectedLineId) => allLines().map((line) => `<option value="${line.id}" ${line.id === selectedLineId ? "selected" : ""}>${line.category} - ${line.name}</option>`).join("");
@@ -768,6 +820,7 @@ function renderTransactions() {
             <label>Payee<input name="payee" placeholder="Coffee House" required></label>
             <label>Amount<input name="amount" type="number" step="0.01" placeholder="18.72" required></label>
             <label>Subcategory<select name="lineId">${allLines().map((line) => `<option value="${line.id}">${line.category} - ${line.name}</option>`).join("")}</select></label>
+            ${state.accounts.length ? `<label>Account<select name="accountId"><option value="">Not linked</option>${accountOptions("")}</select></label>` : ""}
             <button type="submit">Split</button>
           </form>
           ${unassignedLedger.map((transaction) => `
@@ -790,6 +843,7 @@ function renderTransactions() {
 
 function renderPaychecks() {
   ensurePaycheckRecurrenceData();
+  ensureAccountsData();
   const paycheckOptions = state.paychecks.map((paycheck) => `<option value="${paycheck.date}">${paycheck.name} - ${money.format(paycheck.amount)}</option>`).join("");
   const lineOptions = allLines().map((line) => `<option value="${line.id}">${line.category} - ${line.name}</option>`).join("");
   const amountOptions = [50, 100, 150, 200, 250, 300, 350, 450, 520, 620, 850, 1850].map((amount) => `<option value="${amount}">${money.format(amount)}</option>`).join("");
@@ -815,6 +869,7 @@ function renderPaychecks() {
                 </div>
                 <small>${paycheck.date}</small>
                 <label class="paycheck-recurrence-field">Repeat<select data-paycheck-recurrence="${index}" aria-label="How often ${escapeHtml(paycheck.name)} repeats">${Object.entries(paycheckRecurrenceLabels).map(([value, label]) => `<option value="${value}" ${paycheck.recurrence === value ? "selected" : ""}>${label}</option>`).join("")}</select></label>
+                ${state.accounts.length ? `<label class="paycheck-recurrence-field">Deposit to<select data-paycheck-deposit-account="${index}" aria-label="Deposit account for ${escapeHtml(paycheck.name)}"><option value="">Not linked</option>${accountOptions(paycheck.depositAccountId || "", { excludeType: "credit_card" })}</select></label>` : ""}
                 <div class="mini-tags">${paycheck.assignedLineIds.map((id) => `<span>${lineName(id)}</span>`).join("")}</div>
                 <div class="split-stat" data-paycheck-split="${index}"><span>Income ${money.format(paycheck.amount)}</span><b>Assigned ${money.format(assigned)}</b></div>
               </article>`;
@@ -1919,9 +1974,26 @@ function renderGoals() {
 
 function renderWealth() {
   if (ensureDebtNetWorthSync()) autosaveState();
+  ensureAccountsData();
   return `
     <section class="work-grid wealth-layout">
       <div class="main-stack">
+        <section class="card">
+          <div class="section-head"><div><span class="card-label">Cash flow</span><h3>Accounts</h3></div><button id="addAccountButton" type="button">+ Add account</button></div>
+          ${state.accounts.length ? state.accounts.map((account, index) => accountItemRow(account, index)).join("") : `<div class="onboarding-empty compact-onboarding"><div class="empty-symbol" aria-hidden="true">▥</div><h3>Add your first account</h3><p>Track a checking account your paycheck deposits into, and a credit card whose purchases it pays off.</p></div>`}
+        </section>
+        <section class="card">
+          <div class="section-head"><div><span class="card-label">Cash flow</span><h3>Transfers</h3></div></div>
+          ${state.accounts.length >= 2 ? `<form id="transferForm" class="mini-form">
+            <label>From<select name="fromAccountId">${accountOptions("")}</select></label>
+            <label>To<select name="toAccountId">${accountOptions("")}</select></label>
+            <label>Amount<input name="amount" type="number" min="0.01" step="0.01" placeholder="620.00" required></label>
+            <label>Date<input name="date" type="date" value="${dateKey(new Date())}"></label>
+            <label>Memo<input name="memo" placeholder="Credit card payment"></label>
+            <button type="submit">Transfer</button>
+          </form>` : `<div class="empty-inline">Add at least two accounts to record a transfer, like paying a credit card from checking.</div>`}
+          ${state.transfers.length ? state.transfers.map((transfer, index) => transferRow(transfer, index)).join("") : ""}
+        </section>
         <section class="card">
           <div class="section-head"><div><span class="card-label">Debt snowball</span><h3>Debt payoff tracker</h3></div><button id="addDebtButton" type="button">+ Add debt</button></div>
           ${state.goals.debts.length ? state.goals.debts.map((debt, index) => `<article class="debt-card">
@@ -1944,6 +2016,31 @@ function renderWealth() {
     </section>`;
 }
 
+function accountItemRow(account, index) {
+  const balance = currentAccountBalance(account.id);
+  const isLiability = account.type === "credit_card";
+  const typeLabels = { checking: "Checking", savings: "Savings", cash: "Cash", credit_card: "Credit card", other: "Other" };
+  return `<article class="account-item ${isLiability ? "liability" : ""}">
+    <div class="debt-edit-grid">
+      <label class="debt-name-field">Account name<input data-account-name="${index}" value="${escapeHtml(account.name)}" aria-label="Account name"></label>
+      <label>Type<select data-account-type="${index}" aria-label="Type for ${escapeHtml(account.name)}">${Object.entries(typeLabels).map(([value, label]) => `<option value="${value}" ${account.type === value ? "selected" : ""}>${label}</option>`).join("")}</select></label>
+      <label>Opening balance<input data-account-opening-balance="${index}" type="number" step="0.01" inputmode="decimal" value="${account.openingBalance}" aria-label="Opening balance for ${escapeHtml(account.name)}"></label>
+    </div>
+    <div class="split-stat"><span>${isLiability ? "Owed" : "Balance"}</span><b class="${isLiability && balance > 0 ? "danger" : ""}">${money.format(balance)}</b></div>
+    <button class="icon-button danger-button" data-delete-account="${index}" type="button" aria-label="Remove ${escapeHtml(account.name)}">×</button>
+  </article>`;
+}
+
+function transferRow(transfer, index) {
+  return compactRow(
+    `${escapeHtml(accountName(transfer.fromAccountId))} → ${escapeHtml(accountName(transfer.toAccountId))}`,
+    `${formatShortDate(transfer.date)}${transfer.memo ? ` · ${escapeHtml(transfer.memo)}` : ""}`,
+    money.format(transfer.amount),
+    "",
+    `data-delete-transfer="${index}" aria-label="Delete transfer"`
+  );
+}
+
 function netWorthItemRow(item, type, index) {
   const isLiability = type === "liability";
   const isStock = !isLiability && item.assetClass === "stock";
@@ -1953,7 +2050,11 @@ function netWorthItemRow(item, type, index) {
     <label class="net-worth-name">Name<input data-net-worth-name="${type}:${index}" value="${escapeHtml(item.name)}" aria-label="${isLiability ? "Liability" : "Asset"} name"></label>
     <label>Type<select data-net-worth-type="${type}:${index}" aria-label="Item type"><option value="asset" ${isLiability ? "" : "selected"}>Asset</option><option value="liability" ${isLiability ? "selected" : ""}>Liability</option></select></label>
     ${isLiability ? "" : `<label>Asset class<select data-asset-class="${index}" aria-label="Asset class for ${escapeHtml(item.name)}"><option value="other" ${item.assetClass === "other" ? "selected" : ""}>Other asset</option><option value="cash" ${item.assetClass === "cash" ? "selected" : ""}>Cash</option><option value="property" ${item.assetClass === "property" ? "selected" : ""}>Property</option><option value="retirement" ${item.assetClass === "retirement" ? "selected" : ""}>Retirement</option><option value="stock" ${isStock ? "selected" : ""}>Stock</option></select></label>`}
-    ${isStock ? `<label>Symbol<input data-stock-symbol="${index}" value="${escapeHtml(item.symbol || "")}" placeholder="AAPL" aria-label="Stock symbol for ${escapeHtml(item.name)}"></label><label>Shares<input data-stock-shares="${index}" type="number" min="0" step="0.0001" inputmode="decimal" value="${Number(item.shares || 0)}" aria-label="Number of shares for ${escapeHtml(item.name)}"></label><label>Price per share<input data-stock-price="${index}" type="number" min="0" step="0.01" inputmode="decimal" value="${Number(item.price || 0)}" aria-label="Share price for ${escapeHtml(item.name)}"></label><div class="stock-market-value"><span>Market value</span><strong data-stock-market-value="${index}">${money.format(assetValue(item))}</strong></div>` : `<label>Amount<input data-net-worth-value="${type}:${index}" type="number" min="0" step="0.01" inputmode="decimal" value="${Number(item.value || 0)}" aria-label="${isLiability ? "Liability" : "Asset"} amount"></label>`}
+    ${isStock
+      ? `<label>Symbol<input data-stock-symbol="${index}" value="${escapeHtml(item.symbol || "")}" placeholder="AAPL" aria-label="Stock symbol for ${escapeHtml(item.name)}"></label><label>Shares<input data-stock-shares="${index}" type="number" min="0" step="0.0001" inputmode="decimal" value="${Number(item.shares || 0)}" aria-label="Number of shares for ${escapeHtml(item.name)}"></label><label>Price per share<input data-stock-price="${index}" type="number" min="0" step="0.01" inputmode="decimal" value="${Number(item.price || 0)}" aria-label="Share price for ${escapeHtml(item.name)}"></label><div class="stock-market-value"><span>Market value</span><strong data-stock-market-value="${index}">${money.format(assetValue(item))}</strong></div>`
+      : isAccountLinked(type, item.id)
+        ? `<div class="net-worth-linked-value"><span>Amount (from account)</span><strong>${money.format(Number(item.value || 0))}</strong></div>`
+        : `<label>Amount<input data-net-worth-value="${type}:${index}" type="number" min="0" step="0.01" inputmode="decimal" value="${Number(item.value || 0)}" aria-label="${isLiability ? "Liability" : "Asset"} amount"></label>`}
     <button class="icon-button danger-button" data-delete-${type}="${index}" type="button" aria-label="Remove ${escapeHtml(item.name)}">×</button>
     <button type="button" class="wealth-doc-chip" data-wealth-doc-toggle="${wealthKey}" title="Documents tagged to ${escapeHtml(item.name)}">📄 ${linkedDocuments.length}</button>
     ${wealthDocsExpandedKey === wealthKey ? `<div class="wealth-doc-list">
@@ -3406,7 +3507,7 @@ function bindViewEvents() {
   $("#transactionForm")?.addEventListener("submit", (event) => {
     event.preventDefault();
     const data = Object.fromEntries(new FormData(event.currentTarget));
-    state.transactions.unshift(makeTransaction({ date: new Date().toISOString().slice(0, 10), payee: data.payee, lineId: data.lineId, amount: Number(data.amount), memo: "Manual split" }));
+    state.transactions.unshift(makeTransaction({ date: new Date().toISOString().slice(0, 10), payee: data.payee, lineId: data.lineId, amount: Number(data.amount), memo: "Manual split", accountId: data.accountId || "" }));
     render();
   });
 
@@ -3564,6 +3665,15 @@ function bindViewEvents() {
     select.addEventListener("change", () => {
       const paycheck = state.paychecks[Number(select.dataset.paycheckRecurrence)];
       if (paycheck) paycheck.recurrence = select.value;
+      render();
+    });
+  });
+
+  document.querySelectorAll("[data-paycheck-deposit-account]").forEach((select) => {
+    select.addEventListener("change", () => {
+      const paycheck = state.paychecks[Number(select.dataset.paycheckDepositAccount)];
+      if (paycheck) paycheck.depositAccountId = select.value;
+      autosaveState();
       render();
     });
   });
@@ -4049,6 +4159,134 @@ function bindViewEvents() {
     button.addEventListener("click", () => {
       const [liability] = state.goals.netWorth.liabilities.splice(Number(button.dataset.deleteLiability), 1);
       if (liability) state.goals.debts = state.goals.debts.filter((debt) => debt.id !== liability.id);
+      autosaveState();
+      render();
+    });
+  });
+
+  $("#addAccountButton")?.addEventListener("click", () => {
+    const name = `New account ${state.accounts.length + 1}`;
+    const netWorthId = uniqueId(name);
+    state.goals.netWorth.assets.push({ id: netWorthId, name, value: 0, assetClass: "cash" });
+    state.accounts.push({
+      id: uniqueId(name), name, type: "checking", openingBalance: 0,
+      netWorthAssetId: netWorthId, netWorthLiabilityId: "", createdAt: dateKey(new Date())
+    });
+    autosaveState();
+    render();
+  });
+
+  document.querySelectorAll("[data-account-name]").forEach((input) => {
+    const syncName = (name) => {
+      const account = state.accounts[Number(input.dataset.accountName)];
+      account.name = name;
+      const asset = state.goals.netWorth.assets.find((item) => item.id === account.netWorthAssetId);
+      if (asset) asset.name = name;
+      const liability = state.goals.netWorth.liabilities.find((item) => item.id === account.netWorthLiabilityId);
+      if (liability) liability.name = name;
+    };
+    input.addEventListener("input", () => {
+      syncName(input.value);
+      autosaveState();
+    });
+    input.addEventListener("change", () => {
+      const account = state.accounts[Number(input.dataset.accountName)];
+      syncName(input.value.trim() || "Untitled account");
+      input.value = account.name;
+      autosaveState();
+    });
+  });
+
+  document.querySelectorAll("[data-account-type]").forEach((select) => {
+    select.addEventListener("change", () => {
+      const account = state.accounts[Number(select.dataset.accountType)];
+      const wasLiability = account.type === "credit_card";
+      const isLiability = select.value === "credit_card";
+      account.type = select.value;
+      if (wasLiability !== isLiability) {
+        if (isLiability) {
+          const assetIndex = state.goals.netWorth.assets.findIndex((item) => item.id === account.netWorthAssetId);
+          if (assetIndex >= 0) {
+            const [item] = state.goals.netWorth.assets.splice(assetIndex, 1);
+            state.goals.netWorth.liabilities.push({ id: item.id, name: item.name, value: 0 });
+            account.netWorthLiabilityId = item.id;
+          } else {
+            const id = uniqueId(account.name);
+            state.goals.netWorth.liabilities.push({ id, name: account.name, value: 0 });
+            account.netWorthLiabilityId = id;
+          }
+          account.netWorthAssetId = "";
+        } else {
+          const liabilityIndex = state.goals.netWorth.liabilities.findIndex((item) => item.id === account.netWorthLiabilityId);
+          if (liabilityIndex >= 0) {
+            const [item] = state.goals.netWorth.liabilities.splice(liabilityIndex, 1);
+            state.goals.netWorth.assets.push({ id: item.id, name: item.name, value: 0, assetClass: "cash" });
+            account.netWorthAssetId = item.id;
+          } else {
+            const id = uniqueId(account.name);
+            state.goals.netWorth.assets.push({ id, name: account.name, value: 0, assetClass: "cash" });
+            account.netWorthAssetId = id;
+          }
+          account.netWorthLiabilityId = "";
+        }
+      }
+      autosaveState();
+      render();
+    });
+  });
+
+  document.querySelectorAll("[data-account-opening-balance]").forEach((input) => {
+    input.addEventListener("input", () => {
+      const account = state.accounts[Number(input.dataset.accountOpeningBalance)];
+      account.openingBalance = Number(input.value || 0);
+      refreshNetWorthTotals();
+      autosaveState();
+    });
+    input.addEventListener("change", () => render());
+  });
+
+  document.querySelectorAll("[data-delete-account]").forEach((button) => {
+    button.addEventListener("click", () => {
+      const [account] = state.accounts.splice(Number(button.dataset.deleteAccount), 1);
+      if (account) {
+        state.transactions.forEach((transaction) => {
+          if (transaction.accountId === account.id) transaction.accountId = "";
+        });
+        state.paychecks.forEach((paycheck) => {
+          if (paycheck.depositAccountId === account.id) paycheck.depositAccountId = "";
+        });
+        // Deliberately leave state.transfers untouched: a transfer that already
+        // moved money out of/into a surviving account is a historical fact that
+        // must keep affecting that account's balance, even after the other side
+        // of the transfer is deleted. accountBalance() only looks up the account
+        // currently being computed, so a transfer referencing a deleted account
+        // id on the *other* side is simply inert going forward, never an error.
+      }
+      autosaveState();
+      render();
+    });
+  });
+
+  $("#transferForm")?.addEventListener("submit", (event) => {
+    event.preventDefault();
+    const data = Object.fromEntries(new FormData(event.currentTarget));
+    const amount = Number(data.amount || 0);
+    if (!data.fromAccountId || !data.toAccountId || data.fromAccountId === data.toAccountId || amount <= 0) return;
+    state.transfers.unshift({
+      id: uniqueId("transfer"),
+      date: data.date || dateKey(new Date()),
+      fromAccountId: data.fromAccountId,
+      toAccountId: data.toAccountId,
+      amount,
+      memo: (data.memo || "").trim()
+    });
+    autosaveState();
+    render();
+  });
+
+  document.querySelectorAll("[data-delete-transfer]").forEach((button) => {
+    button.addEventListener("click", () => {
+      state.transfers.splice(Number(button.dataset.deleteTransfer), 1);
       autosaveState();
       render();
     });
