@@ -34,6 +34,16 @@ const LEGACY_DEMO_EMAIL = "demo@householdhub.app";
 const ADMIN_EMAIL = String(process.env.ADMIN_EMAIL || "").trim().toLowerCase();
 const ADMIN_PASSWORD = String(process.env.ADMIN_PASSWORD || "");
 const ADMIN_NAME = String(process.env.ADMIN_NAME || "FamilyLoop Administrator").trim();
+
+// The single source of truth for "is this the platform administrator" --
+// checked directly against the configured email rather than trusting the
+// is_admin DB column in isolation, so admin access can never depend on that
+// column being in a state it shouldn't be (it's already kept in sync with
+// this same email on every schema migration and blocked from being toggled
+// via the API, but this makes the actual policy explicit at the point of use).
+function isPlatformAdminEmail(email) {
+  return Boolean(ADMIN_EMAIL) && String(email || "").trim().toLowerCase() === ADMIN_EMAIL;
+}
 const SMTP_HOST = String(process.env.SMTP_HOST || "").trim();
 const SMTP_PORT = Number(process.env.SMTP_PORT || 587);
 const SMTP_SECURE = String(process.env.SMTP_SECURE || "false").toLowerCase() === "true";
@@ -458,7 +468,7 @@ async function databasePrimaryOwnerId(client, householdId) {
 }
 
 function publicUser(row) {
-  return row ? { id: row.id, email: row.email, name: row.name, isAdmin: Boolean(row.is_admin), phone: row.phone || "", carrier: row.carrier || "" } : null;
+  return row ? { id: row.id, email: row.email, name: row.name, isAdmin: isPlatformAdminEmail(row.email), phone: row.phone || "", carrier: row.carrier || "" } : null;
 }
 
 function normalizePhoneAndCarrier(rawPhone, rawCarrier) {
@@ -904,7 +914,7 @@ async function requireAdmin(req, res, next) {
       clearSession(res);
       return res.status(401).json({ error: "Authentication required" });
     }
-    if (!session.is_admin) return res.status(403).json({ error: "Admin access required" });
+    if (!session.is_admin || !isPlatformAdminEmail(session.email)) return res.status(403).json({ error: "Admin access required" });
     refreshSession(res, session.id);
     req.sessionUser = session;
     return next();
@@ -918,7 +928,7 @@ function adminUserRow(user) {
     id: user.id,
     email: user.email,
     name: user.name,
-    isAdmin: Boolean(user.is_admin),
+    isAdmin: isPlatformAdminEmail(user.email),
     disabled: Boolean(user.disabled_at),
     loginCount: Number(user.login_count || 0),
     lastLoginAt: user.last_login_at || null,
