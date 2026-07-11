@@ -370,7 +370,7 @@ function currentAccountBalance(accountId) {
     transactions: state.transactions,
     paychecks: state.paychecks,
     transfers: state.transfers
-  });
+  }, dateKey(new Date()));
 }
 
 function accountName(accountId) {

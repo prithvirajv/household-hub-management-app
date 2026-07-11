@@ -5,7 +5,7 @@ const {
   dailyTaskOccursOnDate, isDailyTaskDoneOnDate, toggleDailyTaskDoneOnDate,
   timeToMinutes, minutesToTime, snapMinutes, layoutTimelineBlocks, comparePlannedToActual,
   sanitizeFilename, buildDocumentObjectPath, wouldCreateFolderCycle, buildFolderTree,
-  smsGatewayAddress, accountBalance, accountsWithBalances
+  smsGatewayAddress, paycheckOccurrencesSince, accountBalance, accountsWithBalances
 } = require("../lib/shared-logic");
 
 test("layoutTimelineBlocks gives non-overlapping tasks full width", () => {
@@ -395,8 +395,8 @@ test("smsGatewayAddress returns null when the phone number has no digits", () =>
 
 test("accountBalance: checking account with one paycheck deposit and no purchases", () => {
   const accounts = [{ id: "checking", type: "checking", openingBalance: 100 }];
-  const paychecks = [{ amount: 2600, depositAccountId: "checking" }];
-  const balance = accountBalance("checking", { accounts, transactions: [], paychecks, transfers: [] });
+  const paychecks = [{ date: "2026-07-01", recurrence: "once", amount: 2600, depositAccountId: "checking" }];
+  const balance = accountBalance("checking", { accounts, transactions: [], paychecks, transfers: [] }, "2026-07-11");
   assert.equal(balance, 2700);
 });
 
@@ -406,14 +406,14 @@ test("accountBalance: a purchase linked to the account reduces its balance, an u
     { amount: 50, accountId: "checking" },
     { amount: 999, accountId: "" }
   ];
-  const balance = accountBalance("checking", { accounts, transactions, paychecks: [], transfers: [] });
+  const balance = accountBalance("checking", { accounts, transactions, paychecks: [], transfers: [] }, "2026-07-11");
   assert.equal(balance, 950);
 });
 
 test("accountBalance: a credit card's owed balance increases with a purchase and no payments", () => {
   const accounts = [{ id: "card", type: "credit_card", openingBalance: 0 }];
   const transactions = [{ amount: 120, accountId: "card" }];
-  const balance = accountBalance("card", { accounts, transactions, paychecks: [], transfers: [] });
+  const balance = accountBalance("card", { accounts, transactions, paychecks: [], transfers: [] }, "2026-07-11");
   assert.equal(balance, 120);
 });
 
@@ -425,8 +425,8 @@ test("accountBalance: paying off a credit card via one transfer reduces both the
   const transactions = [{ amount: 300, accountId: "card" }];
   const transfers = [{ fromAccountId: "checking", toAccountId: "card", amount: 300 }];
   const context = { accounts, transactions, paychecks: [], transfers };
-  assert.equal(accountBalance("checking", context), 1700);
-  assert.equal(accountBalance("card", context), 0);
+  assert.equal(accountBalance("checking", context, "2026-07-11"), 1700);
+  assert.equal(accountBalance("card", context, "2026-07-11"), 0);
 });
 
 test("accountBalance: movements referencing a different account do not leak into the account under test", () => {
@@ -435,14 +435,14 @@ test("accountBalance: movements referencing a different account do not leak into
     { id: "savings", type: "savings", openingBalance: 500 }
   ];
   const transactions = [{ amount: 40, accountId: "savings" }];
-  const paychecks = [{ amount: 1000, depositAccountId: "savings" }];
+  const paychecks = [{ date: "2026-07-01", recurrence: "once", amount: 1000, depositAccountId: "savings" }];
   const transfers = [{ fromAccountId: "savings", toAccountId: "checking", amount: 10 }];
-  const balance = accountBalance("checking", { accounts, transactions, paychecks, transfers });
+  const balance = accountBalance("checking", { accounts, transactions, paychecks, transfers }, "2026-07-11");
   assert.equal(balance, 510);
 });
 
 test("accountBalance returns 0 for an unknown or deleted account id", () => {
-  const balance = accountBalance("does-not-exist", { accounts: [], transactions: [], paychecks: [], transfers: [] });
+  const balance = accountBalance("does-not-exist", { accounts: [], transactions: [], paychecks: [], transfers: [] }, "2026-07-11");
   assert.equal(balance, 0);
 });
 
@@ -453,9 +453,44 @@ test("accountsWithBalances attaches a computed balance to every account", () => 
       { id: "card", type: "credit_card", openingBalance: 0 }
     ],
     transactions: [{ amount: 25, accountId: "card" }],
-    paychecks: [{ amount: 200, depositAccountId: "checking" }],
+    paychecks: [{ date: "2026-07-01", recurrence: "once", amount: 200, depositAccountId: "checking" }],
     transfers: []
   };
-  const result = accountsWithBalances(state);
+  const result = accountsWithBalances(state, "2026-07-11");
   assert.deepEqual(result.map((account) => [account.id, account.balance]), [["checking", 300], ["card", 25]]);
+});
+
+test("paycheckOccurrencesSince: a monthly paycheck deposits once per elapsed month since its anchor date", () => {
+  const paycheck = { date: "2026-04-11", recurrence: "monthly" };
+  assert.equal(paycheckOccurrencesSince(paycheck, "2026-04-11"), 1);
+  assert.equal(paycheckOccurrencesSince(paycheck, "2026-05-10"), 1);
+  assert.equal(paycheckOccurrencesSince(paycheck, "2026-05-11"), 2);
+  assert.equal(paycheckOccurrencesSince(paycheck, "2026-07-11"), 4);
+});
+
+test("paycheckOccurrencesSince: weekly and biweekly paychecks count elapsed periods", () => {
+  const weekly = { date: "2026-07-01", recurrence: "weekly" };
+  assert.equal(paycheckOccurrencesSince(weekly, "2026-07-01"), 1);
+  assert.equal(paycheckOccurrencesSince(weekly, "2026-07-07"), 1);
+  assert.equal(paycheckOccurrencesSince(weekly, "2026-07-08"), 2);
+
+  const biweekly = { date: "2026-07-01", recurrence: "biweekly" };
+  assert.equal(paycheckOccurrencesSince(biweekly, "2026-07-14"), 1);
+  assert.equal(paycheckOccurrencesSince(biweekly, "2026-07-15"), 2);
+});
+
+test("paycheckOccurrencesSince: a one-time or bonus paycheck always counts as exactly one", () => {
+  assert.equal(paycheckOccurrencesSince({ date: "2026-01-01", recurrence: "once" }, "2026-07-11"), 1);
+  assert.equal(paycheckOccurrencesSince({ date: "2026-01-01", recurrence: "bonus" }, "2026-07-11"), 1);
+});
+
+test("paycheckOccurrencesSince: a future-dated paycheck has not occurred yet", () => {
+  assert.equal(paycheckOccurrencesSince({ date: "2026-08-01", recurrence: "monthly" }, "2026-07-11"), 0);
+});
+
+test("accountBalance: a monthly recurring paycheck deposits multiple times into its linked account", () => {
+  const accounts = [{ id: "checking", type: "checking", openingBalance: 0 }];
+  const paychecks = [{ date: "2026-04-11", recurrence: "monthly", amount: 1000, depositAccountId: "checking" }];
+  const balance = accountBalance("checking", { accounts, transactions: [], paychecks, transfers: [] }, "2026-07-11");
+  assert.equal(balance, 4000);
 });
