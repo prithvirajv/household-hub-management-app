@@ -1429,11 +1429,50 @@ main {
 }
 
 .calendar-quick-add {
-  grid-template-columns: minmax(110px, 0.7fr) minmax(180px, 1.5fr) minmax(165px, 1fr) minmax(130px, 1fr);
+  grid-template-columns: minmax(110px, 0.7fr) minmax(180px, 1.5fr) minmax(165px, 1fr) minmax(180px, 1.2fr);
   align-items: end;
   border-radius: 8px;
   background: var(--soft-blue);
   padding: 0.7rem;
+}
+
+.assign-to-field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  min-width: 0;
+}
+
+.assign-to-label {
+  color: var(--muted);
+  font-size: 0.75rem;
+  font-weight: 800;
+  white-space: nowrap;
+}
+
+.assignee-chip-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+  align-items: center;
+  min-height: 34px;
+}
+
+.assignee-chip {
+  position: relative;
+}
+
+.assignee-chip input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+}
+
+.assignee-chip:has(input:checked) {
+  border-color: var(--navy);
+  background: var(--soft-blue);
+  color: var(--text);
 }
 
 .calendar-quick-add > label {

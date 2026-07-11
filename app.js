@@ -910,6 +910,50 @@ function calendarAssigneeOptions() {
   return members;
 }
 
+function assigneeKey(member) {
+  return member?.email || member?.name || "";
+}
+
+// Turns a list of selected keys (from the assign-to checkboxes) into full
+// {key, name, email} records, resolving names/emails from the current
+// household member list so display stays correct even if a key is later
+// renamed. Falls back to using the key itself as the name/email if the
+// member can no longer be found (e.g. they left the household).
+function resolveAssignees(keys) {
+  const options = calendarAssigneeOptions();
+  const unique = [...new Set((keys || []).map((key) => String(key || "").trim()).filter(Boolean))];
+  return unique.map((key) => {
+    const member = options.find((candidate) => assigneeKey(candidate) === key);
+    return { key, name: member?.name || key, email: member?.email || (key.includes("@") ? key : "") };
+  });
+}
+
+// Lazily upgrades chores/events created before multi-assignee support
+// (single assignee/owner fields) into the new assignees array, following the
+// same one-way migration convention used elsewhere (e.g. ensureAnnualEventRecurrenceData).
+function ensureAssigneesData() {
+  state.calendar.chores.forEach((chore) => {
+    if (chore.assignees) return;
+    chore.assignees = chore.assignee ? resolveAssignees([chore.assignee]).map((assignee) => ({ ...assignee, name: chore.assigneeName || assignee.name })) : [];
+  });
+  state.calendar.events.forEach((event) => {
+    if (event.assignees) return;
+    event.assignees = event.owner ? resolveAssignees([event.owner]).map((assignee) => ({ ...assignee, name: event.ownerName || assignee.name })) : [];
+  });
+}
+
+function assigneeNames(assignees) {
+  return (assignees || []).map((assignee) => assignee.name).filter(Boolean).join(", ");
+}
+
+// Several small dots (one per assignee) instead of one, so a jointly-assigned
+// chore/event visibly shows everyone it belongs to, not just the first person.
+function assigneeDots(assignees) {
+  return (assignees || [])
+    .map((assignee) => `<span class="member-dot" style="background:${memberColor(assignee.key)}" title="${escapeHtml(assignee.name)}" aria-hidden="true"></span>`)
+    .join("");
+}
+
 const memberColorPalette = ["#2f6fed", "#e05252", "#13936d", "#d99a24", "#8a5cf6", "#0891b2", "#c2410c", "#be185d"];
 function memberColor(ownerKey) {
   const key = String(ownerKey || "").trim().toLowerCase();
@@ -920,6 +964,7 @@ function memberColor(ownerKey) {
 }
 
 function renderCalendar() {
+  ensureAssigneesData();
   const calendarMembers = calendarAssigneeOptions();
   const today = dateKey(new Date());
   const choreRows = state.calendar.chores
@@ -956,7 +1001,15 @@ function renderCalendar() {
             <label><span>Date<span data-date-label-suffix> and time</span></span><input name="date" type="datetime-local" value="${state.budget.month}-01T09:00" required></label>
             <label data-annual-time-field hidden>Remind me at<input name="annualTime" type="time" value="09:00"></label>
             <label data-plain-reminder-field hidden>Remind me on<input name="reminderAt" type="datetime-local"></label>
-            <label>Assign to<select name="owner">${calendarMembers.map((member) => `<option value="${escapeHtml(member.email || member.name)}" ${(member.email || member.name) === (sessionUser?.email || "") ? "selected" : ""}>${escapeHtml(member.name)}${member.email ? ` · ${escapeHtml(member.email)}` : ""}${member.status && member.status !== "active" ? " (invited)" : ""}</option>`).join("")}</select></label>
+            <div class="assign-to-field">
+              <span class="assign-to-label">Assign to</span>
+              <div class="assignee-chip-row" role="group" aria-label="Assign to">
+                ${calendarMembers.map((member) => {
+                  const key = member.email || member.name;
+                  return `<label class="member-chip assignee-chip"><input type="checkbox" name="assignees" value="${escapeHtml(key)}" ${key === (sessionUser?.email || "") ? "checked" : ""}><span class="member-dot" style="background:${memberColor(key)}" aria-hidden="true"></span>${escapeHtml(member.name)}${member.status && member.status !== "active" ? " (invited)" : ""}</label>`;
+                }).join("")}
+              </div>
+            </div>
             <label data-chore-recurrence-field>Repeat<select name="recurrence"><option value="once">Once</option><option value="weekly" selected>Weekly</option><option value="biweekly">Every 2 weeks</option><option value="triweekly">Every 3 weeks</option><option value="monthly">Monthly</option></select></label>
             <label data-annual-reminder-field hidden>Remind before<select name="reminderDays"><option value="0">Same day</option><option value="1" selected>1 day</option><option value="3">3 days</option><option value="7">7 days</option><option value="14">14 days</option><option value="-1">Don't remind</option></select></label>
             <button data-calendar-submit type="submit">Add</button>
@@ -969,19 +1022,19 @@ function renderCalendar() {
             ${calendarCells().map((cell) => `
             <div class="day-cell ${cell.muted ? "muted-cell" : ""} ${cell.currentMonth ? "" : "outside-month"} ${cell.dateKey === dateKey(new Date()) ? "today-cell" : ""}" data-calendar-day="${cell.dateKey}" role="button" tabindex="0" aria-label="Add an item on ${cell.dateKey}">
               <b>${cell.day}</b>
-              ${cell.items.map((item) => `<button class="event ${item.eventType || item.type}" style="border-left:3px solid ${memberColor(item.owner)}" data-edit-calendar-item="${item.sourceKind}:${item.sourceId}" type="button" title="Edit ${escapeHtml(item.title)}${item.ownerName ? ` · ${escapeHtml(item.ownerName)}` : ""}">${escapeHtml(item.title)}</button>`).join("")}
+              ${cell.items.map((item) => `<button class="event ${item.eventType || item.type}" style="border-left:3px solid ${memberColor(item.assignees?.[0]?.key)}" data-edit-calendar-item="${item.sourceKind}:${item.sourceId}" type="button" title="Edit ${escapeHtml(item.title)}${assigneeNames(item.assignees) ? ` · ${escapeHtml(assigneeNames(item.assignees))}` : ""}">${escapeHtml(item.title)}</button>`).join("")}
             </div>
           `).join("")}</div>
         </section>
       </div>
       <aside class="side-stack">
-        <section class="card"><div class="card-label">Daily planner</div><h3>Upcoming schedule</h3>${visibleScheduleItems().length ? visibleScheduleItems().map((item) => calendarManageRow(item.title, item.displayDate || item.date, item.label || item.type, item.sourceKind, item.sourceId, item.owner, item.ownerName)).join("") : `<div class="empty-inline">No events scheduled this month</div>`}</section>
+        <section class="card"><div class="card-label">Daily planner</div><h3>Upcoming schedule</h3>${visibleScheduleItems().length ? visibleScheduleItems().map((item) => calendarManageRow(item.title, item.displayDate || item.date, item.label || item.type, item.sourceKind, item.sourceId, item.assignees)).join("") : `<div class="empty-inline">No events scheduled this month</div>`}</section>
         <section class="card">
           <div class="section-head"><div><span class="card-label">What to do</span><h3>Chore rotation</h3></div><button id="sideAddChoreButton" class="ghost" type="button">Add chore</button></div>
           ${choreRows.length ? choreRows.map(({ chore, index, occurrence }) => {
             const overdue = occurrence.date < today;
             return `<div class="compact-row ${overdue ? "overdue" : ""}">
-              <div><strong>${escapeHtml(chore.title)}</strong><small>${occurrence.date}${overdue ? " · Past due" : ""} · ${escapeHtml(chore.assigneeName || chore.assignee)} · ${choreCadenceLabel(chore)}</small></div>
+              <div>${assigneeDots(chore.assignees)}<strong>${escapeHtml(chore.title)}</strong><small>${occurrence.date}${overdue ? " · Past due" : ""} · ${escapeHtml(assigneeNames(chore.assignees) || "Unassigned")} · ${choreCadenceLabel(chore)}</small></div>
               <button class="ghost chore-complete-button" data-complete-chore="${index}:${occurrence.date}" type="button">Complete</button>
               <button class="icon-button" data-edit-calendar-item="chore:${chore.id}" type="button" aria-label="Edit ${escapeHtml(chore.title)}">✎</button>
               <button class="icon-button danger-button" data-delete-calendar-item="chore:${chore.id}" type="button" aria-label="Remove ${escapeHtml(chore.title)}">×</button>
@@ -993,7 +1046,7 @@ function renderCalendar() {
           ${annualRows.length ? annualRows.map(({ event, occurrence }) => {
             const overdue = occurrence.date < today;
             return `<div class="compact-row ${overdue ? "overdue" : ""}">
-              <div><strong>${escapeHtml(annualEventDisplayTitle(event))}</strong><small>${formatAnnualEventMonthDay(event)}${overdue ? " · Not wished yet" : ""} · ${annualEventLabels[event.type] || "Annual"}</small></div>
+              <div>${assigneeDots(event.assignees)}<strong>${escapeHtml(annualEventDisplayTitle(event))}</strong><small>${formatAnnualEventMonthDay(event)}${overdue ? " · Not wished yet" : ""} · ${annualEventLabels[event.type] || "Annual"}</small></div>
               <button class="ghost chore-complete-button" data-mark-wished="${event.id}:${occurrence.year}" type="button">Mark wished</button>
               <button class="icon-button" data-edit-calendar-item="event:${event.id}" type="button" aria-label="Edit ${escapeHtml(event.title)}">✎</button>
               <button class="icon-button danger-button" data-delete-calendar-item="event:${event.id}" type="button" aria-label="Remove ${escapeHtml(event.title)}">×</button>
@@ -2347,10 +2400,9 @@ function compactRow(title, detail, badge, tone = "", actionAttrs = "") {
   return `<div class="compact-row ${tone}"><div><strong>${title}</strong>${detail ? `<small>${detail}</small>` : ""}</div>${badge ? `<span class="pill">${badge}</span>` : ""}${actionAttrs ? `<button class="icon-button danger-button" ${actionAttrs} type="button">×</button>` : ""}</div>`;
 }
 
-function calendarManageRow(title, detail, badge, kind, id, owner, ownerName) {
-  const dot = owner ? `<span class="member-dot" style="background:${memberColor(owner)}" title="${escapeHtml(ownerName || owner)}" aria-hidden="true"></span>` : "";
+function calendarManageRow(title, detail, badge, kind, id, assignees) {
   return `<div class="compact-row">
-    <div>${dot}<strong>${escapeHtml(title)}</strong>${detail ? `<small>${escapeHtml(detail)}</small>` : ""}</div>
+    <div>${assigneeDots(assignees)}<strong>${escapeHtml(title)}</strong>${detail ? `<small>${escapeHtml(detail)}</small>` : ""}</div>
     ${badge ? `<span class="pill">${escapeHtml(badge)}</span>` : ""}
     <button class="icon-button" data-edit-calendar-item="${kind}:${id}" type="button" aria-label="Edit ${escapeHtml(title)}">✎</button>
     <button class="icon-button danger-button" data-delete-calendar-item="${kind}:${id}" type="button" aria-label="Remove ${escapeHtml(title)}">×</button>
@@ -2381,10 +2433,11 @@ function dueDateRows() {
 function scheduleItems() {
   ensureAnnualEventRecurrenceData();
   ensureChoreRecurrenceData();
+  ensureAssigneesData();
   const selectedMonth = state.budget.month;
   const oneTimeEvents = state.calendar.events
     .filter((event) => !ANNUAL_EVENT_TYPES.includes(event.type) && event.date?.startsWith(selectedMonth))
-    .map((event) => ({ title: event.title, date: event.date.slice(5), displayDate: `${event.date.slice(5)}${event.dateTime ? ` · ${formatReminderTime(event.dateTime)}` : ""}`, type: event.type, sourceKind: "event", sourceId: event.id, owner: event.owner || "", ownerName: event.ownerName || event.owner || "" }));
+    .map((event) => ({ title: event.title, date: event.date.slice(5), displayDate: `${event.date.slice(5)}${event.dateTime ? ` · ${formatReminderTime(event.dateTime)}` : ""}`, type: event.type, sourceKind: "event", sourceId: event.id, assignees: event.assignees || [] }));
   const chores = state.calendar.chores.flatMap((chore) =>
     choreOccurrencesForMonth(chore).map((occurrence) => ({
       title: chore.title,
@@ -2394,8 +2447,7 @@ function scheduleItems() {
       eventType: "chore",
       sourceKind: "chore",
       sourceId: chore.id,
-      owner: chore.assignee || "",
-      ownerName: chore.assigneeName || chore.assignee || ""
+      assignees: chore.assignees || []
     }))
   );
   const annualEvents = annualEventScheduleItems();
@@ -2584,7 +2636,7 @@ function annualEventScheduleItems() {
       if (!dateKey(occursOn).startsWith(state.budget.month)) return [];
       const title = annualEventDisplayTitle(event);
       const label = annualEventLabels[event.type] || "Annual event";
-      return [{ title, date: dateKey(occursOn).slice(5), type: event.type, label, eventType: event.type, sourceKind: "event", sourceId: event.id, owner: event.owner || "", ownerName: event.ownerName || event.owner || "" }];
+      return [{ title, date: dateKey(occursOn).slice(5), type: event.type, label, eventType: event.type, sourceKind: "event", sourceId: event.id, assignees: event.assignees || [] }];
     });
 }
 
@@ -2602,7 +2654,7 @@ function formatAnnualEventMonthDay(event) {
 function visibleScheduleItems() {
   const items = scheduleItems();
   if (!calendarFilterOwner) return items;
-  return items.filter((item) => item.owner === calendarFilterOwner);
+  return items.filter((item) => (item.assignees || []).some((assignee) => assignee.key === calendarFilterOwner));
 }
 
 function calendarCells() {
@@ -4404,8 +4456,12 @@ function bindViewEvents() {
 
   $("#calendarQuickAdd")?.addEventListener("submit", (event) => {
     event.preventDefault();
-    const data = Object.fromEntries(new FormData(event.currentTarget));
-    const assignedMember = calendarAssigneeOptions().find((member) => (member.email || member.name) === data.owner);
+    const formData = new FormData(event.currentTarget);
+    const data = Object.fromEntries(formData);
+    const selectedKeys = formData.getAll("assignees");
+    const assignees = selectedKeys.length
+      ? resolveAssignees(selectedKeys)
+      : resolveAssignees([sessionUser?.email || "Household owner"]);
     const selectedDateTime = String(data.date || "");
     const selectedDate = selectedDateTime.slice(0, 10);
     const editingKind = data.editingKind;
@@ -4423,8 +4479,7 @@ function bindViewEvents() {
       const chore = {
         id: existing?.id || uniqueId("chore"),
         title: data.title,
-        assignee: data.owner || sessionUser?.email || "Household owner",
-        assigneeName: assignedMember?.name || sessionUser?.name || data.owner || "Household owner",
+        assignees,
         cadence: choreCadenceLabel({ recurrence }),
         recurrence,
         startDate: selectedDate,
@@ -4433,8 +4488,11 @@ function bindViewEvents() {
         notifyAt: selectedDateTime ? new Date(selectedDateTime).toISOString() : "",
         completedDates: existing?.completedDates || []
       };
-      if (existing) Object.assign(existing, chore);
-      else state.calendar.chores.push(chore);
+      if (existing) {
+        delete existing.assignee;
+        delete existing.assigneeName;
+        Object.assign(existing, chore);
+      } else state.calendar.chores.push(chore);
     } else {
       const isAnnual = ANNUAL_EVENT_TYPES.includes(data.type);
       const monthDay = isAnnual ? selectedDate.slice(5) : undefined;
@@ -4461,11 +4519,13 @@ function bindViewEvents() {
         type: isAnnual ? data.type : "reminder",
         annual: isAnnual,
         reminderDays,
-        owner: data.owner || sessionUser?.email || "",
-        ownerName: assignedMember?.name || sessionUser?.name || data.owner || ""
+        assignees
       };
-      if (existing) Object.assign(existing, calendarEvent);
-      else state.calendar.events.push(calendarEvent);
+      if (existing) {
+        delete existing.owner;
+        delete existing.ownerName;
+        Object.assign(existing, calendarEvent);
+      } else state.calendar.events.push(calendarEvent);
     }
     calendarFeedback = `${data.type === "chore" ? "Chore" : annualEventLabels[data.type] || "Reminder"} ${wasEditing ? "updated" : "added"}.`;
     render();
@@ -4984,8 +5044,10 @@ function editCalendarItem(reference) {
     : ANNUAL_EVENT_TYPES.includes(item.type)
       ? item.date || `${state.budget.month}-01`
       : item.dateTime || `${item.date || `${state.budget.month}-01`}T09:00`;
-  form.owner.value = kind === "chore" ? item.assignee || "" : item.owner || "";
-  if (![...form.owner.options].some((option) => option.value === form.owner.value)) form.owner.value = sessionUser?.email || form.owner.options[0]?.value || "";
+  const selectedAssigneeKeys = new Set((item.assignees || []).map((assignee) => assignee.key));
+  form.querySelectorAll('input[name="assignees"]').forEach((checkbox) => {
+    checkbox.checked = selectedAssigneeKeys.has(checkbox.value);
+  });
   form.recurrence.value = kind === "chore" ? item.recurrence || "once" : "once";
   form.reminderDays.value = kind === "event" && ANNUAL_EVENT_TYPES.includes(item.type) ? String(item.reminderDays ?? 1) : "1";
   form.annualTime.value = kind === "event" && ANNUAL_EVENT_TYPES.includes(item.type) ? (item.dateTime?.slice(11, 16) || "09:00") : "09:00";
@@ -5672,7 +5734,7 @@ function downloadCsv() {
       return [transaction.date, transaction.payee, Number(transaction.amount || 0).toFixed(2), line?.category || transaction.categoryName || "", line?.name || "Unassigned", transaction.memo || ""];
     })],
     paychecks: () => [["date", "paycheck_income", "amount", "assigned_subcategories"], ...state.paychecks.map((paycheck) => [paycheck.date, paycheck.name, Number(paycheck.amount || 0).toFixed(2), (paycheck.assignedLineIds || []).map((id) => allLines().find((line) => line.id === id)?.name || id).join("; ")])],
-    calendar: () => [["kind", "title", "date_time", "assigned_to", "repeat"], ...state.calendar.events.map((item) => [item.type, item.title, item.dateTime || item.date, item.ownerName || item.owner || "", item.annual ? "Yearly" : "Once"]), ...state.calendar.chores.map((item) => ["chore", item.title, `${item.startDate || item.nextDue}T${item.time || "09:00"}`, item.assigneeName || item.assignee || "", choreCadenceLabel(item)])],
+    calendar: () => [["kind", "title", "date_time", "assigned_to", "repeat"], ...state.calendar.events.map((item) => [item.type, item.title, item.dateTime || item.date, assigneeNames(item.assignees), item.annual ? "Yearly" : "Once"]), ...state.calendar.chores.map((item) => ["chore", item.title, `${item.startDate || item.nextDue}T${item.time || "09:00"}`, assigneeNames(item.assignees), choreCadenceLabel(item)])],
     meals: () => [["month", "week", "day", "meal", "recipe", "servings"], ...state.meals.plannedWeek.map((item) => [item.month || state.budget.month, item.week || 1, item.day, item.slot || "Dinner", item.meal, item.servings])],
     recipes: () => [["recipe", "calories", "protein_g", "ingredients"], ...state.meals.recipes.map((recipe) => [recipe.name, recipe.calories, recipe.protein, (recipe.ingredients || []).join("; ")])],
     goals: () => [["goal", "target_date", "target", "saved", "remaining"], ...state.goals.sinkingFunds.map((goal) => [goal.name, goal.targetDate || "", goal.target, goal.saved, Math.max(0, Number(goal.target || 0) - Number(goal.saved || 0))])],

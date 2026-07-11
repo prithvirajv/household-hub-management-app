@@ -154,6 +154,18 @@ async function sendTransactionalEmail({ to, subject, text, html }) {
   }
 }
 
+// A chore/event can now be assigned to several household members at once;
+// every one of them with a known email gets their own reminder. Falls back
+// to the household's own email only when there are no assignees at all
+// (e.g. data saved before multi-assignee support, not yet migrated by the
+// client's ensureAssigneesData()).
+function recipientEmails(item, fallbackEmail) {
+  const assignees = Array.isArray(item.assignees) ? item.assignees : [];
+  const emails = [...new Set(assignees.map((assignee) => String(assignee?.email || "").trim()).filter(Boolean))];
+  if (emails.length) return emails;
+  return fallbackEmail ? [fallbackEmail] : [];
+}
+
 function notificationCandidates(appState, fallbackEmail) {
   // Reminder emails display "Due <date/time>" using this timezone (captured
   // from whichever browser last rendered the app, see app.js's render()) so
@@ -174,15 +186,21 @@ function notificationCandidates(appState, fallbackEmail) {
       if (Number(event.reminderDays || 0) < 0) continue;
       const dueAt = rollAnnualNotifyAtForward(event.notifyAt);
       if (!dueAt) continue;
-      candidates.push({ sourceType: `calendar-${event.type}`, sourceId: event.id, title: event.title || "Calendar reminder", email: event.owner || fallbackEmail, dueAt, timeZone });
+      for (const email of recipientEmails(event, fallbackEmail)) {
+        candidates.push({ sourceType: `calendar-${event.type}`, sourceId: event.id, title: event.title || "Calendar reminder", email, dueAt, timeZone });
+      }
       continue;
     }
     if (!event.notifyAt) continue;
-    candidates.push({ sourceType: `calendar-${event.type || "event"}`, sourceId: event.id, title: event.title || "Calendar reminder", email: event.owner || fallbackEmail, dueAt: event.notifyAt, timeZone });
+    for (const email of recipientEmails(event, fallbackEmail)) {
+      candidates.push({ sourceType: `calendar-${event.type || "event"}`, sourceId: event.id, title: event.title || "Calendar reminder", email, dueAt: event.notifyAt, timeZone });
+    }
   }
   for (const chore of appState?.calendar?.chores || []) {
     if (!chore.notifyAt || !chore.id) continue;
-    candidates.push({ sourceType: "calendar-chore", sourceId: chore.id, title: chore.title || "Chore reminder", email: chore.assignee || fallbackEmail, dueAt: chore.notifyAt, timeZone });
+    for (const email of recipientEmails(chore, fallbackEmail)) {
+      candidates.push({ sourceType: "calendar-chore", sourceId: chore.id, title: chore.title || "Chore reminder", email, dueAt: chore.notifyAt, timeZone });
+    }
   }
   for (const note of appState?.notes?.entries || []) {
     if (!note.reminderAt || !note.id || note.trashed) continue;
