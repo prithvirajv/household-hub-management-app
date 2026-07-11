@@ -13,7 +13,7 @@ try {
 const { Pool } = require("pg");
 const { countries } = require("countries-list");
 const { defaultState } = require("./default-state");
-const { validateJournalPayload, buildDocumentObjectPath, wouldCreateFolderCycle, SMS_CARRIERS, smsGatewayAddress, annualEventNotifyAt } = require("../lib/shared-logic");
+const { validateJournalPayload, buildDocumentObjectPath, wouldCreateFolderCycle, SMS_CARRIERS, smsGatewayAddress, rollAnnualNotifyAtForward } = require("../lib/shared-logic");
 
 const ANNUAL_EVENT_TYPES = ["birthday", "anniversary"];
 const { createSignedUploadUrl, createSignedDownloadUrl, deleteObject } = require("./gcs");
@@ -148,14 +148,18 @@ function notificationCandidates(appState, fallbackEmail) {
   const candidates = [];
   for (const event of appState?.calendar?.events || []) {
     if (!event.id) continue;
-    // Birthdays/anniversaries recur every year, so their due date is always
-    // derived fresh here from the event's month/day + reminderDays — never
-    // trusted from the client's stored notifyAt, which may be stale (e.g.
-    // computed once from a literal birth year) or simply never refreshed if
-    // nobody has opened the Calendar view since the event was added.
+    // Birthdays/anniversaries recur every year, so a stale notifyAt (e.g. from
+    // an event nobody has revisited since it was added) needs to keep rolling
+    // forward. Rather than recomputing the due date from scratch here — which
+    // would re-derive the hour/minute using the server's own ambient timezone
+    // (typically UTC on Cloud Run) and silently disagree with whatever the
+    // client correctly localized to the user's real timezone — we only
+    // advance the client's already-correct instant by whole years.
     if (ANNUAL_EVENT_TYPES.includes(event.type)) {
       if (Number(event.reminderDays || 0) < 0) continue;
-      candidates.push({ sourceType: `calendar-${event.type}`, sourceId: event.id, title: event.title || "Calendar reminder", email: event.owner || fallbackEmail, dueAt: annualEventNotifyAt(event) });
+      const dueAt = rollAnnualNotifyAtForward(event.notifyAt);
+      if (!dueAt) continue;
+      candidates.push({ sourceType: `calendar-${event.type}`, sourceId: event.id, title: event.title || "Calendar reminder", email: event.owner || fallbackEmail, dueAt });
       continue;
     }
     if (!event.notifyAt) continue;

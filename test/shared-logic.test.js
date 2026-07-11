@@ -6,7 +6,7 @@ const {
   timeToMinutes, minutesToTime, snapMinutes, layoutTimelineBlocks, comparePlannedToActual,
   sanitizeFilename, buildDocumentObjectPath, wouldCreateFolderCycle, buildFolderTree,
   smsGatewayAddress, paycheckOccurrencesSince, accountBalance, accountsWithBalances,
-  annualEventDate, nextAnnualEventDate, annualEventNotifyAt
+  annualEventDate, nextAnnualEventDate, annualEventNotifyAt, rollAnnualNotifyAtForward
 } = require("../lib/shared-logic");
 
 test("layoutTimelineBlocks gives non-overlapping tasks full width", () => {
@@ -550,4 +550,27 @@ test("annualEventNotifyAt rolls the due date to next year once this year's occur
   assert.equal(notifyAt.getFullYear(), 2027);
   assert.equal(notifyAt.getMonth(), 4);
   assert.equal(notifyAt.getDate(), 21);
+});
+
+test("rollAnnualNotifyAtForward leaves a future instant unchanged", () => {
+  const notifyAt = "2027-05-28T13:00:00.000Z";
+  const reference = new Date("2026-07-11T12:00:00.000Z");
+  assert.equal(rollAnnualNotifyAtForward(notifyAt, reference), notifyAt);
+});
+
+test("rollAnnualNotifyAtForward advances a stale instant to the same hour/minute in a future year, never re-deriving the time of day", () => {
+  // This is the exact scenario that caused a duplicate email in production:
+  // the server must not recompute the hour using its own ambient timezone.
+  const notifyAt = "1982-07-11T13:00:00.000Z";
+  const beforeThisYearsTime = new Date("2026-07-11T12:00:00.000Z");
+  assert.equal(rollAnnualNotifyAtForward(notifyAt, beforeThisYearsTime), "2026-07-11T13:00:00.000Z");
+
+  const afterThisYearsTime = new Date("2026-07-11T14:00:00.000Z");
+  assert.equal(rollAnnualNotifyAtForward(notifyAt, afterThisYearsTime), "2027-07-11T13:00:00.000Z");
+});
+
+test("rollAnnualNotifyAtForward returns null for a missing or invalid notifyAt", () => {
+  assert.equal(rollAnnualNotifyAtForward(""), null);
+  assert.equal(rollAnnualNotifyAtForward(null), null);
+  assert.equal(rollAnnualNotifyAtForward("not-a-date"), null);
 });
