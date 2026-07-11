@@ -947,6 +947,7 @@ function renderCalendar() {
             <label>Type<select name="type"><option value="chore">Chore</option><option value="birthday">Birthday</option><option value="anniversary">Anniversary</option><option value="reminder">Reminder</option></select></label>
             <label>Title<input name="title" placeholder="Mom birthday reminder" required></label>
             <label>Date<span data-date-label-suffix> and time</span><input name="date" type="datetime-local" value="${state.budget.month}-01T09:00" required></label>
+            <label data-annual-time-field hidden>Remind me at<input name="annualTime" type="time" value="09:00"></label>
             <label>Assign to<select name="owner">${calendarMembers.map((member) => `<option value="${escapeHtml(member.email || member.name)}" ${(member.email || member.name) === (sessionUser?.email || "") ? "selected" : ""}>${escapeHtml(member.name)}${member.email ? ` · ${escapeHtml(member.email)}` : ""}${member.status && member.status !== "active" ? " (invited)" : ""}</option>`).join("")}</select></label>
             <label data-chore-recurrence-field>Repeat<select name="recurrence"><option value="once">Once</option><option value="weekly" selected>Weekly</option><option value="biweekly">Every 2 weeks</option><option value="triweekly">Every 3 weeks</option><option value="monthly">Monthly</option></select></label>
             <label data-annual-reminder-field hidden>Remind before<select name="reminderDays"><option value="0">Same day</option><option value="1" selected>1 day</option><option value="3">3 days</option><option value="7">7 days</option><option value="14">14 days</option><option value="-1">Don't remind</option></select></label>
@@ -2557,24 +2558,27 @@ function annualEventOccurrencesForMonth() {
     .filter(({ date }) => dateKey(date).startsWith(state.budget.month));
 }
 
+// One schedule item per annual event, never two — a reminder set for N days
+// ahead already tells you it's coming, so the actual-day marker would just be
+// a redundant duplicate on the same list. Only shows the actual day itself
+// when there's no advance reminder to lean on instead (0 days / "don't remind").
 function annualEventScheduleItems() {
   const selectedYear = Number(state.budget.month.slice(0, 4));
   return state.calendar.events
     .filter((event) => ANNUAL_EVENT_TYPES.includes(event.type))
     .flatMap((event) => {
       const occursOn = annualEventDate(event, selectedYear);
-      const reminderDate = new Date(occursOn);
-      reminderDate.setDate(reminderDate.getDate() - Number(event.reminderDays || 0));
+      const reminderDays = Number(event.reminderDays || 0);
       const title = annualEventDisplayTitle(event);
       const label = annualEventLabels[event.type] || "Annual event";
-      const items = [];
-      if (dateKey(occursOn).startsWith(state.budget.month)) {
-        items.push({ title, date: dateKey(occursOn).slice(5), type: event.type, label, eventType: event.type, sourceKind: "event", sourceId: event.id, owner: event.owner || "", ownerName: event.ownerName || event.owner || "" });
+      if (reminderDays > 0) {
+        const reminderDate = new Date(occursOn);
+        reminderDate.setDate(reminderDate.getDate() - reminderDays);
+        if (!dateKey(reminderDate).startsWith(state.budget.month)) return [];
+        return [{ title: `${title} reminder`, date: dateKey(reminderDate).slice(5), type: `${event.type}-reminder`, label: `${label} reminder`, eventType: `${event.type}-reminder`, sourceKind: "event", sourceId: event.id, owner: event.owner || "", ownerName: event.ownerName || event.owner || "" }];
       }
-      if (Number(event.reminderDays || 0) > 0 && dateKey(reminderDate).startsWith(state.budget.month)) {
-        items.push({ title: `${title} reminder`, date: dateKey(reminderDate).slice(5), type: `${event.type}-reminder`, label: `${label} reminder`, eventType: `${event.type}-reminder`, sourceKind: "event", sourceId: event.id, owner: event.owner || "", ownerName: event.ownerName || event.owner || "" });
-      }
-      return items;
+      if (!dateKey(occursOn).startsWith(state.budget.month)) return [];
+      return [{ title, date: dateKey(occursOn).slice(5), type: event.type, label, eventType: event.type, sourceKind: "event", sourceId: event.id, owner: event.owner || "", ownerName: event.ownerName || event.owner || "" }];
     });
 }
 
@@ -4417,17 +4421,18 @@ function bindViewEvents() {
       const isAnnual = ANNUAL_EVENT_TYPES.includes(data.type);
       const monthDay = isAnnual ? selectedDate.slice(5) : undefined;
       const reminderDays = isAnnual ? Number(data.reminderDays ?? 1) : undefined;
+      const annualTime = String(data.annualTime || "09:00");
       const existing = editingKind === "event" ? state.calendar.events.find((item) => item.id === editingId) : null;
       const calendarEvent = {
         id: existing?.id || uniqueId("event"),
         title: data.title,
         date: selectedDate,
-        dateTime: isAnnual ? `${selectedDate}T09:00` : (selectedDateTime || `${selectedDate}T09:00`),
+        dateTime: isAnnual ? `${selectedDate}T${annualTime}` : (selectedDateTime || `${selectedDate}T09:00`),
         // Annual events (birthday/anniversary) always notify off the NEXT upcoming
         // occurrence, not the literal date entered (which is often a birth year
         // decades in the past and would make the reminder look permanently overdue).
         notifyAt: isAnnual
-          ? annualEventNotifyAt({ monthDay, reminderDays, dateTime: selectedDateTime })
+          ? annualEventNotifyAt({ monthDay, reminderDays, dateTime: `${selectedDate}T${annualTime}` })
           : (selectedDateTime ? new Date(selectedDateTime).toISOString() : ""),
         monthDay,
         type: isAnnual ? data.type : "reminder",
@@ -4960,6 +4965,7 @@ function editCalendarItem(reference) {
   if (![...form.owner.options].some((option) => option.value === form.owner.value)) form.owner.value = sessionUser?.email || form.owner.options[0]?.value || "";
   form.recurrence.value = kind === "chore" ? item.recurrence || "once" : "once";
   form.reminderDays.value = kind === "event" && ANNUAL_EVENT_TYPES.includes(item.type) ? String(item.reminderDays ?? 1) : "1";
+  form.annualTime.value = kind === "event" && ANNUAL_EVENT_TYPES.includes(item.type) ? (item.dateTime?.slice(11, 16) || "09:00") : "09:00";
   form.querySelector("[data-calendar-submit]").textContent = "Save changes";
   form.querySelector("[data-calendar-delete]").textContent = `Delete ${form.type.value === "chore" ? "chore" : annualEventLabels[form.type.value]?.toLowerCase() || "reminder"}`;
   form.querySelector("[data-calendar-delete]").hidden = false;
@@ -4993,8 +4999,10 @@ function updateCalendarQuickAddFields() {
   const isAnnual = ANNUAL_EVENT_TYPES.includes(type);
   const recurrenceField = form.querySelector("[data-chore-recurrence-field]");
   const reminderField = form.querySelector("[data-annual-reminder-field]");
+  const timeField = form.querySelector("[data-annual-time-field]");
   if (recurrenceField) recurrenceField.hidden = type !== "chore";
   if (reminderField) reminderField.hidden = !isAnnual;
+  if (timeField) timeField.hidden = !isAnnual;
   // Birthdays/anniversaries only need a plain calendar date — asking for a
   // year and time invites entering an actual birth year, which used to make
   // the reminder look permanently overdue (see annualEventNotifyAt).
