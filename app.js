@@ -29,6 +29,9 @@ let autosaveTimer = null;
 let inviteEmailStatus = "";
 let calendarFilterOwner = "";
 let calendarFeedback = "";
+// Kept out of state (like calendarFeedback) so a confirmation message never
+// gets saved into the shared household blob and replayed for every login.
+let mealsFeedback = "";
 // privateData is scoped to the signed-in user (not the household) and is never part
 // of `state` or autosaveState() — it must never reach the shared household blob.
 let privateData = null;
@@ -950,7 +953,7 @@ function renderCalendar() {
             <input name="editingId" type="hidden">
             <label>Type<select name="type"><option value="chore">Chore</option><option value="birthday">Birthday</option><option value="anniversary">Anniversary</option><option value="reminder">Reminder</option></select></label>
             <label>Title<input name="title" placeholder="Mom birthday reminder" required></label>
-            <label>Date<span data-date-label-suffix> and time</span><input name="date" type="datetime-local" value="${state.budget.month}-01T09:00" required></label>
+            <label><span>Date<span data-date-label-suffix> and time</span></span><input name="date" type="datetime-local" value="${state.budget.month}-01T09:00" required></label>
             <label data-annual-time-field hidden>Remind me at<input name="annualTime" type="time" value="09:00"></label>
             <label data-plain-reminder-field hidden>Remind me on<input name="reminderAt" type="datetime-local"></label>
             <label>Assign to<select name="owner">${calendarMembers.map((member) => `<option value="${escapeHtml(member.email || member.name)}" ${(member.email || member.name) === (sessionUser?.email || "") ? "selected" : ""}>${escapeHtml(member.name)}${member.email ? ` · ${escapeHtml(member.email)}` : ""}${member.status && member.status !== "active" ? " (invited)" : ""}</option>`).join("")}</select></label>
@@ -1885,7 +1888,7 @@ function renderMeals() {
         <div class="main-stack">
           <section class="card">
             <div class="section-head"><div><span class="card-label">Meal plan</span><h3>Household meal plan</h3></div><div class="button-row"><button id="saveMealWeekButton" class="ghost" type="button">Save week</button><button id="postGroceriesButton" class="ghost" type="button">Post groceries</button></div></div>
-            <p class="meal-feedback" role="status">${escapeHtml(state.meals.feedback || "")}</p>
+            <p class="meal-feedback" role="status">${escapeHtml(mealsFeedback || "")}</p>
             <form id="mealPlanForm" class="meal-toolbar">
               <label>Day<select name="day">${days.map((day) => `<option value="${day}">${day}</option>`).join("")}</select></label>
               <label>Meal<select name="slot">${meals.map((meal) => `<option value="${meal}">${meal}</option>`).join("")}</select></label>
@@ -2692,7 +2695,7 @@ function planMealFromCurrentForm() {
   const recipe = recipeById(data.recipeId);
   const mealName = recipe ? recipe.name : ($("#mealRecipeName")?.value || "").trim();
   if (!mealName) {
-    state.meals.feedback = "Enter a meal name or choose a saved recipe before planning the meal.";
+    mealsFeedback = "Enter a meal name or choose a saved recipe before planning the meal.";
     render();
     return;
   }
@@ -2706,7 +2709,7 @@ function planMealFromCurrentForm() {
   const planned = { month: state.budget.month, week, day: data.day, slot: data.slot, meal: mealName, recipeId: recipe?.id || "", servings: Number(data.servings || 1) };
   if (existing) Object.assign(existing, planned);
   else state.meals.plannedWeek.push(planned);
-  state.meals.feedback = `${mealName} planned for ${data.day} ${data.slot}.`;
+  mealsFeedback = `${mealName} planned for ${data.day} ${data.slot}.`;
   render();
 }
 
@@ -3800,22 +3803,34 @@ function bindViewEvents() {
     render();
   });
 
+  // Once the user starts a new meals action, clear the leftover confirmation
+  // message so it doesn't look stuck/stale while they're doing something else
+  // (mirrors the same pattern used for the calendar quick-add form).
+  const mealFeedbackStatus = $(".meal-feedback");
+  ["input", "change"].forEach((eventName) => {
+    $(".meal-layout")?.addEventListener(eventName, () => {
+      if (!mealsFeedback) return;
+      mealsFeedback = "";
+      if (mealFeedbackStatus) mealFeedbackStatus.textContent = "";
+    });
+  });
+
   $("#postGroceriesButton")?.addEventListener("click", async () => {
     const groceryLine = allLines().find((line) => line.name.toLowerCase().includes("grocer"));
     if (!groceryLine) {
-      state.meals.feedback = "Add a Groceries subcategory in Budget before posting the grocery list.";
+      mealsFeedback = "Add a Groceries subcategory in Budget before posting the grocery list.";
       render();
       return;
     }
     if (groceryList().length === 0) {
-      state.meals.feedback = "Plan at least one meal this week before posting a grocery estimate.";
+      mealsFeedback = "Plan at least one meal this week before posting a grocery estimate.";
       render();
       return;
     }
     const amount = Math.max(0, Number(state.meals.groceryEstimate || groceryEstimateAmount()));
     state.transactions.unshift(makeTransaction({ date: new Date().toISOString().slice(0, 10), payee: "Meal plan groceries", lineId: groceryLine.id, amount, memo: `Posted from Week ${selectedMealWeek()} grocery list` }));
-    state.meals.feedback = `${exactMoney.format(amount)} posted to ${groceryLine.category} · ${groceryLine.name}.`;
-    state.household.activity.unshift(state.meals.feedback);
+    mealsFeedback = `${exactMoney.format(amount)} posted to ${groceryLine.category} · ${groceryLine.name}.`;
+    state.household.activity.unshift(mealsFeedback);
     await saveStateNow();
     render();
   });
@@ -3846,7 +3861,7 @@ function bindViewEvents() {
   $("#addMealRecipeButton")?.addEventListener("click", () => {
     const name = ($("#mealRecipeName")?.value || "").trim();
     if (!name) {
-      state.meals.feedback = "Type a recipe name before adding it.";
+      mealsFeedback = "Type a recipe name before adding it.";
       render();
       return;
     }
@@ -3860,7 +3875,7 @@ function bindViewEvents() {
     };
     if (!existing) state.meals.recipes.push(recipe);
     state.meals.selectedRecipeId = recipe.id;
-    state.meals.feedback = existing
+    mealsFeedback = existing
       ? `${recipe.name} is already saved — selected it for this meal.`
       : `${recipe.name} added to your recipes. Edit its ingredients and nutrition in the Recipes tab.`;
     render();
@@ -3917,7 +3932,7 @@ function bindViewEvents() {
   $("#saveMealWeekButton")?.addEventListener("click", async () => {
     const label = `${monthLabel()} · Week ${selectedMealWeek()}`;
     if (!state.meals.savedWeeks.includes(label)) state.meals.savedWeeks.push(label);
-    state.meals.feedback = `${label} saved.`;
+    mealsFeedback = `${label} saved.`;
     state.household.activity.unshift(`Saved meal week: ${label}`);
     await saveStateNow();
     render();

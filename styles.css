@@ -1429,11 +1429,15 @@ main {
 }
 
 .calendar-quick-add {
-  grid-template-columns: minmax(110px, 0.7fr) minmax(180px, 1.5fr) minmax(145px, 1fr) minmax(130px, 1fr);
+  grid-template-columns: minmax(110px, 0.7fr) minmax(180px, 1.5fr) minmax(165px, 1fr) minmax(130px, 1fr);
   align-items: end;
   border-radius: 8px;
   background: var(--soft-blue);
   padding: 0.7rem;
+}
+
+.calendar-quick-add > label {
+  white-space: nowrap;
 }
 
 .calendar-member-filter {
