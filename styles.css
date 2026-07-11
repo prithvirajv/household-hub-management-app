@@ -1128,6 +1128,15 @@ main {
   min-width: 0;
 }
 
+.compact-row.overdue {
+  background: #fde9e8;
+}
+
+.compact-row.overdue small {
+  color: var(--coral);
+  font-weight: 700;
+}
+
 .compact-row .pill {
   max-width: 100%;
   overflow: hidden;

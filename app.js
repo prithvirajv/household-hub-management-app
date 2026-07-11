@@ -914,6 +914,18 @@ function memberColor(ownerKey) {
 
 function renderCalendar() {
   const calendarMembers = calendarAssigneeOptions();
+  const today = dateKey(new Date());
+  const choreRows = state.calendar.chores
+    .map((chore, index) => ({ chore, index, occurrence: nextPendingChoreOccurrence(chore) }))
+    .filter((row) => row.occurrence)
+    .sort((a, b) => a.occurrence.date.localeCompare(b.occurrence.date))
+    .slice(0, UPCOMING_LIST_LIMIT);
+  const annualRows = state.calendar.events
+    .filter((event) => ANNUAL_EVENT_TYPES.includes(event.type))
+    .map((event) => ({ event, occurrence: nextPendingAnnualEventOccurrence(event) }))
+    .filter((row) => row.occurrence)
+    .sort((a, b) => a.occurrence.date.localeCompare(b.occurrence.date))
+    .slice(0, UPCOMING_LIST_LIMIT);
   return `
     <section class="work-grid calendar-layout">
       <div class="main-stack">
@@ -934,7 +946,7 @@ function renderCalendar() {
             <input name="editingId" type="hidden">
             <label>Type<select name="type"><option value="chore">Chore</option><option value="birthday">Birthday reminder</option><option value="anniversary">Anniversary reminder</option><option value="reminder">Reminder</option></select></label>
             <label>Title<input name="title" placeholder="Mom birthday reminder" required></label>
-            <label>Date and time<input name="date" type="datetime-local" value="${state.budget.month}-01T09:00" required></label>
+            <label>Date<span data-date-label-suffix> and time</span><input name="date" type="datetime-local" value="${state.budget.month}-01T09:00" required></label>
             <label>Assign to<select name="owner">${calendarMembers.map((member) => `<option value="${escapeHtml(member.email || member.name)}">${escapeHtml(member.name)}${member.email ? ` · ${escapeHtml(member.email)}` : ""}${member.status && member.status !== "active" ? " (invited)" : ""}</option>`).join("")}</select></label>
             <label data-chore-recurrence-field>Repeat<select name="recurrence"><option value="once">Once</option><option value="weekly" selected>Weekly</option><option value="biweekly">Every 2 weeks</option><option value="triweekly">Every 3 weeks</option><option value="monthly">Monthly</option></select></label>
             <label data-annual-reminder-field hidden>Remind before<select name="reminderDays"><option value="0">Same day</option><option value="1">1 day</option><option value="3">3 days</option><option value="7" selected>7 days</option><option value="14">14 days</option></select></label>
@@ -957,11 +969,11 @@ function renderCalendar() {
         <section class="card"><div class="card-label">Daily planner</div><h3>Upcoming schedule</h3>${visibleScheduleItems().length ? visibleScheduleItems().map((item) => calendarManageRow(item.title, item.displayDate || item.date, item.label || item.type, item.sourceKind, item.sourceId, item.owner, item.ownerName)).join("") : `<div class="empty-inline">No events scheduled this month</div>`}</section>
         <section class="card">
           <div class="section-head"><div><span class="card-label">What to do</span><h3>Chore rotation</h3></div><button id="sideAddChoreButton" class="ghost" type="button">Add chore</button></div>
-          ${state.calendar.chores.length ? state.calendar.chores.map((chore, index) => {
-            const occurrence = nextChoreOccurrenceInMonth(chore);
-            return `<div class="compact-row">
-              <div><strong>${chore.title}</strong><small>${occurrence?.date || "No occurrence this month"} · ${chore.assigneeName || chore.assignee} · ${choreCadenceLabel(chore)}</small></div>
-              ${occurrence ? `<button class="ghost chore-complete-button" data-complete-chore="${index}:${occurrence.date}" type="button">Complete</button>` : `<span class="pill">Recurring</span>`}
+          ${choreRows.length ? choreRows.map(({ chore, index, occurrence }) => {
+            const overdue = occurrence.date < today;
+            return `<div class="compact-row ${overdue ? "overdue" : ""}">
+              <div><strong>${escapeHtml(chore.title)}</strong><small>${occurrence.date}${overdue ? " · Past due" : ""} · ${escapeHtml(chore.assigneeName || chore.assignee)} · ${choreCadenceLabel(chore)}</small></div>
+              <button class="ghost chore-complete-button" data-complete-chore="${index}:${occurrence.date}" type="button">Complete</button>
               <button class="icon-button" data-edit-calendar-item="chore:${chore.id}" type="button" aria-label="Edit ${escapeHtml(chore.title)}">✎</button>
               <button class="icon-button danger-button" data-delete-calendar-item="chore:${chore.id}" type="button" aria-label="Remove ${escapeHtml(chore.title)}">×</button>
             </div>`;
@@ -969,7 +981,15 @@ function renderCalendar() {
         </section>
         <section class="card">
           <div class="section-head"><div><span class="card-label">Remember</span><h3>Birthdays &amp; anniversaries</h3></div><button id="sideAddBirthdayButton" class="ghost" type="button">Add birthday/anniversary</button></div>
-          ${state.calendar.events.filter((event) => ANNUAL_EVENT_TYPES.includes(event.type)).length ? state.calendar.events.filter((event) => ANNUAL_EVENT_TYPES.includes(event.type)).map((event) => calendarManageRow(annualEventDisplayTitle(event), `${formatAnnualEventMonthDay(event)} · every year · ${Number(event.reminderDays || 0)} days before`, annualEventLabels[event.type] || "Annual", "event", event.id)).join("") : `<div class="empty-inline">No birthdays or anniversaries added</div>`}
+          ${annualRows.length ? annualRows.map(({ event, occurrence }) => {
+            const overdue = occurrence.date < today;
+            return `<div class="compact-row ${overdue ? "overdue" : ""}">
+              <div><strong>${escapeHtml(annualEventDisplayTitle(event))}</strong><small>${formatAnnualEventMonthDay(event)}${overdue ? " · Not wished yet" : ""} · ${annualEventLabels[event.type] || "Annual"}</small></div>
+              <button class="ghost chore-complete-button" data-mark-wished="${event.id}:${occurrence.year}" type="button">Mark wished</button>
+              <button class="icon-button" data-edit-calendar-item="event:${event.id}" type="button" aria-label="Edit ${escapeHtml(event.title)}">✎</button>
+              <button class="icon-button danger-button" data-delete-calendar-item="event:${event.id}" type="button" aria-label="Remove ${escapeHtml(event.title)}">×</button>
+            </div>`;
+          }).join("") : `<div class="empty-inline">No birthdays or anniversaries added</div>`}
         </section>
       </aside>
     </section>`;
@@ -2445,6 +2465,47 @@ function nextChoreOccurrenceInMonth(chore) {
   return choreOccurrencesForMonth(chore)[0] || null;
 }
 
+const UPCOMING_LIST_LIMIT = 5;
+
+// The side-panel "what's due" row for a chore — the earliest occurrence that
+// hasn't been marked complete yet, regardless of which month is displayed.
+// If that date is already in the past it's the same row, just overdue,
+// rather than a whole backlog of missed rows piling up.
+function nextPendingChoreOccurrence(chore) {
+  const completed = new Set(chore.completedDates || []);
+  const recurrence = chore.recurrence || "once";
+  const start = new Date(`${chore.startDate}T00:00:00`);
+  if (Number.isNaN(start.getTime())) return null;
+
+  if (recurrence === "once") {
+    const key = dateKey(start);
+    return completed.has(key) ? null : { date: key };
+  }
+
+  if (recurrence === "monthly") {
+    const cursor = new Date(start.getFullYear(), start.getMonth(), 1);
+    for (let i = 0; i < 240; i += 1) {
+      const lastDay = new Date(cursor.getFullYear(), cursor.getMonth() + 1, 0).getDate();
+      const occurrence = new Date(cursor.getFullYear(), cursor.getMonth(), Math.min(start.getDate(), lastDay));
+      if (occurrence >= start) {
+        const key = dateKey(occurrence);
+        if (!completed.has(key)) return { date: key };
+      }
+      cursor.setMonth(cursor.getMonth() + 1);
+    }
+    return null;
+  }
+
+  const intervalDays = recurrence === "triweekly" ? 21 : recurrence === "biweekly" ? 14 : 7;
+  const cursor = new Date(start);
+  for (let i = 0; i < 3650; i += 1) {
+    const key = dateKey(cursor);
+    if (!completed.has(key)) return { date: key };
+    cursor.setDate(cursor.getDate() + intervalDays);
+  }
+  return null;
+}
+
 const ANNUAL_EVENT_TYPES = ["birthday", "anniversary"];
 const annualEventLabels = { birthday: "Birthday", anniversary: "Anniversary" };
 
@@ -2455,12 +2516,27 @@ function ensureAnnualEventRecurrenceData() {
     event.monthDay ||= event.date?.slice(5);
     event.annual = true;
     event.reminderDays = Number(event.reminderDays ?? 7);
+    event.wishedYears ||= [];
     // Recomputed every render so the reminder always points at the next upcoming
     // occurrence instead of staying pinned to whatever year the event was first
     // saved with (e.g. a birth year) — otherwise it looks permanently overdue and
     // fires immediately instead of waiting for the actual date to approach.
     event.notifyAt = annualEventNotifyAt(event);
   });
+}
+
+// The side-panel "what's due" row for a birthday/anniversary — the earliest
+// year that hasn't been marked wished yet. If this year's occurrence already
+// passed and nobody marked it wished, that's the row that shows (overdue),
+// instead of silently skipping ahead to next year.
+function nextPendingAnnualEventOccurrence(event, referenceDate = new Date()) {
+  const wished = new Set((event.wishedYears || []).map(String));
+  let year = referenceDate.getFullYear();
+  for (let i = 0; i < 200; i += 1) {
+    if (!wished.has(String(year))) return { date: dateKey(annualEventDate(event, year)), year };
+    year += 1;
+  }
+  return null;
 }
 
 function annualEventDate(event, year) {
@@ -4362,7 +4438,7 @@ function bindViewEvents() {
         id: existing?.id || uniqueId("event"),
         title: data.title,
         date: selectedDate,
-        dateTime: selectedDateTime || `${selectedDate}T09:00`,
+        dateTime: isAnnual ? `${selectedDate}T09:00` : (selectedDateTime || `${selectedDate}T09:00`),
         // Annual events (birthday/anniversary) always notify off the NEXT upcoming
         // occurrence, not the literal date entered (which is often a birth year
         // decades in the past and would make the reminder look permanently overdue).
@@ -4408,6 +4484,20 @@ function bindViewEvents() {
       chore.completedDates ||= [];
       if (!chore.completedDates.includes(occurrenceDate)) chore.completedDates.push(occurrenceDate);
       state.household.activity.unshift(`Completed ${chore.title} for ${occurrenceDate}`);
+      render();
+    });
+  });
+
+  document.querySelectorAll("[data-mark-wished]").forEach((button) => {
+    button.addEventListener("click", () => {
+      const separator = button.dataset.markWished.indexOf(":");
+      const eventId = button.dataset.markWished.slice(0, separator);
+      const year = button.dataset.markWished.slice(separator + 1);
+      const event = state.calendar.events.find((item) => item.id === eventId);
+      if (!event || !year) return;
+      event.wishedYears ||= [];
+      if (!event.wishedYears.includes(year)) event.wishedYears.push(year);
+      state.household.activity.unshift(`Wished ${annualEventDisplayTitle(event)} for ${year}`);
       render();
     });
   });
@@ -4873,10 +4963,15 @@ function editCalendarItem(reference) {
   form.editingKind.value = kind;
   form.editingId.value = id;
   form.type.value = kind === "chore" ? "chore" : ANNUAL_EVENT_TYPES.includes(item.type) ? item.type : "reminder";
+  // Switch the date input's type (date-only vs datetime-local) before assigning
+  // its value below, so the value we set matches the format the input expects.
+  updateCalendarQuickAddFields();
   form.title.value = item.title || "";
   form.date.value = kind === "chore"
     ? `${item.startDate || item.nextDue || `${state.budget.month}-01`}T${item.time || "09:00"}`
-    : item.dateTime || `${item.date || `${state.budget.month}-01`}T09:00`;
+    : ANNUAL_EVENT_TYPES.includes(item.type)
+      ? item.date || `${state.budget.month}-01`
+      : item.dateTime || `${item.date || `${state.budget.month}-01`}T09:00`;
   form.owner.value = kind === "chore" ? item.assignee || "" : item.owner || "";
   if (![...form.owner.options].some((option) => option.value === form.owner.value)) form.owner.value = sessionUser?.email || form.owner.options[0]?.value || "";
   form.recurrence.value = kind === "chore" ? item.recurrence || "once" : "once";
@@ -4911,10 +5006,26 @@ function updateCalendarQuickAddFields() {
   const form = $("#calendarQuickAdd");
   if (!form) return;
   const type = form.type.value;
+  const isAnnual = ANNUAL_EVENT_TYPES.includes(type);
   const recurrenceField = form.querySelector("[data-chore-recurrence-field]");
   const reminderField = form.querySelector("[data-annual-reminder-field]");
   if (recurrenceField) recurrenceField.hidden = type !== "chore";
-  if (reminderField) reminderField.hidden = !ANNUAL_EVENT_TYPES.includes(type);
+  if (reminderField) reminderField.hidden = !isAnnual;
+  // Birthdays/anniversaries only need a plain calendar date — asking for a
+  // year and time invites entering an actual birth year, which used to make
+  // the reminder look permanently overdue (see annualEventNotifyAt).
+  const dateInput = form.date;
+  const dateLabelSuffix = form.querySelector("[data-date-label-suffix]");
+  if (dateInput) {
+    if (isAnnual && dateInput.type !== "date") {
+      dateInput.type = "date";
+      dateInput.value = dateInput.value.slice(0, 10);
+    } else if (!isAnnual && dateInput.type !== "datetime-local") {
+      dateInput.type = "datetime-local";
+      dateInput.value = `${dateInput.value.slice(0, 10) || `${state.budget.month}-01`}T09:00`;
+    }
+  }
+  if (dateLabelSuffix) dateLabelSuffix.textContent = isAnnual ? "" : " and time";
   const deleteButton = form.querySelector("[data-calendar-delete]");
   if (deleteButton && !deleteButton.hidden) deleteButton.textContent = `Delete ${type === "chore" ? "chore" : annualEventLabels[type]?.toLowerCase() || "reminder"}`;
 }
