@@ -992,7 +992,7 @@ function renderCalendar() {
         <section class="card calendar-main-card">
           <div class="section-head">
             <div><span class="card-label">Household calendar</span><h3>Chores, birthdays, anniversaries and reminders</h3></div>
-            <div class="button-row"><button id="addChoreButton" class="ghost" type="button">+ Add chore</button><button id="addBirthdayButton" class="ghost" type="button">+ Add birthday/anniversary</button><button id="addReminderButton" type="button">+ Add reminder</button></div>
+            <div class="button-row"><button id="addChoreButton" class="ghost" type="button">+ Add chore</button><button id="addBirthdayButton" class="ghost" type="button">+ Add birthday/anniversary</button><button id="addReminderButton" class="ghost" type="button">+ Add reminder</button></div>
           </div>
           <div class="calendar-member-filter" role="group" aria-label="Filter calendar by person">
             <button type="button" class="member-chip ${calendarFilterOwner ? "" : "active"}" data-calendar-filter-owner="">All people</button>

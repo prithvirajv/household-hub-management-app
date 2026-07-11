@@ -1484,6 +1484,18 @@ main {
   background: var(--soft-blue);
 }
 
+/* The global input/select rule (width:100%, min-height:34px, bordered box)
+   is meant for text/select fields — without this override it also inflates
+   the checkbox itself into a large, misaligned bordered square. */
+.assignee-menu-option input[type="checkbox"] {
+  width: 18px;
+  min-height: 0;
+  height: 18px;
+  padding: 0;
+  flex: none;
+  accent-color: var(--navy);
+}
+
 .calendar-quick-add > label {
   white-space: nowrap;
 }
