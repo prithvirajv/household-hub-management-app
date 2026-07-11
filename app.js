@@ -2204,14 +2204,20 @@ function renderReports() {
 
 function renderHelp() {
   const guides = [
-    ["Start here", "Create a household, choose its country and currency, then add income and assign every planned dollar in Budget."],
-    ["Households", "Use Current household in the sidebar to switch between homes, countries, or family workspaces. Each household keeps separate budgets and records."],
-    ["Budget and transactions", "Create categories and subcategories in Budget. Add or import transactions, then assign each transaction to the matching budget line."],
-    ["Calendar and chores", "Add events, annual birthdays and anniversaries, reminders, and recurring chores. Weekly chores automatically appear on future calendar dates."],
-    ["Meals and recipes", "Save recipes in Recipes, then select them in the weekly Meals planner. Planned ingredients feed the grocery list."],
-    ["Goals and wealth", "Track sinking funds in Goals. Use Wealth for debts, assets, liabilities, payoff progress, and net worth."],
-    ["Sharing", "Choose the household areas to share, send an invitation, and ask the recipient to use the exact invited email and one-time code."],
-    ["Reports and export", "Review spending and budget health in Reports. Use the download button in the header to export the selected month as CSV."]
+    ["◈", "Households", "Switch households from the Current household dropdown in the sidebar — each one keeps entirely separate budgets, calendars, notes, and records. + Add creates another (one household per currency; you'll be blocked if you already have one in that currency). Set as default marks which household loads automatically the next time you sign in — it's a preference for you personally, not something that changes what other members see. Remove deletes a household outright and is blocked if it's your only one."],
+    ["▦", "Budget", "Set your month's income, then create categories and the subcategories (budget lines) under them, each with a planned amount and an optional due day. Spent and Remaining update automatically as you assign transactions to a line. Use the copy-previous-budget option to reuse last month's categories instead of starting from scratch, and switch months from the picker in the header."],
+    ["☰", "Transactions", "Add a transaction by payee and amount, then assign it to a budget line so Spent updates in Budget. If you've linked a bank account under Wealth, also link the transaction to that account so its running balance stays accurate. Transactions from a connected bank stream land in a review queue — accept or dismiss each one before it counts."],
+    ["☑", "Paycheck/Income", "Add each paycheck with an amount and how often it repeats (one-time, bonus, weekly, biweekly, or monthly), then use the assign form to route pieces of it to specific budget lines. Set a paycheck's Deposit to account (under Wealth) so that account's balance reflects the deposit automatically instead of needing a matching manual transaction."],
+    ["⌂", "Calendar", "Chores repeat on a schedule (weekly, every 2 or 3 weeks, or monthly) and rotate through the Chore rotation panel — mark one Complete to reveal its next occurrence, and anything overdue turns red as \"Past due.\" Birthdays and anniversaries recur every year automatically; set Remind before (or Don't remind) and Remind me at to control when the reminder email fires, and Mark wished once you've reached out. Plain Reminders have their own independent Remind me on time, fully separate from the event's own date/time — so an event at noon can remind you an hour earlier. Filter the whole calendar by household member using the chips above the grid."],
+    ["✎", "Notes", "Create notes with labels, colors, and checklists — checklist items can be nested and will suggest matches from ones you've typed before. Pin the notes you check often, archive the ones you're done with but might need later, and anything trashed is permanently removed after 7 days."],
+    ["✒", "Journal", "A private day-by-day journal for mood, tags, photos, and free text. It is never shared with other household members, even ones with full access to everything else."],
+    ["◫", "Plan", "A private daily/weekly/monthly task planner with its own timeline view — schedule tasks with a start time and duration, then log what actually happened afterward to compare planned versus actual. Like Journal, this is yours alone; nobody else in the household can see it."],
+    ["▢", "Documents", "Upload and organize household files into folders. Link a folder or an individual document to a specific asset or liability in Wealth (for example, a mortgage folder linked to your home) so the paperwork behind a number is easy to find later."],
+    ["♨", "Meals and recipes", "Save reusable recipes with ingredients and nutrition info in Recipes, then drop them into the weekly Meals planner by day and slot. Planned ingredients automatically build your grocery list, and you can post it straight to a budget line."],
+    ["◎", "Goals", "Track sinking funds — savings goals with a target amount and, optionally, a target date. Update Saved so far as you contribute, and the progress bar and remaining balance recalculate automatically."],
+    ["▥", "Wealth", "Add real bank or credit-card Accounts with an opening balance; their balance is always computed live from linked transactions, paychecks, and transfers between accounts, never entered by hand. Link an account to a Net worth asset or liability and that entry updates with it automatically. The Debt payoff tracker estimates a payoff date and suggested payment from balance, rate, and term."],
+    ["♙", "Sharing", "Generate a one-time invite code for someone to join your household, choosing a preset role (co-owner, adult, viewer, or meals/chores-only) or picking exact areas to share instead. Codes are single-use — resend a new one if theirs lapsed or was already used. Revoke access for any member from the member list at any time."],
+    ["◷", "Reports and export", "Review spending by category and overall budget health for the selected month. Use the download button in the header to export whatever you're currently viewing — Budget, Transactions, Calendar, Wealth, and more — as a CSV file."]
   ];
   return `
     <section class="help-layout">
@@ -2223,14 +2229,14 @@ function renderHelp() {
         </div>
       </section>
       <section class="help-journey" aria-label="Getting started workflow">
-        <article><span>1</span><div><strong>Choose a household</strong><small>Keep currencies and records separate.</small></div></article>
+        <article><span>1</span><div><strong>Choose a household</strong><small>Keep currencies and records separate; set one as your default.</small></div></article>
         <article><span>2</span><div><strong>Add what is real</strong><small>Start empty and enter only your data.</small></div></article>
         <article><span>3</span><div><strong>Review together</strong><small>Share access and revisit the plan.</small></div></article>
       </section>
       <section class="help-grid">
-        ${guides.map(([title, copy], index) => `
+        ${guides.map(([icon, title, copy]) => `
           <article class="help-topic">
-            <span class="help-topic-icon">${["⌂", "◇", "$", "□", "♨", "◎", "↗", "◷"][index]}</span>
+            <span class="help-topic-icon">${icon}</span>
             <div><h3>${title}</h3><p>${copy}</p></div>
           </article>
         `).join("")}
