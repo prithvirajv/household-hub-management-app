@@ -145,6 +145,11 @@ async function sendTransactionalEmail({ to, subject, text, html }) {
 }
 
 function notificationCandidates(appState, fallbackEmail) {
+  // Reminder emails display "Due <date/time>" using this timezone (captured
+  // from whichever browser last rendered the app, see app.js's render()) so
+  // the displayed time matches what the household actually typed in, instead
+  // of whatever timezone the server container happens to be running in.
+  const timeZone = appState?.household?.timeZone || "UTC";
   const candidates = [];
   for (const event of appState?.calendar?.events || []) {
     if (!event.id) continue;
@@ -159,19 +164,19 @@ function notificationCandidates(appState, fallbackEmail) {
       if (Number(event.reminderDays || 0) < 0) continue;
       const dueAt = rollAnnualNotifyAtForward(event.notifyAt);
       if (!dueAt) continue;
-      candidates.push({ sourceType: `calendar-${event.type}`, sourceId: event.id, title: event.title || "Calendar reminder", email: event.owner || fallbackEmail, dueAt });
+      candidates.push({ sourceType: `calendar-${event.type}`, sourceId: event.id, title: event.title || "Calendar reminder", email: event.owner || fallbackEmail, dueAt, timeZone });
       continue;
     }
     if (!event.notifyAt) continue;
-    candidates.push({ sourceType: `calendar-${event.type || "event"}`, sourceId: event.id, title: event.title || "Calendar reminder", email: event.owner || fallbackEmail, dueAt: event.notifyAt });
+    candidates.push({ sourceType: `calendar-${event.type || "event"}`, sourceId: event.id, title: event.title || "Calendar reminder", email: event.owner || fallbackEmail, dueAt: event.notifyAt, timeZone });
   }
   for (const chore of appState?.calendar?.chores || []) {
     if (!chore.notifyAt || !chore.id) continue;
-    candidates.push({ sourceType: "calendar-chore", sourceId: chore.id, title: chore.title || "Chore reminder", email: chore.assignee || fallbackEmail, dueAt: chore.notifyAt });
+    candidates.push({ sourceType: "calendar-chore", sourceId: chore.id, title: chore.title || "Chore reminder", email: chore.assignee || fallbackEmail, dueAt: chore.notifyAt, timeZone });
   }
   for (const note of appState?.notes?.entries || []) {
     if (!note.reminderAt || !note.id || note.trashed) continue;
-    candidates.push({ sourceType: "note", sourceId: note.id, title: note.title || "Note reminder", email: fallbackEmail, dueAt: note.reminderAt });
+    candidates.push({ sourceType: "note", sourceId: note.id, title: note.title || "Note reminder", email: fallbackEmail, dueAt: note.reminderAt, timeZone });
   }
   return candidates.filter((item) => item.email && !Number.isNaN(new Date(item.dueAt).getTime()));
 }
@@ -182,7 +187,7 @@ async function syncNotificationJobs({ householdId, appState, user }) {
     memoryDb.notificationJobs = memoryDb.notificationJobs.filter((job) => job.household_id !== householdId || job.sent_at);
     for (const item of candidates) {
       const recipient = memoryDb.users.find((candidate) => candidate.email.toLowerCase() === item.email.toLowerCase());
-      memoryDb.notificationJobs.push({ id: crypto.randomUUID(), household_id: householdId, user_id: recipient?.id || null, source_type: item.sourceType, source_id: item.sourceId, title: item.title, recipient_email: item.email, due_at: item.dueAt, sent_at: null, claimed_at: null, attempts: 0, last_error: null });
+      memoryDb.notificationJobs.push({ id: crypto.randomUUID(), household_id: householdId, user_id: recipient?.id || null, source_type: item.sourceType, source_id: item.sourceId, title: item.title, recipient_email: item.email, due_at: item.dueAt, time_zone: item.timeZone, sent_at: null, claimed_at: null, attempts: 0, last_error: null });
     }
     return;
   }
@@ -192,10 +197,10 @@ async function syncNotificationJobs({ householdId, appState, user }) {
     await client.query("DELETE FROM notification_jobs WHERE household_id = $1 AND sent_at IS NULL", [householdId]);
     for (const item of candidates) {
       await client.query(
-        `INSERT INTO notification_jobs (household_id, user_id, source_type, source_id, title, recipient_email, due_at)
-         VALUES ($1, (SELECT id FROM users WHERE lower(email) = lower($2) LIMIT 1), $3, $4, $5, $2, $6)
+        `INSERT INTO notification_jobs (household_id, user_id, source_type, source_id, title, recipient_email, due_at, time_zone)
+         VALUES ($1, (SELECT id FROM users WHERE lower(email) = lower($2) LIMIT 1), $3, $4, $5, $2, $6, $7)
          ON CONFLICT (household_id, source_type, source_id, recipient_email, due_at) DO NOTHING`,
-        [householdId, item.email, item.sourceType, item.sourceId, item.title, item.dueAt]
+        [householdId, item.email, item.sourceType, item.sourceId, item.title, item.dueAt, item.timeZone]
       );
     }
     await client.query("COMMIT");
@@ -240,11 +245,22 @@ async function prunePushDevices(tokens) {
   await pool.query("DELETE FROM push_devices WHERE token = ANY($1)", [tokens]);
 }
 
-function sendReminderEmail({ email, title, dueAt }) {
+// Formats an absolute UTC instant in the household's own timezone (captured
+// from the browser, see app.js's render()) so the displayed due time matches
+// what was actually typed in, rather than the server container's timezone.
+function formatDueLabel(dueAt, timeZone, dateStyle) {
+  try {
+    return new Date(dueAt).toLocaleString("en-US", { dateStyle, timeStyle: "short", timeZone: timeZone || "UTC" });
+  } catch (_error) {
+    return new Date(dueAt).toLocaleString("en-US", { dateStyle, timeStyle: "short", timeZone: "UTC" });
+  }
+}
+
+function sendReminderEmail({ email, title, dueAt, timeZone }) {
   if (TEST_FORCE_EMAIL_FAILURE) {
     return Promise.resolve({ queued: false, preview: false, accepted: [], rejected: [], error: "Forced test failure" });
   }
-  const dueLabel = new Date(dueAt).toLocaleString("en-US", { dateStyle: "medium", timeStyle: "short" });
+  const dueLabel = formatDueLabel(dueAt, timeZone, "medium");
   return sendTransactionalEmail({
     to: email,
     subject: `Reminder: ${title}`,
@@ -253,13 +269,13 @@ function sendReminderEmail({ email, title, dueAt }) {
   });
 }
 
-function sendReminderSms({ phone, carrier, title, dueAt }) {
+function sendReminderSms({ phone, carrier, title, dueAt, timeZone }) {
   const gatewayAddress = smsGatewayAddress(phone, carrier);
   if (!gatewayAddress) return Promise.resolve({ skipped: true });
   if (TEST_FORCE_EMAIL_FAILURE) {
     return Promise.resolve({ queued: false, preview: false, accepted: [], rejected: [], error: "Forced test failure" });
   }
-  const dueLabel = new Date(dueAt).toLocaleString("en-US", { dateStyle: "short", timeStyle: "short" });
+  const dueLabel = formatDueLabel(dueAt, timeZone, "short");
   const body = `FamilyLoop: ${title} - due ${dueLabel}`;
   return sendTransactionalEmail({ to: gatewayAddress, subject: "", text: body, html: body });
 }
@@ -294,7 +310,7 @@ async function claimDueNotificationJobsDb(limit) {
        LIMIT $2
        FOR UPDATE SKIP LOCKED
      )
-     RETURNING id, household_id, user_id, source_type, source_id, title, recipient_email, due_at, attempts`,
+     RETURNING id, household_id, user_id, source_type, source_id, title, recipient_email, due_at, time_zone, attempts`,
     [String(NOTIFICATION_LEASE_MS), limit]
   );
   return result.rows;
@@ -2685,7 +2701,7 @@ app.post("/api/internal/notifications/process", requireNotificationSecret, async
     let smsSent = 0;
     for (const job of jobs) {
       try {
-        const delivery = await sendReminderEmail({ email: job.recipient_email, title: job.title, dueAt: job.due_at });
+        const delivery = await sendReminderEmail({ email: job.recipient_email, title: job.title, dueAt: job.due_at, timeZone: job.time_zone });
         if (delivery.error) throw new Error(delivery.error);
         await markNotificationJobSent(job.id);
         sent += 1;
@@ -2701,7 +2717,7 @@ app.post("/api/internal/notifications/process", requireNotificationSecret, async
       const phoneInfo = job.user_id ? phoneByUser.get(job.user_id) : null;
       if (phoneInfo) {
         try {
-          const smsDelivery = await sendReminderSms({ phone: phoneInfo.phone, carrier: phoneInfo.carrier, title: job.title, dueAt: job.due_at });
+          const smsDelivery = await sendReminderSms({ phone: phoneInfo.phone, carrier: phoneInfo.carrier, title: job.title, dueAt: job.due_at, timeZone: job.time_zone });
           if (!smsDelivery.skipped && !smsDelivery.error) smsSent += 1;
         } catch (_error) {
           // SMS is a best-effort bonus channel; failures here shouldn't affect the job's email retry bookkeeping.

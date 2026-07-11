@@ -634,6 +634,10 @@ function metricsForView() {
 
 function render() {
   if (!state) return;
+  // Captured once per household so the server can format reminder-email due
+  // times in the household's own timezone instead of the server container's
+  // (see notificationCandidates/formatDueLabel in server/index.js).
+  state.household.timeZone ||= Intl.DateTimeFormat().resolvedOptions().timeZone;
   if (currentView === "admin" && !sessionUser?.isAdmin) currentView = "budget";
   if (currentView === "wealth") { ensureDebtNetWorthSync(); ensureAccountsData(); }
   renderShell();
