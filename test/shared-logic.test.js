@@ -5,7 +5,8 @@ const {
   dailyTaskOccursOnDate, isDailyTaskDoneOnDate, toggleDailyTaskDoneOnDate,
   timeToMinutes, minutesToTime, snapMinutes, layoutTimelineBlocks, comparePlannedToActual,
   sanitizeFilename, buildDocumentObjectPath, wouldCreateFolderCycle, buildFolderTree,
-  smsGatewayAddress, paycheckOccurrencesSince, accountBalance, accountsWithBalances
+  smsGatewayAddress, paycheckOccurrencesSince, accountBalance, accountsWithBalances,
+  annualEventDate, nextAnnualEventDate, annualEventNotifyAt
 } = require("../lib/shared-logic");
 
 test("layoutTimelineBlocks gives non-overlapping tasks full width", () => {
@@ -493,4 +494,60 @@ test("accountBalance: a monthly recurring paycheck deposits multiple times into 
   const paychecks = [{ date: "2026-04-11", recurrence: "monthly", amount: 1000, depositAccountId: "checking" }];
   const balance = accountBalance("checking", { accounts, transactions: [], paychecks, transfers: [] }, "2026-07-11");
   assert.equal(balance, 4000);
+});
+
+test("annualEventDate clamps Feb 29 to Feb 28 in non-leap years", () => {
+  const event = { monthDay: "02-29" };
+  const nonLeap = annualEventDate(event, 2025);
+  assert.equal(nonLeap.getMonth(), 1);
+  assert.equal(nonLeap.getDate(), 28);
+  const leap = annualEventDate(event, 2024);
+  assert.equal(leap.getMonth(), 1);
+  assert.equal(leap.getDate(), 29);
+});
+
+test("nextAnnualEventDate returns this year's date when it hasn't passed yet", () => {
+  const event = { monthDay: "09-24" };
+  const reference = new Date(2026, 6, 11);
+  const next = nextAnnualEventDate(event, reference);
+  assert.equal(next.getFullYear(), 2026);
+  assert.equal(next.getMonth(), 8);
+  assert.equal(next.getDate(), 24);
+});
+
+test("nextAnnualEventDate rolls to next year once this year's date has already passed", () => {
+  const event = { monthDay: "05-28" };
+  const reference = new Date(2026, 6, 11);
+  const next = nextAnnualEventDate(event, reference);
+  assert.equal(next.getFullYear(), 2027);
+  assert.equal(next.getMonth(), 4);
+  assert.equal(next.getDate(), 28);
+});
+
+test("nextAnnualEventDate treats today's own date as not yet passed", () => {
+  const event = { monthDay: "07-11" };
+  const reference = new Date(2026, 6, 11);
+  const next = nextAnnualEventDate(event, reference);
+  assert.equal(next.getFullYear(), 2026);
+  assert.equal(next.getMonth(), 6);
+  assert.equal(next.getDate(), 11);
+});
+
+test("annualEventNotifyAt derives the due date from the next occurrence and reminderDays, ignoring a literal birth year", () => {
+  const event = { monthDay: "09-24", reminderDays: 7, dateTime: "1986-09-24T13:00" };
+  const reference = new Date(2026, 6, 11);
+  const notifyAt = new Date(annualEventNotifyAt(event, reference));
+  assert.equal(notifyAt.getFullYear(), 2026);
+  assert.equal(notifyAt.getMonth(), 8);
+  assert.equal(notifyAt.getDate(), 17);
+  assert.equal(notifyAt.getHours(), 13);
+});
+
+test("annualEventNotifyAt rolls the due date to next year once this year's occurrence has passed", () => {
+  const event = { monthDay: "05-28", reminderDays: 7, dateTime: "2020-05-28T09:00" };
+  const reference = new Date(2026, 6, 11);
+  const notifyAt = new Date(annualEventNotifyAt(event, reference));
+  assert.equal(notifyAt.getFullYear(), 2027);
+  assert.equal(notifyAt.getMonth(), 4);
+  assert.equal(notifyAt.getDate(), 21);
 });

@@ -13,7 +13,9 @@ try {
 const { Pool } = require("pg");
 const { countries } = require("countries-list");
 const { defaultState } = require("./default-state");
-const { validateJournalPayload, buildDocumentObjectPath, wouldCreateFolderCycle, SMS_CARRIERS, smsGatewayAddress } = require("../lib/shared-logic");
+const { validateJournalPayload, buildDocumentObjectPath, wouldCreateFolderCycle, SMS_CARRIERS, smsGatewayAddress, annualEventNotifyAt } = require("../lib/shared-logic");
+
+const ANNUAL_EVENT_TYPES = ["birthday", "anniversary"];
 const { createSignedUploadUrl, createSignedDownloadUrl, deleteObject } = require("./gcs");
 
 const PORT = Number(process.env.PORT || 8080);
@@ -145,7 +147,18 @@ async function sendTransactionalEmail({ to, subject, text, html }) {
 function notificationCandidates(appState, fallbackEmail) {
   const candidates = [];
   for (const event of appState?.calendar?.events || []) {
-    if (!event.notifyAt || !event.id) continue;
+    if (!event.id) continue;
+    // Birthdays/anniversaries recur every year, so their due date is always
+    // derived fresh here from the event's month/day + reminderDays — never
+    // trusted from the client's stored notifyAt, which may be stale (e.g.
+    // computed once from a literal birth year) or simply never refreshed if
+    // nobody has opened the Calendar view since the event was added.
+    if (ANNUAL_EVENT_TYPES.includes(event.type)) {
+      if (Number(event.reminderDays || 0) < 0) continue;
+      candidates.push({ sourceType: `calendar-${event.type}`, sourceId: event.id, title: event.title || "Calendar reminder", email: event.owner || fallbackEmail, dueAt: annualEventNotifyAt(event) });
+      continue;
+    }
+    if (!event.notifyAt) continue;
     candidates.push({ sourceType: `calendar-${event.type || "event"}`, sourceId: event.id, title: event.title || "Calendar reminder", email: event.owner || fallbackEmail, dueAt: event.notifyAt });
   }
   for (const chore of appState?.calendar?.chores || []) {

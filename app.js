@@ -944,12 +944,12 @@ function renderCalendar() {
           <form id="calendarQuickAdd" class="calendar-quick-add">
             <input name="editingKind" type="hidden">
             <input name="editingId" type="hidden">
-            <label>Type<select name="type"><option value="chore">Chore</option><option value="birthday">Birthday reminder</option><option value="anniversary">Anniversary reminder</option><option value="reminder">Reminder</option></select></label>
+            <label>Type<select name="type"><option value="chore">Chore</option><option value="birthday">Birthday</option><option value="anniversary">Anniversary</option><option value="reminder">Reminder</option></select></label>
             <label>Title<input name="title" placeholder="Mom birthday reminder" required></label>
             <label>Date<span data-date-label-suffix> and time</span><input name="date" type="datetime-local" value="${state.budget.month}-01T09:00" required></label>
-            <label>Assign to<select name="owner">${calendarMembers.map((member) => `<option value="${escapeHtml(member.email || member.name)}">${escapeHtml(member.name)}${member.email ? ` · ${escapeHtml(member.email)}` : ""}${member.status && member.status !== "active" ? " (invited)" : ""}</option>`).join("")}</select></label>
+            <label>Assign to<select name="owner">${calendarMembers.map((member) => `<option value="${escapeHtml(member.email || member.name)}" ${(member.email || member.name) === (sessionUser?.email || "") ? "selected" : ""}>${escapeHtml(member.name)}${member.email ? ` · ${escapeHtml(member.email)}` : ""}${member.status && member.status !== "active" ? " (invited)" : ""}</option>`).join("")}</select></label>
             <label data-chore-recurrence-field>Repeat<select name="recurrence"><option value="once">Once</option><option value="weekly" selected>Weekly</option><option value="biweekly">Every 2 weeks</option><option value="triweekly">Every 3 weeks</option><option value="monthly">Monthly</option></select></label>
-            <label data-annual-reminder-field hidden>Remind before<select name="reminderDays"><option value="0">Same day</option><option value="1">1 day</option><option value="3">3 days</option><option value="7" selected>7 days</option><option value="14">14 days</option></select></label>
+            <label data-annual-reminder-field hidden>Remind before<select name="reminderDays"><option value="0">Same day</option><option value="1" selected>1 day</option><option value="3">3 days</option><option value="7">7 days</option><option value="14">14 days</option><option value="-1">Don't remind</option></select></label>
             <button data-calendar-submit type="submit">Add</button>
             <button data-calendar-delete class="danger-button" type="button" hidden>Delete</button>
             <button data-calendar-cancel class="ghost" type="button" hidden>Cancel</button>
@@ -2515,7 +2515,7 @@ function ensureAnnualEventRecurrenceData() {
     if (!ANNUAL_EVENT_TYPES.includes(event.type)) return;
     event.monthDay ||= event.date?.slice(5);
     event.annual = true;
-    event.reminderDays = Number(event.reminderDays ?? 7);
+    event.reminderDays = Number(event.reminderDays ?? 1);
     event.wishedYears ||= [];
     // Recomputed every render so the reminder always points at the next upcoming
     // occurrence instead of staying pinned to whatever year the event was first
@@ -2539,26 +2539,10 @@ function nextPendingAnnualEventOccurrence(event, referenceDate = new Date()) {
   return null;
 }
 
-function annualEventDate(event, year) {
-  const [month, requestedDay] = String(event.monthDay || event.date?.slice(5) || "01-01").split("-").map(Number);
-  const lastDay = new Date(year, month, 0).getDate();
-  return new Date(year, month - 1, Math.min(requestedDay, lastDay));
-}
-
-function nextAnnualEventDate(event, referenceDate = new Date()) {
-  const candidate = annualEventDate(event, referenceDate.getFullYear());
-  if (dateKey(candidate) >= dateKey(referenceDate)) return candidate;
-  return annualEventDate(event, referenceDate.getFullYear() + 1);
-}
-
-function annualEventNotifyAt(event, referenceDate = new Date()) {
-  const occursOn = nextAnnualEventDate(event, referenceDate);
-  const notifyDate = new Date(occursOn);
-  notifyDate.setDate(notifyDate.getDate() - Number(event.reminderDays || 0));
-  const [hour, minute] = String(event.dateTime?.slice(11, 16) || "09:00").split(":").map(Number);
-  notifyDate.setHours(hour, minute, 0, 0);
-  return notifyDate.toISOString();
-}
+// annualEventDate / nextAnnualEventDate / annualEventNotifyAt come from
+// lib/shared-logic.js (loaded as a global script alongside this file) so the
+// client and server always agree on how a birthday/anniversary's next
+// occurrence and reminder due date are computed.
 
 function dateKey(date) {
   return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
@@ -4432,7 +4416,7 @@ function bindViewEvents() {
     } else {
       const isAnnual = ANNUAL_EVENT_TYPES.includes(data.type);
       const monthDay = isAnnual ? selectedDate.slice(5) : undefined;
-      const reminderDays = isAnnual ? Number(data.reminderDays || 7) : undefined;
+      const reminderDays = isAnnual ? Number(data.reminderDays ?? 1) : undefined;
       const existing = editingKind === "event" ? state.calendar.events.find((item) => item.id === editingId) : null;
       const calendarEvent = {
         id: existing?.id || uniqueId("event"),
@@ -4975,7 +4959,7 @@ function editCalendarItem(reference) {
   form.owner.value = kind === "chore" ? item.assignee || "" : item.owner || "";
   if (![...form.owner.options].some((option) => option.value === form.owner.value)) form.owner.value = sessionUser?.email || form.owner.options[0]?.value || "";
   form.recurrence.value = kind === "chore" ? item.recurrence || "once" : "once";
-  form.reminderDays.value = kind === "event" && ANNUAL_EVENT_TYPES.includes(item.type) ? String(item.reminderDays ?? 7) : "7";
+  form.reminderDays.value = kind === "event" && ANNUAL_EVENT_TYPES.includes(item.type) ? String(item.reminderDays ?? 1) : "1";
   form.querySelector("[data-calendar-submit]").textContent = "Save changes";
   form.querySelector("[data-calendar-delete]").textContent = `Delete ${form.type.value === "chore" ? "chore" : annualEventLabels[form.type.value]?.toLowerCase() || "reminder"}`;
   form.querySelector("[data-calendar-delete]").hidden = false;
