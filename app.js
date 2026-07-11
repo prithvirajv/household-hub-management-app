@@ -2455,6 +2455,11 @@ function ensureAnnualEventRecurrenceData() {
     event.monthDay ||= event.date?.slice(5);
     event.annual = true;
     event.reminderDays = Number(event.reminderDays ?? 7);
+    // Recomputed every render so the reminder always points at the next upcoming
+    // occurrence instead of staying pinned to whatever year the event was first
+    // saved with (e.g. a birth year) — otherwise it looks permanently overdue and
+    // fires immediately instead of waiting for the actual date to approach.
+    event.notifyAt = annualEventNotifyAt(event);
   });
 }
 
@@ -2462,6 +2467,21 @@ function annualEventDate(event, year) {
   const [month, requestedDay] = String(event.monthDay || event.date?.slice(5) || "01-01").split("-").map(Number);
   const lastDay = new Date(year, month, 0).getDate();
   return new Date(year, month - 1, Math.min(requestedDay, lastDay));
+}
+
+function nextAnnualEventDate(event, referenceDate = new Date()) {
+  const candidate = annualEventDate(event, referenceDate.getFullYear());
+  if (dateKey(candidate) >= dateKey(referenceDate)) return candidate;
+  return annualEventDate(event, referenceDate.getFullYear() + 1);
+}
+
+function annualEventNotifyAt(event, referenceDate = new Date()) {
+  const occursOn = nextAnnualEventDate(event, referenceDate);
+  const notifyDate = new Date(occursOn);
+  notifyDate.setDate(notifyDate.getDate() - Number(event.reminderDays || 0));
+  const [hour, minute] = String(event.dateTime?.slice(11, 16) || "09:00").split(":").map(Number);
+  notifyDate.setHours(hour, minute, 0, 0);
+  return notifyDate.toISOString();
 }
 
 function dateKey(date) {
@@ -4335,19 +4355,24 @@ function bindViewEvents() {
       else state.calendar.chores.push(chore);
     } else {
       const isAnnual = ANNUAL_EVENT_TYPES.includes(data.type);
-      const notificationDate = new Date(selectedDateTime);
-      if (isAnnual) notificationDate.setDate(notificationDate.getDate() - Number(data.reminderDays || 7));
+      const monthDay = isAnnual ? selectedDate.slice(5) : undefined;
+      const reminderDays = isAnnual ? Number(data.reminderDays || 7) : undefined;
       const existing = editingKind === "event" ? state.calendar.events.find((item) => item.id === editingId) : null;
       const calendarEvent = {
         id: existing?.id || uniqueId("event"),
         title: data.title,
         date: selectedDate,
         dateTime: selectedDateTime || `${selectedDate}T09:00`,
-        notifyAt: selectedDateTime ? notificationDate.toISOString() : "",
-        monthDay: isAnnual ? selectedDate.slice(5) : undefined,
+        // Annual events (birthday/anniversary) always notify off the NEXT upcoming
+        // occurrence, not the literal date entered (which is often a birth year
+        // decades in the past and would make the reminder look permanently overdue).
+        notifyAt: isAnnual
+          ? annualEventNotifyAt({ monthDay, reminderDays, dateTime: selectedDateTime })
+          : (selectedDateTime ? new Date(selectedDateTime).toISOString() : ""),
+        monthDay,
         type: isAnnual ? data.type : "reminder",
         annual: isAnnual,
-        reminderDays: isAnnual ? Number(data.reminderDays || 7) : undefined,
+        reminderDays,
         owner: data.owner || sessionUser?.email || "",
         ownerName: assignedMember?.name || sessionUser?.name || data.owner || ""
       };
