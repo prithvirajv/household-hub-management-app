@@ -958,8 +958,16 @@ const memberColorPalette = ["#2f6fed", "#e05252", "#13936d", "#d99a24", "#8a5cf6
 function memberColor(ownerKey) {
   const key = String(ownerKey || "").trim().toLowerCase();
   if (!key) return "#9aa5b1";
+  // Assign by each member's stable position in the household's member list,
+  // not a hash of their key — a hash mod the palette size can (and did) put
+  // two different people on the exact same or a barely-distinguishable
+  // color purely by chance. Position-based assignment guarantees every real
+  // member gets a distinct, maximally-different color as long as the
+  // household has no more members than the palette has colors.
+  const index = calendarAssigneeOptions().findIndex((member) => (member.email || member.name || "").trim().toLowerCase() === key);
+  if (index >= 0) return memberColorPalette[index % memberColorPalette.length];
   let hash = 0;
-  for (let index = 0; index < key.length; index += 1) hash = (hash * 31 + key.charCodeAt(index)) >>> 0;
+  for (let i = 0; i < key.length; i += 1) hash = (hash * 31 + key.charCodeAt(i)) >>> 0;
   return memberColorPalette[hash % memberColorPalette.length];
 }
 
@@ -1001,12 +1009,13 @@ function renderCalendar() {
             <label><span>Date<span data-date-label-suffix> and time</span></span><input name="date" type="datetime-local" value="${state.budget.month}-01T09:00" required></label>
             <label data-annual-time-field hidden>Remind me at<input name="annualTime" type="time" value="09:00"></label>
             <label data-plain-reminder-field hidden>Remind me on<input name="reminderAt" type="datetime-local"></label>
-            <div class="assign-to-field">
+            <div class="assign-to-field custom-combobox">
               <span class="assign-to-label">Assign to</span>
-              <div class="assignee-chip-row" role="group" aria-label="Assign to">
+              <button type="button" id="assigneeComboTrigger" class="assignee-combo-trigger"></button>
+              <div id="assigneeMenu" class="combo-menu assignee-menu" hidden>
                 ${calendarMembers.map((member) => {
                   const key = member.email || member.name;
-                  return `<label class="member-chip assignee-chip"><input type="checkbox" name="assignees" value="${escapeHtml(key)}" ${key === (sessionUser?.email || "") ? "checked" : ""}><span class="member-dot" style="background:${memberColor(key)}" aria-hidden="true"></span>${escapeHtml(member.name)}${member.status && member.status !== "active" ? " (invited)" : ""}</label>`;
+                  return `<label class="assignee-menu-option"><input type="checkbox" name="assignees" value="${escapeHtml(key)}" ${key === (sessionUser?.email || "") ? "checked" : ""}><span class="member-dot" style="background:${memberColor(key)}" aria-hidden="true"></span>${escapeHtml(member.name)}${member.status && member.status !== "active" ? " (invited)" : ""}</label>`;
                 }).join("")}
               </div>
             </div>
@@ -4534,6 +4543,13 @@ function bindViewEvents() {
   $("#calendarQuickAdd select[name='type']")?.addEventListener("change", updateCalendarQuickAddFields);
   updateCalendarQuickAddFields();
 
+  $("#assigneeComboTrigger")?.addEventListener("click", () => {
+    const menu = $("#assigneeMenu");
+    if (menu) menu.hidden = !menu.hidden;
+  });
+  $("#assigneeMenu")?.addEventListener("change", updateAssigneeSummary);
+  updateAssigneeSummary();
+
   // Once the user starts editing the form again after a completed add/update,
   // clear the leftover confirmation message so it doesn't look stuck/stale
   // while they're drafting a different entry.
@@ -5048,6 +5064,7 @@ function editCalendarItem(reference) {
   form.querySelectorAll('input[name="assignees"]').forEach((checkbox) => {
     checkbox.checked = selectedAssigneeKeys.has(checkbox.value);
   });
+  updateAssigneeSummary();
   form.recurrence.value = kind === "chore" ? item.recurrence || "once" : "once";
   form.reminderDays.value = kind === "event" && ANNUAL_EVENT_TYPES.includes(item.type) ? String(item.reminderDays ?? 1) : "1";
   form.annualTime.value = kind === "event" && ANNUAL_EVENT_TYPES.includes(item.type) ? (item.dateTime?.slice(11, 16) || "09:00") : "09:00";
@@ -5076,6 +5093,19 @@ function resetCalendarEditor() {
   calendarFeedback = "";
   form.querySelector(".calendar-form-status").textContent = "";
   updateCalendarQuickAddFields();
+  updateAssigneeSummary();
+  const assigneeMenu = $("#assigneeMenu");
+  if (assigneeMenu) assigneeMenu.hidden = true;
+}
+
+function updateAssigneeSummary() {
+  const trigger = $("#assigneeComboTrigger");
+  const menu = $("#assigneeMenu");
+  if (!trigger || !menu) return;
+  const names = [...menu.querySelectorAll('input[name="assignees"]:checked')]
+    .map((checkbox) => checkbox.closest(".assignee-menu-option")?.textContent.trim())
+    .filter(Boolean);
+  trigger.textContent = names.length ? names.join(", ") : "Select people";
 }
 
 function updateCalendarQuickAddFields() {
@@ -5270,9 +5300,11 @@ view.addEventListener("click", (event) => {
     const subcategoryMenu = $("#transactionSubcategoryMenu");
     const categoryMenu = $("#budgetCategoryMenu");
     const recipeMenu = $("#mealRecipeMenu");
+    const assigneeMenu = $("#assigneeMenu");
     if (subcategoryMenu) subcategoryMenu.hidden = true;
     if (categoryMenu) categoryMenu.hidden = true;
     if (recipeMenu) recipeMenu.hidden = true;
+    if (assigneeMenu) assigneeMenu.hidden = true;
   }
 });
 

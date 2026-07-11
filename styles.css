@@ -1450,29 +1450,38 @@ main {
   white-space: nowrap;
 }
 
-.assignee-chip-row {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.35rem;
-  align-items: center;
+.assignee-combo-trigger {
   min-height: 34px;
-}
-
-.assignee-chip {
-  position: relative;
-}
-
-.assignee-chip input {
-  position: absolute;
-  width: 1px;
-  height: 1px;
-  opacity: 0;
-}
-
-.assignee-chip:has(input:checked) {
-  border-color: var(--navy);
-  background: var(--soft-blue);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: white;
   color: var(--text);
+  font-weight: 800;
+  text-align: left;
+  padding: 0 0.6rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.assignee-menu {
+  min-width: 220px;
+}
+
+.assignee-menu-option {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  min-height: 36px;
+  padding: 0.3rem 0.6rem;
+  border-radius: 6px;
+  cursor: pointer;
+  font-weight: 700;
+  color: var(--text);
+}
+
+.assignee-menu-option:hover {
+  background: var(--soft-blue);
 }
 
 .calendar-quick-add > label {
