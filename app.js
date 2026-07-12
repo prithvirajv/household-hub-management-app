@@ -595,9 +595,9 @@ function renderShell() {
   const selectedHousehold = households.find((household) => household.selected);
   $("#defaultHouseholdButton").disabled = Boolean(selectedHousehold?.isDefault);
   $("#defaultHouseholdButton").textContent = selectedHousehold?.isDefault ? "Default household" : "Set as default";
-  $(".month-control").hidden = isAdminView || isNotesView || isHelpView || isRecipesView || isGoalsView || isWealthView;
+  $(".month-control").hidden = isAdminView || isNotesView || isHelpView || isRecipesView || isGoalsView || isWealthView || isJournalView || isPlanView || isDocumentsView;
   $("#syncButton").hidden = isAdminView || isHelpView;
-  $("#downloadCsvButton").hidden = isAdminView || isNotesView || isHelpView;
+  $("#downloadCsvButton").hidden = isAdminView || isNotesView || isHelpView || isJournalView || isPlanView || isDocumentsView;
   renderNav();
   const metrics = metricsForView();
   $("#metrics").hidden = metrics.length === 0;
