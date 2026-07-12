@@ -466,7 +466,11 @@ function sharedModulesFromState(appState) {
   return {
     notes: cloneJson(appState?.notes || {}),
     meals: cloneJson(appState?.meals || {}),
-    calendar: cloneJson(appState?.calendar || { events: [], chores: [] })
+    calendar: cloneJson(appState?.calendar || { events: [], chores: [] }),
+    // Decisions are family discussions, not tied to any one household's
+    // budget/currency — they should read the same regardless of which of the
+    // owner's households is currently selected.
+    decisions: cloneJson(appState?.decisions || [])
   };
 }
 
@@ -475,6 +479,7 @@ function applySharedModules(appState, sharedModules) {
   if (sharedModules?.notes) merged.notes = cloneJson(sharedModules.notes);
   if (sharedModules?.meals) merged.meals = cloneJson(sharedModules.meals);
   if (sharedModules?.calendar) merged.calendar = cloneJson(sharedModules.calendar);
+  if (sharedModules?.decisions) merged.decisions = cloneJson(sharedModules.decisions);
   return merged;
 }
 
