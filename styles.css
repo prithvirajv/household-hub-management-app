@@ -1351,6 +1351,16 @@ main {
     position: static;
     box-shadow: none;
   }
+
+  .compact-row {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+  }
+
+  .compact-row > div:first-child {
+    flex: 1 1 100%;
+  }
 }
 
 .invite-email-status {
