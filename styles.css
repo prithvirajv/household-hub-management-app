@@ -1585,9 +1585,20 @@ main {
   font-weight: 800;
 }
 
+.chore-complete-group {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+}
+
 .chore-complete-button {
   min-width: 88px;
   color: var(--green);
+}
+
+.chore-complete-button.is-done {
+  background: var(--green-soft);
+  border-color: var(--green);
 }
 
 .paycheck-grid {

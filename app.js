@@ -1048,7 +1048,7 @@ function renderCalendar() {
             const overdue = occurrence.date < today;
             return `<div class="compact-row ${overdue ? "overdue" : ""}">
               <div>${assigneeDots(chore.assignees)}<strong>${escapeHtml(chore.title)}</strong><small>${occurrence.date}${overdue ? " · Past due" : ""} · ${escapeHtml(assigneeNames(chore.assignees) || "Unassigned")} · ${choreCadenceLabel(chore)}</small></div>
-              <button class="ghost chore-complete-button" data-complete-chore="${index}:${occurrence.date}" type="button">Complete</button>
+              <div class="chore-complete-group">${choreCompletionButtons(chore, index, occurrence.date)}</div>
               <button class="icon-button" data-edit-calendar-item="chore:${chore.id}" type="button" aria-label="Edit ${escapeHtml(chore.title)}">✎</button>
               <button class="icon-button danger-button" data-delete-calendar-item="chore:${chore.id}" type="button" aria-label="Remove ${escapeHtml(chore.title)}">×</button>
             </div>`;
@@ -1060,7 +1060,7 @@ function renderCalendar() {
             const overdue = occurrence.date < today;
             return `<div class="compact-row ${overdue ? "overdue" : ""}">
               <div>${assigneeDots(event.assignees)}<strong>${escapeHtml(annualEventDisplayTitle(event))}</strong><small>${formatAnnualEventMonthDay(event)}${overdue ? " · Not wished yet" : ""} · ${annualEventLabels[event.type] || "Annual"}</small></div>
-              <button class="ghost chore-complete-button" data-mark-wished="${event.id}:${occurrence.year}" type="button">Mark wished</button>
+              <div class="chore-complete-group">${annualEventCompletionButtons(event, occurrence.year)}</div>
               <button class="icon-button" data-edit-calendar-item="event:${event.id}" type="button" aria-label="Edit ${escapeHtml(event.title)}">✎</button>
               <button class="icon-button danger-button" data-delete-calendar-item="event:${event.id}" type="button" aria-label="Remove ${escapeHtml(event.title)}">×</button>
             </div>`;
@@ -2477,14 +2477,67 @@ function ensurePaycheckRecurrenceData() {
 }
 
 function ensureChoreRecurrenceData() {
+  // Needed before the completedDates -> completedBy migration below, which
+  // records each current assignee against every already-completed date.
+  ensureAssigneesData();
   state.calendar.chores.forEach((chore) => {
     chore.id ||= uniqueId("chore");
     chore.startDate ||= chore.nextDue;
     chore.recurrence ||= String(chore.cadence || "Once").toLowerCase() === "weekly" ? "weekly" : "once";
     chore.endDate ||= "";
     chore.cadence = choreCadenceLabel(chore);
-    chore.completedDates ||= [];
+    // Completion used to be a single shared flag per occurrence date (anyone
+    // marking it done finished it for the whole household). Multi-assignee
+    // chores now require every assignee to mark it done individually, so
+    // completion is tracked per assignee per date instead. Existing completed
+    // dates are attributed to every current assignee so already-finished
+    // occurrences don't reappear as pending after this upgrade.
+    if (!chore.completedBy) {
+      chore.completedBy = {};
+      (chore.completedDates || []).forEach((date) => {
+        chore.completedBy[date] = chore.assignees.map((assignee) => assignee.key);
+      });
+    }
+    delete chore.completedDates;
+    chore.notifyAt = choreNotifyAt(chore);
   });
+}
+
+function isChoreOccurrenceComplete(chore, date) {
+  const assigneeKeys = (chore.assignees || []).map((assignee) => assignee.key);
+  const completedKeys = (chore.completedBy || {})[date] || [];
+  if (!assigneeKeys.length) return completedKeys.length > 0;
+  return assigneeKeys.every((key) => completedKeys.includes(key));
+}
+
+// One toggle button per assignee — a jointly-assigned chore only counts as
+// done for a given occurrence once every assignee has marked their own button.
+function choreCompletionButtons(chore, index, occurrenceDate) {
+  const completedKeys = (chore.completedBy || {})[occurrenceDate] || [];
+  // A handful of legacy chores predate the assignee system and have nobody
+  // assigned at all — fall back to a single shared button rather than
+  // rendering nothing and leaving them impossible to ever mark done.
+  if (!chore.assignees?.length) {
+    const done = completedKeys.length > 0;
+    return `<button class="ghost chore-complete-button ${done ? "is-done" : ""}" data-complete-chore-assignee="${index}:${occurrenceDate}:household" type="button" aria-pressed="${done}">${done ? "✓ Completed" : "Complete"}</button>`;
+  }
+  return chore.assignees.map((assignee) => {
+    const done = completedKeys.includes(assignee.key);
+    return `<button class="ghost chore-complete-button ${done ? "is-done" : ""}" data-complete-chore-assignee="${index}:${occurrenceDate}:${escapeHtml(assignee.key)}" type="button" aria-pressed="${done}">${done ? "☑" : "☐"} ${escapeHtml(assignee.name)}</button>`;
+  }).join("");
+}
+
+// Recomputed every render (mirrors annualEventNotifyAt for birthdays) so the
+// reminder always points at the next occurrence nobody has fully completed
+// yet, instead of staying pinned to whichever date the chore was first
+// created with and never firing again for later occurrences.
+function choreNotifyAt(chore) {
+  const pending = nextPendingChoreOccurrence(chore);
+  if (!pending) return "";
+  const [hour, minute] = String(chore.time || "09:00").split(":").map(Number);
+  const notifyDate = new Date(`${pending.date}T00:00:00`);
+  notifyDate.setHours(hour, minute, 0, 0);
+  return notifyDate.toISOString();
 }
 
 function choreCadenceLabel(chore) {
@@ -2510,12 +2563,11 @@ function choreOccurrencesForMonth(chore) {
   // occurrence past it is ever generated.
   const choreEnd = chore.endDate ? new Date(`${chore.endDate}T00:00:00`) : null;
   if (choreEnd && choreEnd < monthEnd) monthEnd = choreEnd;
-  const completed = new Set(chore.completedDates || []);
   const dates = [];
 
   if (chore.recurrence === "once") {
     const key = dateKey(start);
-    return key.startsWith(state.budget.month) && !completed.has(key) ? [{ date: key }] : [];
+    return key.startsWith(state.budget.month) && !isChoreOccurrenceComplete(chore, key) ? [{ date: key }] : [];
   }
 
   if (chore.recurrence === "monthly") {
@@ -2525,7 +2577,7 @@ function choreOccurrencesForMonth(chore) {
       const occurrence = new Date(cursor.getFullYear(), cursor.getMonth(), Math.min(start.getDate(), lastDay));
       if (occurrence >= start && occurrence >= monthStart && occurrence <= monthEnd) {
         const key = dateKey(occurrence);
-        if (!completed.has(key)) dates.push({ date: key });
+        if (!isChoreOccurrenceComplete(chore, key)) dates.push({ date: key });
       }
       cursor.setMonth(cursor.getMonth() + 1);
     }
@@ -2541,7 +2593,7 @@ function choreOccurrencesForMonth(chore) {
   }
   while (cursor <= monthEnd) {
     const key = dateKey(cursor);
-    if (!completed.has(key)) dates.push({ date: key });
+    if (!isChoreOccurrenceComplete(chore, key)) dates.push({ date: key });
     cursor.setDate(cursor.getDate() + intervalDays);
   }
   return dates;
@@ -2558,7 +2610,6 @@ const UPCOMING_LIST_LIMIT = 5;
 // If that date is already in the past it's the same row, just overdue,
 // rather than a whole backlog of missed rows piling up.
 function nextPendingChoreOccurrence(chore) {
-  const completed = new Set(chore.completedDates || []);
   const recurrence = chore.recurrence || "once";
   const start = new Date(`${chore.startDate}T00:00:00`);
   if (Number.isNaN(start.getTime())) return null;
@@ -2568,7 +2619,7 @@ function nextPendingChoreOccurrence(chore) {
 
   if (recurrence === "once") {
     const key = dateKey(start);
-    return completed.has(key) ? null : { date: key };
+    return isChoreOccurrenceComplete(chore, key) ? null : { date: key };
   }
 
   if (recurrence === "monthly") {
@@ -2579,7 +2630,7 @@ function nextPendingChoreOccurrence(chore) {
       if (occurrence >= start) {
         if (choreEnd && occurrence > choreEnd) return null;
         const key = dateKey(occurrence);
-        if (!completed.has(key)) return { date: key };
+        if (!isChoreOccurrenceComplete(chore, key)) return { date: key };
       }
       cursor.setMonth(cursor.getMonth() + 1);
     }
@@ -2591,7 +2642,7 @@ function nextPendingChoreOccurrence(chore) {
   for (let i = 0; i < 3650; i += 1) {
     if (choreEnd && cursor > choreEnd) return null;
     const key = dateKey(cursor);
-    if (!completed.has(key)) return { date: key };
+    if (!isChoreOccurrenceComplete(chore, key)) return { date: key };
     cursor.setDate(cursor.getDate() + intervalDays);
   }
   return null;
@@ -2601,13 +2652,27 @@ const ANNUAL_EVENT_TYPES = ["birthday", "anniversary"];
 const annualEventLabels = { birthday: "Birthday", anniversary: "Anniversary" };
 
 function ensureAnnualEventRecurrenceData() {
+  // Needed before the wishedYears -> wishedBy migration below, which records
+  // each current assignee against every already-wished year.
+  ensureAssigneesData();
   state.calendar.events.forEach((event) => {
     event.id ||= uniqueId("event");
     if (!ANNUAL_EVENT_TYPES.includes(event.type)) return;
     event.monthDay ||= event.date?.slice(5);
     event.annual = true;
     event.reminderDays = Number(event.reminderDays ?? 1);
-    event.wishedYears ||= [];
+    // "Wished" used to be a single shared flag per year (anyone marking it
+    // finished it for the whole household). Multi-assignee birthdays/
+    // anniversaries now require every assignee to mark it individually, so
+    // it's tracked per assignee per year instead. Existing wished years are
+    // attributed to every current assignee so they don't reappear as pending.
+    if (!event.wishedBy) {
+      event.wishedBy = {};
+      (event.wishedYears || []).forEach((year) => {
+        event.wishedBy[year] = event.assignees.map((assignee) => assignee.key);
+      });
+    }
+    delete event.wishedYears;
     // Recomputed every render so the reminder always points at the next upcoming
     // occurrence instead of staying pinned to whatever year the event was first
     // saved with (e.g. a birth year) — otherwise it looks permanently overdue and
@@ -2616,15 +2681,38 @@ function ensureAnnualEventRecurrenceData() {
   });
 }
 
+function isAnnualEventYearComplete(event, year) {
+  const assigneeKeys = (event.assignees || []).map((assignee) => assignee.key);
+  const completedKeys = (event.wishedBy || {})[String(year)] || [];
+  if (!assigneeKeys.length) return completedKeys.length > 0;
+  return assigneeKeys.every((key) => completedKeys.includes(key));
+}
+
+// One toggle button per assignee — a jointly-assigned birthday/anniversary
+// only counts as wished for a given year once every assignee has marked it.
+function annualEventCompletionButtons(event, year) {
+  const completedKeys = (event.wishedBy || {})[String(year)] || [];
+  // A handful of legacy birthdays/anniversaries predate the assignee system
+  // and have nobody assigned at all — fall back to a single shared button
+  // rather than rendering nothing and leaving them impossible to mark wished.
+  if (!event.assignees?.length) {
+    const done = completedKeys.length > 0;
+    return `<button class="ghost chore-complete-button ${done ? "is-done" : ""}" data-mark-wished-assignee="${event.id}:${year}:household" type="button" aria-pressed="${done}">${done ? "✓ Wished" : "Mark wished"}</button>`;
+  }
+  return event.assignees.map((assignee) => {
+    const done = completedKeys.includes(assignee.key);
+    return `<button class="ghost chore-complete-button ${done ? "is-done" : ""}" data-mark-wished-assignee="${event.id}:${year}:${escapeHtml(assignee.key)}" type="button" aria-pressed="${done}">${done ? "☑" : "☐"} ${escapeHtml(assignee.name)}</button>`;
+  }).join("");
+}
+
 // The side-panel "what's due" row for a birthday/anniversary — the earliest
 // year that hasn't been marked wished yet. If this year's occurrence already
 // passed and nobody marked it wished, that's the row that shows (overdue),
 // instead of silently skipping ahead to next year.
 function nextPendingAnnualEventOccurrence(event, referenceDate = new Date()) {
-  const wished = new Set((event.wishedYears || []).map(String));
   let year = referenceDate.getFullYear();
   for (let i = 0; i < 200; i += 1) {
-    if (!wished.has(String(year))) return { date: dateKey(annualEventDate(event, year)), year };
+    if (!isAnnualEventYearComplete(event, year)) return { date: dateKey(annualEventDate(event, year)), year };
     year += 1;
   }
   return null;
@@ -4514,7 +4602,7 @@ function bindViewEvents() {
         nextDue: selectedDate,
         time: selectedDateTime.slice(11, 16) || "09:00",
         notifyAt: selectedDateTime ? new Date(selectedDateTime).toISOString() : "",
-        completedDates: existing?.completedDates || []
+        completedBy: existing?.completedBy || {}
       };
       if (existing) {
         delete existing.assignee;
@@ -4582,30 +4670,52 @@ function bindViewEvents() {
     });
   });
 
-  document.querySelectorAll("[data-complete-chore]").forEach((button) => {
+  document.querySelectorAll("[data-complete-chore-assignee]").forEach((button) => {
     button.addEventListener("click", () => {
-      const separator = button.dataset.completeChore.indexOf(":");
-      const index = Number(button.dataset.completeChore.slice(0, separator));
-      const occurrenceDate = button.dataset.completeChore.slice(separator + 1);
+      const raw = button.dataset.completeChoreAssignee;
+      const first = raw.indexOf(":");
+      const second = raw.indexOf(":", first + 1);
+      const index = Number(raw.slice(0, first));
+      const occurrenceDate = raw.slice(first + 1, second);
+      const assigneeKey = raw.slice(second + 1);
       const chore = state.calendar.chores[index];
-      if (!chore || !occurrenceDate) return;
-      chore.completedDates ||= [];
-      if (!chore.completedDates.includes(occurrenceDate)) chore.completedDates.push(occurrenceDate);
-      state.household.activity.unshift(`Completed ${chore.title} for ${occurrenceDate}`);
+      if (!chore || !occurrenceDate || !assigneeKey) return;
+      chore.completedBy ||= {};
+      chore.completedBy[occurrenceDate] ||= [];
+      const already = chore.completedBy[occurrenceDate].includes(assigneeKey);
+      // A jointly-assigned chore only counts as done for this occurrence once
+      // every assignee has toggled their own button on.
+      chore.completedBy[occurrenceDate] = already
+        ? chore.completedBy[occurrenceDate].filter((key) => key !== assigneeKey)
+        : [...chore.completedBy[occurrenceDate], assigneeKey];
+      if (!already && isChoreOccurrenceComplete(chore, occurrenceDate)) {
+        state.household.activity.unshift(`Completed ${chore.title} for ${occurrenceDate}`);
+      }
       render();
     });
   });
 
-  document.querySelectorAll("[data-mark-wished]").forEach((button) => {
+  document.querySelectorAll("[data-mark-wished-assignee]").forEach((button) => {
     button.addEventListener("click", () => {
-      const separator = button.dataset.markWished.indexOf(":");
-      const eventId = button.dataset.markWished.slice(0, separator);
-      const year = button.dataset.markWished.slice(separator + 1);
+      const raw = button.dataset.markWishedAssignee;
+      const first = raw.indexOf(":");
+      const second = raw.indexOf(":", first + 1);
+      const eventId = raw.slice(0, first);
+      const year = raw.slice(first + 1, second);
+      const assigneeKey = raw.slice(second + 1);
       const event = state.calendar.events.find((item) => item.id === eventId);
-      if (!event || !year) return;
-      event.wishedYears ||= [];
-      if (!event.wishedYears.includes(year)) event.wishedYears.push(year);
-      state.household.activity.unshift(`Wished ${annualEventDisplayTitle(event)} for ${year}`);
+      if (!event || !year || !assigneeKey) return;
+      event.wishedBy ||= {};
+      event.wishedBy[year] ||= [];
+      const already = event.wishedBy[year].includes(assigneeKey);
+      // A jointly-assigned birthday/anniversary only counts as wished for this
+      // year once every assignee has toggled their own button on.
+      event.wishedBy[year] = already
+        ? event.wishedBy[year].filter((key) => key !== assigneeKey)
+        : [...event.wishedBy[year], assigneeKey];
+      if (!already && isAnnualEventYearComplete(event, year)) {
+        state.household.activity.unshift(`Wished ${annualEventDisplayTitle(event)} for ${year}`);
+      }
       render();
     });
   });
