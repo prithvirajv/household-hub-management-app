@@ -4548,3 +4548,172 @@ main {
   outline: 2px dashed var(--blue);
   outline-offset: -2px;
 }
+
+.decisions-layout {
+  display: grid;
+  gap: 0.9rem;
+}
+
+.decision-form {
+  display: grid;
+  gap: 0.65rem;
+}
+
+.decision-form textarea {
+  min-height: 70px;
+}
+
+.decision-card {
+  display: grid;
+  gap: 0.6rem;
+}
+
+.decision-card.is-decided {
+  background: var(--soft);
+}
+
+.decision-card-header {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.decision-title-input {
+  flex: 1 1 auto;
+  min-width: 160px;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  padding: 0.2rem 0.35rem;
+  margin: -0.2rem -0.35rem;
+  font-size: 1.1rem;
+  font-weight: 800;
+  color: var(--text);
+  background: transparent;
+}
+
+.decision-title-input:focus {
+  border-color: var(--green);
+  background: white;
+  outline: 0;
+}
+
+.pill-open {
+  background: var(--soft-blue);
+  color: var(--blue);
+}
+
+.decision-notes-input {
+  min-height: 44px;
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--muted);
+  padding: 0.2rem 0.35rem;
+  margin: -0.2rem -0.35rem;
+  resize: vertical;
+}
+
+.decision-notes-input:focus {
+  border-color: var(--line);
+  background: white;
+  outline: 0;
+}
+
+.decision-outcome {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+  background: var(--green-soft);
+  color: var(--green);
+  border-radius: 6px;
+  padding: 0.55rem 0.7rem;
+  font-weight: 700;
+}
+
+.decision-outcome .ghost {
+  margin-left: auto;
+}
+
+.decision-columns {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.75rem;
+}
+
+.decision-column {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 0.65rem;
+  display: grid;
+  gap: 0.5rem;
+  align-content: start;
+}
+
+.decision-column-pro {
+  border-top: 3px solid var(--green);
+}
+
+.decision-column-con {
+  border-top: 3px solid var(--coral);
+}
+
+.decision-column h4 {
+  margin: 0;
+  font-size: 0.78rem;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  color: var(--muted);
+}
+
+.decision-item-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 0.4rem;
+}
+
+.decision-item {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+}
+
+.decision-item-text {
+  flex: 1;
+  min-width: 0;
+  font-size: 0.88rem;
+  color: var(--text);
+}
+
+.decision-add-item-form {
+  display: flex;
+  gap: 0.4rem;
+}
+
+.decision-add-item-form button {
+  flex: none;
+  min-width: 36px;
+}
+
+.decision-decide-form {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.decision-decide-form input {
+  flex: 1;
+  min-width: 180px;
+}
+
+.decision-decide-form button {
+  flex: none;
+}
+
+@media (max-width: 720px) {
+  .decision-columns {
+    grid-template-columns: 1fr;
+  }
+}

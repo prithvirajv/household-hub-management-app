@@ -246,6 +246,24 @@ const defaultState = {
       }
     ]
   },
+  decisions: [
+    {
+      id: "decision-bigger-apartment",
+      title: "Should we move to a bigger apartment?",
+      notes: "Current lease is up in August.",
+      status: "open",
+      outcome: "",
+      decidedAt: "",
+      pros: [
+        { id: "pro-1", text: "More space for the kids", authorKey: "demo@familyloop.net", authorName: "Alex" },
+        { id: "pro-2", text: "Closer to school", authorKey: "alex@example.com", authorName: "Alex Carter" }
+      ],
+      cons: [
+        { id: "con-1", text: "Higher rent", authorKey: "demo@familyloop.net", authorName: "Alex" }
+      ],
+      createdAt: "2026-05-15T12:00:00.000Z"
+    }
+  ],
   meals: {
     nutritionGoals: { calories: 2100, protein: 140 },
     selectedWeekByMonth: { "2026-05": 1 },

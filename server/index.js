@@ -635,6 +635,7 @@ function householdState(name, country = "US", currency = "USD", seededDemo = fal
       labels: [],
       entries: []
     };
+    state.decisions = [];
     state.meals.selectedWeekByMonth = { [state.budget.month]: 1 };
     state.meals.plannedWeek = [];
     state.meals.recipes = [];

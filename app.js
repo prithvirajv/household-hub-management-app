@@ -7,6 +7,7 @@ const views = [
   ["journal", "Journal", "✒"],
   ["plan", "Plan", "◫"],
   ["documents", "Documents", "▢"],
+  ["decisions", "Decisions", "⚖"],
   ["meals", "Meals", "♨"],
   ["recipes", "Recipes", "▤"],
   ["goals", "Goals", "◎"],
@@ -555,6 +556,7 @@ function renderShell() {
   const isJournalView = currentView === "journal";
   const isPlanView = currentView === "plan";
   const isDocumentsView = currentView === "documents";
+  const isDecisionsView = currentView === "decisions";
   $("#viewTitle").textContent = isAdminView
     ? "Application admin"
     : isHelpView
@@ -573,6 +575,8 @@ function renderShell() {
                   ? "Your plan"
                   : isDocumentsView
                     ? "Household documents"
+                    : isDecisionsView
+                      ? "Household decisions"
           : `${monthLabel()} plan`;
   $("#householdName").textContent = title.toUpperCase();
   $("#userName").textContent = sessionUser?.name || "Demo User";
@@ -595,9 +599,9 @@ function renderShell() {
   const selectedHousehold = households.find((household) => household.selected);
   $("#defaultHouseholdButton").disabled = Boolean(selectedHousehold?.isDefault);
   $("#defaultHouseholdButton").textContent = selectedHousehold?.isDefault ? "Default household" : "Set as default";
-  $(".month-control").hidden = isAdminView || isNotesView || isHelpView || isRecipesView || isGoalsView || isWealthView || isJournalView || isPlanView || isDocumentsView;
+  $(".month-control").hidden = isAdminView || isNotesView || isHelpView || isRecipesView || isGoalsView || isWealthView || isJournalView || isPlanView || isDocumentsView || isDecisionsView;
   $("#syncButton").hidden = isAdminView || isHelpView;
-  $("#downloadCsvButton").hidden = isAdminView || isNotesView || isHelpView || isJournalView || isPlanView || isDocumentsView;
+  $("#downloadCsvButton").hidden = isAdminView || isNotesView || isHelpView || isJournalView || isPlanView || isDocumentsView || isDecisionsView;
   renderNav();
   const metrics = metricsForView();
   $("#metrics").hidden = metrics.length === 0;
@@ -663,6 +667,7 @@ const renderers = {
   journal: renderJournal,
   plan: renderPlan,
   documents: renderDocuments,
+  decisions: renderDecisions,
   meals: renderMeals,
   recipes: renderRecipes,
   goals: renderGoals,
@@ -1940,6 +1945,87 @@ function renderDocuments() {
       </div>`).join("")}
     </div>` : ""}
     ${currentDocuments.length ? `<div class="documents-file-list">${currentDocuments.map(renderDocumentRow).join("")}</div>` : `<p class="muted">No documents in this folder yet.</p>`}
+  </section>`;
+}
+
+function ensureDecisionsData() {
+  state.decisions ||= [];
+  state.decisions.forEach((decision) => {
+    decision.id ||= uniqueId("decision");
+    decision.notes ||= "";
+    decision.status ||= "open";
+    decision.outcome ||= "";
+    decision.decidedAt ||= "";
+    decision.pros ||= [];
+    decision.cons ||= [];
+    decision.createdAt ||= new Date().toISOString();
+  });
+}
+
+function decisionItemRow(decisionId, listKey, item) {
+  return `<li class="decision-item">
+    <span class="member-dot" style="background:${memberColor(item.authorKey)}" title="${escapeHtml(item.authorName)}" aria-hidden="true"></span>
+    <span class="decision-item-text">${escapeHtml(item.text)}</span>
+    <button class="icon-button danger-button" data-delete-decision-item="${decisionId}:${listKey}:${item.id}" type="button" aria-label="Remove this ${listKey === "pros" ? "pro" : "con"}">×</button>
+  </li>`;
+}
+
+function renderDecisionCard(decision) {
+  const isDecided = decision.status === "decided";
+  return `<div class="card decision-card ${isDecided ? "is-decided" : ""}">
+    <div class="decision-card-header">
+      <input class="decision-title-input" data-decision-title="${decision.id}" value="${escapeHtml(decision.title)}" aria-label="Decision title">
+      <span class="pill ${isDecided ? "" : "pill-open"}">${isDecided ? "Decided" : "Open"}</span>
+      <button class="icon-button danger-button" data-delete-decision="${decision.id}" type="button" aria-label="Delete ${escapeHtml(decision.title)}">×</button>
+    </div>
+    <textarea class="decision-notes-input" data-decision-notes="${decision.id}" placeholder="Any context worth remembering (optional)">${escapeHtml(decision.notes)}</textarea>
+    ${isDecided ? `<div class="decision-outcome">
+      <strong>Outcome:</strong> ${escapeHtml(decision.outcome) || "<em>No outcome noted</em>"}
+      <small>${decision.decidedAt ? ` · ${decision.decidedAt.slice(0, 10)}` : ""}</small>
+      <button class="ghost" data-reopen-decision="${decision.id}" type="button">Reopen</button>
+    </div>` : ""}
+    <div class="decision-columns">
+      <div class="decision-column decision-column-pro">
+        <h4>Pros</h4>
+        <ul class="decision-item-list">${decision.pros.map((item) => decisionItemRow(decision.id, "pros", item)).join("")}</ul>
+        <form class="decision-add-item-form" data-decision-add="${decision.id}:pros">
+          <input name="text" placeholder="Add a pro" required>
+          <button type="submit">+</button>
+        </form>
+      </div>
+      <div class="decision-column decision-column-con">
+        <h4>Cons</h4>
+        <ul class="decision-item-list">${decision.cons.map((item) => decisionItemRow(decision.id, "cons", item)).join("")}</ul>
+        <form class="decision-add-item-form" data-decision-add="${decision.id}:cons">
+          <input name="text" placeholder="Add a con" required>
+          <button type="submit">+</button>
+        </form>
+      </div>
+    </div>
+    ${!isDecided ? `<form class="decision-decide-form" data-decision-decide="${decision.id}">
+      <input name="outcome" placeholder="What did you decide? (optional)">
+      <button type="submit">Mark decided</button>
+    </form>` : ""}
+  </div>`;
+}
+
+function renderDecisions() {
+  ensureDecisionsData();
+  const decisions = [...state.decisions].sort((a, b) => {
+    if ((a.status === "decided") !== (b.status === "decided")) return a.status === "decided" ? 1 : -1;
+    return b.createdAt.localeCompare(a.createdAt);
+  });
+  return `<section class="decisions-layout">
+    <p class="muted">Weigh a family decision together — add pros and cons, then mark it decided once you've chosen.</p>
+    <div class="card">
+      <div class="card-label">New decision</div>
+      <form id="decisionForm" class="decision-form">
+        <label>Question<input name="title" placeholder="Should we move to a bigger apartment?" required></label>
+        <label>Notes (optional)<textarea name="notes" placeholder="Any context worth remembering"></textarea></label>
+        <button type="submit">Add decision</button>
+      </form>
+    </div>
+    ${decisions.length ? decisions.map(renderDecisionCard).join("") : `<p class="muted">No decisions yet — add one above to start weighing it together.</p>`}
   </section>`;
 }
 
@@ -5192,6 +5278,95 @@ function bindViewEvents() {
       } catch (error) {
         window.alert(error.message);
       }
+    });
+  });
+
+  $("#decisionForm")?.addEventListener("submit", (event) => {
+    event.preventDefault();
+    const formData = new FormData(event.currentTarget);
+    const title = String(formData.get("title") || "").trim();
+    if (!title) return;
+    state.decisions.push({
+      id: uniqueId("decision"),
+      title,
+      notes: String(formData.get("notes") || "").trim(),
+      status: "open",
+      outcome: "",
+      decidedAt: "",
+      pros: [],
+      cons: [],
+      createdAt: new Date().toISOString()
+    });
+    event.currentTarget.reset();
+    render();
+  });
+
+  document.querySelectorAll("[data-decision-title]").forEach((input) => {
+    const decision = state.decisions.find((item) => item.id === input.dataset.decisionTitle);
+    input.addEventListener("input", () => { if (decision) decision.title = input.value; autosaveState(); });
+    input.addEventListener("change", () => { if (decision) decision.title = input.value.trim() || decision.title; render(); });
+  });
+
+  document.querySelectorAll("[data-decision-notes]").forEach((textarea) => {
+    const decision = state.decisions.find((item) => item.id === textarea.dataset.decisionNotes);
+    textarea.addEventListener("input", () => { if (decision) decision.notes = textarea.value; autosaveState(); });
+  });
+
+  document.querySelectorAll("[data-delete-decision]").forEach((button) => {
+    button.addEventListener("click", () => {
+      state.decisions = state.decisions.filter((item) => item.id !== button.dataset.deleteDecision);
+      render();
+    });
+  });
+
+  document.querySelectorAll("[data-decision-add]").forEach((form) => {
+    form.addEventListener("submit", (event) => {
+      event.preventDefault();
+      const [decisionId, listKey] = form.dataset.decisionAdd.split(":");
+      const decision = state.decisions.find((item) => item.id === decisionId);
+      const input = form.querySelector('input[name="text"]');
+      const text = input.value.trim();
+      if (!decision || !text) return;
+      decision[listKey].push({
+        id: uniqueId("item"),
+        text,
+        authorKey: sessionUser?.email || "",
+        authorName: sessionUser?.name || "Household member"
+      });
+      render();
+    });
+  });
+
+  document.querySelectorAll("[data-delete-decision-item]").forEach((button) => {
+    button.addEventListener("click", () => {
+      const [decisionId, listKey, itemId] = button.dataset.deleteDecisionItem.split(":");
+      const decision = state.decisions.find((item) => item.id === decisionId);
+      if (!decision) return;
+      decision[listKey] = decision[listKey].filter((item) => item.id !== itemId);
+      render();
+    });
+  });
+
+  document.querySelectorAll("[data-decision-decide]").forEach((form) => {
+    form.addEventListener("submit", (event) => {
+      event.preventDefault();
+      const decision = state.decisions.find((item) => item.id === form.dataset.decisionDecide);
+      if (!decision) return;
+      decision.status = "decided";
+      decision.outcome = String(new FormData(form).get("outcome") || "").trim();
+      decision.decidedAt = new Date().toISOString();
+      render();
+    });
+  });
+
+  document.querySelectorAll("[data-reopen-decision]").forEach((button) => {
+    button.addEventListener("click", () => {
+      const decision = state.decisions.find((item) => item.id === button.dataset.reopenDecision);
+      if (!decision) return;
+      decision.status = "open";
+      decision.outcome = "";
+      decision.decidedAt = "";
+      render();
     });
   });
 }
