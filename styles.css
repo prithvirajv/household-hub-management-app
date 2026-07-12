@@ -1623,16 +1623,23 @@ main {
   min-width: 0;
 }
 
-.paycheck-card-actions {
+.paycheck-card-header {
   display: flex;
   align-items: center;
-  justify-content: flex-end;
+  flex-wrap: wrap;
   gap: 0.5rem;
 }
 
+.paycheck-card-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex: none;
+}
+
 .paycheck-name-input {
-  width: 100%;
-  min-width: 0;
+  flex: 1 1 auto;
+  min-width: 90px;
   border: 1px solid transparent;
   border-radius: 4px;
   padding: 0.2rem 0.35rem;
