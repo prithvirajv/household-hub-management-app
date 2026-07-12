@@ -4680,11 +4680,30 @@ main {
   gap: 0.45rem;
 }
 
-.decision-item-text {
+.decision-item-input {
   flex: 1;
   min-width: 0;
+  min-height: 0;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  padding: 0.2rem 0.35rem;
+  margin: -0.2rem -0.35rem;
   font-size: 0.88rem;
+  font-weight: 600;
   color: var(--text);
+  background: transparent;
+}
+
+.decision-item-input:focus {
+  border-color: var(--line);
+  background: white;
+  outline: 0;
+}
+
+.decision-item-actions {
+  display: flex;
+  gap: 0.3rem;
+  flex: none;
 }
 
 .decision-add-item-form {

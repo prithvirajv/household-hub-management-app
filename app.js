@@ -1962,11 +1962,16 @@ function ensureDecisionsData() {
   });
 }
 
-function decisionItemRow(decisionId, listKey, item) {
+function decisionItemRow(decisionId, listKey, item, index, total) {
+  const kind = listKey === "pros" ? "pro" : "con";
   return `<li class="decision-item">
     <span class="member-dot" style="background:${memberColor(item.authorKey)}" title="${escapeHtml(item.authorName)}" aria-hidden="true"></span>
-    <span class="decision-item-text">${escapeHtml(item.text)}</span>
-    <button class="icon-button danger-button" data-delete-decision-item="${decisionId}:${listKey}:${item.id}" type="button" aria-label="Remove this ${listKey === "pros" ? "pro" : "con"}">×</button>
+    <input class="decision-item-input" data-decision-item-text="${decisionId}:${listKey}:${item.id}" value="${escapeHtml(item.text)}" aria-label="Edit this ${kind}">
+    <div class="decision-item-actions">
+      <button class="documents-icon-btn" data-decision-item-move="${decisionId}:${listKey}:${item.id}:up" type="button" aria-label="Move this ${kind} up in rank" ${index === 0 ? "disabled" : ""}>↑</button>
+      <button class="documents-icon-btn" data-decision-item-move="${decisionId}:${listKey}:${item.id}:down" type="button" aria-label="Move this ${kind} down in rank" ${index === total - 1 ? "disabled" : ""}>↓</button>
+      <button class="documents-icon-btn danger-button" data-delete-decision-item="${decisionId}:${listKey}:${item.id}" type="button" aria-label="Remove this ${kind}">×</button>
+    </div>
   </li>`;
 }
 
@@ -1987,7 +1992,7 @@ function renderDecisionCard(decision) {
     <div class="decision-columns">
       <div class="decision-column decision-column-pro">
         <h4>Pros</h4>
-        <ul class="decision-item-list">${decision.pros.map((item) => decisionItemRow(decision.id, "pros", item)).join("")}</ul>
+        <ul class="decision-item-list">${decision.pros.map((item, index) => decisionItemRow(decision.id, "pros", item, index, decision.pros.length)).join("")}</ul>
         <form class="decision-add-item-form" data-decision-add="${decision.id}:pros">
           <input name="text" placeholder="Add a pro" required>
           <button type="submit">+</button>
@@ -1995,7 +2000,7 @@ function renderDecisionCard(decision) {
       </div>
       <div class="decision-column decision-column-con">
         <h4>Cons</h4>
-        <ul class="decision-item-list">${decision.cons.map((item) => decisionItemRow(decision.id, "cons", item)).join("")}</ul>
+        <ul class="decision-item-list">${decision.cons.map((item, index) => decisionItemRow(decision.id, "cons", item, index, decision.cons.length)).join("")}</ul>
         <form class="decision-add-item-form" data-decision-add="${decision.id}:cons">
           <input name="text" placeholder="Add a con" required>
           <button type="submit">+</button>
@@ -5333,6 +5338,26 @@ function bindViewEvents() {
         authorKey: sessionUser?.email || "",
         authorName: sessionUser?.name || "Household member"
       });
+      render();
+    });
+  });
+
+  document.querySelectorAll("[data-decision-item-text]").forEach((input) => {
+    const [decisionId, listKey, itemId] = input.dataset.decisionItemText.split(":");
+    const entry = state.decisions.find((item) => item.id === decisionId)?.[listKey]?.find((item) => item.id === itemId);
+    input.addEventListener("input", () => { if (entry) entry.text = input.value; autosaveState(); });
+    input.addEventListener("change", () => { if (entry) entry.text = input.value.trim() || entry.text; render(); });
+  });
+
+  document.querySelectorAll("[data-decision-item-move]").forEach((button) => {
+    button.addEventListener("click", () => {
+      const [decisionId, listKey, itemId, direction] = button.dataset.decisionItemMove.split(":");
+      const list = state.decisions.find((item) => item.id === decisionId)?.[listKey];
+      if (!list) return;
+      const index = list.findIndex((item) => item.id === itemId);
+      const targetIndex = direction === "up" ? index - 1 : index + 1;
+      if (index === -1 || targetIndex < 0 || targetIndex >= list.length) return;
+      [list[index], list[targetIndex]] = [list[targetIndex], list[index]];
       render();
     });
   });
