@@ -1023,6 +1023,7 @@ function renderCalendar() {
               </div>
             </div>
             <label data-chore-recurrence-field>Repeat<select name="recurrence"><option value="once">Once</option><option value="weekly" selected>Weekly</option><option value="biweekly">Every 2 weeks</option><option value="triweekly">Every 3 weeks</option><option value="monthly">Monthly</option></select></label>
+            <label data-chore-end-date-field hidden>End date (optional)<input name="choreEndDate" type="date"></label>
             <label data-annual-reminder-field hidden>Remind before<select name="reminderDays"><option value="0">Same day</option><option value="1" selected>1 day</option><option value="3">3 days</option><option value="7">7 days</option><option value="14">14 days</option><option value="-1">Don't remind</option></select></label>
             <button data-calendar-submit type="submit">Add</button>
             <button data-calendar-delete class="danger-button" type="button" hidden>Delete</button>
@@ -2480,6 +2481,7 @@ function ensureChoreRecurrenceData() {
     chore.id ||= uniqueId("chore");
     chore.startDate ||= chore.nextDue;
     chore.recurrence ||= String(chore.cadence || "Once").toLowerCase() === "weekly" ? "weekly" : "once";
+    chore.endDate ||= "";
     chore.cadence = choreCadenceLabel(chore);
     chore.completedDates ||= [];
   });
@@ -2487,13 +2489,14 @@ function ensureChoreRecurrenceData() {
 
 function choreCadenceLabel(chore) {
   const recurrence = chore.recurrence || "once";
-  return {
+  const base = {
     once: "Once",
     weekly: "Weekly",
     biweekly: "Every 2 weeks",
     triweekly: "Every 3 weeks",
     monthly: "Monthly"
   }[recurrence] || "Once";
+  return chore.endDate ? `${base} until ${chore.endDate}` : base;
 }
 
 function choreOccurrencesForMonth(chore) {
@@ -2502,7 +2505,11 @@ function choreOccurrencesForMonth(chore) {
   if (Number.isNaN(start.getTime())) return [];
   const [year, month] = state.budget.month.split("-").map(Number);
   const monthStart = new Date(year, month - 1, 1);
-  const monthEnd = new Date(year, month, 0);
+  let monthEnd = new Date(year, month, 0);
+  // Clamp the search window to the chore's end date, if any, so no
+  // occurrence past it is ever generated.
+  const choreEnd = chore.endDate ? new Date(`${chore.endDate}T00:00:00`) : null;
+  if (choreEnd && choreEnd < monthEnd) monthEnd = choreEnd;
   const completed = new Set(chore.completedDates || []);
   const dates = [];
 
@@ -2555,6 +2562,9 @@ function nextPendingChoreOccurrence(chore) {
   const recurrence = chore.recurrence || "once";
   const start = new Date(`${chore.startDate}T00:00:00`);
   if (Number.isNaN(start.getTime())) return null;
+  // Once an occurrence would fall after the chore's end date, the chore has
+  // finished repeating — there is nothing left to be pending.
+  const choreEnd = chore.endDate ? new Date(`${chore.endDate}T00:00:00`) : null;
 
   if (recurrence === "once") {
     const key = dateKey(start);
@@ -2567,6 +2577,7 @@ function nextPendingChoreOccurrence(chore) {
       const lastDay = new Date(cursor.getFullYear(), cursor.getMonth() + 1, 0).getDate();
       const occurrence = new Date(cursor.getFullYear(), cursor.getMonth(), Math.min(start.getDate(), lastDay));
       if (occurrence >= start) {
+        if (choreEnd && occurrence > choreEnd) return null;
         const key = dateKey(occurrence);
         if (!completed.has(key)) return { date: key };
       }
@@ -2578,6 +2589,7 @@ function nextPendingChoreOccurrence(chore) {
   const intervalDays = recurrence === "triweekly" ? 21 : recurrence === "biweekly" ? 14 : 7;
   const cursor = new Date(start);
   for (let i = 0; i < 3650; i += 1) {
+    if (choreEnd && cursor > choreEnd) return null;
     const key = dateKey(cursor);
     if (!completed.has(key)) return { date: key };
     cursor.setDate(cursor.getDate() + intervalDays);
@@ -4487,13 +4499,17 @@ function bindViewEvents() {
     }
     if (data.type === "chore") {
       const recurrence = data.recurrence || "once";
+      // An end date only applies to a chore that repeats — a one-time chore
+      // is dropped even if a stale value lingers in the (hidden) field.
+      const endDate = recurrence === "once" ? "" : String(data.choreEndDate || "").trim();
       const existing = editingKind === "chore" ? state.calendar.chores.find((chore) => chore.id === editingId) : null;
       const chore = {
         id: existing?.id || uniqueId("chore"),
         title: data.title,
         assignees,
-        cadence: choreCadenceLabel({ recurrence }),
+        cadence: choreCadenceLabel({ recurrence, endDate }),
         recurrence,
+        endDate,
         startDate: selectedDate,
         nextDue: selectedDate,
         time: selectedDateTime.slice(11, 16) || "09:00",
@@ -4544,6 +4560,7 @@ function bindViewEvents() {
   });
 
   $("#calendarQuickAdd select[name='type']")?.addEventListener("change", updateCalendarQuickAddFields);
+  $("#calendarQuickAdd select[name='recurrence']")?.addEventListener("change", updateCalendarQuickAddFields);
   updateCalendarQuickAddFields();
 
   $("#assigneeComboTrigger")?.addEventListener("click", () => {
@@ -5073,6 +5090,7 @@ function editCalendarItem(reference) {
   });
   updateAssigneeSummary();
   form.recurrence.value = kind === "chore" ? item.recurrence || "once" : "once";
+  form.choreEndDate.value = kind === "chore" ? item.endDate || "" : "";
   form.reminderDays.value = kind === "event" && ANNUAL_EVENT_TYPES.includes(item.type) ? String(item.reminderDays ?? 1) : "1";
   form.annualTime.value = kind === "event" && ANNUAL_EVENT_TYPES.includes(item.type) ? (item.dateTime?.slice(11, 16) || "09:00") : "09:00";
   form.reminderAt.value = kind === "event" && item.type === "reminder" ? (item.reminderAt || item.dateTime || form.date.value) : "";
@@ -5121,10 +5139,14 @@ function updateCalendarQuickAddFields() {
   const type = form.type.value;
   const isAnnual = ANNUAL_EVENT_TYPES.includes(type);
   const recurrenceField = form.querySelector("[data-chore-recurrence-field]");
+  const endDateField = form.querySelector("[data-chore-end-date-field]");
   const reminderField = form.querySelector("[data-annual-reminder-field]");
   const timeField = form.querySelector("[data-annual-time-field]");
   const plainReminderField = form.querySelector("[data-plain-reminder-field]");
   if (recurrenceField) recurrenceField.hidden = type !== "chore";
+  // An end date only means something for a chore that actually repeats —
+  // a one-time chore already stops after its single occurrence.
+  if (endDateField) endDateField.hidden = type !== "chore" || form.recurrence.value === "once";
   if (reminderField) reminderField.hidden = !isAnnual;
   if (timeField) timeField.hidden = !isAnnual;
   if (plainReminderField) {
