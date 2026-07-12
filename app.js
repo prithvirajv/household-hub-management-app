@@ -978,14 +978,18 @@ function renderCalendar() {
   ensureAssigneesData();
   const calendarMembers = calendarAssigneeOptions();
   const today = dateKey(new Date());
+  // Personalizes the two "what's due" panels to the signed-in user: once
+  // they've marked their own part done, it drops off their view even if
+  // other assignees on the same chore/birthday haven't finished theirs yet.
+  const viewerKey = sessionUser?.email || "";
   const choreRows = state.calendar.chores
-    .map((chore, index) => ({ chore, index, occurrence: nextPendingChoreOccurrence(chore) }))
+    .map((chore, index) => ({ chore, index, occurrence: nextPendingChoreOccurrence(chore, viewerKey) }))
     .filter((row) => row.occurrence)
     .sort((a, b) => a.occurrence.date.localeCompare(b.occurrence.date))
     .slice(0, UPCOMING_LIST_LIMIT);
   const annualRows = state.calendar.events
     .filter((event) => ANNUAL_EVENT_TYPES.includes(event.type))
-    .map((event) => ({ event, occurrence: nextPendingAnnualEventOccurrence(event) }))
+    .map((event) => ({ event, occurrence: nextPendingAnnualEventOccurrence(event, new Date(), viewerKey) }))
     .filter((row) => row.occurrence)
     .sort((a, b) => a.occurrence.date.localeCompare(b.occurrence.date))
     .slice(0, UPCOMING_LIST_LIMIT);
@@ -2510,6 +2514,20 @@ function isChoreOccurrenceComplete(chore, date) {
   return assigneeKeys.every((key) => completedKeys.includes(key));
 }
 
+// Whether a given occurrence still belongs on viewerKey's own pending list.
+// Once a specific assignee has marked their own button for this date, it
+// drops off THEIR view even if other assignees haven't finished their part
+// yet — the shared "is everyone done" check only applies when there's no
+// particular viewer to personalize for (or the viewer isn't an assignee).
+function isChoreOccurrencePendingFor(chore, date, viewerKey) {
+  const assigneeKeys = (chore.assignees || []).map((assignee) => assignee.key);
+  if (viewerKey && assigneeKeys.includes(viewerKey)) {
+    const completedKeys = (chore.completedBy || {})[date] || [];
+    return !completedKeys.includes(viewerKey);
+  }
+  return !isChoreOccurrenceComplete(chore, date);
+}
+
 // One toggle button per assignee — a jointly-assigned chore only counts as
 // done for a given occurrence once every assignee has marked their own button.
 function choreCompletionButtons(chore, index, occurrenceDate) {
@@ -2608,8 +2626,10 @@ const UPCOMING_LIST_LIMIT = 5;
 // The side-panel "what's due" row for a chore — the earliest occurrence that
 // hasn't been marked complete yet, regardless of which month is displayed.
 // If that date is already in the past it's the same row, just overdue,
-// rather than a whole backlog of missed rows piling up.
-function nextPendingChoreOccurrence(chore) {
+// rather than a whole backlog of missed rows piling up. Pass viewerKey (the
+// signed-in user's own assignee key) to personalize this to their own
+// completion instead of the whole household's.
+function nextPendingChoreOccurrence(chore, viewerKey) {
   const recurrence = chore.recurrence || "once";
   const start = new Date(`${chore.startDate}T00:00:00`);
   if (Number.isNaN(start.getTime())) return null;
@@ -2619,7 +2639,7 @@ function nextPendingChoreOccurrence(chore) {
 
   if (recurrence === "once") {
     const key = dateKey(start);
-    return isChoreOccurrenceComplete(chore, key) ? null : { date: key };
+    return isChoreOccurrencePendingFor(chore, key, viewerKey) ? { date: key } : null;
   }
 
   if (recurrence === "monthly") {
@@ -2630,7 +2650,7 @@ function nextPendingChoreOccurrence(chore) {
       if (occurrence >= start) {
         if (choreEnd && occurrence > choreEnd) return null;
         const key = dateKey(occurrence);
-        if (!isChoreOccurrenceComplete(chore, key)) return { date: key };
+        if (isChoreOccurrencePendingFor(chore, key, viewerKey)) return { date: key };
       }
       cursor.setMonth(cursor.getMonth() + 1);
     }
@@ -2642,7 +2662,7 @@ function nextPendingChoreOccurrence(chore) {
   for (let i = 0; i < 3650; i += 1) {
     if (choreEnd && cursor > choreEnd) return null;
     const key = dateKey(cursor);
-    if (!isChoreOccurrenceComplete(chore, key)) return { date: key };
+    if (isChoreOccurrencePendingFor(chore, key, viewerKey)) return { date: key };
     cursor.setDate(cursor.getDate() + intervalDays);
   }
   return null;
@@ -2688,6 +2708,18 @@ function isAnnualEventYearComplete(event, year) {
   return assigneeKeys.every((key) => completedKeys.includes(key));
 }
 
+// Whether a given year still belongs on viewerKey's own pending list — mirrors
+// isChoreOccurrencePendingFor. Once a specific assignee has marked their own
+// button wished, it drops off THEIR view even if other assignees haven't yet.
+function isAnnualEventYearPendingFor(event, year, viewerKey) {
+  const assigneeKeys = (event.assignees || []).map((assignee) => assignee.key);
+  if (viewerKey && assigneeKeys.includes(viewerKey)) {
+    const completedKeys = (event.wishedBy || {})[String(year)] || [];
+    return !completedKeys.includes(viewerKey);
+  }
+  return !isAnnualEventYearComplete(event, year);
+}
+
 // One toggle button per assignee — a jointly-assigned birthday/anniversary
 // only counts as wished for a given year once every assignee has marked it.
 function annualEventCompletionButtons(event, year) {
@@ -2708,11 +2740,13 @@ function annualEventCompletionButtons(event, year) {
 // The side-panel "what's due" row for a birthday/anniversary — the earliest
 // year that hasn't been marked wished yet. If this year's occurrence already
 // passed and nobody marked it wished, that's the row that shows (overdue),
-// instead of silently skipping ahead to next year.
-function nextPendingAnnualEventOccurrence(event, referenceDate = new Date()) {
+// instead of silently skipping ahead to next year. Pass viewerKey (the
+// signed-in user's own assignee key) to personalize this to their own
+// completion instead of the whole household's.
+function nextPendingAnnualEventOccurrence(event, referenceDate = new Date(), viewerKey) {
   let year = referenceDate.getFullYear();
   for (let i = 0; i < 200; i += 1) {
-    if (!isAnnualEventYearComplete(event, year)) return { date: dateKey(annualEventDate(event, year)), year };
+    if (isAnnualEventYearPendingFor(event, year, viewerKey)) return { date: dateKey(annualEventDate(event, year)), year };
     year += 1;
   }
   return null;
