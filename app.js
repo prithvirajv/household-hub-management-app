@@ -4613,8 +4613,12 @@ function bindViewEvents() {
       if (event.target.closest(".event")) return;
       const dateInput = $("#calendarQuickAdd [name='date']");
       if (!dateInput) return;
-      const existingTime = dateInput.value.includes("T") ? dateInput.value.split("T")[1] : "09:00";
-      dateInput.value = `${cell.dataset.calendarDay}T${existingTime}`;
+      if (dateInput.type === "date") {
+        dateInput.value = cell.dataset.calendarDay;
+      } else {
+        const existingTime = dateInput.value.includes("T") ? dateInput.value.split("T")[1] : "09:00";
+        dateInput.value = `${cell.dataset.calendarDay}T${existingTime}`;
+      }
       $("#calendarQuickAdd [name='title']")?.focus();
     };
     cell.addEventListener("click", applyDay);
