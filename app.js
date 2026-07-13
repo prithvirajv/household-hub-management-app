@@ -2140,7 +2140,7 @@ function renderMeals() {
                     <label class="meal-servings-field">Servings<input data-meal-servings="${plannedIndex}" type="number" min="1" max="99" step="1" value="${planned.servings || 1}"></label>
                   </div>`;
                 }).join("");
-                const openSlot = meal === "Snack" || plannedItems.length === 0
+                const openSlot = plannedItems.length === 0
                   ? `<button class="meal-slot meal-slot-open" data-open-meal="${day}:${meal}" type="button"><small>${meal}</small><strong>Open</strong></button>`
                   : "";
                 return `${slots}${openSlot}`;
