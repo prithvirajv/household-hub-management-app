@@ -1958,8 +1958,52 @@ function ensureDecisionsData() {
     decision.decidedAt ||= "";
     decision.pros ||= [];
     decision.cons ||= [];
+    decision.attachments ||= [];
     decision.createdAt ||= new Date().toISOString();
   });
+}
+
+function readFileAsDataUrl(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onerror = () => reject(reader.error || new Error("Could not read file"));
+    reader.onload = () => resolve(reader.result);
+    reader.readAsDataURL(file);
+  });
+}
+
+const DECISION_ATTACHMENT_MAX_BYTES = 5 * 1024 * 1024;
+const DECISION_ATTACHMENT_MAX_COUNT = 5;
+
+// Attachments are stored inline as data URLs (like Journal photos) rather than
+// through the separate Documents/GCS pipeline, because decisions sync across
+// a user's whole set of households (see ensureDecisionsData's caller) while
+// documents are scoped to a single household — keeping attachments inline
+// avoids that mismatch entirely.
+async function filesToDecisionAttachments(fileList, existingCount) {
+  const files = fileList ? [...fileList].slice(0, Math.max(0, DECISION_ATTACHMENT_MAX_COUNT - existingCount)) : [];
+  const attachments = [];
+  for (const file of files) {
+    if (file.size > DECISION_ATTACHMENT_MAX_BYTES) {
+      window.alert(`${file.name} is larger than 5MB and was skipped.`);
+      continue;
+    }
+    try {
+      const dataUrl = await readFileAsDataUrl(file);
+      attachments.push({ id: uniqueId("attachment"), name: file.name, contentType: file.type || "application/octet-stream", sizeBytes: file.size, dataUrl, createdAt: new Date().toISOString() });
+    } catch (error) {
+      console.warn("Could not process attachment", error);
+    }
+  }
+  return attachments;
+}
+
+function decisionAttachmentRow(decisionId, attachment) {
+  return `<div class="decision-attachment">
+    <a class="decision-attachment-link" href="${attachment.dataUrl}" download="${escapeHtml(attachment.name)}">${escapeHtml(attachment.name)}</a>
+    <small>${formatFileSize(attachment.sizeBytes)}</small>
+    <button class="icon-button danger-button" data-delete-decision-attachment="${decisionId}:${attachment.id}" type="button" aria-label="Remove ${escapeHtml(attachment.name)}">×</button>
+  </div>`;
 }
 
 function decisionItemRow(decisionId, listKey, item, index, total) {
@@ -1984,6 +2028,10 @@ function renderDecisionCard(decision) {
       <button class="icon-button danger-button" data-delete-decision="${decision.id}" type="button" aria-label="Delete ${escapeHtml(decision.title)}">×</button>
     </div>
     <textarea class="decision-notes-input" data-decision-notes="${decision.id}" placeholder="Any context worth remembering (optional)">${escapeHtml(decision.notes)}</textarea>
+    <div class="decision-attachments">
+      ${decision.attachments.map((attachment) => decisionAttachmentRow(decision.id, attachment)).join("")}
+      ${decision.attachments.length < DECISION_ATTACHMENT_MAX_COUNT ? `<label class="decision-attachment-picker ghost">+ Attach a file<input data-decision-attachment-input="${decision.id}" type="file" multiple></label>` : ""}
+    </div>
     ${isDecided ? `<div class="decision-outcome">
       <strong>Outcome:</strong> ${escapeHtml(decision.outcome) || "<em>No outcome noted</em>"}
       <small>${decision.decidedAt ? ` · ${decision.decidedAt.slice(0, 10)}` : ""}</small>
@@ -5315,6 +5363,26 @@ function bindViewEvents() {
   document.querySelectorAll("[data-decision-notes]").forEach((textarea) => {
     const decision = state.decisions.find((item) => item.id === textarea.dataset.decisionNotes);
     textarea.addEventListener("input", () => { if (decision) decision.notes = textarea.value; autosaveState(); });
+  });
+
+  document.querySelectorAll("[data-decision-attachment-input]").forEach((input) => {
+    input.addEventListener("change", async () => {
+      const decision = state.decisions.find((item) => item.id === input.dataset.decisionAttachmentInput);
+      if (!decision) return;
+      const newAttachments = await filesToDecisionAttachments(input.files, decision.attachments.length);
+      decision.attachments.push(...newAttachments);
+      render();
+    });
+  });
+
+  document.querySelectorAll("[data-delete-decision-attachment]").forEach((button) => {
+    button.addEventListener("click", () => {
+      const [decisionId, attachmentId] = button.dataset.deleteDecisionAttachment.split(":");
+      const decision = state.decisions.find((item) => item.id === decisionId);
+      if (!decision) return;
+      decision.attachments = decision.attachments.filter((attachment) => attachment.id !== attachmentId);
+      render();
+    });
   });
 
   document.querySelectorAll("[data-delete-decision]").forEach((button) => {
