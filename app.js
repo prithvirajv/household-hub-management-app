@@ -1050,7 +1050,7 @@ function renderCalendar() {
         </section>
       </div>
       <aside class="side-stack">
-        <section class="card"><div class="card-label">Daily planner</div><h3>Upcoming schedule</h3>${visibleScheduleItems().length ? visibleScheduleItems().map((item) => calendarManageRow(item.title, item.displayDate || item.date, item.label || item.type, item.sourceKind, item.sourceId, item.assignees)).join("") : `<div class="empty-inline">No events scheduled this month</div>`}</section>
+        <section class="card"><div class="card-label">Daily planner</div><h3>Upcoming schedule</h3>${upcomingScheduleItems().length ? upcomingScheduleItems().map((item) => calendarManageRow(item.title, item.displayDate || item.date, item.label || item.type, item.sourceKind, item.sourceId, item.assignees)).join("") : `<div class="empty-inline">No events scheduled this month</div>`}</section>
         <section class="card">
           <div class="section-head"><div><span class="card-label">What to do</span><h3>Chore rotation</h3></div><button id="sideAddChoreButton" class="ghost" type="button">Add chore</button></div>
           ${choreRows.length ? choreRows.map(({ chore, index, occurrence }) => {
@@ -2955,6 +2955,18 @@ function visibleScheduleItems() {
   const items = scheduleItems();
   if (!calendarFilterOwner) return items;
   return items.filter((item) => (item.assignees || []).some((assignee) => assignee.key === calendarFilterOwner));
+}
+
+// The "Upcoming schedule" side-panel is meant to be forward-looking only —
+// unlike the calendar grid (which must keep showing every day of the month,
+// past and future, since it's a literal calendar), and unlike the dedicated
+// Chore rotation / Birthdays panels (which intentionally keep surfacing
+// overdue, not-yet-actioned items). Once a date has passed, it drops off
+// this list even if nobody completed/wished it — that's what the other
+// panels are for.
+function upcomingScheduleItems() {
+  const today = dateKey(new Date());
+  return visibleScheduleItems().filter((item) => `${state.budget.month}-${item.date.slice(3)}` >= today);
 }
 
 function calendarCells() {
