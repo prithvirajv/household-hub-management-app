@@ -1137,14 +1137,24 @@ main {
 }
 
 .compact-row {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(0, auto) auto auto;
+  /* flex + wrap, not a width-based media query: this row often sits in a
+     narrow sidebar column on an otherwise wide desktop viewport (e.g. the
+     Chore rotation card next to the calendar grid), so a max-width media
+     query on the page never fires even though this row itself is narrow.
+     Flex-wrap reflows based on the row's own available space regardless of
+     viewport width. */
+  display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 0.65rem;
   padding: 0.65rem;
   border-radius: 6px;
   background: var(--soft-blue);
   min-width: 0;
+}
+
+.compact-row > div:first-child {
+  flex: 1 1 100%;
 }
 
 .compact-row > div {
@@ -1350,16 +1360,6 @@ main {
   .member-add-household-panel {
     position: static;
     box-shadow: none;
-  }
-
-  .compact-row {
-    display: flex;
-    flex-wrap: wrap;
-    align-items: center;
-  }
-
-  .compact-row > div:first-child {
-    flex: 1 1 100%;
   }
 }
 
@@ -1599,6 +1599,12 @@ main {
 .chore-complete-button.is-done {
   background: var(--green-soft);
   border-color: var(--green);
+}
+
+.chore-complete-status {
+  color: var(--muted);
+  font-size: 0.78rem;
+  font-weight: 700;
 }
 
 .paycheck-grid {

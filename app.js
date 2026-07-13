@@ -2667,21 +2667,30 @@ function isChoreOccurrencePendingFor(chore, date, viewerKey) {
   return !isChoreOccurrenceComplete(chore, date);
 }
 
-// One toggle button per assignee — a jointly-assigned chore only counts as
-// done for a given occurrence once every assignee has marked their own button.
+// A single button tied to whoever is actually signed in — never a menu of
+// every assignee's own checkbox, which would let one person mark the chore
+// done on someone else's behalf. A jointly-assigned chore only counts as
+// fully done for a given occurrence once every assignee has marked their own
+// button (see isChoreOccurrenceComplete), but each person can only ever
+// toggle their own.
 function choreCompletionButtons(chore, index, occurrenceDate) {
   const completedKeys = (chore.completedBy || {})[occurrenceDate] || [];
+  const assignees = chore.assignees || [];
+  const viewerKey = sessionUser?.email || "";
+  const viewerIsAssignee = assignees.some((assignee) => assignee.key === viewerKey);
   // A handful of legacy chores predate the assignee system and have nobody
   // assigned at all — fall back to a single shared button rather than
   // rendering nothing and leaving them impossible to ever mark done.
-  if (!chore.assignees?.length) {
-    const done = completedKeys.length > 0;
-    return `<button class="ghost chore-complete-button ${done ? "is-done" : ""}" data-complete-chore-assignee="${index}:${occurrenceDate}:household" type="button" aria-pressed="${done}">${done ? "✓ Completed" : "Complete"}</button>`;
+  const effectiveKey = (assignees.length && viewerIsAssignee) ? viewerKey : "household";
+  const done = completedKeys.includes(effectiveKey);
+  if (assignees.length && !viewerIsAssignee) {
+    // Signed in as someone not assigned to this chore (e.g. an admin just
+    // observing) — show status only, nothing for them to toggle on others'
+    // behalf.
+    return `<span class="chore-complete-status">${completedKeys.length}/${assignees.length} done</span>`;
   }
-  return chore.assignees.map((assignee) => {
-    const done = completedKeys.includes(assignee.key);
-    return `<button class="ghost chore-complete-button ${done ? "is-done" : ""}" data-complete-chore-assignee="${index}:${occurrenceDate}:${escapeHtml(assignee.key)}" type="button" aria-pressed="${done}">${done ? "☑" : "☐"} ${escapeHtml(assignee.name)}</button>`;
-  }).join("");
+  const suffix = assignees.length > 1 ? ` (${completedKeys.length}/${assignees.length})` : "";
+  return `<button class="ghost chore-complete-button ${done ? "is-done" : ""}" data-complete-chore-assignee="${index}:${occurrenceDate}:${escapeHtml(effectiveKey)}" type="button" aria-pressed="${done}">${done ? "✓ Done" : "Mark done"}${suffix}</button>`;
 }
 
 // Recomputed every render (mirrors annualEventNotifyAt for birthdays) so the
@@ -2859,21 +2868,27 @@ function isAnnualEventYearPendingFor(event, year, viewerKey) {
   return !isAnnualEventYearComplete(event, year);
 }
 
-// One toggle button per assignee — a jointly-assigned birthday/anniversary
-// only counts as wished for a given year once every assignee has marked it.
+// A single button tied to whoever is actually signed in — never a menu of
+// every assignee's own checkbox, which would let one person mark it wished on
+// someone else's behalf. A jointly-assigned birthday/anniversary only counts
+// as fully wished for a given year once every assignee has marked their own
+// button (see isAnnualEventYearComplete), but each person can only ever
+// toggle their own.
 function annualEventCompletionButtons(event, year) {
   const completedKeys = (event.wishedBy || {})[String(year)] || [];
+  const assignees = event.assignees || [];
+  const viewerKey = sessionUser?.email || "";
+  const viewerIsAssignee = assignees.some((assignee) => assignee.key === viewerKey);
   // A handful of legacy birthdays/anniversaries predate the assignee system
   // and have nobody assigned at all — fall back to a single shared button
   // rather than rendering nothing and leaving them impossible to mark wished.
-  if (!event.assignees?.length) {
-    const done = completedKeys.length > 0;
-    return `<button class="ghost chore-complete-button ${done ? "is-done" : ""}" data-mark-wished-assignee="${event.id}:${year}:household" type="button" aria-pressed="${done}">${done ? "✓ Wished" : "Mark wished"}</button>`;
+  const effectiveKey = (assignees.length && viewerIsAssignee) ? viewerKey : "household";
+  const done = completedKeys.includes(effectiveKey);
+  if (assignees.length && !viewerIsAssignee) {
+    return `<span class="chore-complete-status">${completedKeys.length}/${assignees.length} wished</span>`;
   }
-  return event.assignees.map((assignee) => {
-    const done = completedKeys.includes(assignee.key);
-    return `<button class="ghost chore-complete-button ${done ? "is-done" : ""}" data-mark-wished-assignee="${event.id}:${year}:${escapeHtml(assignee.key)}" type="button" aria-pressed="${done}">${done ? "☑" : "☐"} ${escapeHtml(assignee.name)}</button>`;
-  }).join("");
+  const suffix = assignees.length > 1 ? ` (${completedKeys.length}/${assignees.length})` : "";
+  return `<button class="ghost chore-complete-button ${done ? "is-done" : ""}" data-mark-wished-assignee="${event.id}:${year}:${escapeHtml(effectiveKey)}" type="button" aria-pressed="${done}">${done ? "✓ Wished" : "Mark wished"}${suffix}</button>`;
 }
 
 // The side-panel "what's due" row for a birthday/anniversary — the earliest
