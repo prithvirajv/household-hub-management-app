@@ -858,7 +858,7 @@ function renderTransactions() {
           ${state.transactions.length ? state.transactions
             .map((transaction, index) => ({ payee: transaction.payee, amount: -transaction.amount, date: transaction.date, tag: transactionAssignmentLabel(transaction), index }))
             .slice(0, 6)
-            .map((transaction) => compactRow(transaction.payee, formatShortDate(transaction.date), `${exactMoney.format(transaction.amount)} · ${transaction.tag}`, "danger", `data-delete-transaction="${transaction.index}" aria-label="Delete ${escapeHtml(transaction.payee)}"`))
+            .map((transaction) => compactRow(transaction.payee, formatShortDate(transaction.date), `${exactMoney.format(transaction.amount)} · ${transaction.tag}`, "", `data-delete-transaction="${transaction.index}" aria-label="Delete ${escapeHtml(transaction.payee)}"`))
             .join("") : `<div class="empty-inline">No transactions yet</div>`}
         </section>
       </aside>
