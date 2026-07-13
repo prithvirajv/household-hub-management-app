@@ -4822,3 +4822,11 @@ main {
 .form-message.success {
   color: var(--green);
 }
+
+.profile-verify-status {
+  display: grid;
+  gap: 0.4rem;
+  margin-top: 0.65rem;
+  padding-top: 0.65rem;
+  border-top: 1px solid var(--line);
+}

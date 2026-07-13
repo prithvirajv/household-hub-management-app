@@ -104,6 +104,7 @@ const memoryDb = {
   sharedModules: [],
   loginEvents: [],
   passwordResetTokens: [],
+  emailVerificationTokens: [],
   notificationJobs: [],
   pushDevices: [],
   privateData: [],
@@ -442,6 +443,16 @@ function sendPasswordResetEmail({ email, name, token }) {
   });
 }
 
+function sendVerificationEmail({ email, name, token }) {
+  const verifyUrl = `${APP_BASE_URL}/index.html?verifyToken=${encodeURIComponent(token)}&email=${encodeURIComponent(email)}`;
+  return sendTransactionalEmail({
+    to: email,
+    subject: "Verify your FamilyLoop email",
+    text: `Hi ${name}, confirm this is your email address by opening this link within 24 hours: ${verifyUrl}`,
+    html: `<h2>Verify your email</h2><p>Hi ${escapeHtml(name)},</p><p>Confirm this is your email address. This link expires in 24 hours.</p><p><a href="${escapeHtml(verifyUrl)}">Verify email</a></p>`
+  });
+}
+
 function sendHouseholdInvitesEmail({ email, name, inviterName, invites }) {
   const blocks = invites.map(({ householdName, inviteCode, role, scopes }) => {
     const scopeText = scopes.length ? scopes.join(", ") : "household workspace";
@@ -518,7 +529,7 @@ async function databasePrimaryOwnerId(client, householdId) {
 }
 
 function publicUser(row) {
-  return row ? { id: row.id, email: row.email, name: row.name, isAdmin: isPlatformAdminEmail(row.email), phone: row.phone || "", carrier: row.carrier || "" } : null;
+  return row ? { id: row.id, email: row.email, name: row.name, isAdmin: isPlatformAdminEmail(row.email), phone: row.phone || "", carrier: row.carrier || "", emailVerified: Boolean(row.email_verified_at) } : null;
 }
 
 function normalizePhoneAndCarrier(rawPhone, rawCarrier) {
@@ -598,14 +609,53 @@ async function migrate() {
   } else {
     await pool.query("UPDATE users SET is_admin = false WHERE email = $1", [DEMO_EMAIL]);
   }
+  // Demo/admin accounts are internally provisioned, not signed up through the
+  // public form, and any account authenticated via Google already had its
+  // email verified by Google at sign-in time -- none of these should be left
+  // showing an "unverified" nag on the Profile page.
+  await pool.query(
+    "UPDATE users SET email_verified_at = COALESCE(email_verified_at, now()) WHERE email = ANY($1) OR google_id IS NOT NULL",
+    [[DEMO_EMAIL, LEGACY_DEMO_EMAIL, ADMIN_EMAIL].filter(Boolean)]
+  );
 }
 
 function makeInviteCode() {
   return `HUB-${crypto.randomBytes(3).toString("hex").toUpperCase()}`;
 }
 
-function hashResetToken(token) {
+function hashToken(token) {
   return crypto.createHash("sha256").update(String(token)).digest("hex");
+}
+
+// Issues a fresh email-verification token for `user` (invalidating any prior
+// unused one) and emails it. Called right after signup, and from the
+// "resend verification" endpoint -- both cases just need "make sure exactly
+// one live token exists and the owner has a fresh link in their inbox".
+async function issueEmailVerification(user) {
+  const token = crypto.randomBytes(32).toString("base64url");
+  const tokenHash = hashToken(token);
+  const expiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000);
+  if (MEMORY_DB) {
+    memoryDb.emailVerificationTokens.forEach((item) => {
+      if (item.user_id === user.id && !item.used_at) item.used_at = new Date().toISOString();
+    });
+    memoryDb.emailVerificationTokens.push({
+      id: crypto.randomUUID(),
+      user_id: user.id,
+      token_hash: tokenHash,
+      expires_at: expiresAt.toISOString(),
+      used_at: null,
+      created_at: new Date().toISOString()
+    });
+  } else {
+    await pool.query("UPDATE email_verification_tokens SET used_at = now() WHERE user_id = $1 AND used_at IS NULL", [user.id]);
+    await pool.query(
+      "INSERT INTO email_verification_tokens (user_id, token_hash, expires_at) VALUES ($1, $2, $3)",
+      [user.id, tokenHash, expiresAt]
+    );
+  }
+  await sendVerificationEmail({ email: user.email, name: user.name, token });
+  return token;
 }
 
 function countryCatalog() {
@@ -747,6 +797,7 @@ async function seedDemoUser() {
     const existingUser = memoryDb.users.find((user) => user.email === DEMO_EMAIL);
     if (existingUser) {
       existingUser.is_admin = false;
+      existingUser.email_verified_at ||= new Date().toISOString();
       return;
     }
     const user = {
@@ -758,6 +809,7 @@ async function seedDemoUser() {
       login_count: 0,
       last_login_at: null,
       disabled_at: null,
+      email_verified_at: new Date().toISOString(),
       created_at: new Date().toISOString()
     };
     const usState = householdState("US Household", "US", "USD", true);
@@ -875,6 +927,7 @@ async function seedAdminUser() {
         login_count: 0,
         last_login_at: null,
         disabled_at: null,
+        email_verified_at: new Date().toISOString(),
         created_at: new Date().toISOString()
       };
       const state = householdState("Administrator Household", "US", "USD");
@@ -892,6 +945,7 @@ async function seedAdminUser() {
     user.name = ADMIN_NAME;
     user.is_admin = true;
     user.disabled_at = null;
+    user.email_verified_at ||= new Date().toISOString();
     user.default_household_id ||= memoryDb.memberships.find((item) => item.user_id === user.id)?.household_id;
     return;
   }
@@ -945,7 +999,7 @@ async function getSession(req) {
   }
 
   const result = await pool.query(
-    `SELECT u.id, u.email, u.name, u.is_admin, u.disabled_at, u.default_household_id,
+    `SELECT u.id, u.email, u.name, u.is_admin, u.disabled_at, u.default_household_id, u.email_verified_at,
             h.id AS household_id, h.name AS household_name
      FROM users u
      JOIN household_memberships hm ON hm.user_id = u.id
@@ -1113,7 +1167,7 @@ app.patch("/api/auth/me", requireSession, async (req, res, next) => {
     if (passwordHash) { values.push(passwordHash); updates.push(`password_hash = $${values.length}`); }
     values.push(req.sessionUser.id);
     const result = await pool.query(
-      `UPDATE users SET ${updates.join(", ")} WHERE id = $${values.length} RETURNING id, email, name, is_admin, phone, carrier`,
+      `UPDATE users SET ${updates.join(", ")} WHERE id = $${values.length} RETURNING id, email, name, is_admin, phone, carrier, email_verified_at`,
       values
     );
     res.json(publicUser(result.rows[0]));
@@ -1174,9 +1228,12 @@ app.post("/api/auth/signup", async (req, res, next) => {
     memoryDb.memberships.push({ user_id: user.id, household_id: household.id, role: "owner" });
     user.default_household_id = household.id;
     const emailDelivery = await sendWelcomeEmail({ email, name, householdName });
+    const verificationToken = await issueEmailVerification(user);
     signSession(res, user.id);
     selectHousehold(res, household.id);
-    return res.status(201).json({ user: publicUser(user), email: emailDelivery });
+    const response = { user: publicUser(user), email: emailDelivery };
+    if (TEST_EXPOSE_RESET_TOKEN) response.verificationToken = verificationToken;
+    return res.status(201).json(response);
   }
 
   const client = await pool.connect();
@@ -1184,16 +1241,19 @@ app.post("/api/auth/signup", async (req, res, next) => {
     await client.query("BEGIN");
     const hash = await bcrypt.hash(password, 12);
     const user = await client.query(
-      "INSERT INTO users (email, password_hash, name, is_admin, phone, carrier) VALUES ($1, $2, $3, $4, $5, $6) RETURNING id, email, name, is_admin, phone, carrier",
+      "INSERT INTO users (email, password_hash, name, is_admin, phone, carrier) VALUES ($1, $2, $3, $4, $5, $6) RETURNING id, email, name, is_admin, phone, carrier, email_verified_at",
       [email, hash, name, false, phone || null, carrier || null]
     );
     const state = householdState(householdName, country, currency);
     const household = await createHouseholdForUser(client, user.rows[0].id, householdName, state);
     await client.query("COMMIT");
     const emailDelivery = await sendWelcomeEmail({ email, name, householdName });
+    const verificationToken = await issueEmailVerification(user.rows[0]);
     signSession(res, user.rows[0].id);
     selectHousehold(res, household.id);
-    res.status(201).json({ user: publicUser(user.rows[0]), email: emailDelivery });
+    const response = { user: publicUser(user.rows[0]), email: emailDelivery };
+    if (TEST_EXPOSE_RESET_TOKEN) response.verificationToken = verificationToken;
+    res.status(201).json(response);
   } catch (error) {
     await client.query("ROLLBACK");
     if (error.code === "23505") return res.status(409).json({ error: "That email is already registered" });
@@ -1224,7 +1284,7 @@ app.post("/api/auth/signin", async (req, res, next) => {
       return res.json({ user: publicUser(user) });
     }
 
-    const result = await pool.query("SELECT id, email, name, password_hash, is_admin, disabled_at, default_household_id FROM users WHERE email = $1", [email]);
+    const result = await pool.query("SELECT id, email, name, password_hash, is_admin, disabled_at, default_household_id, email_verified_at FROM users WHERE email = $1", [email]);
     const user = result.rows[0];
     if (!user || !user.password_hash || !(await bcrypt.compare(password, user.password_hash))) {
       return res.status(401).json({ error: "Invalid email or password" });
@@ -1306,6 +1366,7 @@ app.post("/api/auth/google", async (req, res, next) => {
         disabled_at: null,
         phone: "",
         carrier: "",
+        email_verified_at: new Date().toISOString(),
         created_at: new Date().toISOString()
       };
       const state = householdState(`${name}'s Household`, "US", "USD");
@@ -1326,7 +1387,7 @@ app.post("/api/auth/google", async (req, res, next) => {
     }
 
     const existingResult = await pool.query(
-      "SELECT id, email, name, google_id, is_admin, disabled_at, default_household_id FROM users WHERE email = $1",
+      "SELECT id, email, name, google_id, is_admin, disabled_at, default_household_id, email_verified_at FROM users WHERE email = $1",
       [email]
     );
     const existingUser = existingResult.rows[0];
@@ -1353,7 +1414,7 @@ app.post("/api/auth/google", async (req, res, next) => {
     try {
       await client.query("BEGIN");
       const insertedUser = await client.query(
-        "INSERT INTO users (email, name, google_id, is_admin) VALUES ($1, $2, $3, false) RETURNING id, email, name, is_admin",
+        "INSERT INTO users (email, name, google_id, is_admin, email_verified_at) VALUES ($1, $2, $3, false, now()) RETURNING id, email, name, is_admin, email_verified_at",
         [email, name, googleId]
       );
       const state = householdState(`${name}'s Household`, "US", "USD");
@@ -1391,7 +1452,7 @@ app.post("/api/auth/password-reset/request", async (req, res, next) => {
     if (!user) return res.status(202).json(response);
 
     const token = crypto.randomBytes(32).toString("base64url");
-    const tokenHash = hashResetToken(token);
+    const tokenHash = hashToken(token);
     const expiresAt = new Date(Date.now() + 30 * 60 * 1000);
     if (MEMORY_DB) {
       const recentRequest = memoryDb.passwordResetTokens.some((item) =>
@@ -1448,7 +1509,7 @@ app.post("/api/auth/password-reset/request", async (req, res, next) => {
 app.post("/api/auth/password-reset/confirm", async (req, res, next) => {
   try {
     const email = String(req.body.email || "").trim().toLowerCase();
-    const tokenHash = hashResetToken(req.body.token || "");
+    const tokenHash = hashToken(req.body.token || "");
     const password = String(req.body.password || "");
     if (!email || password.length < 12) {
       return res.status(400).json({ error: "Enter the account email and a password of at least 12 characters" });
@@ -1505,6 +1566,109 @@ app.post("/api/auth/password-reset/confirm", async (req, res, next) => {
     }
     clearSession(res);
     res.json({ ok: true });
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.post("/api/auth/verify-email/confirm", async (req, res, next) => {
+  try {
+    const email = String(req.body.email || "").trim().toLowerCase();
+    const tokenHash = hashToken(req.body.token || "");
+    if (!email || !req.body.token) {
+      return res.status(400).json({ error: "Missing verification link details" });
+    }
+
+    if (MEMORY_DB) {
+      const user = memoryDb.users.find((item) => item.email === email);
+      const verifyToken = memoryDb.emailVerificationTokens.find((item) =>
+        item.user_id === user?.id
+        && item.token_hash === tokenHash
+        && !item.used_at
+        && new Date(item.expires_at).getTime() > Date.now()
+      );
+      if (!user || !verifyToken) return res.status(400).json({ error: "That verification link is invalid or expired" });
+      verifyToken.used_at = new Date().toISOString();
+      user.email_verified_at ||= new Date().toISOString();
+      return res.json({ ok: true });
+    }
+
+    const client = await pool.connect();
+    try {
+      await client.query("BEGIN");
+      const result = await client.query(
+        `SELECT u.id
+         FROM email_verification_tokens evt
+         JOIN users u ON u.id = evt.user_id
+         WHERE u.email = $1
+           AND evt.token_hash = $2
+           AND evt.used_at IS NULL
+           AND evt.expires_at > now()
+         FOR UPDATE`,
+        [email, tokenHash]
+      );
+      const user = result.rows[0];
+      if (!user) {
+        await client.query("ROLLBACK");
+        return res.status(400).json({ error: "That verification link is invalid or expired" });
+      }
+      await client.query(
+        "UPDATE email_verification_tokens SET used_at = now() WHERE user_id = $1 AND token_hash = $2",
+        [user.id, tokenHash]
+      );
+      await client.query(
+        "UPDATE users SET email_verified_at = COALESCE(email_verified_at, now()) WHERE id = $1",
+        [user.id]
+      );
+      await client.query("COMMIT");
+    } catch (error) {
+      await client.query("ROLLBACK");
+      throw error;
+    } finally {
+      client.release();
+    }
+    res.json({ ok: true });
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.post("/api/auth/verify-email/resend", requireSession, async (req, res, next) => {
+  try {
+    if (req.sessionUser.email === DEMO_EMAIL || req.sessionUser.email === LEGACY_DEMO_EMAIL) {
+      return res.status(400).json({ error: "The demo account's email is already verified" });
+    }
+
+    let user;
+    if (MEMORY_DB) {
+      user = memoryDb.users.find((item) => item.id === req.sessionUser.id);
+    } else {
+      const result = await pool.query(
+        "SELECT id, email, name, email_verified_at FROM users WHERE id = $1",
+        [req.sessionUser.id]
+      );
+      user = result.rows[0];
+    }
+    if (!user) return res.status(404).json({ error: "Account not found" });
+    if (user.email_verified_at) return res.status(400).json({ error: "This email is already verified" });
+
+    const response = { ok: true, message: "Verification email sent." };
+    if (MEMORY_DB) {
+      const recentRequest = memoryDb.emailVerificationTokens.some((item) =>
+        item.user_id === user.id && Date.now() - new Date(item.created_at).getTime() < 60 * 1000
+      );
+      if (recentRequest) return res.status(202).json({ ok: true, message: "A verification email was already sent recently." });
+    } else {
+      const recentRequest = await pool.query(
+        "SELECT 1 FROM email_verification_tokens WHERE user_id = $1 AND created_at > now() - interval '60 seconds' LIMIT 1",
+        [user.id]
+      );
+      if (recentRequest.rowCount > 0) return res.status(202).json({ ok: true, message: "A verification email was already sent recently." });
+    }
+
+    const verificationToken = await issueEmailVerification(user);
+    if (TEST_EXPOSE_RESET_TOKEN) response.verificationToken = verificationToken;
+    res.status(202).json(response);
   } catch (error) {
     next(error);
   }
@@ -1603,7 +1767,7 @@ app.post("/api/auth/invitations/accept", async (req, res, next) => {
         }
         household = { id: invitation.household_id, name: invitation.household_name };
         const userResult = await client.query(
-          "SELECT id, email, name, password_hash, is_admin, disabled_at FROM users WHERE email = $1",
+          "SELECT id, email, name, password_hash, is_admin, disabled_at, email_verified_at FROM users WHERE email = $1",
           [email]
         );
         user = userResult.rows[0];
@@ -1634,7 +1798,7 @@ app.post("/api/auth/invitations/accept", async (req, res, next) => {
           const created = await client.query(
             `INSERT INTO users (email, password_hash, name, is_admin, phone, carrier)
              VALUES ($1, $2, $3, false, $4, $5)
-             RETURNING id, email, name, is_admin, disabled_at, phone, carrier`,
+             RETURNING id, email, name, is_admin, disabled_at, phone, carrier, email_verified_at`,
             [email, await bcrypt.hash(password, 12), requestedName || invitation.name || "Household member", phone || null, carrier || null]
           );
           user = created.rows[0];

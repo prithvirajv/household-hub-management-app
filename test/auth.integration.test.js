@@ -773,3 +773,85 @@ test("password reset is generic, one-time, and preserves admin authorization", a
   assert.equal(newSignin.status, 200);
   assert.equal(newSignin.body.user.isAdmin, true);
 });
+
+test("a new signup starts unverified, gets a verification token, and confirming it marks the account verified", async () => {
+  const email = "unverified-signup@example.com";
+  const signup = await request("/api/auth/signup", {
+    method: "POST",
+    body: JSON.stringify({
+      email, password: "Consumer-Password-123!", name: "Unverified Signup",
+      householdName: "Unverified Household", country: "US"
+    })
+  });
+  assert.equal(signup.status, 201);
+  assert.equal(signup.body.user.emailVerified, false);
+  assert.ok(signup.body.verificationToken);
+
+  const session = await request("/api/session", { headers: { cookie: signup.cookie } });
+  assert.equal(session.body.user.emailVerified, false);
+
+  const badToken = await request("/api/auth/verify-email/confirm", {
+    method: "POST",
+    body: JSON.stringify({ email, token: "not-the-real-token" })
+  });
+  assert.equal(badToken.status, 400);
+
+  const confirmation = await request("/api/auth/verify-email/confirm", {
+    method: "POST",
+    body: JSON.stringify({ email, token: signup.body.verificationToken })
+  });
+  assert.equal(confirmation.status, 200);
+
+  const verifiedSession = await request("/api/session", { headers: { cookie: signup.cookie } });
+  assert.equal(verifiedSession.body.user.emailVerified, true);
+
+  const reuse = await request("/api/auth/verify-email/confirm", {
+    method: "POST",
+    body: JSON.stringify({ email, token: signup.body.verificationToken })
+  });
+  assert.equal(reuse.status, 400);
+});
+
+test("resend verification is rate-limited, no-ops once verified, and updates the account when confirmed", async () => {
+  const email = "resend-verify@example.com";
+  const signup = await request("/api/auth/signup", {
+    method: "POST",
+    body: JSON.stringify({
+      email, password: "Consumer-Password-123!", name: "Resend Verify",
+      householdName: "Resend Verify Household", country: "US"
+    })
+  });
+  assert.equal(signup.status, 201);
+
+  const immediateResend = await request("/api/auth/verify-email/resend", {
+    method: "POST",
+    headers: { cookie: signup.cookie },
+    body: "{}"
+  });
+  assert.equal(immediateResend.status, 202);
+  assert.equal("verificationToken" in immediateResend.body, false);
+
+  const confirmation = await request("/api/auth/verify-email/confirm", {
+    method: "POST",
+    body: JSON.stringify({ email, token: signup.body.verificationToken })
+  });
+  assert.equal(confirmation.status, 200);
+
+  const resendAfterVerified = await request("/api/auth/verify-email/resend", {
+    method: "POST",
+    headers: { cookie: signup.cookie },
+    body: "{}"
+  });
+  assert.equal(resendAfterVerified.status, 400);
+  assert.equal(resendAfterVerified.body.error, "This email is already verified");
+});
+
+test("a Google sign-in account is verified immediately since Google already confirmed the email", async () => {
+  const email = "verified-by-google@example.com";
+  const signin = await request("/api/auth/google", {
+    method: "POST",
+    body: JSON.stringify({ testPayload: googlePayload(email) })
+  });
+  assert.equal(signin.status, 201);
+  assert.equal(signin.body.user.emailVerified, true);
+});

@@ -39,6 +39,8 @@ let profileNameFeedback = "";
 let profileNameFeedbackIsError = false;
 let profilePasswordFeedback = "";
 let profilePasswordFeedbackIsError = false;
+let profileVerifyFeedback = "";
+let profileVerifyFeedbackIsError = false;
 // privateData is scoped to the signed-in user (not the household) and is never part
 // of `state` or autosaveState() — it must never reach the shared household blob.
 let privateData = null;
@@ -2435,7 +2437,13 @@ function renderProfile() {
         <label>Email<input value="${escapeHtml(sessionUser?.email || "")}" disabled></label>
         <button type="submit">Save name</button>
         <p class="form-message ${profileNameFeedbackIsError ? "" : "success"}" data-profile-name-message>${escapeHtml(profileNameFeedback)}</p>
-      </form>`}
+      </form>
+      <div class="profile-verify-status">
+        ${sessionUser?.emailVerified
+          ? `<p class="form-message success">Email verified ✓</p>`
+          : `<p class="form-message">Email not verified yet.</p><button type="button" class="ghost" data-resend-verification>Resend verification email</button>`}
+        <p class="form-message ${profileVerifyFeedbackIsError ? "" : "success"}" data-profile-verify-message>${escapeHtml(profileVerifyFeedback)}</p>
+      </div>`}
     </div>
     ${isDemo ? "" : `<div class="card">
       <div class="card-label">Security</div>
@@ -5620,6 +5628,18 @@ function bindViewEvents() {
     }
     render();
   });
+
+  $("[data-resend-verification]")?.addEventListener("click", async () => {
+    try {
+      const result = await api("/api/auth/verify-email/resend", { method: "POST", body: "{}" });
+      profileVerifyFeedback = result.message || "Verification email sent.";
+      profileVerifyFeedbackIsError = false;
+    } catch (error) {
+      profileVerifyFeedback = error.message;
+      profileVerifyFeedbackIsError = true;
+    }
+    render();
+  });
 }
 
 function focusCalendarType(type) {
@@ -6423,7 +6443,18 @@ async function initializeApp() {
   const resetToken = resetParams.get("resetToken");
   const resetEmail = resetParams.get("email");
   const inviteCode = resetParams.get("inviteCode");
-  if (resetToken && resetEmail) {
+  const verifyToken = resetParams.get("verifyToken");
+  if (verifyToken && resetEmail) {
+    history.replaceState({}, "", location.pathname);
+    try {
+      await api("/api/auth/verify-email/confirm", { method: "POST", body: JSON.stringify({ email: resetEmail, token: verifyToken }) });
+      $("#authMessage").textContent = "Email verified. Sign in to continue.";
+    } catch (error) {
+      $("#authMessage").textContent = error.message;
+    }
+    $("#signinForm [name=email]").value = resetEmail;
+    setAuthShell("Sign in");
+  } else if (resetToken && resetEmail) {
     $("#signinForm").hidden = true;
     $("#signupForm").hidden = true;
     $("#passwordResetConfirmForm").hidden = false;

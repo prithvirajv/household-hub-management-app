@@ -19,7 +19,8 @@ ALTER TABLE users
   ADD COLUMN IF NOT EXISTS disabled_at TIMESTAMPTZ,
   ADD COLUMN IF NOT EXISTS phone TEXT,
   ADD COLUMN IF NOT EXISTS carrier TEXT,
-  ADD COLUMN IF NOT EXISTS google_id TEXT UNIQUE;
+  ADD COLUMN IF NOT EXISTS google_id TEXT UNIQUE,
+  ADD COLUMN IF NOT EXISTS email_verified_at TIMESTAMPTZ;
 
 -- Google-authenticated accounts never set a password.
 ALTER TABLE users ALTER COLUMN password_hash DROP NOT NULL;
@@ -111,6 +112,21 @@ CREATE INDEX IF NOT EXISTS idx_password_reset_tokens_user_id
 
 CREATE INDEX IF NOT EXISTS idx_password_reset_tokens_expires_at
   ON password_reset_tokens(expires_at);
+
+CREATE TABLE IF NOT EXISTS email_verification_tokens (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  token_hash TEXT NOT NULL UNIQUE,
+  expires_at TIMESTAMPTZ NOT NULL,
+  used_at TIMESTAMPTZ,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS idx_email_verification_tokens_user_id
+  ON email_verification_tokens(user_id);
+
+CREATE INDEX IF NOT EXISTS idx_email_verification_tokens_expires_at
+  ON email_verification_tokens(expires_at);
 
 CREATE TABLE IF NOT EXISTS notification_jobs (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
