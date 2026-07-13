@@ -1873,6 +1873,7 @@ main {
   padding: 0.55rem;
   display: grid;
   gap: 0.45rem;
+  min-width: 0;
 }
 
 .meal-day-date {
@@ -1887,6 +1888,9 @@ main {
   background: white;
   border: 1px solid var(--line);
   padding: 0.45rem;
+  min-width: 0;
+  overflow-wrap: break-word;
+  word-break: break-word;
 }
 
 .meal-slot-head {
