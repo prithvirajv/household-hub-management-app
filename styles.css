@@ -4807,3 +4807,18 @@ main {
     grid-template-columns: 1fr;
   }
 }
+
+.profile-layout {
+  display: grid;
+  gap: 0.9rem;
+  max-width: 480px;
+}
+
+.profile-form {
+  display: grid;
+  gap: 0.65rem;
+}
+
+.form-message.success {
+  color: var(--green);
+}

@@ -14,6 +14,7 @@ const views = [
   ["wealth", "Wealth", "▥"],
   ["sharing", "Sharing", "♙"],
   ["reports", "Reports", "◷"],
+  ["profile", "Profile", "◍"],
   ["help", "Help", "?"],
   ["admin", "Admin", "⚙"]
 ];
@@ -34,6 +35,10 @@ let calendarFeedback = "";
 // Kept out of state (like calendarFeedback) so a confirmation message never
 // gets saved into the shared household blob and replayed for every login.
 let mealsFeedback = "";
+let profileNameFeedback = "";
+let profileNameFeedbackIsError = false;
+let profilePasswordFeedback = "";
+let profilePasswordFeedbackIsError = false;
 // privateData is scoped to the signed-in user (not the household) and is never part
 // of `state` or autosaveState() — it must never reach the shared household blob.
 let privateData = null;
@@ -557,6 +562,7 @@ function renderShell() {
   const isPlanView = currentView === "plan";
   const isDocumentsView = currentView === "documents";
   const isDecisionsView = currentView === "decisions";
+  const isProfileView = currentView === "profile";
   $("#viewTitle").textContent = isAdminView
     ? "Application admin"
     : isHelpView
@@ -577,6 +583,8 @@ function renderShell() {
                     ? "Household documents"
                     : isDecisionsView
                       ? "Household decisions"
+                      : isProfileView
+                        ? "Your profile"
           : `${monthLabel()} plan`;
   $("#householdName").textContent = title.toUpperCase();
   $("#userName").textContent = sessionUser?.name || "Demo User";
@@ -599,9 +607,9 @@ function renderShell() {
   const selectedHousehold = households.find((household) => household.selected);
   $("#defaultHouseholdButton").disabled = Boolean(selectedHousehold?.isDefault);
   $("#defaultHouseholdButton").textContent = selectedHousehold?.isDefault ? "Default household" : "Set as default";
-  $(".month-control").hidden = isAdminView || isNotesView || isHelpView || isRecipesView || isGoalsView || isWealthView || isJournalView || isPlanView || isDocumentsView || isDecisionsView;
+  $(".month-control").hidden = isAdminView || isNotesView || isHelpView || isRecipesView || isGoalsView || isWealthView || isJournalView || isPlanView || isDocumentsView || isDecisionsView || isProfileView;
   $("#syncButton").hidden = isAdminView || isHelpView;
-  $("#downloadCsvButton").hidden = isAdminView || isNotesView || isHelpView || isJournalView || isPlanView || isDocumentsView || isDecisionsView;
+  $("#downloadCsvButton").hidden = isAdminView || isNotesView || isHelpView || isJournalView || isPlanView || isDocumentsView || isDecisionsView || isProfileView;
   renderNav();
   const metrics = metricsForView();
   $("#metrics").hidden = metrics.length === 0;
@@ -674,6 +682,7 @@ const renderers = {
   wealth: renderWealth,
   sharing: renderSharing,
   reports: renderReports,
+  profile: renderProfile,
   help: renderHelp,
   admin: renderAdmin
 };
@@ -1050,7 +1059,7 @@ function renderCalendar() {
         </section>
       </div>
       <aside class="side-stack">
-        <section class="card"><div class="card-label">Daily planner</div><h3>Upcoming schedule</h3>${upcomingScheduleItems().length ? upcomingScheduleItems().map((item) => calendarManageRow(item.title, item.displayDate || item.date, item.label || item.type, item.sourceKind, item.sourceId, item.assignees)).join("") : `<div class="empty-inline">No events scheduled this month</div>`}</section>
+        <section class="card"><div class="card-label">Daily planner</div><h3>Upcoming schedule</h3>${upcomingScheduleItems().length ? upcomingScheduleItems().map((item) => calendarManageRow(item)).join("") : `<div class="empty-inline">No events scheduled this month</div>`}</section>
         <section class="card">
           <div class="section-head"><div><span class="card-label">What to do</span><h3>Chore rotation</h3></div><button id="sideAddChoreButton" class="ghost" type="button">Add chore</button></div>
           ${choreRows.length ? choreRows.map(({ chore, index, occurrence }) => {
@@ -2414,6 +2423,34 @@ function renderReports() {
     </section>`;
 }
 
+function renderProfile() {
+  const isDemo = sessionUser?.email === "demo@familyloop.net";
+  return `<section class="profile-layout">
+    <div class="card">
+      <div class="card-label">Account</div>
+      <h3>Your profile</h3>
+      ${isDemo ? `<p class="muted">The demo account is shared by every visitor, so its name and password can't be changed here.</p>` : `
+      <form id="profileNameForm" class="profile-form">
+        <label>Name<input name="name" value="${escapeHtml(sessionUser?.name || "")}" required></label>
+        <label>Email<input value="${escapeHtml(sessionUser?.email || "")}" disabled></label>
+        <button type="submit">Save name</button>
+        <p class="form-message ${profileNameFeedbackIsError ? "" : "success"}" data-profile-name-message>${escapeHtml(profileNameFeedback)}</p>
+      </form>`}
+    </div>
+    ${isDemo ? "" : `<div class="card">
+      <div class="card-label">Security</div>
+      <h3>Change password</h3>
+      <form id="profilePasswordForm" class="profile-form">
+        <label>Current password<input name="currentPassword" type="password" autocomplete="current-password" required></label>
+        <label>New password<input name="newPassword" type="password" minlength="8" autocomplete="new-password" required></label>
+        <label>Confirm new password<input name="confirmPassword" type="password" minlength="8" autocomplete="new-password" required></label>
+        <button type="submit">Update password</button>
+        <p class="form-message ${profilePasswordFeedbackIsError ? "" : "success"}" data-profile-password-message>${escapeHtml(profilePasswordFeedback)}</p>
+      </form>
+    </div>`}
+  </section>`;
+}
+
 function renderHelp() {
   const guides = [
     ["◈", "Households", "Switch households from the Current household dropdown in the sidebar — each one keeps entirely separate budgets, calendars, notes, and records. + Add creates another (one household per currency; you'll be blocked if you already have one in that currency). Set as default marks which household loads automatically the next time you sign in — it's a preference for you personally, not something that changes what other members see. Remove deletes a household outright and is blocked if it's your only one."],
@@ -2556,10 +2593,20 @@ function compactRow(title, detail, badge, tone = "", actionAttrs = "") {
   return `<div class="compact-row ${tone}"><div><strong>${title}</strong>${detail ? `<small>${detail}</small>` : ""}</div>${badge ? `<span class="pill">${badge}</span>` : ""}${actionAttrs ? `<button class="icon-button danger-button" ${actionAttrs} type="button">×</button>` : ""}</div>`;
 }
 
-function calendarManageRow(title, detail, badge, kind, id, assignees) {
+function calendarManageRow(item) {
+  const { title, sourceKind: kind, sourceId: id, assignees } = item;
+  const detail = item.displayDate || item.date;
+  const badge = item.label || item.type;
+  // Plain reminders get the same per-assignee completion control chores use
+  // (see reminderCompletionControl) — birthdays/anniversaries and chores
+  // already have their own dedicated panels with this, so this only applies
+  // to one-time reminders shown here.
+  const isReminder = kind === "event" && item.type === "reminder";
+  const reminderEvent = isReminder ? state.calendar.events.find((event) => event.id === id) : null;
   return `<div class="compact-row">
     <div>${assigneeDots(assignees)}<strong>${escapeHtml(title)}</strong>${detail ? `<small>${escapeHtml(detail)}</small>` : ""}</div>
     ${badge ? `<span class="pill">${escapeHtml(badge)}</span>` : ""}
+    ${reminderEvent ? `<div class="chore-complete-group">${reminderCompletionControl(reminderEvent)}</div>` : ""}
     <button class="icon-button" data-edit-calendar-item="${kind}:${id}" type="button" aria-label="Edit ${escapeHtml(title)}">✎</button>
     <button class="icon-button danger-button" data-delete-calendar-item="${kind}:${id}" type="button" aria-label="Remove ${escapeHtml(title)}">×</button>
   </div>`;
@@ -2592,7 +2639,7 @@ function scheduleItems() {
   ensureAssigneesData();
   const selectedMonth = state.budget.month;
   const oneTimeEvents = state.calendar.events
-    .filter((event) => !ANNUAL_EVENT_TYPES.includes(event.type) && event.date?.startsWith(selectedMonth))
+    .filter((event) => !ANNUAL_EVENT_TYPES.includes(event.type) && event.date?.startsWith(selectedMonth) && !isReminderComplete(event))
     .map((event) => ({ title: event.title, date: event.date.slice(5), displayDate: `${event.date.slice(5)}${event.dateTime ? ` · ${formatReminderTime(event.dateTime)}` : ""}`, type: event.type, sourceKind: "event", sourceId: event.id, assignees: event.assignees || [] }));
   const chores = state.calendar.chores.flatMap((chore) =>
     choreOccurrencesForMonth(chore).map((occurrence) => ({
@@ -2691,6 +2738,30 @@ function choreCompletionButtons(chore, index, occurrenceDate) {
   }
   const suffix = assignees.length > 1 ? ` (${completedKeys.length}/${assignees.length})` : "";
   return `<button class="ghost chore-complete-button ${done ? "is-done" : ""}" data-complete-chore-assignee="${index}:${occurrenceDate}:${escapeHtml(effectiveKey)}" type="button" aria-pressed="${done}">${done ? "✓ Done" : "Mark done"}${suffix}</button>`;
+}
+
+// A plain reminder has only one occurrence ever, so completion is a flat
+// list of who's marked it done rather than the date-keyed map chores use.
+function isReminderComplete(event) {
+  const assigneeKeys = (event.assignees || []).map((assignee) => assignee.key);
+  const completedKeys = event.completedBy || [];
+  if (!assigneeKeys.length) return completedKeys.length > 0;
+  return assigneeKeys.every((key) => completedKeys.includes(key));
+}
+
+// Same single-button-tied-to-the-signed-in-user pattern as choreCompletionButtons.
+function reminderCompletionControl(event) {
+  const completedKeys = event.completedBy || [];
+  const assignees = event.assignees || [];
+  const viewerKey = sessionUser?.email || "";
+  const viewerIsAssignee = assignees.some((assignee) => assignee.key === viewerKey);
+  const effectiveKey = (assignees.length && viewerIsAssignee) ? viewerKey : "household";
+  const done = completedKeys.includes(effectiveKey);
+  if (assignees.length && !viewerIsAssignee) {
+    return `<span class="chore-complete-status">${completedKeys.length}/${assignees.length} done</span>`;
+  }
+  const suffix = assignees.length > 1 ? ` (${completedKeys.length}/${assignees.length})` : "";
+  return `<button class="ghost chore-complete-button ${done ? "is-done" : ""}" data-complete-reminder="${event.id}:${escapeHtml(effectiveKey)}" type="button" aria-pressed="${done}">${done ? "✓ Done" : "Mark done"}${suffix}</button>`;
 }
 
 // Recomputed every render (mirrors annualEventNotifyAt for birthdays) so the
@@ -2825,7 +2896,13 @@ function ensureAnnualEventRecurrenceData() {
   ensureAssigneesData();
   state.calendar.events.forEach((event) => {
     event.id ||= uniqueId("event");
-    if (!ANNUAL_EVENT_TYPES.includes(event.type)) return;
+    if (!ANNUAL_EVENT_TYPES.includes(event.type)) {
+      // Plain one-time reminders get the same per-assignee completion
+      // tracking as chores, just without an occurrence date to key by since
+      // there's only ever the one occurrence.
+      if (event.type === "reminder") event.completedBy ||= [];
+      return;
+    }
     event.monthDay ||= event.date?.slice(5);
     event.annual = true;
     event.reminderDays = Number(event.reminderDays ?? 1);
@@ -4895,6 +4972,23 @@ function bindViewEvents() {
     });
   });
 
+  document.querySelectorAll("[data-complete-reminder]").forEach((button) => {
+    button.addEventListener("click", () => {
+      const raw = button.dataset.completeReminder;
+      const separator = raw.indexOf(":");
+      const eventId = raw.slice(0, separator);
+      const key = raw.slice(separator + 1);
+      const event = state.calendar.events.find((item) => item.id === eventId);
+      if (!event || !key) return;
+      event.completedBy ||= [];
+      const already = event.completedBy.includes(key);
+      event.completedBy = already
+        ? event.completedBy.filter((item) => item !== key)
+        : [...event.completedBy, key];
+      render();
+    });
+  });
+
   document.querySelectorAll("[data-mark-wished-assignee]").forEach((button) => {
     button.addEventListener("click", () => {
       const raw = button.dataset.markWishedAssignee;
@@ -5488,6 +5582,43 @@ function bindViewEvents() {
       decision.decidedAt = "";
       render();
     });
+  });
+
+  $("#profileNameForm")?.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    const name = new FormData(event.currentTarget).get("name");
+    try {
+      const updated = await api("/api/auth/me", { method: "PATCH", body: JSON.stringify({ name }) });
+      sessionUser = { ...sessionUser, ...updated };
+      profileNameFeedback = "Saved.";
+      profileNameFeedbackIsError = false;
+    } catch (error) {
+      profileNameFeedback = error.message;
+      profileNameFeedbackIsError = true;
+    }
+    render();
+  });
+
+  $("#profilePasswordForm")?.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    const formData = new FormData(event.currentTarget);
+    const newPassword = formData.get("newPassword");
+    const confirmPassword = formData.get("confirmPassword");
+    if (newPassword !== confirmPassword) {
+      profilePasswordFeedback = "New passwords don't match.";
+      profilePasswordFeedbackIsError = true;
+      render();
+      return;
+    }
+    try {
+      await api("/api/auth/me", { method: "PATCH", body: JSON.stringify({ currentPassword: formData.get("currentPassword"), newPassword }) });
+      profilePasswordFeedback = "Password updated.";
+      profilePasswordFeedbackIsError = false;
+    } catch (error) {
+      profilePasswordFeedback = error.message;
+      profilePasswordFeedbackIsError = true;
+    }
+    render();
   });
 }
 

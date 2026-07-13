@@ -174,7 +174,11 @@ async function sendTransactionalEmail({ to, subject, text, html }) {
 // client's ensureAssigneesData()).
 function recipientEmails(item, fallbackEmail) {
   const assignees = Array.isArray(item.assignees) ? item.assignees : [];
-  const emails = [...new Set(assignees.map((assignee) => String(assignee?.email || "").trim()).filter(Boolean))];
+  // Lowercase before deduping — two assignee records for the same inbox but
+  // differing only in case (e.g. from an older entry typed with capitals)
+  // would otherwise both survive this Set and each get queued as their own
+  // notification_jobs row, producing a duplicate email to the one real inbox.
+  const emails = [...new Set(assignees.map((assignee) => String(assignee?.email || "").trim().toLowerCase()).filter(Boolean))];
   if (emails.length) return emails;
   return fallbackEmail ? [fallbackEmail] : [];
 }
@@ -205,6 +209,16 @@ function notificationCandidates(appState, fallbackEmail) {
       continue;
     }
     if (!event.notifyAt) continue;
+    // A plain reminder marked done (by every assignee, or by anyone if
+    // unassigned) doesn't need to fire, even if it hasn't reached its
+    // scheduled time yet - matches how a fully-completed chore stops
+    // generating a due candidate too.
+    const reminderAssigneeKeys = (event.assignees || []).map((assignee) => assignee?.key).filter(Boolean);
+    const reminderCompletedKeys = Array.isArray(event.completedBy) ? event.completedBy : [];
+    const reminderComplete = reminderAssigneeKeys.length
+      ? reminderAssigneeKeys.every((key) => reminderCompletedKeys.includes(key))
+      : reminderCompletedKeys.length > 0;
+    if (reminderComplete) continue;
     for (const email of recipientEmails(event, fallbackEmail)) {
       candidates.push({ sourceType: `calendar-${event.type || "event"}`, sourceId: event.id, title: event.title || "Calendar reminder", email, dueAt: event.notifyAt, timeZone });
     }
@@ -1053,6 +1067,56 @@ app.get("/api/session", async (req, res, next) => {
       household: session ? { id: session.household_id, name: session.household_name } : null,
       googleClientId: GOOGLE_CLIENT_ID
     });
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.patch("/api/auth/me", requireSession, async (req, res, next) => {
+  try {
+    if (req.sessionUser.email === DEMO_EMAIL || req.sessionUser.email === LEGACY_DEMO_EMAIL) {
+      return res.status(403).json({ error: "The consumer demo account can't be edited" });
+    }
+    const name = typeof req.body.name === "string" ? req.body.name.trim() : undefined;
+    const newPassword = typeof req.body.newPassword === "string" ? req.body.newPassword : "";
+    const currentPassword = typeof req.body.currentPassword === "string" ? req.body.currentPassword : "";
+    if (name === undefined && !newPassword) {
+      return res.status(400).json({ error: "No changes supplied" });
+    }
+    if (name !== undefined && !name) {
+      return res.status(400).json({ error: "Name cannot be blank" });
+    }
+
+    let passwordHash;
+    if (newPassword) {
+      if (newPassword.length < 8) return res.status(400).json({ error: "New password must be at least 8 characters" });
+      const existingHash = MEMORY_DB
+        ? memoryDb.users.find((item) => item.id === req.sessionUser.id)?.password_hash
+        : (await pool.query("SELECT password_hash FROM users WHERE id = $1", [req.sessionUser.id])).rows[0]?.password_hash;
+      if (!existingHash) return res.status(400).json({ error: "This account signs in with Google and has no password to change" });
+      if (!(await bcrypt.compare(currentPassword, existingHash))) {
+        return res.status(401).json({ error: "Current password is incorrect" });
+      }
+      passwordHash = await bcrypt.hash(newPassword, 12);
+    }
+
+    if (MEMORY_DB) {
+      const user = memoryDb.users.find((item) => item.id === req.sessionUser.id);
+      if (name !== undefined) user.name = name;
+      if (passwordHash) user.password_hash = passwordHash;
+      return res.json(publicUser(user));
+    }
+
+    const updates = [];
+    const values = [];
+    if (name !== undefined) { values.push(name); updates.push(`name = $${values.length}`); }
+    if (passwordHash) { values.push(passwordHash); updates.push(`password_hash = $${values.length}`); }
+    values.push(req.sessionUser.id);
+    const result = await pool.query(
+      `UPDATE users SET ${updates.join(", ")} WHERE id = $${values.length} RETURNING id, email, name, is_admin, phone, carrier`,
+      values
+    );
+    res.json(publicUser(result.rows[0]));
   } catch (error) {
     next(error);
   }
