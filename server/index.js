@@ -61,6 +61,8 @@ const NOTIFICATION_SECRET = String(process.env.NOTIFICATION_SECRET || "").trim()
 const NOTIFICATION_LEASE_MS = Math.max(50, Number(process.env.NOTIFICATION_LEASE_MS || "") || 10 * 60 * 1000);
 const NOTIFICATION_MAX_ATTEMPTS = Math.max(1, Number(process.env.NOTIFICATION_MAX_ATTEMPTS || "") || 5);
 const EXPO_PUSH_URL = String(process.env.NOTIFICATION_TEST_EXPO_URL || "").trim() || "https://exp.host/--/api/v2/push/send";
+const FINNHUB_API_KEY = String(process.env.FINNHUB_API_KEY || "").trim();
+const FINNHUB_QUOTE_URL = String(process.env.FINNHUB_QUOTE_URL || "").trim() || "https://finnhub.io/api/v1/quote";
 const SESSION_IDLE_MS = Math.max(
   1000,
   Number(process.env.SESSION_IDLE_MS || "") || Number(process.env.SESSION_IDLE_MINUTES || 30) * 60 * 1000
@@ -1105,6 +1107,24 @@ app.get("/readyz", async (_req, res) => {
 
 app.get("/api/countries", (_req, res) => {
   res.json(countryCatalog());
+});
+
+app.get("/api/stock-quote", requireSession, async (req, res, next) => {
+  try {
+    const symbol = String(req.query.symbol || "").trim().toUpperCase();
+    if (!symbol) return res.status(400).json({ error: "Enter a stock symbol first" });
+    if (!FINNHUB_API_KEY) return res.status(503).json({ error: "Live stock pricing is not configured for this deployment" });
+    const quoteUrl = `${FINNHUB_QUOTE_URL}?symbol=${encodeURIComponent(symbol)}&token=${encodeURIComponent(FINNHUB_API_KEY)}`;
+    const response = await fetch(quoteUrl);
+    const body = await response.json().catch(() => ({}));
+    const price = Number(body.c);
+    if (!response.ok || !Number.isFinite(price) || price <= 0) {
+      return res.status(404).json({ error: `No live price found for ${symbol}` });
+    }
+    res.json({ symbol, price });
+  } catch (error) {
+    next(error);
+  }
 });
 
 app.get("/api/session", async (req, res, next) => {

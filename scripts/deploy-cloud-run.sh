@@ -44,6 +44,7 @@ REQUIRE_SMTP="${REQUIRE_SMTP:-true}"
 NOTIFICATION_SECRET="${NOTIFICATION_SECRET:?Set NOTIFICATION_SECRET to authorize the scheduled notification worker}"
 GCS_BUCKET="${GCS_BUCKET:-}"
 GOOGLE_CLIENT_ID="${GOOGLE_CLIENT_ID:-}"
+FINNHUB_API_KEY="${FINNHUB_API_KEY:-}"
 
 # Every credential above is stored in Secret Manager, not passed to Cloud Run
 # as a plaintext env var — this script only reads them from the environment
@@ -53,6 +54,7 @@ SESSION_SECRET_NAME="${SESSION_SECRET_NAME:-familyloop-session-secret}"
 ADMIN_PASSWORD_SECRET="${ADMIN_PASSWORD_SECRET:-familyloop-admin-password}"
 SMTP_PASS_SECRET="${SMTP_PASS_SECRET:-familyloop-smtp-pass}"
 NOTIFICATION_SECRET_NAME="${NOTIFICATION_SECRET_NAME:-familyloop-notification-secret}"
+FINNHUB_API_KEY_SECRET="${FINNHUB_API_KEY_SECRET:-familyloop-finnhub-api-key}"
 
 if [[ -z "${DB_PASSWORD}" ]]; then
   echo "Set DB_PASSWORD or POSTGRES_PASSWORD for Cloud SQL" >&2
@@ -150,12 +152,18 @@ put_secret "${NOTIFICATION_SECRET_NAME}" "${NOTIFICATION_SECRET}"
 if [[ -n "${SMTP_PASS}" ]]; then
   put_secret "${SMTP_PASS_SECRET}" "${SMTP_PASS}"
 fi
+if [[ -n "${FINNHUB_API_KEY}" ]]; then
+  put_secret "${FINNHUB_API_KEY_SECRET}" "${FINNHUB_API_KEY}"
+fi
 
 gcloud builds submit --tag "${IMAGE}" --project "${PROJECT_ID}" .
 
 SECRET_REFS="DB_PASSWORD=${DB_PASSWORD_SECRET}:latest,SESSION_SECRET=${SESSION_SECRET_NAME}:latest,ADMIN_PASSWORD=${ADMIN_PASSWORD_SECRET}:latest,NOTIFICATION_SECRET=${NOTIFICATION_SECRET_NAME}:latest"
 if [[ -n "${SMTP_PASS}" ]]; then
   SECRET_REFS="${SECRET_REFS},SMTP_PASS=${SMTP_PASS_SECRET}:latest"
+fi
+if [[ -n "${FINNHUB_API_KEY}" ]]; then
+  SECRET_REFS="${SECRET_REFS},FINNHUB_API_KEY=${FINNHUB_API_KEY_SECRET}:latest"
 fi
 
 gcloud run deploy "${SERVICE_NAME}" \

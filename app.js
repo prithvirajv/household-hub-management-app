@@ -41,6 +41,9 @@ let profilePasswordFeedback = "";
 let profilePasswordFeedbackIsError = false;
 let profileVerifyFeedback = "";
 let profileVerifyFeedbackIsError = false;
+// Keyed by asset id (not index, since rows can reorder/delete) so a stale
+// "Refresh price" result never gets attributed to the wrong stock row.
+let stockPriceFeedback = {};
 // privateData is scoped to the signed-in user (not the household) and is never part
 // of `state` or autosaveState() — it must never reach the shared household blob.
 let privateData = null;
@@ -2302,7 +2305,7 @@ function netWorthItemRow(item, type, index) {
     <label>Type<select data-net-worth-type="${type}:${index}" aria-label="Item type"><option value="asset" ${isLiability ? "" : "selected"}>Asset</option><option value="liability" ${isLiability ? "selected" : ""}>Liability</option></select></label>
     ${isLiability ? "" : `<label>Asset class<select data-asset-class="${index}" aria-label="Asset class for ${escapeHtml(item.name)}"><option value="other" ${item.assetClass === "other" ? "selected" : ""}>Other asset</option><option value="cash" ${item.assetClass === "cash" ? "selected" : ""}>Cash</option><option value="property" ${item.assetClass === "property" ? "selected" : ""}>Property</option><option value="retirement" ${item.assetClass === "retirement" ? "selected" : ""}>Retirement</option><option value="stock" ${isStock ? "selected" : ""}>Stock</option></select></label>`}
     ${isStock
-      ? `<label>Symbol<input data-stock-symbol="${index}" value="${escapeHtml(item.symbol || "")}" placeholder="AAPL" aria-label="Stock symbol for ${escapeHtml(item.name)}"></label><label>Shares<input data-stock-shares="${index}" type="number" min="0" step="0.0001" inputmode="decimal" value="${Number(item.shares || 0)}" aria-label="Number of shares for ${escapeHtml(item.name)}"></label><label>Price per share<input data-stock-price="${index}" type="number" min="0" step="0.01" inputmode="decimal" value="${Number(item.price || 0)}" aria-label="Share price for ${escapeHtml(item.name)}"></label><div class="stock-market-value"><span>Market value</span><strong data-stock-market-value="${index}">${money.format(assetValue(item))}</strong></div>`
+      ? `<label>Symbol<input data-stock-symbol="${index}" value="${escapeHtml(item.symbol || "")}" placeholder="AAPL" aria-label="Stock symbol for ${escapeHtml(item.name)}"></label><label>Shares<input data-stock-shares="${index}" type="number" min="0" step="0.0001" inputmode="decimal" value="${Number(item.shares || 0)}" aria-label="Number of shares for ${escapeHtml(item.name)}"></label><label>Price per share<input data-stock-price="${index}" type="number" min="0" step="0.01" inputmode="decimal" value="${Number(item.price || 0)}" aria-label="Share price for ${escapeHtml(item.name)}"></label><div class="stock-market-value"><span>Market value</span><strong data-stock-market-value="${index}">${money.format(assetValue(item))}</strong><button type="button" class="ghost stock-refresh-button" data-refresh-stock-price="${index}" aria-label="Pull live price for ${escapeHtml(item.symbol || item.name)}">↻ Live price</button>${stockPriceFeedback[item.id] ? `<small class="${stockPriceFeedback[item.id].isError ? "stock-price-error" : ""}">${escapeHtml(stockPriceFeedback[item.id].message)}</small>` : ""}</div>`
       : isAccountLinked(type, item.id)
         ? `<div class="net-worth-linked-value"><span>Amount (from account)</span><strong>${money.format(Number(item.value || 0))}</strong></div>`
         : `<label>Amount<input data-net-worth-value="${type}:${index}" type="number" min="0" step="0.01" inputmode="decimal" value="${Number(item.value || 0)}" aria-label="${isLiability ? "Liability" : "Asset"} amount"></label>`}
@@ -4675,6 +4678,28 @@ function bindViewEvents() {
       const index = Number(input.dataset.stockPrice);
       state.goals.netWorth.assets[index].price = Math.max(0, Number(input.value || 0));
       refreshStockValue(index);
+    });
+  });
+  document.querySelectorAll("[data-refresh-stock-price]").forEach((button) => {
+    button.addEventListener("click", async () => {
+      const index = Number(button.dataset.refreshStockPrice);
+      const asset = state.goals.netWorth.assets[index];
+      const symbol = (asset.symbol || "").trim().toUpperCase();
+      if (!symbol) {
+        stockPriceFeedback[asset.id] = { message: "Enter a stock symbol first.", isError: true };
+        render();
+        return;
+      }
+      button.disabled = true;
+      try {
+        const result = await api(`/api/stock-quote?symbol=${encodeURIComponent(symbol)}`);
+        asset.price = result.price;
+        refreshStockValue(index);
+        stockPriceFeedback[asset.id] = { message: `Updated to ${money.format(result.price)} per share.`, isError: false };
+      } catch (error) {
+        stockPriceFeedback[asset.id] = { message: error.message, isError: true };
+      }
+      render();
     });
   });
 

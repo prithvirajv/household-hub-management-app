@@ -2265,6 +2265,22 @@ main {
   color: var(--green);
 }
 
+.stock-refresh-button {
+  justify-self: start;
+  min-height: 0;
+  padding: 0.2rem 0.5rem;
+  font-size: 0.7rem;
+}
+
+.stock-market-value small {
+  font-size: 0.68rem;
+  color: var(--muted);
+}
+
+.stock-market-value small.stock-price-error {
+  color: var(--coral);
+}
+
 .net-worth-item.liability {
   border-left-color: var(--coral);
 }
