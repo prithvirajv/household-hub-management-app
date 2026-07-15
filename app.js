@@ -719,7 +719,8 @@ function renderHome() {
           ${items.length ? items.map((item) => `
             <div class="compact-row ${item.overdue ? "overdue" : ""}">
               <div><strong>${escapeHtml(item.title)}</strong><small>${escapeHtml(item.kind)} · ${item.overdue ? "Past due" : "Due today"} · ${escapeHtml(item.detail)}</small></div>
-              <button class="pill-button" data-goto-view="${item.gotoView}" type="button">Go</button>
+              <div class="chore-complete-group">${item.completion}</div>
+              <button class="icon-button" data-goto-view="${item.gotoView}" type="button" aria-label="View ${escapeHtml(item.title)} in Calendar">✎</button>
             </div>`).join("") : `<div class="empty-inline">Nothing past due or due today — you're all caught up.</div>`}
         </section>
       </div>
@@ -3052,7 +3053,7 @@ function homeActionItems() {
   const viewerKey = sessionUser?.email || "";
 
   const choreItems = state.calendar.chores
-    .map((chore) => ({ chore, occurrence: nextPendingChoreOccurrence(chore, viewerKey) }))
+    .map((chore, index) => ({ chore, index, occurrence: nextPendingChoreOccurrence(chore, viewerKey) }))
     .filter((row) => row.occurrence && row.occurrence.date <= today)
     .map((row) => ({
       date: row.occurrence.date,
@@ -3060,7 +3061,8 @@ function homeActionItems() {
       title: row.chore.title,
       kind: "Chore",
       detail: `${assigneeNames(row.chore.assignees) || "Unassigned"} · ${choreCadenceLabel(row.chore)}`,
-      gotoView: "calendar"
+      gotoView: "calendar",
+      completion: choreCompletionButtons(row.chore, row.index, row.occurrence.date)
     }));
 
   const annualItems = state.calendar.events
@@ -3073,7 +3075,8 @@ function homeActionItems() {
       title: annualEventDisplayTitle(row.event),
       kind: annualEventLabels[row.event.type] || "Annual",
       detail: assigneeNames(row.event.assignees) || "Household",
-      gotoView: "calendar"
+      gotoView: "calendar",
+      completion: annualEventCompletionButtons(row.event, row.occurrence.year)
     }));
 
   const reminderItems = state.calendar.events
@@ -3084,7 +3087,8 @@ function homeActionItems() {
       title: event.title,
       kind: "Reminder",
       detail: event.dateTime ? formatReminderTime(event.dateTime) : (assigneeNames(event.assignees) || "Household"),
-      gotoView: "calendar"
+      gotoView: "calendar",
+      completion: reminderCompletionControl(event)
     }));
 
   return [...choreItems, ...annualItems, ...reminderItems].sort((a, b) => a.date.localeCompare(b.date));
