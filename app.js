@@ -720,7 +720,7 @@ function renderHome() {
             <div class="compact-row ${item.overdue ? "overdue" : ""}">
               <div><strong>${escapeHtml(item.title)}</strong><small>${escapeHtml(item.kind)} · ${item.overdue ? "Past due" : "Due today"} · ${escapeHtml(item.detail)}</small></div>
               <div class="chore-complete-group">${item.completion}</div>
-              <button class="icon-button" data-goto-view="${item.gotoView}" type="button" aria-label="View ${escapeHtml(item.title)} in Calendar">✎</button>
+              <button class="icon-button" data-home-edit-item="${item.reference}:${item.month}" type="button" aria-label="Edit ${escapeHtml(item.title)} in Calendar">✎</button>
             </div>`).join("") : `<div class="empty-inline">Nothing past due or due today — you're all caught up.</div>`}
         </section>
       </div>
@@ -3061,7 +3061,8 @@ function homeActionItems() {
       title: row.chore.title,
       kind: "Chore",
       detail: `${assigneeNames(row.chore.assignees) || "Unassigned"} · ${choreCadenceLabel(row.chore)}`,
-      gotoView: "calendar",
+      reference: `chore:${row.chore.id}`,
+      month: row.occurrence.date.slice(0, 7),
       completion: choreCompletionButtons(row.chore, row.index, row.occurrence.date)
     }));
 
@@ -3075,7 +3076,8 @@ function homeActionItems() {
       title: annualEventDisplayTitle(row.event),
       kind: annualEventLabels[row.event.type] || "Annual",
       detail: assigneeNames(row.event.assignees) || "Household",
-      gotoView: "calendar",
+      reference: `event:${row.event.id}`,
+      month: row.occurrence.date.slice(0, 7),
       completion: annualEventCompletionButtons(row.event, row.occurrence.year)
     }));
 
@@ -3087,7 +3089,8 @@ function homeActionItems() {
       title: event.title,
       kind: "Reminder",
       detail: event.dateTime ? formatReminderTime(event.dateTime) : (assigneeNames(event.assignees) || "Household"),
-      gotoView: "calendar",
+      reference: `event:${event.id}`,
+      month: event.date.slice(0, 7),
       completion: reminderCompletionControl(event)
     }));
 
@@ -3291,6 +3294,31 @@ function bindViewEvents() {
     button.addEventListener("click", () => {
       currentView = button.dataset.gotoView;
       render();
+    });
+  });
+
+  // The edit icon on a Home action item needs the Calendar view (and its
+  // #calendarQuickAdd form) to actually exist in the DOM before it can be
+  // populated, so switch views and re-render first, then open the editor —
+  // unlike editCalendarItem's other callers, which are already on Calendar.
+  document.querySelectorAll("[data-home-edit-item]").forEach((button) => {
+    button.addEventListener("click", async () => {
+      const raw = button.dataset.homeEditItem;
+      const monthSeparator = raw.lastIndexOf(":");
+      const reference = raw.slice(0, monthSeparator);
+      const month = raw.slice(monthSeparator + 1);
+      if (month) state.budget.month = month;
+      currentView = "calendar";
+      // render() itself fires these off unawaited the first time Calendar is
+      // visited, and re-renders again once they resolve — which would wipe
+      // out the edit form editCalendarItem is about to populate below. Wait
+      // for them up front so only this handler's own render() touches the DOM.
+      await Promise.all([
+        sharingAccess ? null : loadSharingAccess(false),
+        sharedCalendarMembers.length === 0 ? loadCalendarMembers(false) : null
+      ]);
+      render();
+      editCalendarItem(reference);
     });
   });
 
