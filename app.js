@@ -1,4 +1,5 @@
 const views = [
+  ["home", "Home", "◈"],
   ["budget", "Budget", "▦"],
   ["transactions", "Transactions", "☰"],
   ["paychecks", "Paycheck/Income", "☑"],
@@ -26,7 +27,7 @@ let sharingAccess = null;
 let sharedCalendarMembers = [];
 let households = [];
 let countryCatalog = [];
-let currentView = "budget";
+let currentView = "home";
 let autosaveTimer = null;
 let inviteEmailStatus = "";
 let googleSignInInitialized = false;
@@ -572,6 +573,7 @@ function renderShell() {
   const isDocumentsView = currentView === "documents";
   const isDecisionsView = currentView === "decisions";
   const isProfileView = currentView === "profile";
+  const isHomeView = currentView === "home";
   $("#viewTitle").textContent = isAdminView
     ? "Application admin"
     : isHelpView
@@ -594,6 +596,8 @@ function renderShell() {
                       ? "Household decisions"
                       : isProfileView
                         ? "Your profile"
+                        : isHomeView
+                          ? "Home"
           : `${monthLabel()} plan`;
   $("#householdName").textContent = title.toUpperCase();
   $("#userName").textContent = sessionUser?.name || "Demo User";
@@ -616,9 +620,9 @@ function renderShell() {
   const selectedHousehold = households.find((household) => household.selected);
   $("#defaultHouseholdButton").disabled = Boolean(selectedHousehold?.isDefault);
   $("#defaultHouseholdButton").textContent = selectedHousehold?.isDefault ? "Default household" : "Set as default";
-  $(".month-control").hidden = isAdminView || isNotesView || isHelpView || isRecipesView || isGoalsView || isWealthView || isJournalView || isPlanView || isDocumentsView || isDecisionsView || isProfileView;
+  $(".month-control").hidden = isAdminView || isNotesView || isHelpView || isRecipesView || isGoalsView || isWealthView || isJournalView || isPlanView || isDocumentsView || isDecisionsView || isProfileView || isHomeView;
   $("#syncButton").hidden = isAdminView || isHelpView;
-  $("#downloadCsvButton").hidden = isAdminView || isNotesView || isHelpView || isJournalView || isPlanView || isDocumentsView || isDecisionsView || isProfileView;
+  $("#downloadCsvButton").hidden = isAdminView || isNotesView || isHelpView || isJournalView || isPlanView || isDocumentsView || isDecisionsView || isProfileView || isHomeView;
   renderNav();
   const metrics = metricsForView();
   $("#metrics").hidden = metrics.length === 0;
@@ -635,6 +639,13 @@ function metricsForView() {
   const margin = state.budget.income - plannedTotal();
   const upcoming = scheduleItems().length;
   const groceries = groceryList().length;
+  if (currentView === "home") {
+    const items = homeActionItems();
+    const pastDue = items.filter((item) => item.overdue).length;
+    const dueToday = items.length - pastDue;
+    const openBillsAndGoals = billAndGoalReminders().length;
+    return [["Past due", String(pastDue), "chores, birthdays and reminders"], ["Due today", String(dueToday), "needs action today"], ["Bills & goals", String(openBillsAndGoals), "still open"], ["All caught up", pastDue + dueToday + openBillsAndGoals === 0 ? "Yes" : "Not yet", "across the household"]];
+  }
   if (currentView === "calendar") {
     const annualEventsThisMonth = annualEventOccurrencesForMonth().length;
     return [["Chore rotation", String(state.calendar.chores.length), "household chores"], ["Birthdays & anniversaries", String(annualEventsThisMonth), `annual events in ${monthLabel()}`], [`${monthLabel()} events`, String(upcoming), "chores, birthdays, anniversaries and reminders"], ["Shared calendar", "Household", "tasks in every member"]];
@@ -663,7 +674,7 @@ function render() {
   // times in the household's own timezone instead of the server container's
   // (see notificationCandidates/formatDueLabel in server/index.js).
   state.household.timeZone ||= Intl.DateTimeFormat().resolvedOptions().timeZone;
-  if (currentView === "admin" && !sessionUser?.isAdmin) currentView = "budget";
+  if (currentView === "admin" && !sessionUser?.isAdmin) currentView = "home";
   if (currentView === "wealth") { ensureDebtNetWorthSync(); ensureAccountsData(); }
   renderShell();
   view.innerHTML = (renderers[currentView] || renderers.budget)();
@@ -676,6 +687,7 @@ function render() {
 }
 
 const renderers = {
+  home: renderHome,
   budget: renderBudget,
   transactions: renderTransactions,
   paychecks: renderPaychecks,
@@ -695,6 +707,30 @@ const renderers = {
   help: renderHelp,
   admin: renderAdmin
 };
+
+function renderHome() {
+  const items = homeActionItems();
+  const billsAndGoals = billAndGoalReminders();
+  return `
+    <section class="work-grid">
+      <div class="main-stack">
+        <section class="card">
+          <div class="section-head"><div><span class="card-label">Action needed</span><h3>Past due and due today</h3></div></div>
+          ${items.length ? items.map((item) => `
+            <div class="compact-row ${item.overdue ? "overdue" : ""}">
+              <div><strong>${escapeHtml(item.title)}</strong><small>${escapeHtml(item.kind)} · ${item.overdue ? "Past due" : "Due today"} · ${escapeHtml(item.detail)}</small></div>
+              <button class="pill-button" data-goto-view="${item.gotoView}" type="button">Go</button>
+            </div>`).join("") : `<div class="empty-inline">Nothing past due or due today — you're all caught up.</div>`}
+        </section>
+      </div>
+      <aside class="side-stack">
+        <section class="card">
+          <div class="card-label">Bills &amp; goals</div><h3>Needs funding or payment</h3>
+          ${billsAndGoals.length ? billsAndGoals.map((reminder) => `<div class="compact-row"><div><strong>${escapeHtml(reminder.title)}</strong><small>${escapeHtml(reminder.detail)}</small></div><button class="pill-button" data-dismiss-reminder="${escapeHtml(reminder.id)}" type="button">Done</button></div>`).join("") : `<div class="empty-inline">No open bills or goals right now.</div>`}
+        </section>
+      </aside>
+    </section>`;
+}
 
 function renderBudget() {
   ensurePaycheckRecurrenceData();
@@ -3003,6 +3039,56 @@ function nextPendingAnnualEventOccurrence(event, referenceDate = new Date(), vie
 // lib/shared-logic.js (loaded as a global script alongside this file) so the
 // client and server always agree on how a birthday/anniversary's next
 // occurrence and reminder due date are computed.
+
+// Everything on the Home dashboard that has an actual calendar date and is
+// either already overdue or due today — chores, birthdays/anniversaries, and
+// plain reminders. Personalized to the signed-in viewer the same way the
+// Calendar tab's own side panels are (see nextPendingChoreOccurrence),
+// so a jointly-assigned item drops off once the viewer has done their part.
+function homeActionItems() {
+  ensureChoreRecurrenceData();
+  ensureAnnualEventRecurrenceData();
+  const today = dateKey(new Date());
+  const viewerKey = sessionUser?.email || "";
+
+  const choreItems = state.calendar.chores
+    .map((chore) => ({ chore, occurrence: nextPendingChoreOccurrence(chore, viewerKey) }))
+    .filter((row) => row.occurrence && row.occurrence.date <= today)
+    .map((row) => ({
+      date: row.occurrence.date,
+      overdue: row.occurrence.date < today,
+      title: row.chore.title,
+      kind: "Chore",
+      detail: `${assigneeNames(row.chore.assignees) || "Unassigned"} · ${choreCadenceLabel(row.chore)}`,
+      gotoView: "calendar"
+    }));
+
+  const annualItems = state.calendar.events
+    .filter((event) => ANNUAL_EVENT_TYPES.includes(event.type))
+    .map((event) => ({ event, occurrence: nextPendingAnnualEventOccurrence(event, new Date(), viewerKey) }))
+    .filter((row) => row.occurrence && row.occurrence.date <= today)
+    .map((row) => ({
+      date: row.occurrence.date,
+      overdue: row.occurrence.date < today,
+      title: annualEventDisplayTitle(row.event),
+      kind: annualEventLabels[row.event.type] || "Annual",
+      detail: assigneeNames(row.event.assignees) || "Household",
+      gotoView: "calendar"
+    }));
+
+  const reminderItems = state.calendar.events
+    .filter((event) => event.type === "reminder" && event.date && event.date <= today && !isReminderComplete(event))
+    .map((event) => ({
+      date: event.date,
+      overdue: event.date < today,
+      title: event.title,
+      kind: "Reminder",
+      detail: event.dateTime ? formatReminderTime(event.dateTime) : (assigneeNames(event.assignees) || "Household"),
+      gotoView: "calendar"
+    }));
+
+  return [...choreItems, ...annualItems, ...reminderItems].sort((a, b) => a.date.localeCompare(b.date));
+}
 
 function dateKey(date) {
   return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
@@ -5916,7 +6002,7 @@ nav.addEventListener("click", async (event) => {
       adminData = null;
     } catch (error) {
       sessionUser = { ...sessionUser, isAdmin: false };
-      currentView = "budget";
+      currentView = "home";
       render();
       window.alert(error.message);
       return;
@@ -6419,7 +6505,7 @@ async function loadAdminData() {
   } catch (error) {
     sessionUser = { ...sessionUser, isAdmin: false };
     adminData = null;
-    currentView = "budget";
+    currentView = "home";
     render();
     window.alert(error.message);
   }
