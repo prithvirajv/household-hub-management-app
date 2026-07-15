@@ -745,6 +745,7 @@ function renderHome() {
 
 function renderBudget() {
   ensurePaycheckRecurrenceData();
+  ensureAccountsData();
   const setupStarted = state.budget.setupStarted ?? (state.paychecks.length > 0 || state.budget.categories.length > 0);
   if (!setupStarted) {
     return `<section class="onboarding-empty budget-onboarding">
@@ -760,18 +761,20 @@ function renderBudget() {
     <section class="work-grid transactions-grid">
       <div class="main-stack">
         <section class="budget-ledger-card card">
-          <div class="budget-ledger-head">
+          <div class="budget-ledger-head ${state.accounts.length ? "has-accounts" : ""}">
             <div><h3>Income</h3><small data-income-left>${money.format(state.budget.income - plannedTotal())} left to budget</small></div>
             <span>Planned</span>
             <span>Remaining</span>
             <span>Repeats</span>
+            ${state.accounts.length ? `<span>Deposit to</span>` : ""}
           </div>
           ${state.paychecks.map((paycheck, index) => `
-            <div class="budget-money-row">
+            <div class="budget-money-row ${state.accounts.length ? "has-accounts" : ""}">
               <input class="line-name-input" data-income-name="${index}" value="${paycheck.name}">
               <input class="money-input" data-income-amount="${index}" type="number" step="0.01" value="${paycheck.amount}">
               <strong data-income-remaining="${index}">${exactMoney.format(Number(paycheck.amount || 0) - paycheckAssignedAmount(paycheck))}</strong>
               <select class="income-recurrence-select" data-income-recurrence="${index}" aria-label="How often ${escapeHtml(paycheck.name)} repeats">${Object.entries(paycheckRecurrenceLabels).map(([value, label]) => `<option value="${value}" ${paycheck.recurrence === value ? "selected" : ""}>${label}</option>`).join("")}</select>
+              ${state.accounts.length ? `<select class="income-recurrence-select" data-paycheck-deposit-account="${index}" aria-label="Deposit account for ${escapeHtml(paycheck.name)}"><option value="">Not linked</option>${accountOptions(paycheck.depositAccountId || "", { excludeType: "credit_card" })}</select>` : ""}
             </div>
           `).join("")}
           <button id="addIncomeButton" class="link-button" type="button">Add income</button>

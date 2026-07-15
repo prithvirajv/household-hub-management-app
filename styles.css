@@ -905,7 +905,7 @@ main {
 }
 
 .budget-ledger-card {
-  max-width: 860px;
+  max-width: 1040px;
   margin-inline: auto;
   width: 100%;
 }
@@ -916,6 +916,10 @@ main {
   gap: 0.75rem;
   align-items: end;
   color: var(--muted);
+}
+
+.budget-ledger-head.has-accounts {
+  grid-template-columns: minmax(0, 1fr) 150px 150px 140px 160px;
 }
 
 .budget-ledger-head h3 {
@@ -929,6 +933,10 @@ main {
   align-items: center;
   padding: 0.55rem 0;
   border-bottom: 1px solid #1f8ee8;
+}
+
+.budget-money-row.has-accounts {
+  grid-template-columns: minmax(0, 1fr) 150px 150px 140px 160px;
 }
 
 .income-recurrence-select {
@@ -3456,7 +3464,9 @@ main {
   .payment-row,
   .category-adder,
   .budget-ledger-head,
+  .budget-ledger-head.has-accounts,
   .budget-money-row,
+  .budget-money-row.has-accounts,
   .assign-row,
   .ledger-assign-row,
   .report-row {
