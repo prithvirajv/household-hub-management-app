@@ -903,7 +903,7 @@ main {
 
 .budget-ledger-head {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 150px 150px;
+  grid-template-columns: minmax(0, 1fr) 150px 150px 140px;
   gap: 0.75rem;
   align-items: end;
   color: var(--muted);

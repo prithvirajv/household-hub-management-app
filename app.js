@@ -213,6 +213,10 @@ function plannedTotal() {
   return allLines().reduce((sum, line) => sum + Number(line.planned || 0), 0);
 }
 
+function paycheckAssignedAmount(paycheck) {
+  return paycheck.assignedLineIds.reduce((sum, id) => sum + (allLines().find((line) => line.id === id)?.planned || 0), 0);
+}
+
 function spentByLine(lineId) {
   return state.transactions.filter((transaction) => transaction.lineId === lineId).reduce((sum, transaction) => sum + Number(transaction.amount || 0), 0);
 }
@@ -713,12 +717,13 @@ function renderBudget() {
             <div><h3>Income</h3><small data-income-left>${money.format(state.budget.income - plannedTotal())} left to budget</small></div>
             <span>Planned</span>
             <span>Remaining</span>
+            <span>Repeats</span>
           </div>
           ${state.paychecks.map((paycheck, index) => `
             <div class="budget-money-row">
               <input class="line-name-input" data-income-name="${index}" value="${paycheck.name}">
               <input class="money-input" data-income-amount="${index}" type="number" step="0.01" value="${paycheck.amount}">
-              <strong data-income-remaining="${index}">${exactMoney.format(paycheck.amount)}</strong>
+              <strong data-income-remaining="${index}">${exactMoney.format(Number(paycheck.amount || 0) - paycheckAssignedAmount(paycheck))}</strong>
               <select class="income-recurrence-select" data-income-recurrence="${index}" aria-label="How often ${escapeHtml(paycheck.name)} repeats">${Object.entries(paycheckRecurrenceLabels).map(([value, label]) => `<option value="${value}" ${paycheck.recurrence === value ? "selected" : ""}>${label}</option>`).join("")}</select>
             </div>
           `).join("")}
@@ -887,7 +892,7 @@ function renderPaychecks() {
           </div>
           <div class="paycheck-grid">
             ${state.paychecks.map((paycheck, index) => {
-              const assigned = paycheck.assignedLineIds.reduce((sum, id) => sum + (allLines().find((line) => line.id === id)?.planned || 0), 0);
+              const assigned = paycheckAssignedAmount(paycheck);
               return `<article class="paycheck-card">
                 <div class="paycheck-card-header">
                   <input class="paycheck-name-input" data-income-name="${index}" value="${escapeHtml(paycheck.name)}" aria-label="Name for this paycheck/income entry">
@@ -4021,7 +4026,7 @@ function bindViewEvents() {
       const index = Number(input.dataset.incomeAmount);
       state.paychecks[index].amount = Number(input.value || 0);
       state.budget.income = state.paychecks.reduce((sum, paycheck) => sum + Number(paycheck.amount || 0), 0);
-      refreshIncomeTotals(index);
+      refreshIncomeTotals();
       autosaveState();
     });
     input.addEventListener("change", () => {
@@ -4237,7 +4242,7 @@ function bindViewEvents() {
       state.budget.income = state.paychecks.reduce((sum, item) => sum + Number(item.amount || 0), 0);
       const splitEl = document.querySelector(`[data-paycheck-split="${index}"]`);
       if (splitEl) {
-        const assigned = paycheck.assignedLineIds.reduce((sum, id) => sum + (allLines().find((line) => line.id === id)?.planned || 0), 0);
+        const assigned = paycheckAssignedAmount(paycheck);
         splitEl.innerHTML = `<span>Income ${money.format(paycheck.amount)}</span><b>Assigned ${money.format(assigned)}</b>`;
       }
       autosaveState();
@@ -5815,10 +5820,14 @@ function refreshBudgetTotals(categoryIndex, lineIndex) {
   if (plannedEl) plannedEl.textContent = `${money.format(planned)} planned`;
 }
 
-function refreshIncomeTotals(index) {
-  const paycheck = state.paychecks[index];
-  const remainingEl = document.querySelector(`[data-income-remaining="${index}"]`);
-  if (remainingEl && paycheck) remainingEl.textContent = exactMoney.format(Number(paycheck.amount || 0));
+function refreshIncomeTotals() {
+  // Refresh every row (not just the one edited) since assigning or changing a
+  // budget line's planned amount can shift the "Remaining" figure on any
+  // paycheck that line is assigned to, not only the paycheck being typed into.
+  state.paychecks.forEach((paycheck, paycheckIndex) => {
+    const remainingEl = document.querySelector(`[data-income-remaining="${paycheckIndex}"]`);
+    if (remainingEl) remainingEl.textContent = exactMoney.format(Number(paycheck.amount || 0) - paycheckAssignedAmount(paycheck));
+  });
 
   const left = state.budget.income - plannedTotal();
   const leftEl = document.querySelector("[data-income-left]");
