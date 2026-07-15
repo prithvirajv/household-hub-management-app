@@ -715,6 +715,16 @@ function renderHome() {
     <section class="work-grid">
       <div class="main-stack">
         <section class="card">
+          <div class="card-label">Quick add</div><h3>Jump straight to adding something</h3>
+          <div class="button-row">
+            <button id="homeAddChoreButton" class="ghost" type="button">+ Add chore</button>
+            <button id="homeAddReminderButton" class="ghost" type="button">+ Add reminder</button>
+            <button id="homeAddBirthdayButton" class="ghost" type="button">+ Add birthday/anniversary</button>
+            <button id="homeAddTransactionButton" class="ghost" type="button">+ Add transaction</button>
+            <button id="homeAddIncomeButton" class="ghost" type="button">+ Add income</button>
+          </div>
+        </section>
+        <section class="card">
           <div class="section-head"><div><span class="card-label">Action needed</span><h3>Past due and due today</h3></div></div>
           ${items.length ? items.map((item) => `
             <div class="compact-row ${item.overdue ? "overdue" : ""}">
@@ -3302,25 +3312,27 @@ function bindViewEvents() {
   // populated, so switch views and re-render first, then open the editor —
   // unlike editCalendarItem's other callers, which are already on Calendar.
   document.querySelectorAll("[data-home-edit-item]").forEach((button) => {
-    button.addEventListener("click", async () => {
+    button.addEventListener("click", () => {
       const raw = button.dataset.homeEditItem;
       const monthSeparator = raw.lastIndexOf(":");
       const reference = raw.slice(0, monthSeparator);
       const month = raw.slice(monthSeparator + 1);
       if (month) state.budget.month = month;
-      currentView = "calendar";
-      // render() itself fires these off unawaited the first time Calendar is
-      // visited, and re-renders again once they resolve — which would wipe
-      // out the edit form editCalendarItem is about to populate below. Wait
-      // for them up front so only this handler's own render() touches the DOM.
-      await Promise.all([
-        sharingAccess ? null : loadSharingAccess(false),
-        sharedCalendarMembers.length === 0 ? loadCalendarMembers(false) : null
-      ]);
-      render();
-      editCalendarItem(reference);
+      goToViewAndRun("calendar", () => editCalendarItem(reference));
     });
   });
+
+  $("#homeAddChoreButton")?.addEventListener("click", () => goToViewAndRun("calendar", () => focusCalendarType("chore")));
+  $("#homeAddReminderButton")?.addEventListener("click", () => goToViewAndRun("calendar", () => focusCalendarType("reminder")));
+  $("#homeAddBirthdayButton")?.addEventListener("click", () => goToViewAndRun("calendar", () => focusCalendarType("birthday")));
+  $("#homeAddTransactionButton")?.addEventListener("click", () => goToViewAndRun("transactions", () => {
+    $("#transactionForm")?.scrollIntoView({ behavior: "smooth", block: "center" });
+    $("#transactionForm [name='payee']")?.focus();
+  }));
+  $("#homeAddIncomeButton")?.addEventListener("click", () => goToViewAndRun("budget", () => {
+    $("#addIncomeButton")?.click();
+    $("#addIncomeButton")?.scrollIntoView({ behavior: "smooth", block: "center" });
+  }));
 
   document.querySelectorAll("[data-dismiss-reminder]").forEach((button) => {
     button.addEventListener("click", () => dismissBudgetReminder(button.dataset.dismissReminder));
@@ -5789,6 +5801,24 @@ function bindViewEvents() {
     }
     render();
   });
+}
+
+// Home's Quick add shortcuts jump to another tab and then act on that tab's
+// own form, which only exists once that view has actually been rendered.
+// Calendar specifically also needs its member/sharing-access loads awaited
+// first (see the data-home-edit-item handler above) since each one
+// re-renders again on resolve and would otherwise wipe out anything the
+// action callback just set up.
+async function goToViewAndRun(targetView, action) {
+  currentView = targetView;
+  if (targetView === "calendar") {
+    await Promise.all([
+      sharingAccess ? null : loadSharingAccess(false),
+      sharedCalendarMembers.length === 0 ? loadCalendarMembers(false) : null
+    ]);
+  }
+  render();
+  action?.();
 }
 
 function focusCalendarType(type) {
