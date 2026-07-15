@@ -1108,7 +1108,7 @@ function renderCalendar() {
       <aside class="side-stack">
         <section class="card"><div class="card-label">Daily planner</div><h3>Upcoming schedule</h3>${upcomingScheduleItems().length ? upcomingScheduleItems().map((item) => calendarManageRow(item)).join("") : `<div class="empty-inline">No events scheduled this month</div>`}</section>
         <section class="card">
-          <div class="section-head"><div><span class="card-label">What to do</span><h3>Chore rotation</h3></div><button id="sideAddChoreButton" class="ghost" type="button">Add chore</button></div>
+          <div class="section-head"><div><span class="card-label">What to do</span><h3>Chore rotation</h3></div><div class="button-row"><button id="sideAddChoreButton" class="ghost" type="button">Add chore</button><button id="sideAddReminderButton" class="ghost" type="button">Add reminder</button></div></div>
           ${choreRows.length ? choreRows.map(({ chore, index, occurrence }) => {
             const overdue = occurrence.date < today;
             return `<div class="compact-row ${overdue ? "overdue" : ""}">
@@ -5194,6 +5194,7 @@ function bindViewEvents() {
   $("#addBirthdayButton")?.addEventListener("click", () => focusCalendarType("birthday"));
   $("#sideAddBirthdayButton")?.addEventListener("click", () => focusCalendarType("birthday"));
   $("#addReminderButton")?.addEventListener("click", () => focusCalendarType("reminder"));
+  $("#sideAddReminderButton")?.addEventListener("click", () => focusCalendarType("reminder"));
 
   document.querySelectorAll("[data-calendar-filter-owner]").forEach((button) => {
     button.addEventListener("click", () => {
