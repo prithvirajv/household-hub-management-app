@@ -948,7 +948,7 @@ function renderPaychecks() {
                     <button class="icon-button danger-button" data-delete-paycheck="${index}" type="button" aria-label="Delete ${escapeHtml(paycheck.name)}">×</button>
                   </div>
                 </div>
-                <small>${paycheck.date}</small>
+                <label class="paycheck-recurrence-field">Date<input type="date" data-paycheck-date="${index}" value="${paycheck.date}" aria-label="Date for ${escapeHtml(paycheck.name)}"></label>
                 <label class="paycheck-recurrence-field">Repeat<select data-paycheck-recurrence="${index}" aria-label="How often ${escapeHtml(paycheck.name)} repeats">${Object.entries(paycheckRecurrenceLabels).map(([value, label]) => `<option value="${value}" ${paycheck.recurrence === value ? "selected" : ""}>${label}</option>`).join("")}</select></label>
                 ${state.accounts.length ? `<label class="paycheck-recurrence-field">Deposit to<select data-paycheck-deposit-account="${index}" aria-label="Deposit account for ${escapeHtml(paycheck.name)}"><option value="">Not linked</option>${accountOptions(paycheck.depositAccountId || "", { excludeType: "credit_card" })}</select></label>` : ""}
                 <div class="mini-tags">${paycheck.assignedLineIds.map((id) => `<span>${lineName(id)}</span>`).join("")}</div>
@@ -4342,6 +4342,14 @@ function bindViewEvents() {
     button.addEventListener("click", () => {
       state.paychecks.splice(Number(button.dataset.deletePaycheck), 1);
       state.budget.income = state.paychecks.reduce((sum, paycheck) => sum + Number(paycheck.amount || 0), 0);
+      render();
+    });
+  });
+
+  document.querySelectorAll("[data-paycheck-date]").forEach((input) => {
+    input.addEventListener("change", () => {
+      const paycheck = state.paychecks[Number(input.dataset.paycheckDate)];
+      if (paycheck && input.value) paycheck.date = input.value;
       render();
     });
   });
