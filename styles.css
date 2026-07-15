@@ -249,6 +249,15 @@ main {
   justify-content: flex-start;
 }
 
+/* #nav lives in the sidebar, outside #workspace, so hiding #workspace on
+   sign-out/session-expiry never clears its previously-rendered tabs — the
+   whole populated nav would otherwise stay visible and clickable behind the
+   sign-in form. Hide it purely by CSS so it doesn't matter whether #nav's
+   innerHTML happens to be stale or empty. */
+.auth-mode .sidebar nav {
+  display: none;
+}
+
 .eyebrow,
 .card-label {
   color: var(--muted);
