@@ -1506,21 +1506,30 @@ main {
   margin-bottom: 0.6rem;
 }
 
-.row-heading {
+/* Each field carries its own caption instead of relying on a separate
+   heading row: a heading row is a second, independent flex container that
+   can wrap at different points than the data row below it as soon as
+   content (e.g. a long subcategory name) differs, so it silently drifts out
+   of alignment. A caption glued to its own field can never drift. */
+.row-field {
   display: flex;
-  flex-wrap: wrap;
-  gap: 0.5rem;
-  padding: 0 0.6rem;
-  margin-bottom: 0.35rem;
+  flex-direction: column;
+  gap: 0.15rem;
+  min-width: 0;
 }
 
-.row-heading-label {
-  min-width: 0;
+.row-field > small {
   color: var(--muted);
-  font-size: 0.72rem;
+  font-size: 0.68rem;
   font-weight: 900;
-  letter-spacing: 0.04em;
+  letter-spacing: 0.03em;
   text-transform: uppercase;
+}
+
+.row-field > input,
+.row-field > select {
+  width: 100%;
+  min-width: 0;
 }
 
 .row-heading-spacer {

@@ -875,11 +875,11 @@ function ledgerEntryRow(transaction, index) {
   const lineOptions = allLines().map((line) => `<option value="${line.id}" ${line.id === transaction.lineId ? "selected" : ""}>${line.category} - ${line.name}</option>`).join("");
   return `
     <div class="ledger-entry-row">
-      <input class="row-payee" data-ledger-entry-payee="${index}" value="${escapeHtml(transaction.payee)}" aria-label="Payee">
-      <input class="row-amount money-input" type="number" step="0.01" data-ledger-entry-amount="${index}" value="${transaction.amount}" aria-label="Amount">
-      <input class="row-date" type="date" data-ledger-entry-date="${index}" value="${transaction.date}" aria-label="Date">
-      <select class="row-select" data-ledger-entry-line="${index}" aria-label="Subcategory">${lineOptions}</select>
-      ${state.accounts.length ? `<select class="row-select" data-ledger-entry-account="${index}" aria-label="Account"><option value="">Not linked</option>${accountOptions(transaction.accountId || "")}</select>` : ""}
+      <label class="row-field row-payee"><small>Payee</small><input data-ledger-entry-payee="${index}" value="${escapeHtml(transaction.payee)}"></label>
+      <label class="row-field row-amount"><small>Amount</small><input class="money-input" type="number" step="0.01" data-ledger-entry-amount="${index}" value="${transaction.amount}"></label>
+      <label class="row-field row-date"><small>Date</small><input type="date" data-ledger-entry-date="${index}" value="${transaction.date}"></label>
+      <label class="row-field row-select"><small>Subcategory</small><select data-ledger-entry-line="${index}">${lineOptions}</select></label>
+      ${state.accounts.length ? `<label class="row-field row-select"><small>Account</small><select data-ledger-entry-account="${index}"><option value="">Not linked</option>${accountOptions(transaction.accountId || "")}</select></label>` : ""}
       <button class="icon-button danger-button" data-delete-transaction="${index}" type="button" aria-label="Delete ${escapeHtml(transaction.payee)}">×</button>
     </div>`;
 }
@@ -888,15 +888,15 @@ function recurringExpenseRow(recurring, index) {
   const lineOptions = allLines().map((line) => `<option value="${line.id}" ${line.id === recurring.lineId ? "selected" : ""}>${line.category} - ${line.name}</option>`).join("");
   return `
     <div class="recurring-expense-row">
-      <input class="row-payee" data-recurring-payee="${index}" value="${escapeHtml(recurring.payee)}" aria-label="Recurring bill name">
-      <input class="row-amount money-input" type="number" step="0.01" data-recurring-amount="${index}" value="${recurring.amount}" aria-label="Recurring amount">
-      <select class="row-select" data-recurring-line="${index}" aria-label="Recurring subcategory">${lineOptions}</select>
-      ${state.accounts.length ? `<select class="row-select" data-recurring-account="${index}" aria-label="Recurring account"><option value="">Not linked</option>${accountOptions(recurring.accountId || "")}</select>` : ""}
-      <select class="row-select" data-recurring-recurrence="${index}" aria-label="Recurring frequency">
+      <label class="row-field row-payee"><small>Payee</small><input data-recurring-payee="${index}" value="${escapeHtml(recurring.payee)}"></label>
+      <label class="row-field row-amount"><small>Amount</small><input class="money-input" type="number" step="0.01" data-recurring-amount="${index}" value="${recurring.amount}"></label>
+      <label class="row-field row-select"><small>Subcategory</small><select data-recurring-line="${index}">${lineOptions}</select></label>
+      ${state.accounts.length ? `<label class="row-field row-select"><small>Account</small><select data-recurring-account="${index}"><option value="">Not linked</option>${accountOptions(recurring.accountId || "")}</select></label>` : ""}
+      <label class="row-field row-select"><small>Repeats</small><select data-recurring-recurrence="${index}">
         <option value="weekly" ${recurring.recurrence === "weekly" ? "selected" : ""}>Weekly</option>
         <option value="biweekly" ${recurring.recurrence === "biweekly" ? "selected" : ""}>Biweekly</option>
         <option value="monthly" ${recurring.recurrence === "monthly" ? "selected" : ""}>Monthly</option>
-      </select>
+      </select></label>
       <button class="icon-button danger-button" data-delete-recurring="${index}" type="button" aria-label="Stop recurring ${escapeHtml(recurring.payee)}">×</button>
     </div>`;
 }
@@ -930,14 +930,6 @@ function renderTransactions() {
           ${state.recurringExpenses.length ? `
             <div class="recurring-expenses-block">
               <div class="card-label">Recurring bills</div>
-              <div class="row-heading">
-                <span class="row-payee row-heading-label">Payee</span>
-                <span class="row-amount row-heading-label">Amount</span>
-                <span class="row-select row-heading-label">Subcategory</span>
-                ${state.accounts.length ? `<span class="row-select row-heading-label">Account</span>` : ""}
-                <span class="row-select row-heading-label">Repeats</span>
-                <span class="row-heading-spacer"></span>
-              </div>
               ${state.recurringExpenses.map((recurring, index) => recurringExpenseRow(recurring, index)).join("")}
             </div>
           ` : ""}
@@ -949,17 +941,7 @@ function renderTransactions() {
               <button data-assign-ledger="${transaction.id}:${transaction.payee}:${transaction.amount}:${transaction.date}" type="button">Assign</button>
             </div>
           `).join("")}
-          ${state.transactions.length ? `
-            <div class="row-heading">
-              <span class="row-payee row-heading-label">Payee</span>
-              <span class="row-amount row-heading-label">Amount</span>
-              <span class="row-date row-heading-label">Date</span>
-              <span class="row-select row-heading-label">Subcategory</span>
-              ${state.accounts.length ? `<span class="row-select row-heading-label">Account</span>` : ""}
-              <span class="row-heading-spacer"></span>
-            </div>
-            ${state.transactions.slice(0, 6).map((transaction, index) => ledgerEntryRow(transaction, index)).join("")}
-          ` : `<div class="empty-inline">No transactions yet</div>`}
+          ${state.transactions.length ? state.transactions.slice(0, 6).map((transaction, index) => ledgerEntryRow(transaction, index)).join("") : `<div class="empty-inline">No transactions yet</div>`}
         </section>
       </div>
       <aside class="side-stack">
@@ -980,25 +962,14 @@ function renderTransactions() {
         </section>
         <section class="card">
           <div class="section-head"><div><span class="card-label">Bank expense</span><h3>Bank stream</h3></div><button id="addTransactionButton" type="button">+ Add transaction</button></div>
-          ${imported.length ? `
-            <div class="row-heading">
-              <span class="row-payee row-heading-label">Payee</span>
-              <span class="row-date row-heading-label">Date</span>
-              <span class="row-amount row-heading-label">Amount</span>
-              <span class="row-select row-heading-label">Subcategory</span>
-              ${state.accounts.length ? `<span class="row-select row-heading-label">Account</span>` : ""}
-              <span class="row-heading-spacer"></span>
-              <span class="row-heading-spacer"></span>
-            </div>
-          ` : ""}
           ${imported.map((transaction) => `
             <div class="bank-stream-row" data-bank-stream-row="${transaction.id}">
               ${transaction.recurringId ? `<span class="pill">Recurring</span>` : ""}
-              <input class="row-payee" data-bank-stream-payee="${transaction.id}" value="${escapeHtml(transaction.payee)}" aria-label="Payee">
-              <input class="row-date" type="date" data-bank-stream-date="${transaction.id}" value="${transaction.date}" aria-label="Date">
-              <input class="row-amount money-input" type="number" step="0.01" data-bank-stream-amount="${transaction.id}" value="${transaction.amount}" aria-label="Amount">
-              <select class="row-select" data-bank-stream-line="${transaction.id}" aria-label="Subcategory">${lineOptions(transaction.lineId)}</select>
-              ${state.accounts.length ? `<select class="row-select" data-bank-stream-account="${transaction.id}" aria-label="Account"><option value="">Not linked</option>${accountOptions(transaction.accountId || "")}</select>` : ""}
+              <label class="row-field row-payee"><small>Payee</small><input data-bank-stream-payee="${transaction.id}" value="${escapeHtml(transaction.payee)}"></label>
+              <label class="row-field row-date"><small>Date</small><input type="date" data-bank-stream-date="${transaction.id}" value="${transaction.date}"></label>
+              <label class="row-field row-amount"><small>Amount</small><input class="money-input" type="number" step="0.01" data-bank-stream-amount="${transaction.id}" value="${transaction.amount}"></label>
+              <label class="row-field row-select"><small>Subcategory</small><select data-bank-stream-line="${transaction.id}">${lineOptions(transaction.lineId)}</select></label>
+              ${state.accounts.length ? `<label class="row-field row-select"><small>Account</small><select data-bank-stream-account="${transaction.id}"><option value="">Not linked</option>${accountOptions(transaction.accountId || "")}</select></label>` : ""}
               <button class="icon-button" data-accept-import="${transaction.id}" type="button" aria-label="Accept ${escapeHtml(transaction.payee)}">✓</button>
               <button class="icon-button danger-button" data-dismiss-import="${transaction.id}" type="button" aria-label="Dismiss ${escapeHtml(transaction.payee)}">×</button>
             </div>
