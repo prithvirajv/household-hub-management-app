@@ -1497,6 +1497,8 @@ function setupNoteComposerChecklist() {
 }
 
 const journalMoods = ["Happy", "Calm", "Neutral", "Stressed", "Sad", "Grateful", "Excited"];
+const journalMoodEmoji = { Happy: "😊", Calm: "😌", Neutral: "😐", Stressed: "😖", Sad: "😢", Grateful: "🙏", Excited: "🤩" };
+const journalMoodColor = { Happy: "#f59e0b", Calm: "#38bdf8", Neutral: "#94a3b8", Stressed: "#ef4444", Sad: "#6366f1", Grateful: "#10b981", Excited: "#ec4899" };
 
 function ensureJournalData() {
   privateData.journal ||= { entries: [] };
@@ -1508,8 +1510,20 @@ function sortedJournalEntries() {
     (b.entryDate || "").localeCompare(a.entryDate || "") || (b.createdAt || "").localeCompare(a.createdAt || ""));
 }
 
-function moodOptions(selected) {
-  return `<option value="">No mood</option>${journalMoods.map((mood) => `<option value="${mood}" ${selected === mood ? "selected" : ""}>${mood}</option>`).join("")}`;
+function journalEntryDateLabel(entryDate) {
+  if (!entryDate) return "";
+  const today = dateKey(new Date());
+  const yesterday = dateKey(new Date(Date.now() - 86400000));
+  if (entryDate === today) return "Today";
+  if (entryDate === yesterday) return "Yesterday";
+  return formatShortDate(entryDate);
+}
+
+function moodPickerChips({ selected, namePrefix, compact }) {
+  return journalMoods.map((mood) => `
+    <button type="button" class="mood-chip ${compact ? "mood-chip-compact" : ""} ${selected === mood ? "active" : ""}" data-mood-choice="${namePrefix}:${mood}" style="--mood-color:${journalMoodColor[mood]}" aria-pressed="${selected === mood}" title="${mood}">
+      <span class="mood-emoji">${journalMoodEmoji[mood]}</span>${compact ? "" : `<small>${mood}</small>`}
+    </button>`).join("");
 }
 
 function renderJournal() {
@@ -1520,35 +1534,52 @@ function renderJournal() {
     <section class="journal-layout">
       <div class="section-head"><div><span class="card-label">Journal</span><h3>Your private journal</h3><p class="private-note">Private to you — never shared with other household members.</p></div></div>
       <form id="journalComposer" class="journal-composer card">
-        <label>Date<input name="entryDate" type="date" value="${new Date().toISOString().slice(0, 10)}" required></label>
-        <label>Title<input name="title" placeholder="Give today a title"></label>
-        <label>Mood<select name="mood">${moodOptions("")}</select></label>
+        <div class="journal-composer-head">
+          <span class="journal-composer-icon">📔</span>
+          <div><span class="card-label">New entry</span><h3>Capture today</h3></div>
+        </div>
+        <div class="journal-composer-row">
+          <label>Date<input name="entryDate" type="date" value="${dateKey(new Date())}" required></label>
+          <label class="journal-title-field">Title<input name="title" placeholder="Give today a title"></label>
+        </div>
+        <div class="journal-field-group">
+          <span class="journal-field-label">Mood</span>
+          <div class="mood-picker">${moodPickerChips({ selected: "", namePrefix: "composer" })}</div>
+          <input type="hidden" name="mood" id="journalComposerMoodValue" value="">
+        </div>
         <label>Tags<input name="tags" placeholder="travel, family, work"></label>
-        <textarea name="body" rows="3" placeholder="What happened today?"></textarea>
-        <label class="journal-photo-picker">+ Add photos<input name="photos" type="file" accept="image/*" multiple></label>
-        <button type="submit">Add entry</button>
+        <textarea name="body" rows="4" placeholder="What happened today? How are you feeling?"></textarea>
+        <div class="journal-composer-actions">
+          <label class="journal-photo-picker">📷 Add photos<input name="photos" type="file" accept="image/*" multiple></label>
+          <button type="submit">Save entry</button>
+        </div>
       </form>
       <div class="journal-entries">
-        ${entries.length ? entries.map(renderJournalEntry).join("") : `<div class="empty-inline">No journal entries yet. Write your first one above.</div>`}
+        ${entries.length ? entries.map(renderJournalEntry).join("") : `<div class="empty-inline journal-empty">📔 No journal entries yet — write your first one above.</div>`}
       </div>
     </section>`;
 }
 
 function renderJournalEntry(entry) {
-  return `<article class="journal-entry card" data-journal-id="${entry.id}">
+  const moodColor = journalMoodColor[entry.mood] || "var(--line)";
+  return `<article class="journal-entry card" data-journal-id="${entry.id}" style="--mood-color:${moodColor}">
     <div class="journal-entry-head">
-      <input class="journal-date-input" data-journal-date="${entry.id}" type="date" value="${entry.entryDate || ""}" aria-label="Entry date">
-      <input class="journal-title-input" data-journal-title="${entry.id}" value="${escapeHtml(entry.title || "")}" placeholder="Untitled entry" aria-label="Entry title">
+      <i class="journal-mood-bar"></i>
+      <div class="journal-entry-heading">
+        <input class="journal-title-input" data-journal-title="${entry.id}" value="${escapeHtml(entry.title || "")}" placeholder="Untitled entry" aria-label="Entry title">
+        <div class="journal-entry-date-row">
+          <span class="journal-entry-date-label">${journalEntryDateLabel(entry.entryDate)}</span>
+          <input class="journal-date-input" data-journal-date="${entry.id}" type="date" value="${entry.entryDate || ""}" aria-label="Entry date">
+        </div>
+      </div>
       <button class="icon-button danger-button" data-delete-journal-entry="${entry.id}" type="button" aria-label="Delete entry">×</button>
     </div>
+    <div class="mood-picker mood-picker-compact" data-journal-mood-entry="${entry.id}">${moodPickerChips({ selected: entry.mood || "", namePrefix: entry.id, compact: true })}</div>
     <textarea class="journal-body-input" data-journal-body="${entry.id}" rows="3" placeholder="Write here..." aria-label="Entry body">${escapeHtml(entry.body || "")}</textarea>
-    <div class="journal-entry-row">
-      <label>Mood<select data-journal-mood="${entry.id}" aria-label="Mood">${moodOptions(entry.mood || "")}</select></label>
-      <input class="journal-tags-input" data-journal-tags="${entry.id}" value="${escapeHtml((entry.tags || []).join(", "))}" placeholder="Tags" aria-label="Tags">
-    </div>
-    ${entry.tags?.length ? `<div class="journal-tags">${entry.tags.map((tag) => `<span>${escapeHtml(tag)}</span>`).join("")}</div>` : ""}
+    <input class="journal-tags-input" data-journal-tags="${entry.id}" value="${escapeHtml((entry.tags || []).join(", "))}" placeholder="Tags (comma separated)" aria-label="Tags">
+    ${entry.tags?.length ? `<div class="journal-tags">${entry.tags.map((tag) => `<span>#${escapeHtml(tag)}</span>`).join("")}</div>` : ""}
     ${entry.photos?.length ? `<div class="journal-photos">${entry.photos.map((photo) => `<div class="journal-photo"><img src="${photo.dataUrl}" alt="Journal photo"><button class="icon-button danger-button" data-delete-journal-photo="${entry.id}:${photo.id}" type="button" aria-label="Remove photo">×</button></div>`).join("")}</div>` : ""}
-    <label class="journal-photo-picker ghost">+ Add photo<input data-journal-photo-input="${entry.id}" type="file" accept="image/*" multiple></label>
+    <label class="journal-photo-picker ghost">📷 Add photo<input data-journal-photo-input="${entry.id}" type="file" accept="image/*" multiple></label>
   </article>`;
 }
 
@@ -3946,11 +3977,29 @@ function bindViewEvents() {
     });
   });
 
-  document.querySelectorAll("[data-journal-mood]").forEach((select) => {
-    select.addEventListener("change", () => {
-      const entry = privateData.journal.entries.find((item) => item.id === select.dataset.journalMood);
+  document.querySelectorAll("[data-mood-choice]").forEach((button) => {
+    button.addEventListener("click", () => {
+      const [groupId, mood] = button.dataset.moodChoice.split(":");
+      const picker = button.closest(".mood-picker");
+      const wasActive = button.classList.contains("active");
+      picker.querySelectorAll(".mood-chip").forEach((chip) => {
+        chip.classList.remove("active");
+        chip.setAttribute("aria-pressed", "false");
+      });
+      const nextMood = wasActive ? "" : mood;
+      if (!wasActive) {
+        button.classList.add("active");
+        button.setAttribute("aria-pressed", "true");
+      }
+      if (groupId === "composer") {
+        $("#journalComposerMoodValue").value = nextMood;
+        return;
+      }
+      const entry = privateData.journal.entries.find((item) => item.id === groupId);
       if (!entry) return;
-      entry.mood = select.value;
+      entry.mood = nextMood;
+      const entryEl = button.closest(".journal-entry");
+      if (entryEl) entryEl.style.setProperty("--mood-color", journalMoodColor[nextMood] || "var(--line)");
       autosaveJournal();
     });
   });

@@ -3895,8 +3895,7 @@ main {
   align-items: end;
 }
 
-.journal-composer label,
-.journal-entry-row label {
+.journal-composer label {
   display: grid;
   gap: 0.25rem;
   color: var(--muted);
@@ -3906,6 +3905,114 @@ main {
 
 .journal-composer textarea {
   grid-column: 1 / -1;
+  border-radius: 10px;
+}
+
+.journal-composer-head {
+  display: flex;
+  align-items: center;
+  gap: 0.65rem;
+}
+
+.journal-composer-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 42px;
+  height: 42px;
+  border-radius: 12px;
+  background: var(--soft-blue);
+  font-size: 1.4rem;
+}
+
+.journal-composer-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.6rem;
+}
+
+.journal-composer-row label {
+  flex: 0 1 160px;
+  min-width: 0;
+}
+
+.journal-title-field {
+  flex: 1 1 260px;
+}
+
+.journal-field-group {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
+.journal-field-label {
+  color: var(--muted);
+  font-size: 0.72rem;
+  font-weight: 900;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+}
+
+.journal-composer-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.6rem;
+}
+
+.mood-picker {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+}
+
+.mood-chip {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.2rem;
+  min-width: 60px;
+  padding: 0.4rem 0.5rem;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: white;
+  color: var(--muted);
+  font-size: 0.68rem;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+  cursor: pointer;
+}
+
+.mood-chip .mood-emoji {
+  font-size: 1.25rem;
+  line-height: 1;
+}
+
+.mood-chip:hover {
+  border-color: var(--mood-color, var(--line));
+}
+
+.mood-chip.active {
+  border-color: var(--mood-color, var(--line));
+  background: color-mix(in srgb, var(--mood-color, var(--line)) 14%, white);
+  color: var(--text);
+}
+
+.mood-picker-compact {
+  gap: 0.3rem;
+}
+
+.mood-chip-compact {
+  min-width: 0;
+  padding: 0.3rem;
+  border-radius: 8px;
+}
+
+.mood-chip-compact .mood-emoji {
+  font-size: 1.1rem;
 }
 
 .journal-photo-picker {
@@ -3941,26 +4048,50 @@ main {
 }
 
 .journal-entry-head {
-  display: grid;
-  grid-template-columns: 130px minmax(0, 1fr) 34px;
-  gap: 0.5rem;
-  align-items: center;
+  display: flex;
+  align-items: stretch;
+  justify-content: space-between;
+  gap: 0.6rem;
 }
 
-.journal-entry-row {
+.journal-mood-bar {
+  flex: 0 0 6px;
+  min-height: 40px;
+  border-radius: 999px;
+  background: var(--mood-color, var(--line));
+}
+
+.journal-entry-heading {
   display: grid;
-  grid-template-columns: minmax(140px, 200px) minmax(0, 1fr);
-  gap: 0.6rem;
-  align-items: end;
+  gap: 0.3rem;
+  min-width: 0;
+  flex: 1 1 auto;
+}
+
+.journal-entry-head .icon-button {
+  align-self: center;
+}
+
+.journal-entry-date-row {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.journal-entry-date-label {
+  color: var(--muted);
+  font-size: 0.74rem;
+  font-weight: 800;
 }
 
 .journal-title-input {
-  font-size: 1.05rem;
+  font-size: 1.1rem;
   font-weight: 800;
 }
 
 .journal-body-input {
   white-space: pre-wrap;
+  border-radius: 10px;
 }
 
 .journal-tags {
@@ -3981,27 +4112,39 @@ main {
 .journal-photos {
   display: flex;
   flex-wrap: wrap;
-  gap: 0.5rem;
+  gap: 0.6rem;
 }
 
 .journal-photo {
   position: relative;
-  width: 96px;
-  height: 96px;
-  border-radius: 7px;
+  width: 128px;
+  height: 128px;
+  border-radius: 10px;
   overflow: hidden;
+  box-shadow: 0 2px 8px rgba(15, 23, 42, 0.12);
 }
 
 .journal-photo img {
   width: 100%;
   height: 100%;
   object-fit: cover;
+  transition: transform 0.15s ease;
+}
+
+.journal-photo:hover img {
+  transform: scale(1.05);
 }
 
 .journal-photo button {
   position: absolute;
   top: 4px;
   right: 4px;
+}
+
+.journal-empty {
+  text-align: center;
+  padding: 1.5rem;
+  font-size: 0.95rem;
 }
 
 .plan-bucket-tabs {
