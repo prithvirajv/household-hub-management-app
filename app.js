@@ -968,7 +968,7 @@ function renderTransactions() {
               <input class="row-payee" data-bank-stream-payee="${transaction.id}" value="${escapeHtml(transaction.payee)}" aria-label="Payee">
               <input class="row-date" type="date" data-bank-stream-date="${transaction.id}" value="${transaction.date}" aria-label="Date">
               <input class="row-amount money-input" type="number" step="0.01" data-bank-stream-amount="${transaction.id}" value="${transaction.amount}" aria-label="Amount">
-              <select class="row-select" data-bank-stream-line="${transaction.id}" aria-label="Budget line">${lineOptions(transaction.lineId)}</select>
+              <select class="row-select" data-bank-stream-line="${transaction.id}" aria-label="Subcategory">${lineOptions(transaction.lineId)}</select>
               ${state.accounts.length ? `<select class="row-select" data-bank-stream-account="${transaction.id}" aria-label="Account"><option value="">Not linked</option>${accountOptions(transaction.accountId || "")}</select>` : ""}
               <button class="icon-button" data-accept-import="${transaction.id}" type="button" aria-label="Accept ${escapeHtml(transaction.payee)}">✓</button>
               <button class="icon-button danger-button" data-dismiss-import="${transaction.id}" type="button" aria-label="Dismiss ${escapeHtml(transaction.payee)}">×</button>
@@ -991,7 +991,7 @@ function renderPaychecks() {
           <div class="section-head"><div><span class="card-label">Cash flow</span><h3>Paycheck/Income plan</h3></div><button id="addPaycheckButton" type="button">+ Add paycheck/income</button></div>
           <div class="paycheck-builder">
             <label>Paycheck/Income<select id="paycheckSelect">${paycheckOptions}</select></label>
-            <label>Budget line<select id="paycheckLineSelect">${lineOptions}</select></label>
+            <label>Subcategory<select id="paycheckLineSelect">${lineOptions}</select></label>
             <label>Amount<input id="paycheckAmountSelect" type="number" min="0" step="0.01" placeholder="150.48"></label>
             <button id="assignBillButton" type="button">Assign bill</button>
           </div>
@@ -4279,12 +4279,12 @@ function bindViewEvents() {
   document.querySelectorAll("[data-budget-line-name]").forEach((input) => {
     input.addEventListener("input", () => {
       const [categoryIndex, lineIndex] = input.dataset.budgetLineName.split(":").map(Number);
-      state.budget.categories[categoryIndex].lines[lineIndex].name = input.value || "Budget line";
+      state.budget.categories[categoryIndex].lines[lineIndex].name = input.value || "Subcategory";
       autosaveState();
     });
     input.addEventListener("change", () => {
       const [categoryIndex, lineIndex] = input.dataset.budgetLineName.split(":").map(Number);
-      state.budget.categories[categoryIndex].lines[lineIndex].name = input.value || "Budget line";
+      state.budget.categories[categoryIndex].lines[lineIndex].name = input.value || "Subcategory";
       render();
     });
   });
