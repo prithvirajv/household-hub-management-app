@@ -984,22 +984,26 @@ main {
 .line-title-stack {
   display: grid;
   gap: 0.25rem;
+  min-width: 0;
 }
 
 .due-day-field {
-  width: max-content;
-  display: inline-grid;
-  grid-template-columns: auto 150px;
+  display: grid;
+  grid-template-columns: auto minmax(70px, 150px);
   align-items: center;
   gap: 0.35rem;
   color: var(--muted);
   font-size: 0.78rem;
   font-weight: 800;
+  min-width: 0;
+  max-width: 100%;
 }
 
 .due-day-field input {
   min-height: 28px;
   padding: 0.15rem 0.3rem;
+  min-width: 0;
+  width: 100%;
 }
 
 .line-name-input:focus,
@@ -1093,7 +1097,8 @@ main {
 }
 
 .budget-line {
-  grid-template-columns: minmax(180px, 1fr) 110px 88px 88px 34px;
+  grid-template-columns: minmax(140px, 1fr) minmax(90px, 110px) minmax(70px, 88px) minmax(70px, 88px) 34px;
+  align-items: start;
 }
 
 .budget-line-value {
