@@ -5,7 +5,7 @@ const {
   dailyTaskOccursOnDate, isDailyTaskDoneOnDate, toggleDailyTaskDoneOnDate,
   timeToMinutes, minutesToTime, snapMinutes, layoutTimelineBlocks, comparePlannedToActual,
   sanitizeFilename, buildDocumentObjectPath, wouldCreateFolderCycle, buildFolderTree,
-  smsGatewayAddress, paycheckOccurrencesSince, recurringExpenseOccurrenceDates, accountBalance, accountsWithBalances,
+  smsGatewayAddress, paycheckOccurrencesSince, paycheckOccurrencesInRange, recurringExpenseOccurrenceDates, accountBalance, accountsWithBalances,
   annualEventDate, nextAnnualEventDate, annualEventNotifyAt, rollAnnualNotifyAtForward
 } = require("../lib/shared-logic");
 
@@ -404,8 +404,8 @@ test("accountBalance: checking account with one paycheck deposit and no purchase
 test("accountBalance: a purchase linked to the account reduces its balance, an unlinked purchase does not", () => {
   const accounts = [{ id: "checking", type: "checking", openingBalance: 1000 }];
   const transactions = [
-    { amount: 50, accountId: "checking" },
-    { amount: 999, accountId: "" }
+    { date: "2026-07-05", amount: 50, accountId: "checking" },
+    { date: "2026-07-05", amount: 999, accountId: "" }
   ];
   const balance = accountBalance("checking", { accounts, transactions, paychecks: [], transfers: [] }, "2026-07-11");
   assert.equal(balance, 950);
@@ -413,7 +413,7 @@ test("accountBalance: a purchase linked to the account reduces its balance, an u
 
 test("accountBalance: a credit card's owed balance increases with a purchase and no payments", () => {
   const accounts = [{ id: "card", type: "credit_card", openingBalance: 0 }];
-  const transactions = [{ amount: 120, accountId: "card" }];
+  const transactions = [{ date: "2026-07-05", amount: 120, accountId: "card" }];
   const balance = accountBalance("card", { accounts, transactions, paychecks: [], transfers: [] }, "2026-07-11");
   assert.equal(balance, 120);
 });
@@ -423,8 +423,8 @@ test("accountBalance: paying off a credit card via one transfer reduces both the
     { id: "checking", type: "checking", openingBalance: 2000 },
     { id: "card", type: "credit_card", openingBalance: 0 }
   ];
-  const transactions = [{ amount: 300, accountId: "card" }];
-  const transfers = [{ fromAccountId: "checking", toAccountId: "card", amount: 300 }];
+  const transactions = [{ date: "2026-07-05", amount: 300, accountId: "card" }];
+  const transfers = [{ date: "2026-07-08", fromAccountId: "checking", toAccountId: "card", amount: 300 }];
   const context = { accounts, transactions, paychecks: [], transfers };
   assert.equal(accountBalance("checking", context, "2026-07-11"), 1700);
   assert.equal(accountBalance("card", context, "2026-07-11"), 0);
@@ -435,11 +435,26 @@ test("accountBalance: movements referencing a different account do not leak into
     { id: "checking", type: "checking", openingBalance: 500 },
     { id: "savings", type: "savings", openingBalance: 500 }
   ];
-  const transactions = [{ amount: 40, accountId: "savings" }];
+  const transactions = [{ date: "2026-07-05", amount: 40, accountId: "savings" }];
   const paychecks = [{ date: "2026-07-01", recurrence: "once", amount: 1000, depositAccountId: "savings" }];
-  const transfers = [{ fromAccountId: "savings", toAccountId: "checking", amount: 10 }];
+  const transfers = [{ date: "2026-07-05", fromAccountId: "savings", toAccountId: "checking", amount: 10 }];
   const balance = accountBalance("checking", { accounts, transactions, paychecks, transfers }, "2026-07-11");
   assert.equal(balance, 510);
+});
+
+test("accountBalance: a historical query excludes transactions and transfers dated after the reference date", () => {
+  const accounts = [
+    { id: "checking", type: "checking", openingBalance: 1000 },
+    { id: "card", type: "credit_card", openingBalance: 0 }
+  ];
+  const transactions = [
+    { date: "2026-06-01", amount: 50, accountId: "checking" },
+    { date: "2026-08-01", amount: 200, accountId: "checking" }
+  ];
+  const transfers = [{ date: "2026-08-05", fromAccountId: "checking", toAccountId: "card", amount: 40 }];
+  const context = { accounts, transactions, paychecks: [], transfers };
+  assert.equal(accountBalance("checking", context, "2026-07-01"), 950);
+  assert.equal(accountBalance("checking", context, "2026-09-01"), 710);
 });
 
 test("accountBalance returns 0 for an unknown or deleted account id", () => {
@@ -453,7 +468,7 @@ test("accountsWithBalances attaches a computed balance to every account", () => 
       { id: "checking", type: "checking", openingBalance: 100 },
       { id: "card", type: "credit_card", openingBalance: 0 }
     ],
-    transactions: [{ amount: 25, accountId: "card" }],
+    transactions: [{ date: "2026-07-05", amount: 25, accountId: "card" }],
     paychecks: [{ date: "2026-07-01", recurrence: "once", amount: 200, depositAccountId: "checking" }],
     transfers: []
   };
@@ -487,6 +502,24 @@ test("paycheckOccurrencesSince: a one-time or bonus paycheck always counts as ex
 
 test("paycheckOccurrencesSince: a future-dated paycheck has not occurred yet", () => {
   assert.equal(paycheckOccurrencesSince({ date: "2026-08-01", recurrence: "monthly" }, "2026-07-11"), 0);
+});
+
+test("paycheckOccurrencesInRange: a monthly paycheck counts exactly one landing per month", () => {
+  const paycheck = { date: "2026-04-11", recurrence: "monthly" };
+  assert.equal(paycheckOccurrencesInRange(paycheck, "2026-05-01", "2026-05-31"), 1);
+  assert.equal(paycheckOccurrencesInRange(paycheck, "2026-04-01", "2026-04-10"), 0);
+  assert.equal(paycheckOccurrencesInRange(paycheck, "2026-03-01", "2026-03-31"), 0);
+});
+
+test("paycheckOccurrencesInRange: a biweekly paycheck can land twice within one month", () => {
+  const paycheck = { date: "2026-07-01", recurrence: "biweekly" };
+  assert.equal(paycheckOccurrencesInRange(paycheck, "2026-07-01", "2026-07-31"), 3);
+});
+
+test("paycheckOccurrencesInRange: a one-time paycheck only counts in the month it lands", () => {
+  const paycheck = { date: "2026-06-15", recurrence: "once" };
+  assert.equal(paycheckOccurrencesInRange(paycheck, "2026-06-01", "2026-06-30"), 1);
+  assert.equal(paycheckOccurrencesInRange(paycheck, "2026-07-01", "2026-07-31"), 0);
 });
 
 test("recurringExpenseOccurrenceDates: a one-time bill posts only its anchor date once reached", () => {

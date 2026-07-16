@@ -660,7 +660,7 @@ function metricsForView() {
   }
   if (currentView === "recipes") return [["Saved recipes", String(state.meals.recipes.length), "available to meal plans"], ["Ingredients", String(new Set(state.meals.recipes.flatMap((recipe) => recipe.ingredients)).size), "unique grocery items"], ["Average protein", `${Math.round(state.meals.recipes.reduce((sum, recipe) => sum + Number(recipe.protein || 0), 0) / Math.max(state.meals.recipes.length, 1))}g`, "per recipe"], ["Household library", "Shared", "available to every member"]];
   if (currentView === "sharing") return [["Invite status", state.household.inviteCode || "Ready", "household invite"], ["Members", String(sharingAccess?.members.length ?? state.household.members.length), "active and invited users"], ["Shared scopes", String(state.household.sharedScopes.length), "workspace modules"], ["Activity", String(state.household.activity.length), "recent household changes"]];
-  if (currentView === "reports") return [["Spending", money.format(spentTotal()), "posted transactions"], ["Budget health", money.format(margin), "zero balance target"], ["Savings and debt", money.format(1220), "planned allocation"], ["Cash left", money.format(remainingTotal()), "after ledger"]];
+  if (currentView === "reports") return [["Spending", money.format(spentTotal()), "posted transactions"], ["Budget health", money.format(margin), "zero balance target"], ["Net worth", money.format(netWorth().total), "current estimate"], ["Cash left", money.format(remainingTotal()), "after ledger"]];
   if (currentView === "goals") return [["Active goals", String(state.goals.sinkingFunds.length), "sinking funds"], ["Saved", money.format(state.goals.sinkingFunds.reduce((sum, fund) => sum + fund.saved, 0)), "across goals"], ["Remaining", money.format(state.goals.sinkingFunds.reduce((sum, fund) => sum + fund.target - fund.saved, 0)), "to targets"]];
   if (currentView === "wealth") return [["Assets", money.format(netWorth().assets), "tracked"], ["Liabilities", money.format(netWorth().liabilities), "tracked"], ["Net worth", money.format(netWorth().total), "current estimate"], ["Debt accounts", String(state.goals.debts.length), "payoff plan"]];
   if (currentView === "admin") return [];
@@ -2567,13 +2567,28 @@ function renderSharing() {
 
 function renderReports() {
   const categories = reportCategories();
+  const trend = netWorthTrend(6);
+  const currentNetWorth = trend[trend.length - 1]?.value || 0;
+  const netWorthChange = currentNetWorth - (trend[0]?.value || 0);
+  const months = cashFlowByMonth(6);
+  const totalIncome = months.reduce((sum, month) => sum + month.income, 0);
+  const totalExpenses = months.reduce((sum, month) => sum + month.expenses, 0);
   return `
     <section class="work-grid">
       <div class="main-stack">
+        <section class="card">
+          <div class="section-head"><div><span class="card-label">Trend</span><h3>Net worth</h3></div><b class="${netWorthChange < 0 ? "danger" : ""}">${netWorthChange >= 0 ? "+" : ""}${money.format(netWorthChange)} over ${trend.length} months</b></div>
+          ${netWorthTrendSvg(trend)}
+          <div class="networth-chart-labels">${trend.map((point) => `<span>${formatMonth(point.month).split(" ")[0].slice(0, 3)}</span>`).join("")}</div>
+        </section>
+        <section class="card">
+          <div class="section-head"><div><span class="card-label">Trend</span><h3>Cash flow</h3></div><span>${money.format(totalIncome - totalExpenses)} net over ${months.length} months</span></div>
+          ${cashFlowChart(months)}
+        </section>
         <section class="card"><div class="card-label">Spending</div><h3>Category report</h3>${categories.map((category) => `<div class="report-row"><strong>${category.name}</strong><div class="report-bar"><span style="width:${category.percent}%; background:${category.color}"></span></div><b>${money.format(category.value)}</b></div>`).join("")}</section>
       </div>
       <aside class="side-stack">
-        <section class="card"><div class="card-label">Budget health</div><h3>Snapshot</h3><div class="snapshot-grid"><span>Pending <b>${money.format(61)}</b></span><span>Cash left <b>${money.format(remainingTotal())}</b></span><span>Savings and debt <b>${money.format(1220)}</b></span><span>Zero balance <b>${money.format(0)}</b></span></div><div class="donut"></div>${[[3460, "Essentials"], [1220, "Savings and debt"], [520, "Giving"]].map(([value, label]) => compactRow(`${label} - ${money.format(value)}`, "", "")).join("")}</section>
+        <section class="card"><div class="card-label">Budget health</div><h3>Snapshot</h3><div class="snapshot-grid"><span>Planned <b>${money.format(plannedTotal())}</b></span><span>Spent <b>${money.format(spentTotal())}</b></span><span>Cash left <b>${money.format(remainingTotal())}</b></span><span>Net worth <b>${money.format(currentNetWorth)}</b></span></div>${categories.slice(0, 3).map((category) => compactRow(`${category.name} - ${money.format(category.value)}`, "", "")).join("")}</section>
       </aside>
     </section>`;
 }
@@ -3449,6 +3464,98 @@ function reportCategories() {
     const value = category.lines.reduce((sum, line) => sum + spentByLine(line.id), 0);
     return { name: category.name, value, color: category.color, percent: Math.max(2, Math.round((value / max) * 100)) };
   });
+}
+
+function trailingMonthKeys(count) {
+  const [year, month] = state.budget.month.split("-").map(Number);
+  const keys = [];
+  for (let i = count - 1; i >= 0; i -= 1) {
+    const date = new Date(year, month - 1 - i, 1);
+    keys.push(`${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}`);
+  }
+  return keys;
+}
+
+function monthEndDateKey(monthKey) {
+  const [year, month] = monthKey.split("-").map(Number);
+  const lastDay = new Date(year, month, 0).getDate();
+  return `${monthKey}-${String(lastDay).padStart(2, "0")}`;
+}
+
+// Net worth "as of" a past date, reconstructed rather than stored: a linked
+// account's historical balance comes straight from accountBalance (real
+// transaction/paycheck/transfer history), while an unlinked net-worth item
+// (e.g. property, no transaction history behind it) has no way to know what
+// it was worth in the past, so its current value is carried flat across the
+// whole trend — an honest approximation given what data actually exists.
+function netWorthAtDate(referenceDateKey) {
+  const context = { accounts: state.accounts, transactions: state.transactions, paychecks: state.paychecks, transfers: state.transfers };
+  const assetTotal = state.goals.netWorth.assets.reduce((sum, asset) => {
+    const linkedAccount = state.accounts.find((account) => account.netWorthAssetId === asset.id);
+    return sum + (linkedAccount ? accountBalance(linkedAccount.id, context, referenceDateKey) : assetValue(asset));
+  }, 0);
+  const liabilityTotal = state.goals.netWorth.liabilities.reduce((sum, liability) => {
+    const linkedAccount = state.accounts.find((account) => account.netWorthLiabilityId === liability.id);
+    return sum + (linkedAccount ? accountBalance(linkedAccount.id, context, referenceDateKey) : Number(liability.value || 0));
+  }, 0);
+  return assetTotal - liabilityTotal;
+}
+
+function netWorthTrend(count) {
+  return trailingMonthKeys(count).map((monthKey) => ({ month: monthKey, value: netWorthAtDate(monthEndDateKey(monthKey)) }));
+}
+
+function cashFlowByMonth(count) {
+  return trailingMonthKeys(count).map((monthKey) => {
+    const monthStart = `${monthKey}-01`;
+    const monthEnd = monthEndDateKey(monthKey);
+    const expenses = state.transactions
+      .filter((transaction) => transaction.date >= monthStart && transaction.date <= monthEnd)
+      .reduce((sum, transaction) => sum + Number(transaction.amount || 0), 0);
+    const income = state.paychecks.reduce((sum, paycheck) => sum + Number(paycheck.amount || 0) * paycheckOccurrencesInRange(paycheck, monthStart, monthEnd), 0);
+    return { month: monthKey, income, expenses };
+  });
+}
+
+function netWorthTrendSvg(trend) {
+  const width = 560;
+  const height = 160;
+  const padding = 20;
+  const values = trend.map((point) => point.value);
+  const max = Math.max(...values, 0);
+  const min = Math.min(...values, 0);
+  const range = max - min || 1;
+  const stepX = trend.length > 1 ? (width - padding * 2) / (trend.length - 1) : 0;
+  const toXY = (point, index) => {
+    const x = padding + stepX * index;
+    const y = height - padding - ((point.value - min) / range) * (height - padding * 2);
+    return [x, y];
+  };
+  const coords = trend.map(toXY);
+  const zeroY = height - padding - ((0 - min) / range) * (height - padding * 2);
+  return `
+    <svg viewBox="0 0 ${width} ${height}" class="networth-chart-svg" preserveAspectRatio="none" role="img" aria-label="Net worth trend">
+      <line x1="${padding}" y1="${zeroY.toFixed(1)}" x2="${width - padding}" y2="${zeroY.toFixed(1)}" class="networth-chart-zero"></line>
+      <polyline points="${coords.map(([x, y]) => `${x.toFixed(1)},${y.toFixed(1)}`).join(" ")}" class="networth-chart-line"></polyline>
+      ${coords.map(([x, y]) => `<circle cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="3" class="networth-chart-dot"></circle>`).join("")}
+    </svg>`;
+}
+
+function cashFlowChart(months) {
+  const max = Math.max(...months.flatMap((month) => [month.income, month.expenses]), 1);
+  return `
+    <div class="cashflow-chart">
+      ${months.map((month) => `
+        <div class="cashflow-month">
+          <div class="cashflow-bars">
+            <span class="cashflow-bar cashflow-income" style="height:${Math.max(2, Math.round((month.income / max) * 100))}%" title="Income ${money.format(month.income)}"></span>
+            <span class="cashflow-bar cashflow-expense" style="height:${Math.max(2, Math.round((month.expenses / max) * 100))}%" title="Expenses ${money.format(month.expenses)}"></span>
+          </div>
+          <small>${formatMonth(month.month).split(" ")[0].slice(0, 3)}</small>
+        </div>
+      `).join("")}
+    </div>
+    <div class="cashflow-legend"><span class="cashflow-legend-income">Income</span><span class="cashflow-legend-expense">Expenses</span></div>`;
 }
 
 function transactionInboxItems() {
