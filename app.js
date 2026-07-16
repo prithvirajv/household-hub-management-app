@@ -721,7 +721,8 @@ function renderHome() {
           <div class="button-row">
             <button id="homeAddChoreButton" class="ghost" type="button">+ Add chore</button>
             <button id="homeAddReminderButton" class="ghost" type="button">+ Add reminder</button>
-            <button id="homeAddBirthdayButton" class="ghost" type="button">+ Add birthday/anniversary</button>
+            <button id="homeAddBirthdayButton" class="ghost" type="button">+ Add birthday</button>
+            <button id="homeAddAnniversaryButton" class="ghost" type="button">+ Add anniversary</button>
             <button id="homeAddTransactionButton" class="ghost" type="button">+ Add transaction</button>
             <button id="homeAddIncomeButton" class="ghost" type="button">+ Add income</button>
           </div>
@@ -1086,7 +1087,7 @@ function renderCalendar() {
         <section class="card calendar-main-card">
           <div class="section-head">
             <div><span class="card-label">Household calendar</span><h3>Chores, birthdays, anniversaries and reminders</h3></div>
-            <div class="button-row"><button id="addChoreButton" class="ghost" type="button">+ Add chore</button><button id="addBirthdayButton" class="ghost" type="button">+ Add birthday/anniversary</button><button id="addReminderButton" class="ghost" type="button">+ Add reminder</button></div>
+            <div class="button-row"><button id="addChoreButton" class="ghost" type="button">+ Add chore</button><button id="addBirthdayButton" class="ghost" type="button">+ Add birthday</button><button id="addAnniversaryButton" class="ghost" type="button">+ Add anniversary</button><button id="addReminderButton" class="ghost" type="button">+ Add reminder</button></div>
           </div>
           <div class="calendar-member-filter" role="group" aria-label="Filter calendar by person">
             <button type="button" class="member-chip ${calendarFilterOwner ? "" : "active"}" data-calendar-filter-owner="">All people</button>
@@ -1146,7 +1147,7 @@ function renderCalendar() {
           }).join("") : `<div class="empty-inline">No recurring chores</div>`}
         </section>
         <section class="card">
-          <div class="section-head"><div><span class="card-label">Remember</span><h3>Birthdays &amp; anniversaries</h3></div><button id="sideAddBirthdayButton" class="ghost" type="button">Add birthday/anniversary</button></div>
+          <div class="section-head"><div><span class="card-label">Remember</span><h3>Birthdays &amp; anniversaries</h3></div><div class="button-row"><button id="sideAddBirthdayButton" class="ghost" type="button">Add birthday</button><button id="sideAddAnniversaryButton" class="ghost" type="button">Add anniversary</button></div></div>
           ${annualRows.length ? annualRows.map(({ event, occurrence }) => {
             const overdue = occurrence.date < today;
             return `<div class="compact-row ${overdue ? "overdue" : ""}">
@@ -3378,6 +3379,7 @@ function bindViewEvents() {
   $("#homeAddChoreButton")?.addEventListener("click", () => goToViewAndRun("calendar", () => focusCalendarType("chore")));
   $("#homeAddReminderButton")?.addEventListener("click", () => goToViewAndRun("calendar", () => focusCalendarType("reminder")));
   $("#homeAddBirthdayButton")?.addEventListener("click", () => goToViewAndRun("calendar", () => focusCalendarType("birthday")));
+  $("#homeAddAnniversaryButton")?.addEventListener("click", () => goToViewAndRun("calendar", () => focusCalendarType("anniversary")));
   $("#homeAddTransactionButton")?.addEventListener("click", () => goToViewAndRun("transactions", () => {
     $("#transactionForm")?.scrollIntoView({ behavior: "smooth", block: "center" });
     $("#transactionForm [name='payee']")?.focus();
@@ -5320,6 +5322,8 @@ function bindViewEvents() {
   $("#sideAddChoreButton")?.addEventListener("click", () => focusCalendarType("chore"));
   $("#addBirthdayButton")?.addEventListener("click", () => focusCalendarType("birthday"));
   $("#sideAddBirthdayButton")?.addEventListener("click", () => focusCalendarType("birthday"));
+  $("#addAnniversaryButton")?.addEventListener("click", () => focusCalendarType("anniversary"));
+  $("#sideAddAnniversaryButton")?.addEventListener("click", () => focusCalendarType("anniversary"));
   $("#addReminderButton")?.addEventListener("click", () => focusCalendarType("reminder"));
   $("#sideAddReminderButton")?.addEventListener("click", () => focusCalendarType("reminder"));
 
