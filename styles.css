@@ -1087,39 +1087,12 @@ main {
   padding: 0.7rem;
 }
 
-.budget-line,
 .assign-row {
   display: grid;
   align-items: center;
   gap: 0.6rem;
   border-bottom: 1px solid var(--line);
   padding: 0.52rem 0.4rem;
-}
-
-.budget-line {
-  grid-template-columns: minmax(140px, 1fr) minmax(90px, 110px) minmax(70px, 88px) minmax(70px, 88px) 34px;
-  align-items: start;
-}
-
-.budget-line-value {
-  display: flex;
-  flex-direction: column;
-  gap: 0.2rem;
-  min-width: 0;
-}
-
-.budget-line-value > small {
-  display: block;
-  color: var(--muted);
-  font-size: 0.66rem;
-  font-weight: 800;
-  letter-spacing: 0.03em;
-  text-transform: uppercase;
-}
-
-.budget-line-value span,
-.budget-line-value b {
-  overflow-wrap: anywhere;
 }
 
 .assign-row {
@@ -1158,13 +1131,11 @@ main {
   color: var(--muted);
 }
 
-.budget-line strong,
 .assign-row strong,
 .compact-row strong {
   display: block;
 }
 
-.budget-line small,
 .assign-row small,
 .compact-row small {
   display: block;
@@ -3680,74 +3651,10 @@ main {
     min-height: 36px;
   }
 
-  .budget-line {
-    grid-template-columns: repeat(3, minmax(0, 1fr)) 38px;
-    grid-template-areas:
-      "title title title delete"
-      "planned spent remaining delete";
-    gap: 0.65rem;
-    padding: 0.85rem 0.4rem;
-  }
-
-  .line-title-stack {
-    grid-area: title;
-    min-width: 0;
-  }
-
   .line-name-input {
     min-width: 0;
     width: 100%;
     font-size: 1rem;
-  }
-
-  .due-day-field {
-    width: 100%;
-    grid-template-columns: 68px minmax(0, 1fr);
-  }
-
-  .due-day-field input {
-    min-width: 0;
-    width: 100%;
-  }
-
-  .budget-line-planned {
-    grid-area: planned;
-  }
-
-  .budget-line-spent {
-    grid-area: spent;
-  }
-
-  .budget-line-remaining {
-    grid-area: remaining;
-  }
-
-  .budget-line-value {
-    text-align: left;
-  }
-
-  .budget-line-value .money-input {
-    min-width: 0;
-    width: 100%;
-    min-height: 38px;
-    padding-inline: 0.35rem;
-    border-color: var(--line);
-    background: white;
-    text-align: left;
-  }
-
-  .budget-line-value span,
-  .budget-line-value b {
-    line-height: 1.25;
-  }
-
-  .budget-line-delete {
-    grid-area: delete;
-    align-self: stretch;
-    width: 38px;
-    min-width: 38px;
-    height: 100%;
-    min-height: 76px;
   }
 
   .help-topic,

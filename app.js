@@ -838,15 +838,13 @@ function renderBudget() {
               ${category.lines.map((line, lineIndex) => {
                 const spent = spentByLine(line.id);
                 const remaining = Number(line.planned) - spent;
-                return `<div class="budget-line">
-                  <div class="line-title-stack">
-                    <input class="line-name-input" data-budget-line-name="${categoryIndex}:${lineIndex}" value="${line.name}">
-                    <label class="due-day-field">Due date <input data-budget-due-date="${categoryIndex}:${lineIndex}" type="date" min="${monthDateMin()}" max="${monthDateMax()}" value="${dueDateValue(line.dueDay)}"></label>
-                  </div>
-                  <label class="budget-line-value budget-line-planned"><small>Planned</small><input class="money-input" data-budget-line="${categoryIndex}:${lineIndex}" type="number" step="0.01" value="${line.planned}" min="0" aria-label="Planned amount for ${line.name}"></label>
-                  <div class="budget-line-value budget-line-spent"><small>Spent</small><span>${exactMoney.format(spent)}</span></div>
-                  <div class="budget-line-value budget-line-remaining"><small>Remaining</small><b data-line-remaining="${categoryIndex}:${lineIndex}" class="${remaining < 0 ? "danger" : ""}">${exactMoney.format(remaining)}</b></div>
-                  <button class="icon-button danger-button budget-line-delete" data-delete-line="${categoryIndex}:${lineIndex}" type="button" aria-label="Remove ${line.name}">×</button>
+                return `<div class="budget-line ledger-entry-row">
+                  <label class="row-field row-payee"><small>Subcategory</small><input class="line-name-input" data-budget-line-name="${categoryIndex}:${lineIndex}" value="${line.name}"></label>
+                  <label class="row-field row-date"><small>Due date</small><input data-budget-due-date="${categoryIndex}:${lineIndex}" type="date" min="${monthDateMin()}" max="${monthDateMax()}" value="${dueDateValue(line.dueDay)}"></label>
+                  <label class="row-field row-amount"><small>Planned</small><input class="money-input" data-budget-line="${categoryIndex}:${lineIndex}" type="number" step="0.01" value="${line.planned}" min="0" aria-label="Planned amount for ${line.name}"></label>
+                  <div class="row-field row-amount"><small>Spent</small><span>${exactMoney.format(spent)}</span></div>
+                  <div class="row-field row-amount"><small>Remaining</small><b data-line-remaining="${categoryIndex}:${lineIndex}" class="${remaining < 0 ? "danger" : ""}">${exactMoney.format(remaining)}</b></div>
+                  <button class="icon-button danger-button" data-delete-line="${categoryIndex}:${lineIndex}" type="button" aria-label="Remove ${line.name}">×</button>
                 </div>`;
               }).join("")}
             `).join("")}
@@ -923,6 +921,20 @@ function renderTransactions() {
     <section class="work-grid">
       <div class="main-stack">
         <section class="card">
+          <div class="section-head"><div><span class="card-label">Budget setup</span><h3>Manage subcategories from Transactions</h3></div></div>
+          <div class="transaction-subcategory-adder">
+            <label>Category<select id="transactionParentCategory">${state.budget.categories.map((category, index) => `<option value="${index}">${category.name}</option>`).join("")}</select></label>
+            <label class="custom-combobox">Subcategory
+              <input id="transactionSubcategoryName" autocomplete="off" placeholder="Type to search or add">
+              <div id="transactionSubcategoryMenu" class="combo-menu" hidden>
+                ${(firstCategory?.lines || []).map((line) => `<button type="button" data-subcategory-option="${line.name}">${line.name}</button>`).join("")}
+              </div>
+            </label>
+            <button id="addTransactionSubcategoryButton" class="ghost" type="button">Add subcategory</button>
+            <button id="deleteTransactionSubcategoryButton" class="danger-button" type="button">Delete selected</button>
+          </div>
+        </section>
+        <section class="card">
           <div class="card-label">Entries</div><h3>Ledger</h3>
           <form id="transactionForm" class="mini-form transaction-entry-form">
             <label>Payee<input name="payee" placeholder="Coffee House" required></label>
@@ -957,20 +969,6 @@ function renderTransactions() {
       </div>
       <aside class="side-stack">
         <section class="card soft-card"><div class="card-label">Transactions</div><h3>Connected accounts</h3><div class="sync-empty">Connect a bank to import transactions</div></section>
-        <section class="card">
-          <div class="section-head"><div><span class="card-label">Budget setup</span><h3>Manage subcategories from Transactions</h3></div></div>
-          <div class="transaction-subcategory-adder">
-            <label>Category<select id="transactionParentCategory">${state.budget.categories.map((category, index) => `<option value="${index}">${category.name}</option>`).join("")}</select></label>
-            <label class="custom-combobox">Subcategory
-              <input id="transactionSubcategoryName" autocomplete="off" placeholder="Type to search or add">
-              <div id="transactionSubcategoryMenu" class="combo-menu" hidden>
-                ${(firstCategory?.lines || []).map((line) => `<button type="button" data-subcategory-option="${line.name}">${line.name}</button>`).join("")}
-              </div>
-            </label>
-            <button id="addTransactionSubcategoryButton" class="ghost" type="button">Add subcategory</button>
-            <button id="deleteTransactionSubcategoryButton" class="danger-button" type="button">Delete selected</button>
-          </div>
-        </section>
         <section class="card">
           <div class="section-head"><div><span class="card-label">Bank expense</span><h3>Bank stream</h3></div><button id="addTransactionButton" type="button">+ Add transaction</button></div>
           ${imported.map((transaction) => `
