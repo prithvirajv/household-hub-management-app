@@ -477,24 +477,12 @@ function availablePreviousBudgets() {
   ensureBudgetHistory();
   const history = state.budgetHistory || [];
   return history
-    .filter((budget) => budget.month < state.budget.month && Array.isArray(budget.categories))
+    .filter((budget) => budget.month < state.budget.month && Array.isArray(budget.categories) && budget.categories.length > 0)
     .sort((a, b) => b.month.localeCompare(a.month));
-}
-
-function offsetMonth(monthValue, offset) {
-  const [year, month] = monthValue.split("-").map(Number);
-  const date = new Date(year, month - 1 + offset, 1);
-  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}`;
 }
 
 function ensureBudgetHistory() {
   state.budgetHistory ||= [];
-  if (state.budgetHistory.length > 0) return;
-  state.budgetHistory = [-1, -2].map((offset) => ({
-    month: offsetMonth(state.budget.month, offset),
-    income: state.budget.income,
-    categories: cloneBudgetCategories(state.budget.categories)
-  }));
 }
 
 function cloneBudgetCategories(categories) {
@@ -4345,8 +4333,14 @@ function bindViewEvents() {
   });
 
   $("#copyBudgetSelect")?.addEventListener("change", (event) => {
-    if (!event.currentTarget.value) return;
-    copyBudgetFromMonth(event.currentTarget.value);
+    const month = event.currentTarget.value;
+    if (!month) return;
+    const confirmed = window.confirm(`Replace ${monthLabel()}'s categories and amounts with ${formatMonth(month)}'s budget? This cannot be undone.`);
+    if (!confirmed) {
+      event.currentTarget.value = "";
+      return;
+    }
+    copyBudgetFromMonth(month);
     render();
   });
 
