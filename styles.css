@@ -206,8 +206,8 @@ nav {
 }
 
 .nav-button span {
-  width: 18px;
-  color: #b8c5d9;
+  width: 22px;
+  font-size: 1.05rem;
   text-align: center;
 }
 
@@ -1545,11 +1545,15 @@ main {
 }
 
 .transaction-subcategory-adder {
-  grid-template-columns: minmax(140px, 0.8fr) minmax(240px, 1.2fr) auto auto;
+  grid-template-columns: minmax(140px, 0.8fr) minmax(200px, 1.2fr) minmax(135px, auto) minmax(120px, auto);
   align-items: end;
   border-radius: 8px;
   background: var(--soft-blue);
   padding: 0.7rem;
+}
+
+.transaction-subcategory-adder button {
+  white-space: nowrap;
 }
 
 .custom-combobox {
