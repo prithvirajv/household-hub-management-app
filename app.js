@@ -711,6 +711,8 @@ const renderers = {
 function renderHome() {
   const items = homeActionItems();
   const billsAndGoals = billAndGoalReminders();
+  const noteReminders = homeNoteReminders();
+  const planTasks = homeTodayPlanTasks();
   return `
     <section class="work-grid">
       <div class="main-stack">
@@ -733,11 +735,22 @@ function renderHome() {
               <button class="icon-button" data-home-edit-item="${item.reference}:${item.month}" type="button" aria-label="Edit ${escapeHtml(item.title)} in Calendar">✎</button>
             </div>`).join("") : `<div class="empty-inline">Nothing past due or due today — you're all caught up.</div>`}
         </section>
+        <section class="card">
+          <div class="section-head"><div><span class="card-label">Private to you</span><h3>Today's plan</h3></div><button id="homeOpenPlanButton" class="ghost" type="button">Open Plan</button></div>
+          ${planTasks.length ? planTasks.map((task) => `
+            <div class="compact-row ${task.done ? "" : ""}">
+              <div><input type="checkbox" data-home-plan-task-check="${task.id}" ${task.done ? "checked" : ""} aria-label="Complete ${escapeHtml(task.title)}"> <strong>${escapeHtml(task.title)}</strong><small>${task.startTime || "No set time"}</small></div>
+            </div>`).join("") : `<div class="empty-inline">No plan tasks for today.</div>`}
+        </section>
       </div>
       <aside class="side-stack">
         <section class="card">
           <div class="card-label">Bills &amp; goals</div><h3>Needs funding or payment</h3>
           ${billsAndGoals.length ? billsAndGoals.map((reminder) => `<div class="compact-row"><div><strong>${escapeHtml(reminder.title)}</strong><small>${escapeHtml(reminder.detail)}</small></div><button class="pill-button" data-dismiss-reminder="${escapeHtml(reminder.id)}" type="button">Done</button></div>`).join("") : `<div class="empty-inline">No open bills or goals right now.</div>`}
+        </section>
+        <section class="card">
+          <div class="section-head"><div><span class="card-label">Notes</span><h3>Reminders due</h3></div><button id="homeOpenNoteRemindersButton" class="ghost" type="button">Open Notes</button></div>
+          ${noteReminders.length ? noteReminders.map((note) => `<div class="compact-row ${note.overdue ? "overdue" : ""}"><div><strong>${escapeHtml(note.title)}</strong><small>${note.overdue ? "Past due" : "Due today"} · ${escapeHtml(note.detail)}</small></div></div>`).join("") : `<div class="empty-inline">No note reminders due.</div>`}
         </section>
       </aside>
     </section>`;
@@ -3110,6 +3123,43 @@ function homeActionItems() {
   return [...choreItems, ...annualItems, ...reminderItems].sort((a, b) => a.date.localeCompare(b.date));
 }
 
+// Notes reminders that are due today or already past — mirrors the
+// household calendar items above, just for the separate Notes reminder
+// concept (a note with its own reminder date/time, not a calendar item).
+function homeNoteReminders() {
+  ensureNotesData();
+  const today = dateKey(new Date());
+  return state.notes.entries
+    .filter((note) => !note.archived && !note.trashed && note.reminder && note.reminder.slice(0, 10) <= today)
+    .map((note) => ({
+      id: note.id,
+      title: note.title || "Untitled note",
+      overdue: note.reminder.slice(0, 10) < today,
+      reminder: note.reminder,
+      detail: formatDateTime(note.reminder)
+    }))
+    .sort((a, b) => a.reminder.localeCompare(b.reminder));
+}
+
+// Today's Plan tasks (private to the signed-in user, same as the Plan tab
+// itself) — always computed against the real current date rather than
+// planSelectedDate, which only tracks whatever day the user last browsed to
+// on the Plan tab and would otherwise drift from "today" here.
+function homeTodayPlanTasks() {
+  if (!privateData) return [];
+  ensurePlanData();
+  const today = dateKey(new Date());
+  return privateData.plans.tasks
+    .filter((task) => task.bucket === "daily" && dailyTaskOccursOnDate(task, today))
+    .map((task) => ({
+      id: task.id,
+      title: task.title,
+      done: isDailyTaskDoneOnDate(task, today),
+      startTime: task.startTime || ""
+    }))
+    .sort((a, b) => (a.startTime ? timeToMinutes(a.startTime) : Infinity) - (b.startTime ? timeToMinutes(b.startTime) : Infinity));
+}
+
 function dateKey(date) {
   return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
 }
@@ -3336,6 +3386,32 @@ function bindViewEvents() {
     $("#addIncomeButton")?.click();
     $("#addIncomeButton")?.scrollIntoView({ behavior: "smooth", block: "center" });
   }));
+
+  $("#homeOpenPlanButton")?.addEventListener("click", () => {
+    planActiveBucket = "daily";
+    planSelectedDate = dateKey(new Date());
+    goToViewAndRun("plan");
+  });
+
+  $("#homeOpenNoteRemindersButton")?.addEventListener("click", () => {
+    state.notes.activeView = "reminders";
+    goToViewAndRun("notes");
+  });
+
+  // Toggles against the real current date directly, rather than reusing
+  // Plan's own data-plan-task-check handler, which keys off planSelectedDate
+  // — a value that only tracks whatever day the user last browsed to on the
+  // Plan tab and could otherwise silently drift from "today" here on Home.
+  document.querySelectorAll("[data-home-plan-task-check]").forEach((checkbox) => {
+    checkbox.addEventListener("change", () => {
+      const task = privateData.plans.tasks.find((item) => item.id === checkbox.dataset.homePlanTaskCheck);
+      if (!task) return;
+      const updated = toggleDailyTaskDoneOnDate(task, dateKey(new Date()));
+      Object.assign(task, updated);
+      autosavePlans();
+      render();
+    });
+  });
 
   document.querySelectorAll("[data-dismiss-reminder]").forEach((button) => {
     button.addEventListener("click", () => dismissBudgetReminder(button.dataset.dismissReminder));
