@@ -923,37 +923,6 @@ function renderTransactions() {
   return `
     <section class="work-grid">
       <div class="main-stack">
-        <section class="card soft-card"><div class="card-label">Transactions</div><h3>Connected accounts</h3><div class="sync-empty">Connect a bank to import transactions</div></section>
-        <section class="card">
-          <div class="section-head"><div><span class="card-label">Budget setup</span><h3>Manage subcategories from Transactions</h3></div></div>
-          <div class="transaction-subcategory-adder">
-            <label>Category<select id="transactionParentCategory">${state.budget.categories.map((category, index) => `<option value="${index}">${category.name}</option>`).join("")}</select></label>
-            <label class="custom-combobox">Subcategory
-              <input id="transactionSubcategoryName" autocomplete="off" placeholder="Type to search or add">
-              <div id="transactionSubcategoryMenu" class="combo-menu" hidden>
-                ${(firstCategory?.lines || []).map((line) => `<button type="button" data-subcategory-option="${line.name}">${line.name}</button>`).join("")}
-              </div>
-            </label>
-            <button id="addTransactionSubcategoryButton" class="ghost" type="button">Add subcategory</button>
-            <button id="deleteTransactionSubcategoryButton" class="danger-button" type="button">Delete selected</button>
-          </div>
-        </section>
-        <section class="card">
-          <div class="section-head"><div><span class="card-label">Bank expense</span><h3>Bank stream</h3></div><button id="addTransactionButton" type="button">+ Add transaction</button></div>
-          ${imported.map((transaction) => `
-            <div class="bank-stream-row" data-bank-stream-row="${transaction.id}">
-              <input class="row-payee" data-bank-stream-payee="${transaction.id}" value="${escapeHtml(transaction.payee)}" aria-label="Payee">
-              <input class="row-date" type="date" data-bank-stream-date="${transaction.id}" value="${transaction.date}" aria-label="Date">
-              <input class="row-amount money-input" type="number" step="0.01" data-bank-stream-amount="${transaction.id}" value="${transaction.amount}" aria-label="Amount">
-              <select class="row-select" data-bank-stream-line="${transaction.id}" aria-label="Budget line">${lineOptions(transaction.lineId)}</select>
-              ${state.accounts.length ? `<select class="row-select" data-bank-stream-account="${transaction.id}" aria-label="Account"><option value="">Not linked</option>${accountOptions(transaction.accountId || "")}</select>` : ""}
-              <button class="icon-button" data-accept-import="${transaction.id}" type="button" aria-label="Accept ${escapeHtml(transaction.payee)}">✓</button>
-              <button class="icon-button danger-button" data-dismiss-import="${transaction.id}" type="button" aria-label="Dismiss ${escapeHtml(transaction.payee)}">×</button>
-            </div>
-          `).join("") || `<div class="empty-inline">No bank stream items waiting</div>`}
-        </section>
-      </div>
-      <aside class="side-stack">
         <section class="card">
           <div class="card-label">Entries</div><h3>Ledger</h3>
           <form id="transactionForm" class="mini-form transaction-entry-form">
@@ -985,6 +954,38 @@ function renderTransactions() {
             </div>
           `).join("")}
           ${state.transactions.length ? state.transactions.slice(0, 6).map((transaction, index) => ledgerEntryRow(transaction, index)).join("") : `<div class="empty-inline">No transactions yet</div>`}
+        </section>
+      </div>
+      <aside class="side-stack">
+        <section class="card soft-card"><div class="card-label">Transactions</div><h3>Connected accounts</h3><div class="sync-empty">Connect a bank to import transactions</div></section>
+        <section class="card">
+          <div class="section-head"><div><span class="card-label">Budget setup</span><h3>Manage subcategories from Transactions</h3></div></div>
+          <div class="transaction-subcategory-adder">
+            <label>Category<select id="transactionParentCategory">${state.budget.categories.map((category, index) => `<option value="${index}">${category.name}</option>`).join("")}</select></label>
+            <label class="custom-combobox">Subcategory
+              <input id="transactionSubcategoryName" autocomplete="off" placeholder="Type to search or add">
+              <div id="transactionSubcategoryMenu" class="combo-menu" hidden>
+                ${(firstCategory?.lines || []).map((line) => `<button type="button" data-subcategory-option="${line.name}">${line.name}</button>`).join("")}
+              </div>
+            </label>
+            <button id="addTransactionSubcategoryButton" class="ghost" type="button">Add subcategory</button>
+            <button id="deleteTransactionSubcategoryButton" class="danger-button" type="button">Delete selected</button>
+          </div>
+        </section>
+        <section class="card">
+          <div class="section-head"><div><span class="card-label">Bank expense</span><h3>Bank stream</h3></div><button id="addTransactionButton" type="button">+ Add transaction</button></div>
+          ${imported.map((transaction) => `
+            <div class="bank-stream-row" data-bank-stream-row="${transaction.id}">
+              ${transaction.recurringId ? `<span class="pill">Recurring</span>` : ""}
+              <input class="row-payee" data-bank-stream-payee="${transaction.id}" value="${escapeHtml(transaction.payee)}" aria-label="Payee">
+              <input class="row-date" type="date" data-bank-stream-date="${transaction.id}" value="${transaction.date}" aria-label="Date">
+              <input class="row-amount money-input" type="number" step="0.01" data-bank-stream-amount="${transaction.id}" value="${transaction.amount}" aria-label="Amount">
+              <select class="row-select" data-bank-stream-line="${transaction.id}" aria-label="Budget line">${lineOptions(transaction.lineId)}</select>
+              ${state.accounts.length ? `<select class="row-select" data-bank-stream-account="${transaction.id}" aria-label="Account"><option value="">Not linked</option>${accountOptions(transaction.accountId || "")}</select>` : ""}
+              <button class="icon-button" data-accept-import="${transaction.id}" type="button" aria-label="Accept ${escapeHtml(transaction.payee)}">✓</button>
+              <button class="icon-button danger-button" data-dismiss-import="${transaction.id}" type="button" aria-label="Dismiss ${escapeHtml(transaction.payee)}">×</button>
+            </div>
+          `).join("") || `<div class="empty-inline">No bank stream items waiting</div>`}
         </section>
       </aside>
     </section>`;
@@ -2798,25 +2799,28 @@ function ensurePaycheckRecurrenceData() {
   });
 }
 
-// Recurring bills post real Ledger transactions automatically (no review
-// step, unlike Bank stream): each elapsed period since the rule's anchor
-// date that hasn't already posted gets its own transaction row, tracked via
-// postedDates so revisiting this page never double-posts the same period.
+// A recurring bill surfaces each elapsed period as a Bank stream draft for
+// review (amount can vary month to month, e.g. a utility bill) rather than
+// posting straight to the Ledger; it only becomes a real transaction once
+// accepted there. postedDates tracks periods already surfaced (accepted or
+// dismissed) so revisiting this page never re-surfaces the same period.
 function ensureRecurringExpensesPosted() {
   state.recurringExpenses ||= [];
+  state.transactionInboxDrafts ||= [];
   const today = dateKey(new Date());
   state.recurringExpenses.forEach((recurring) => {
     recurring.postedDates ||= [];
     recurringExpenseOccurrenceDates(recurring, today).forEach((date) => {
       if (recurring.postedDates.includes(date)) return;
-      state.transactions.unshift(makeTransaction({
-        date,
+      state.transactionInboxDrafts.unshift({
+        id: uniqueId("recurring-bank-stream"),
         payee: recurring.payee,
         amount: Number(recurring.amount || 0),
         lineId: recurring.lineId,
-        memo: "Recurring bill",
-        accountId: recurring.accountId || ""
-      }));
+        accountId: recurring.accountId || "",
+        date,
+        recurringId: recurring.id
+      });
       recurring.postedDates.push(date);
     });
   });
@@ -6438,7 +6442,8 @@ function acceptImportTransaction(button) {
 
   if (!inboxItem) return;
   const lineId = inboxItem.lineId || allLines()[0]?.id;
-  state.transactions.unshift(makeTransaction({ date: inboxItem.date, payee: inboxItem.payee, amount: Number(inboxItem.amount), lineId, memo: "Accepted bank stream item", accountId: inboxItem.accountId || "" }));
+  const memo = inboxItem.recurringId ? "Recurring bill" : "Accepted bank stream item";
+  state.transactions.unshift(makeTransaction({ date: inboxItem.date, payee: inboxItem.payee, amount: Number(inboxItem.amount), lineId, memo, accountId: inboxItem.accountId || "" }));
   state.transactionInboxDone ||= [];
   if (!state.transactionInboxDone.includes(inboxItem.id)) state.transactionInboxDone.push(inboxItem.id);
   state.transactionInboxDrafts = (state.transactionInboxDrafts || []).filter((item) => item.id !== inboxItem.id);
