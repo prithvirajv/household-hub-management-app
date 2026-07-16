@@ -910,16 +910,26 @@ main {
   width: 100%;
 }
 
+/* Fixed-px columns here used to add up to more than this card actually gets:
+   its real width is capped by the .main-stack column in the two-column
+   .work-grid layout (as little as ~700-800px), not by its own max-width —
+   so 150+150+140(+160) of rigid columns squeezed the name column down to
+   near nothing. minmax() lets every column (not just the name one) give up
+   space under pressure instead of just the first. */
 .budget-ledger-head {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 150px 150px 140px;
+  grid-template-columns: minmax(140px, 1fr) minmax(80px, 100px) minmax(95px, 120px) minmax(95px, 120px);
   gap: 0.75rem;
   align-items: end;
   color: var(--muted);
 }
 
 .budget-ledger-head.has-accounts {
-  grid-template-columns: minmax(0, 1fr) 150px 150px 140px 160px;
+  grid-template-columns: minmax(140px, 1fr) minmax(80px, 100px) minmax(95px, 120px) minmax(95px, 120px) minmax(100px, 140px);
+}
+
+.budget-ledger-head > * {
+  min-width: 0;
 }
 
 .budget-ledger-head h3 {
@@ -928,7 +938,7 @@ main {
 
 .budget-money-row {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 150px 150px 140px;
+  grid-template-columns: minmax(140px, 1fr) minmax(80px, 100px) minmax(95px, 120px) minmax(95px, 120px);
   gap: 0.75rem;
   align-items: center;
   padding: 0.55rem 0;
@@ -936,7 +946,11 @@ main {
 }
 
 .budget-money-row.has-accounts {
-  grid-template-columns: minmax(0, 1fr) 150px 150px 140px 160px;
+  grid-template-columns: minmax(140px, 1fr) minmax(80px, 100px) minmax(95px, 120px) minmax(95px, 120px) minmax(100px, 140px);
+}
+
+.budget-money-row > * {
+  min-width: 0;
 }
 
 .income-recurrence-select {
@@ -963,6 +977,8 @@ main {
   background: transparent;
   padding: 0.2rem 0.35rem;
   color: var(--text);
+  min-width: 0;
+  text-overflow: ellipsis;
 }
 
 .line-title-stack {
