@@ -310,7 +310,8 @@ const defaultState = {
     { id: "checking-account", name: "Checking", type: "checking", openingBalance: 2380, netWorthAssetId: "checking", netWorthLiabilityId: "", createdAt: "2026-05-01" },
     { id: "credit-card-account", name: "Credit card", type: "credit_card", openingBalance: 4280, netWorthAssetId: "", netWorthLiabilityId: "credit-card", createdAt: "2026-05-01" }
   ],
-  transfers: []
+  transfers: [],
+  recurringExpenses: []
 };
 
 module.exports = { defaultState };

@@ -5,7 +5,7 @@ const {
   dailyTaskOccursOnDate, isDailyTaskDoneOnDate, toggleDailyTaskDoneOnDate,
   timeToMinutes, minutesToTime, snapMinutes, layoutTimelineBlocks, comparePlannedToActual,
   sanitizeFilename, buildDocumentObjectPath, wouldCreateFolderCycle, buildFolderTree,
-  smsGatewayAddress, paycheckOccurrencesSince, accountBalance, accountsWithBalances,
+  smsGatewayAddress, paycheckOccurrencesSince, recurringExpenseOccurrenceDates, accountBalance, accountsWithBalances,
   annualEventDate, nextAnnualEventDate, annualEventNotifyAt, rollAnnualNotifyAtForward
 } = require("../lib/shared-logic");
 
@@ -487,6 +487,29 @@ test("paycheckOccurrencesSince: a one-time or bonus paycheck always counts as ex
 
 test("paycheckOccurrencesSince: a future-dated paycheck has not occurred yet", () => {
   assert.equal(paycheckOccurrencesSince({ date: "2026-08-01", recurrence: "monthly" }, "2026-07-11"), 0);
+});
+
+test("recurringExpenseOccurrenceDates: a one-time bill posts only its anchor date once reached", () => {
+  assert.deepEqual(recurringExpenseOccurrenceDates({ anchorDate: "2026-07-11", recurrence: "none" }, "2026-07-11"), ["2026-07-11"]);
+  assert.deepEqual(recurringExpenseOccurrenceDates({ anchorDate: "2026-07-11", recurrence: "none" }, "2026-09-01"), ["2026-07-11"]);
+});
+
+test("recurringExpenseOccurrenceDates: a future anchor date has not occurred yet", () => {
+  assert.deepEqual(recurringExpenseOccurrenceDates({ anchorDate: "2026-08-01", recurrence: "monthly" }, "2026-07-11"), []);
+});
+
+test("recurringExpenseOccurrenceDates: weekly and biweekly bills post one date per elapsed period", () => {
+  const weekly = { anchorDate: "2026-07-01", recurrence: "weekly" };
+  assert.deepEqual(recurringExpenseOccurrenceDates(weekly, "2026-07-01"), ["2026-07-01"]);
+  assert.deepEqual(recurringExpenseOccurrenceDates(weekly, "2026-07-22"), ["2026-07-01", "2026-07-08", "2026-07-15", "2026-07-22"]);
+
+  const biweekly = { anchorDate: "2026-07-01", recurrence: "biweekly" };
+  assert.deepEqual(recurringExpenseOccurrenceDates(biweekly, "2026-07-29"), ["2026-07-01", "2026-07-15", "2026-07-29"]);
+});
+
+test("recurringExpenseOccurrenceDates: a monthly bill clamps to the last day of shorter months", () => {
+  const monthly = { anchorDate: "2026-01-31", recurrence: "monthly" };
+  assert.deepEqual(recurringExpenseOccurrenceDates(monthly, "2026-04-30"), ["2026-01-31", "2026-02-28", "2026-03-31", "2026-04-30"]);
 });
 
 test("accountBalance: a monthly recurring paycheck deposits multiple times into its linked account", () => {

@@ -883,8 +883,39 @@ function renderBudget() {
   `;
 }
 
+function ledgerEntryRow(transaction, index) {
+  const lineOptions = allLines().map((line) => `<option value="${line.id}" ${line.id === transaction.lineId ? "selected" : ""}>${line.category} - ${line.name}</option>`).join("");
+  return `
+    <div class="ledger-entry-row">
+      <input class="row-payee" data-ledger-entry-payee="${index}" value="${escapeHtml(transaction.payee)}" aria-label="Payee">
+      <input class="row-amount money-input" type="number" step="0.01" data-ledger-entry-amount="${index}" value="${transaction.amount}" aria-label="Amount">
+      <input class="row-date" type="date" data-ledger-entry-date="${index}" value="${transaction.date}" aria-label="Date">
+      <select class="row-select" data-ledger-entry-line="${index}" aria-label="Subcategory">${lineOptions}</select>
+      ${state.accounts.length ? `<select class="row-select" data-ledger-entry-account="${index}" aria-label="Account"><option value="">Not linked</option>${accountOptions(transaction.accountId || "")}</select>` : ""}
+      <button class="icon-button danger-button" data-delete-transaction="${index}" type="button" aria-label="Delete ${escapeHtml(transaction.payee)}">×</button>
+    </div>`;
+}
+
+function recurringExpenseRow(recurring, index) {
+  const lineOptions = allLines().map((line) => `<option value="${line.id}" ${line.id === recurring.lineId ? "selected" : ""}>${line.category} - ${line.name}</option>`).join("");
+  return `
+    <div class="recurring-expense-row">
+      <input class="row-payee" data-recurring-payee="${index}" value="${escapeHtml(recurring.payee)}" aria-label="Recurring bill name">
+      <input class="row-amount money-input" type="number" step="0.01" data-recurring-amount="${index}" value="${recurring.amount}" aria-label="Recurring amount">
+      <select class="row-select" data-recurring-line="${index}" aria-label="Recurring subcategory">${lineOptions}</select>
+      ${state.accounts.length ? `<select class="row-select" data-recurring-account="${index}" aria-label="Recurring account"><option value="">Not linked</option>${accountOptions(recurring.accountId || "")}</select>` : ""}
+      <select class="row-select" data-recurring-recurrence="${index}" aria-label="Recurring frequency">
+        <option value="weekly" ${recurring.recurrence === "weekly" ? "selected" : ""}>Weekly</option>
+        <option value="biweekly" ${recurring.recurrence === "biweekly" ? "selected" : ""}>Biweekly</option>
+        <option value="monthly" ${recurring.recurrence === "monthly" ? "selected" : ""}>Monthly</option>
+      </select>
+      <button class="icon-button danger-button" data-delete-recurring="${index}" type="button" aria-label="Stop recurring ${escapeHtml(recurring.payee)}">×</button>
+    </div>`;
+}
+
 function renderTransactions() {
   ensureAccountsData();
+  ensureRecurringExpensesPosted();
   const imported = transactionInboxItems().filter((transaction) => !(state.transactionInboxDone || []).includes(transaction.id));
   const unassignedLedger = [];
   const lineOptions = (selectedLineId) => allLines().map((line) => `<option value="${line.id}" ${line.id === selectedLineId ? "selected" : ""}>${line.category} - ${line.name}</option>`).join("");
@@ -910,12 +941,14 @@ function renderTransactions() {
         <section class="card">
           <div class="section-head"><div><span class="card-label">Bank expense</span><h3>Bank stream</h3></div><button id="addTransactionButton" type="button">+ Add transaction</button></div>
           ${imported.map((transaction) => `
-            <div class="assign-row">
-              <div><strong>${transaction.payee}</strong><small>${formatShortDate(transaction.date)}</small></div>
-              <b>${exactMoney.format(transaction.amount)}</b>
-              <label>Budget line<select>${lineOptions(transaction.lineId)}</select></label>
-              <button class="icon-button" data-accept-import="${transaction.id}" type="button">✓</button>
-              <button class="icon-button danger-button" data-dismiss-import="${transaction.id}" type="button">×</button>
+            <div class="bank-stream-row" data-bank-stream-row="${transaction.id}">
+              <input class="row-payee" data-bank-stream-payee="${transaction.id}" value="${escapeHtml(transaction.payee)}" aria-label="Payee">
+              <input class="row-date" type="date" data-bank-stream-date="${transaction.id}" value="${transaction.date}" aria-label="Date">
+              <input class="row-amount money-input" type="number" step="0.01" data-bank-stream-amount="${transaction.id}" value="${transaction.amount}" aria-label="Amount">
+              <select class="row-select" data-bank-stream-line="${transaction.id}" aria-label="Budget line">${lineOptions(transaction.lineId)}</select>
+              ${state.accounts.length ? `<select class="row-select" data-bank-stream-account="${transaction.id}" aria-label="Account"><option value="">Not linked</option>${accountOptions(transaction.accountId || "")}</select>` : ""}
+              <button class="icon-button" data-accept-import="${transaction.id}" type="button" aria-label="Accept ${escapeHtml(transaction.payee)}">✓</button>
+              <button class="icon-button danger-button" data-dismiss-import="${transaction.id}" type="button" aria-label="Dismiss ${escapeHtml(transaction.payee)}">×</button>
             </div>
           `).join("") || `<div class="empty-inline">No bank stream items waiting</div>`}
         </section>
@@ -926,10 +959,23 @@ function renderTransactions() {
           <form id="transactionForm" class="mini-form transaction-entry-form">
             <label>Payee<input name="payee" placeholder="Coffee House" required></label>
             <label>Amount<input name="amount" type="number" step="0.01" placeholder="18.72" required></label>
-            <label>Subcategory<select name="lineId">${allLines().map((line) => `<option value="${line.id}">${line.category} - ${line.name}</option>`).join("")}</select></label>
-            ${state.accounts.length ? `<label>Account<select name="accountId"><option value="">Not linked</option>${accountOptions("")}</select></label>` : ""}
-            <button type="submit">Split</button>
+            <label>Date<input name="date" type="date" value="${dateKey(new Date())}" required></label>
+            <label>Repeat<select name="recurrence">
+              <option value="none">One-time</option>
+              <option value="weekly">Weekly</option>
+              <option value="biweekly">Biweekly</option>
+              <option value="monthly">Monthly</option>
+            </select></label>
+            <label class="form-row-full">Subcategory<select name="lineId">${allLines().map((line) => `<option value="${line.id}">${line.category} - ${line.name}</option>`).join("")}</select></label>
+            ${state.accounts.length ? `<label class="form-row-full">Account<select name="accountId"><option value="">Not linked</option>${accountOptions("")}</select></label>` : ""}
+            <button type="submit" class="form-row-full">Split</button>
           </form>
+          ${state.recurringExpenses.length ? `
+            <div class="recurring-expenses-block">
+              <div class="card-label">Recurring bills</div>
+              ${state.recurringExpenses.map((recurring, index) => recurringExpenseRow(recurring, index)).join("")}
+            </div>
+          ` : ""}
           ${unassignedLedger.map((transaction) => `
             <div class="ledger-assign-row">
               <div><strong>${transaction.payee}</strong><small>${formatShortDate(transaction.date)}</small></div>
@@ -938,11 +984,7 @@ function renderTransactions() {
               <button data-assign-ledger="${transaction.id}:${transaction.payee}:${transaction.amount}:${transaction.date}" type="button">Assign</button>
             </div>
           `).join("")}
-          ${state.transactions.length ? state.transactions
-            .map((transaction, index) => ({ payee: transaction.payee, amount: -transaction.amount, date: transaction.date, tag: transactionAssignmentLabel(transaction), index }))
-            .slice(0, 6)
-            .map((transaction) => compactRow(transaction.payee, formatShortDate(transaction.date), `${exactMoney.format(transaction.amount)} · ${transaction.tag}`, "", `data-delete-transaction="${transaction.index}" aria-label="Delete ${escapeHtml(transaction.payee)}"`))
-            .join("") : `<div class="empty-inline">No transactions yet</div>`}
+          ${state.transactions.length ? state.transactions.slice(0, 6).map((transaction, index) => ledgerEntryRow(transaction, index)).join("") : `<div class="empty-inline">No transactions yet</div>`}
         </section>
       </aside>
     </section>`;
@@ -2756,6 +2798,30 @@ function ensurePaycheckRecurrenceData() {
   });
 }
 
+// Recurring bills post real Ledger transactions automatically (no review
+// step, unlike Bank stream): each elapsed period since the rule's anchor
+// date that hasn't already posted gets its own transaction row, tracked via
+// postedDates so revisiting this page never double-posts the same period.
+function ensureRecurringExpensesPosted() {
+  state.recurringExpenses ||= [];
+  const today = dateKey(new Date());
+  state.recurringExpenses.forEach((recurring) => {
+    recurring.postedDates ||= [];
+    recurringExpenseOccurrenceDates(recurring, today).forEach((date) => {
+      if (recurring.postedDates.includes(date)) return;
+      state.transactions.unshift(makeTransaction({
+        date,
+        payee: recurring.payee,
+        amount: Number(recurring.amount || 0),
+        lineId: recurring.lineId,
+        memo: "Recurring bill",
+        accountId: recurring.accountId || ""
+      }));
+      recurring.postedDates.push(date);
+    });
+  });
+}
+
 function ensureChoreRecurrenceData() {
   // Needed before the completedDates -> completedBy migration below, which
   // records each current assignee against every already-completed date.
@@ -4283,7 +4349,24 @@ function bindViewEvents() {
   $("#transactionForm")?.addEventListener("submit", (event) => {
     event.preventDefault();
     const data = Object.fromEntries(new FormData(event.currentTarget));
-    state.transactions.unshift(makeTransaction({ date: new Date().toISOString().slice(0, 10), payee: data.payee, lineId: data.lineId, amount: Number(data.amount), memo: "Manual split", accountId: data.accountId || "" }));
+    const date = data.date || dateKey(new Date());
+    const recurrence = data.recurrence || "none";
+    if (recurrence === "none") {
+      state.transactions.unshift(makeTransaction({ date, payee: data.payee, lineId: data.lineId, amount: Number(data.amount), memo: "Manual split", accountId: data.accountId || "" }));
+    } else {
+      state.recurringExpenses ||= [];
+      state.recurringExpenses.unshift({
+        id: uniqueId("recurring-expense"),
+        payee: data.payee,
+        amount: Number(data.amount),
+        lineId: data.lineId,
+        accountId: data.accountId || "",
+        recurrence,
+        anchorDate: date,
+        postedDates: []
+      });
+      ensureRecurringExpensesPosted();
+    }
     render();
   });
 
@@ -4409,9 +4492,137 @@ function bindViewEvents() {
       payee: "New bank stream item",
       amount: 0,
       lineId: allLines()[0]?.id || "",
+      accountId: "",
       date: new Date().toISOString().slice(0, 10)
     });
     render();
+  });
+
+  document.querySelectorAll("[data-bank-stream-payee]").forEach((input) => {
+    input.addEventListener("input", () => {
+      const draft = (state.transactionInboxDrafts || []).find((item) => item.id === input.dataset.bankStreamPayee);
+      if (draft) draft.payee = input.value;
+      autosaveState();
+    });
+  });
+
+  document.querySelectorAll("[data-bank-stream-date]").forEach((input) => {
+    input.addEventListener("change", () => {
+      const draft = (state.transactionInboxDrafts || []).find((item) => item.id === input.dataset.bankStreamDate);
+      if (draft && input.value) draft.date = input.value;
+      render();
+    });
+  });
+
+  document.querySelectorAll("[data-bank-stream-amount]").forEach((input) => {
+    input.addEventListener("input", () => {
+      const draft = (state.transactionInboxDrafts || []).find((item) => item.id === input.dataset.bankStreamAmount);
+      if (draft) draft.amount = Number(input.value || 0);
+      autosaveState();
+    });
+  });
+
+  document.querySelectorAll("[data-bank-stream-line]").forEach((select) => {
+    select.addEventListener("change", () => {
+      const draft = (state.transactionInboxDrafts || []).find((item) => item.id === select.dataset.bankStreamLine);
+      if (draft) draft.lineId = select.value;
+      autosaveState();
+    });
+  });
+
+  document.querySelectorAll("[data-bank-stream-account]").forEach((select) => {
+    select.addEventListener("change", () => {
+      const draft = (state.transactionInboxDrafts || []).find((item) => item.id === select.dataset.bankStreamAccount);
+      if (draft) draft.accountId = select.value;
+      autosaveState();
+    });
+  });
+
+  document.querySelectorAll("[data-ledger-entry-payee]").forEach((input) => {
+    input.addEventListener("input", () => {
+      const transaction = state.transactions[Number(input.dataset.ledgerEntryPayee)];
+      if (transaction) transaction.payee = input.value;
+      autosaveState();
+    });
+  });
+
+  document.querySelectorAll("[data-ledger-entry-amount]").forEach((input) => {
+    input.addEventListener("input", () => {
+      const transaction = state.transactions[Number(input.dataset.ledgerEntryAmount)];
+      if (transaction) transaction.amount = Number(input.value || 0);
+      autosaveState();
+    });
+  });
+
+  document.querySelectorAll("[data-ledger-entry-date]").forEach((input) => {
+    input.addEventListener("change", () => {
+      const transaction = state.transactions[Number(input.dataset.ledgerEntryDate)];
+      if (transaction && input.value) transaction.date = input.value;
+      render();
+    });
+  });
+
+  document.querySelectorAll("[data-ledger-entry-line]").forEach((select) => {
+    select.addEventListener("change", () => {
+      const transaction = state.transactions[Number(select.dataset.ledgerEntryLine)];
+      if (transaction) Object.assign(transaction, { lineId: select.value }, lineSnapshot(select.value));
+      render();
+    });
+  });
+
+  document.querySelectorAll("[data-ledger-entry-account]").forEach((select) => {
+    select.addEventListener("change", () => {
+      const transaction = state.transactions[Number(select.dataset.ledgerEntryAccount)];
+      if (transaction) transaction.accountId = select.value;
+      render();
+    });
+  });
+
+  document.querySelectorAll("[data-recurring-payee]").forEach((input) => {
+    input.addEventListener("input", () => {
+      const recurring = state.recurringExpenses[Number(input.dataset.recurringPayee)];
+      if (recurring) recurring.payee = input.value;
+      autosaveState();
+    });
+  });
+
+  document.querySelectorAll("[data-recurring-amount]").forEach((input) => {
+    input.addEventListener("input", () => {
+      const recurring = state.recurringExpenses[Number(input.dataset.recurringAmount)];
+      if (recurring) recurring.amount = Number(input.value || 0);
+      autosaveState();
+    });
+  });
+
+  document.querySelectorAll("[data-recurring-line]").forEach((select) => {
+    select.addEventListener("change", () => {
+      const recurring = state.recurringExpenses[Number(select.dataset.recurringLine)];
+      if (recurring) recurring.lineId = select.value;
+      render();
+    });
+  });
+
+  document.querySelectorAll("[data-recurring-account]").forEach((select) => {
+    select.addEventListener("change", () => {
+      const recurring = state.recurringExpenses[Number(select.dataset.recurringAccount)];
+      if (recurring) recurring.accountId = select.value;
+      render();
+    });
+  });
+
+  document.querySelectorAll("[data-recurring-recurrence]").forEach((select) => {
+    select.addEventListener("change", () => {
+      const recurring = state.recurringExpenses[Number(select.dataset.recurringRecurrence)];
+      if (recurring) recurring.recurrence = select.value;
+      render();
+    });
+  });
+
+  document.querySelectorAll("[data-delete-recurring]").forEach((button) => {
+    button.addEventListener("click", () => {
+      state.recurringExpenses.splice(Number(button.dataset.deleteRecurring), 1);
+      render();
+    });
   });
 
   document.querySelectorAll("[data-assign-ledger]").forEach((button) => {
@@ -6226,8 +6437,8 @@ function acceptImportTransaction(button) {
   }
 
   if (!inboxItem) return;
-  const lineId = button.closest(".assign-row")?.querySelector("select")?.value || allLines()[0]?.id;
-  state.transactions.unshift(makeTransaction({ date: inboxItem.date, payee: inboxItem.payee, amount: Number(inboxItem.amount), lineId, memo: "Accepted bank stream item" }));
+  const lineId = inboxItem.lineId || allLines()[0]?.id;
+  state.transactions.unshift(makeTransaction({ date: inboxItem.date, payee: inboxItem.payee, amount: Number(inboxItem.amount), lineId, memo: "Accepted bank stream item", accountId: inboxItem.accountId || "" }));
   state.transactionInboxDone ||= [];
   if (!state.transactionInboxDone.includes(inboxItem.id)) state.transactionInboxDone.push(inboxItem.id);
   state.transactionInboxDrafts = (state.transactionInboxDrafts || []).filter((item) => item.id !== inboxItem.id);

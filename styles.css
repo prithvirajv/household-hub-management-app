@@ -1434,7 +1434,7 @@ main {
   color: var(--text);
 }
 
-.transaction-entry-form label:nth-of-type(3),
+.transaction-entry-form .form-row-full,
 .transaction-entry-form button {
   grid-column: 1 / -1;
 }
@@ -1445,6 +1445,60 @@ main {
 .transaction-entry-form select {
   min-width: 0;
   max-width: 100%;
+}
+
+/* Bank stream / Ledger / Recurring bill rows use unconditional flex-wrap
+   rather than fixed grid columns: the Ledger card lives in .side-stack, a
+   narrow column next to the wide budget grid, so a rigid multi-column grid
+   squeezes long before a viewport media query would ever fire (see the
+   Income-row lesson). Flex-wrap reflows based on each row's own available
+   space regardless of which stack it ends up in. */
+.bank-stream-row,
+.ledger-entry-row,
+.recurring-expense-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+  border-radius: 8px;
+  padding: 0.6rem;
+  margin-bottom: 0.5rem;
+}
+
+.bank-stream-row {
+  background: var(--soft-blue);
+}
+
+.ledger-entry-row,
+.recurring-expense-row {
+  background: var(--soft-blue);
+}
+
+.bank-stream-row > *,
+.ledger-entry-row > *,
+.recurring-expense-row > * {
+  min-width: 0;
+}
+
+.row-payee {
+  flex: 1 1 130px;
+}
+
+.row-date {
+  flex: 0 1 140px;
+}
+
+.row-amount {
+  flex: 0 1 90px;
+}
+
+.row-select {
+  flex: 1 1 150px;
+  max-width: 100%;
+}
+
+.recurring-expenses-block {
+  margin-bottom: 0.6rem;
 }
 
 .transaction-subcategory-adder {
