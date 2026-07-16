@@ -208,3 +208,47 @@ ALTER TABLE document_folders
   ADD COLUMN IF NOT EXISTS wealth_item_id TEXT;
 
 CREATE INDEX IF NOT EXISTS idx_document_folders_wealth_item_id ON document_folders(wealth_item_id);
+
+-- Documents are family-wide like Decisions/Notes/Meals/Calendar, not tied to
+-- one specific household/property book -- scoped by the household's primary
+-- owner instead, so they read the same regardless of which of the owner's
+-- households is currently selected. household_id is kept as informational
+-- provenance (which household a file was added under, used to build its GCS
+-- object path) but must no longer cascade-delete the row when that one
+-- household is removed, since the owner's other households should keep it.
+ALTER TABLE document_folders
+  ADD COLUMN IF NOT EXISTS owner_user_id UUID REFERENCES users(id) ON DELETE CASCADE;
+
+ALTER TABLE documents
+  ADD COLUMN IF NOT EXISTS owner_user_id UUID REFERENCES users(id) ON DELETE CASCADE;
+
+UPDATE document_folders df
+SET owner_user_id = (
+  SELECT hm.user_id FROM household_memberships hm
+  WHERE hm.household_id = df.household_id
+  ORDER BY (hm.role = 'owner') DESC, hm.created_at ASC
+  LIMIT 1
+)
+WHERE df.owner_user_id IS NULL;
+
+UPDATE documents d
+SET owner_user_id = (
+  SELECT hm.user_id FROM household_memberships hm
+  WHERE hm.household_id = d.household_id
+  ORDER BY (hm.role = 'owner') DESC, hm.created_at ASC
+  LIMIT 1
+)
+WHERE d.owner_user_id IS NULL;
+
+CREATE INDEX IF NOT EXISTS idx_document_folders_owner_user_id ON document_folders(owner_user_id);
+CREATE INDEX IF NOT EXISTS idx_documents_owner_user_id ON documents(owner_user_id);
+
+ALTER TABLE document_folders DROP CONSTRAINT IF EXISTS document_folders_household_id_fkey;
+ALTER TABLE document_folders ALTER COLUMN household_id DROP NOT NULL;
+ALTER TABLE document_folders ADD CONSTRAINT document_folders_household_id_fkey
+  FOREIGN KEY (household_id) REFERENCES households(id) ON DELETE SET NULL;
+
+ALTER TABLE documents DROP CONSTRAINT IF EXISTS documents_household_id_fkey;
+ALTER TABLE documents ALTER COLUMN household_id DROP NOT NULL;
+ALTER TABLE documents ADD CONSTRAINT documents_household_id_fkey
+  FOREIGN KEY (household_id) REFERENCES households(id) ON DELETE SET NULL;

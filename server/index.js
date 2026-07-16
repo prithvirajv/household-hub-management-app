@@ -2745,19 +2745,30 @@ const ALLOWED_DOCUMENT_CONTENT_TYPES = new Set([
 ]);
 const MAX_DOCUMENT_SIZE_BYTES = 500 * 1024 * 1024;
 
-async function loadHouseholdFolders(householdId) {
+// Documents are family-wide (see sharedModulesFromState's comment on
+// Decisions for the same reasoning) -- scoped by the household's primary
+// owner so they read the same no matter which of the owner's households is
+// currently selected, instead of by whichever household_id a file happened
+// to be added under.
+async function resolveOwnerId(req) {
+  return MEMORY_DB
+    ? memoryPrimaryOwnerId(req.sessionUser.household_id)
+    : await databasePrimaryOwnerId(pool, req.sessionUser.household_id);
+}
+
+async function loadOwnerFolders(ownerId) {
   if (MEMORY_DB) {
-    return memoryDb.documentFolders.filter((item) => item.household_id === householdId);
+    return memoryDb.documentFolders.filter((item) => item.owner_user_id === ownerId);
   }
-  const result = await pool.query("SELECT * FROM document_folders WHERE household_id = $1", [householdId]);
+  const result = await pool.query("SELECT * FROM document_folders WHERE owner_user_id = $1", [ownerId]);
   return result.rows;
 }
 
-async function loadHouseholdDocuments(householdId) {
+async function loadOwnerDocuments(ownerId) {
   if (MEMORY_DB) {
-    return memoryDb.documents.filter((item) => item.household_id === householdId);
+    return memoryDb.documents.filter((item) => item.owner_user_id === ownerId);
   }
-  const result = await pool.query("SELECT * FROM documents WHERE household_id = $1", [householdId]);
+  const result = await pool.query("SELECT * FROM documents WHERE owner_user_id = $1", [ownerId]);
   return result.rows;
 }
 
@@ -2816,9 +2827,10 @@ async function findHouseholdWealthItemById(householdId, wealthItemType, wealthIt
 
 app.get("/api/documents", requireSession, async (req, res, next) => {
   try {
+    const ownerId = await resolveOwnerId(req);
     const [folders, documents] = await Promise.all([
-      loadHouseholdFolders(req.sessionUser.household_id),
-      loadHouseholdDocuments(req.sessionUser.household_id)
+      loadOwnerFolders(ownerId),
+      loadOwnerDocuments(ownerId)
     ]);
     res.json({ folders: folders.map(toClientFolder), documents: documents.map(toClientDocument) });
   } catch (error) {
@@ -2832,20 +2844,21 @@ app.post("/api/documents/folders", requireSession, async (req, res, next) => {
     const parentId = req.body?.parentId || null;
     if (!name) return res.status(400).json({ error: "A folder name is required" });
 
-    const folders = await loadHouseholdFolders(req.sessionUser.household_id);
+    const ownerId = await resolveOwnerId(req);
+    const folders = await loadOwnerFolders(ownerId);
     if (parentId && !folders.some((item) => item.id === parentId)) {
       return res.status(404).json({ error: "Parent folder not found" });
     }
 
     if (MEMORY_DB) {
-      const folder = { id: crypto.randomUUID(), household_id: req.sessionUser.household_id, parent_id: parentId, name, created_at: new Date().toISOString() };
+      const folder = { id: crypto.randomUUID(), household_id: req.sessionUser.household_id, owner_user_id: ownerId, parent_id: parentId, name, created_at: new Date().toISOString() };
       memoryDb.documentFolders.push(folder);
       return res.json(toClientFolder(folder));
     }
 
     const result = await pool.query(
-      `INSERT INTO document_folders (household_id, parent_id, name) VALUES ($1, $2, $3) RETURNING *`,
-      [req.sessionUser.household_id, parentId, name]
+      `INSERT INTO document_folders (household_id, owner_user_id, parent_id, name) VALUES ($1, $2, $3, $4) RETURNING *`,
+      [req.sessionUser.household_id, ownerId, parentId, name]
     );
     res.json(toClientFolder(result.rows[0]));
   } catch (error) {
@@ -2855,7 +2868,8 @@ app.post("/api/documents/folders", requireSession, async (req, res, next) => {
 
 app.patch("/api/documents/folders/:id", requireSession, async (req, res, next) => {
   try {
-    const folders = await loadHouseholdFolders(req.sessionUser.household_id);
+    const ownerId = await resolveOwnerId(req);
+    const folders = await loadOwnerFolders(ownerId);
     const folder = folders.find((item) => item.id === req.params.id);
     if (!folder) return res.status(404).json({ error: "Folder not found" });
 
@@ -2887,8 +2901,8 @@ app.patch("/api/documents/folders/:id", requireSession, async (req, res, next) =
     }
 
     const result = await pool.query(
-      `UPDATE document_folders SET name = $1, parent_id = $2, wealth_item_type = $3, wealth_item_id = $4 WHERE id = $5 AND household_id = $6 RETURNING *`,
-      [nextName, nextParentId, nextWealthItemType, nextWealthItemId, folder.id, req.sessionUser.household_id]
+      `UPDATE document_folders SET name = $1, parent_id = $2, wealth_item_type = $3, wealth_item_id = $4 WHERE id = $5 AND owner_user_id = $6 RETURNING *`,
+      [nextName, nextParentId, nextWealthItemType, nextWealthItemId, folder.id, ownerId]
     );
     res.json(toClientFolder(result.rows[0]));
   } catch (error) {
@@ -2898,11 +2912,12 @@ app.patch("/api/documents/folders/:id", requireSession, async (req, res, next) =
 
 app.delete("/api/documents/folders/:id", requireSession, async (req, res, next) => {
   try {
-    const folders = await loadHouseholdFolders(req.sessionUser.household_id);
+    const ownerId = await resolveOwnerId(req);
+    const folders = await loadOwnerFolders(ownerId);
     const folder = folders.find((item) => item.id === req.params.id);
     if (!folder) return res.status(404).json({ error: "Folder not found" });
 
-    const documents = await loadHouseholdDocuments(req.sessionUser.household_id);
+    const documents = await loadOwnerDocuments(ownerId);
     const hasChildFolder = folders.some((item) => item.parent_id === folder.id);
     const hasDocument = documents.some((item) => item.folder_id === folder.id);
     if (hasChildFolder || hasDocument) {
@@ -2914,7 +2929,7 @@ app.delete("/api/documents/folders/:id", requireSession, async (req, res, next) 
       return res.json({ ok: true });
     }
 
-    await pool.query("DELETE FROM document_folders WHERE id = $1 AND household_id = $2", [folder.id, req.sessionUser.household_id]);
+    await pool.query("DELETE FROM document_folders WHERE id = $1 AND owner_user_id = $2", [folder.id, ownerId]);
     res.json({ ok: true });
   } catch (error) {
     next(error);
@@ -2932,8 +2947,9 @@ app.post("/api/documents/upload-url", requireSession, async (req, res, next) => 
     if (!ALLOWED_DOCUMENT_CONTENT_TYPES.has(contentType)) return res.status(400).json({ error: "Unsupported file type" });
     if (sizeBytes && sizeBytes > MAX_DOCUMENT_SIZE_BYTES) return res.status(400).json({ error: "File exceeds the 500MB limit" });
 
+    const ownerId = await resolveOwnerId(req);
     if (folderId) {
-      const folders = await loadHouseholdFolders(req.sessionUser.household_id);
+      const folders = await loadOwnerFolders(ownerId);
       if (!folders.some((item) => item.id === folderId)) return res.status(404).json({ error: "Folder not found" });
     }
     if (noteId) {
@@ -2947,7 +2963,7 @@ app.post("/api/documents/upload-url", requireSession, async (req, res, next) => 
 
     if (MEMORY_DB) {
       memoryDb.documents.push({
-        id: documentId, household_id: req.sessionUser.household_id, uploaded_by: req.sessionUser.id,
+        id: documentId, household_id: req.sessionUser.household_id, owner_user_id: ownerId, uploaded_by: req.sessionUser.id,
         folder_id: folderId, note_id: noteId, name, description: "", content_type: contentType,
         size_bytes: sizeBytes, storage_object: storageObject, status: "pending",
         created_at: new Date().toISOString(), updated_at: new Date().toISOString()
@@ -2956,9 +2972,9 @@ app.post("/api/documents/upload-url", requireSession, async (req, res, next) => 
     }
 
     await pool.query(
-      `INSERT INTO documents (id, household_id, uploaded_by, folder_id, note_id, name, content_type, size_bytes, storage_object, status)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, 'pending')`,
-      [documentId, req.sessionUser.household_id, req.sessionUser.id, folderId, noteId, name, contentType, sizeBytes, storageObject]
+      `INSERT INTO documents (id, household_id, owner_user_id, uploaded_by, folder_id, note_id, name, content_type, size_bytes, storage_object, status)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, 'pending')`,
+      [documentId, req.sessionUser.household_id, ownerId, req.sessionUser.id, folderId, noteId, name, contentType, sizeBytes, storageObject]
     );
     res.json({ documentId, uploadUrl: url, expiresAt });
   } catch (error) {
@@ -2968,7 +2984,8 @@ app.post("/api/documents/upload-url", requireSession, async (req, res, next) => 
 
 app.post("/api/documents/:id/confirm", requireSession, async (req, res, next) => {
   try {
-    const documents = await loadHouseholdDocuments(req.sessionUser.household_id);
+    const ownerId = await resolveOwnerId(req);
+    const documents = await loadOwnerDocuments(ownerId);
     const document = documents.find((item) => item.id === req.params.id);
     if (!document) return res.status(404).json({ error: "Document not found" });
 
@@ -2979,8 +2996,8 @@ app.post("/api/documents/:id/confirm", requireSession, async (req, res, next) =>
     }
 
     const result = await pool.query(
-      `UPDATE documents SET status = 'ready', updated_at = now() WHERE id = $1 AND household_id = $2 RETURNING *`,
-      [document.id, req.sessionUser.household_id]
+      `UPDATE documents SET status = 'ready', updated_at = now() WHERE id = $1 AND owner_user_id = $2 RETURNING *`,
+      [document.id, ownerId]
     );
     res.json(toClientDocument(result.rows[0]));
   } catch (error) {
@@ -2990,7 +3007,8 @@ app.post("/api/documents/:id/confirm", requireSession, async (req, res, next) =>
 
 app.get("/api/documents/:id/download-url", requireSession, async (req, res, next) => {
   try {
-    const documents = await loadHouseholdDocuments(req.sessionUser.household_id);
+    const ownerId = await resolveOwnerId(req);
+    const documents = await loadOwnerDocuments(ownerId);
     const document = documents.find((item) => item.id === req.params.id);
     if (!document) return res.status(404).json({ error: "Document not found" });
 
@@ -3003,7 +3021,8 @@ app.get("/api/documents/:id/download-url", requireSession, async (req, res, next
 
 app.delete("/api/documents/:id", requireSession, async (req, res, next) => {
   try {
-    const documents = await loadHouseholdDocuments(req.sessionUser.household_id);
+    const ownerId = await resolveOwnerId(req);
+    const documents = await loadOwnerDocuments(ownerId);
     const document = documents.find((item) => item.id === req.params.id);
     if (!document) return res.status(404).json({ error: "Document not found" });
 
@@ -3014,7 +3033,7 @@ app.delete("/api/documents/:id", requireSession, async (req, res, next) => {
       return res.json({ ok: true });
     }
 
-    await pool.query("DELETE FROM documents WHERE id = $1 AND household_id = $2", [document.id, req.sessionUser.household_id]);
+    await pool.query("DELETE FROM documents WHERE id = $1 AND owner_user_id = $2", [document.id, ownerId]);
     res.json({ ok: true });
   } catch (error) {
     next(error);
@@ -3023,7 +3042,8 @@ app.delete("/api/documents/:id", requireSession, async (req, res, next) => {
 
 app.patch("/api/documents/:id", requireSession, async (req, res, next) => {
   try {
-    const documents = await loadHouseholdDocuments(req.sessionUser.household_id);
+    const ownerId = await resolveOwnerId(req);
+    const documents = await loadOwnerDocuments(ownerId);
     const document = documents.find((item) => item.id === req.params.id);
     if (!document) return res.status(404).json({ error: "Document not found" });
 
@@ -3038,7 +3058,7 @@ app.patch("/api/documents/:id", requireSession, async (req, res, next) => {
       : null;
 
     if (nextFolderId) {
-      const folders = await loadHouseholdFolders(req.sessionUser.household_id);
+      const folders = await loadOwnerFolders(ownerId);
       if (!folders.some((item) => item.id === nextFolderId)) return res.status(404).json({ error: "Folder not found" });
     }
     if (nextNoteId) {
@@ -3062,8 +3082,8 @@ app.patch("/api/documents/:id", requireSession, async (req, res, next) => {
     }
 
     const result = await pool.query(
-      `UPDATE documents SET name = $1, description = $2, folder_id = $3, note_id = $4, wealth_item_type = $5, wealth_item_id = $6, updated_at = now() WHERE id = $7 AND household_id = $8 RETURNING *`,
-      [nextName, nextDescription, nextFolderId, nextNoteId, nextWealthItemType, nextWealthItemId, document.id, req.sessionUser.household_id]
+      `UPDATE documents SET name = $1, description = $2, folder_id = $3, note_id = $4, wealth_item_type = $5, wealth_item_id = $6, updated_at = now() WHERE id = $7 AND owner_user_id = $8 RETURNING *`,
+      [nextName, nextDescription, nextFolderId, nextNoteId, nextWealthItemType, nextWealthItemId, document.id, ownerId]
     );
     res.json(toClientDocument(result.rows[0]));
   } catch (error) {
