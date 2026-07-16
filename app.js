@@ -930,6 +930,14 @@ function renderTransactions() {
           ${state.recurringExpenses.length ? `
             <div class="recurring-expenses-block">
               <div class="card-label">Recurring bills</div>
+              <div class="row-heading">
+                <span class="row-payee row-heading-label">Payee</span>
+                <span class="row-amount row-heading-label">Amount</span>
+                <span class="row-select row-heading-label">Subcategory</span>
+                ${state.accounts.length ? `<span class="row-select row-heading-label">Account</span>` : ""}
+                <span class="row-select row-heading-label">Repeats</span>
+                <span class="row-heading-spacer"></span>
+              </div>
               ${state.recurringExpenses.map((recurring, index) => recurringExpenseRow(recurring, index)).join("")}
             </div>
           ` : ""}
@@ -941,7 +949,17 @@ function renderTransactions() {
               <button data-assign-ledger="${transaction.id}:${transaction.payee}:${transaction.amount}:${transaction.date}" type="button">Assign</button>
             </div>
           `).join("")}
-          ${state.transactions.length ? state.transactions.slice(0, 6).map((transaction, index) => ledgerEntryRow(transaction, index)).join("") : `<div class="empty-inline">No transactions yet</div>`}
+          ${state.transactions.length ? `
+            <div class="row-heading">
+              <span class="row-payee row-heading-label">Payee</span>
+              <span class="row-amount row-heading-label">Amount</span>
+              <span class="row-date row-heading-label">Date</span>
+              <span class="row-select row-heading-label">Subcategory</span>
+              ${state.accounts.length ? `<span class="row-select row-heading-label">Account</span>` : ""}
+              <span class="row-heading-spacer"></span>
+            </div>
+            ${state.transactions.slice(0, 6).map((transaction, index) => ledgerEntryRow(transaction, index)).join("")}
+          ` : `<div class="empty-inline">No transactions yet</div>`}
         </section>
       </div>
       <aside class="side-stack">
@@ -962,6 +980,17 @@ function renderTransactions() {
         </section>
         <section class="card">
           <div class="section-head"><div><span class="card-label">Bank expense</span><h3>Bank stream</h3></div><button id="addTransactionButton" type="button">+ Add transaction</button></div>
+          ${imported.length ? `
+            <div class="row-heading">
+              <span class="row-payee row-heading-label">Payee</span>
+              <span class="row-date row-heading-label">Date</span>
+              <span class="row-amount row-heading-label">Amount</span>
+              <span class="row-select row-heading-label">Subcategory</span>
+              ${state.accounts.length ? `<span class="row-select row-heading-label">Account</span>` : ""}
+              <span class="row-heading-spacer"></span>
+              <span class="row-heading-spacer"></span>
+            </div>
+          ` : ""}
           ${imported.map((transaction) => `
             <div class="bank-stream-row" data-bank-stream-row="${transaction.id}">
               ${transaction.recurringId ? `<span class="pill">Recurring</span>` : ""}

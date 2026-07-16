@@ -1506,6 +1506,27 @@ main {
   margin-bottom: 0.6rem;
 }
 
+.row-heading {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  padding: 0 0.6rem;
+  margin-bottom: 0.35rem;
+}
+
+.row-heading-label {
+  min-width: 0;
+  color: var(--muted);
+  font-size: 0.72rem;
+  font-weight: 900;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.row-heading-spacer {
+  flex: 0 0 34px;
+}
+
 .transaction-subcategory-adder {
   grid-template-columns: minmax(140px, 0.8fr) minmax(240px, 1.2fr) auto auto;
   align-items: end;
