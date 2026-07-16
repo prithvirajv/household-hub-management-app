@@ -1033,6 +1033,28 @@ main {
   background: var(--soft-blue);
 }
 
+/* Subcategory rows sit directly under their category header as one
+   continuous list (plain row separators, no per-row card), rather than each
+   one looking like its own separate floating card the way Ledger/Bank
+   stream rows do — those are independent records, these belong together
+   under one category. */
+.budget-line {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.55rem 0.6rem;
+  border-bottom: 1px solid var(--line);
+}
+
+.budget-line > * {
+  min-width: 0;
+}
+
+.budget-line:last-of-type {
+  border-bottom: none;
+}
+
 .category-title {
   display: grid;
   grid-template-columns: 7px minmax(120px, 1fr) auto auto auto 28px;

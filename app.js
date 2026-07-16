@@ -838,7 +838,7 @@ function renderBudget() {
               ${category.lines.map((line, lineIndex) => {
                 const spent = spentByLine(line.id);
                 const remaining = Number(line.planned) - spent;
-                return `<div class="budget-line ledger-entry-row">
+                return `<div class="budget-line">
                   <label class="row-field row-payee"><small>Subcategory</small><input class="line-name-input" data-budget-line-name="${categoryIndex}:${lineIndex}" value="${line.name}"></label>
                   <label class="row-field row-date"><small>Due date</small><input data-budget-due-date="${categoryIndex}:${lineIndex}" type="date" min="${monthDateMin()}" max="${monthDateMax()}" value="${dueDateValue(line.dueDay)}"></label>
                   <label class="row-field row-amount"><small>Planned</small><input class="money-input" data-budget-line="${categoryIndex}:${lineIndex}" type="number" step="0.01" value="${line.planned}" min="0" aria-label="Planned amount for ${line.name}"></label>
