@@ -667,6 +667,16 @@ function metricsForView() {
   return [["Income", money.format(state.budget.income), "ready to assign"], ["Assigned", money.format(plannedTotal()), "planned this month"], ["Available", money.format(state.budget.income - plannedTotal()), "left to budget"], ["Overdue", money.format(0), "no urgent items"]];
 }
 
+// Pushes (or replaces, on the very first call) a browser history entry
+// whenever the visible view actually changes, so the back/forward buttons
+// step through in-app views instead of leaving the SPA entirely — plain
+// currentView reassignment never touched browser history on its own.
+function syncHistoryToView() {
+  if (history.state?.view === currentView) return;
+  const method = history.state?.view ? "pushState" : "replaceState";
+  history[method]({ view: currentView }, "", `#${currentView}`);
+}
+
 function render() {
   if (!state) return;
   // Captured once per household so the server can format reminder-email due
@@ -674,6 +684,7 @@ function render() {
   // (see notificationCandidates/formatDueLabel in server/index.js).
   state.household.timeZone ||= Intl.DateTimeFormat().resolvedOptions().timeZone;
   if (currentView === "admin" && !sessionUser?.isAdmin) currentView = "home";
+  syncHistoryToView();
   if (currentView === "wealth") { ensureDebtNetWorthSync(); ensureAccountsData(); }
   renderShell();
   view.innerHTML = (renderers[currentView] || renderers.budget)();
@@ -6855,6 +6866,8 @@ async function loadApp() {
     api("/api/private-data")
   ]);
   if (migrateInitialMonth()) autosaveState();
+  const hashView = location.hash.slice(1);
+  if (hashView && renderers[hashView]) currentView = hashView;
   $("#authPanel").hidden = true;
   $("#workspace").hidden = false;
   render();
@@ -7020,4 +7033,11 @@ async function initializeApp() {
 
 initializeApp().catch((error) => {
   $("#authMessage").textContent = error.message;
+});
+
+window.addEventListener("popstate", (event) => {
+  const view = event.state?.view;
+  if (!view || view === currentView || !renderers[view]) return;
+  currentView = view;
+  render();
 });
