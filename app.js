@@ -177,6 +177,17 @@ function allLines() {
   return state.budget.categories.flatMap((category) => category.lines.map((line) => ({ ...line, category: category.name, color: category.color })));
 }
 
+// Unlike allLines(), which copies each line ({ ...line, ... }) to attach its
+// parent category's name/color, this returns the live line object itself so
+// callers can mutate it (e.g. setting .planned) and have it stick.
+function findLineById(lineId) {
+  for (const category of state.budget.categories) {
+    const line = category.lines.find((item) => item.id === lineId);
+    if (line) return line;
+  }
+  return null;
+}
+
 function lineName(lineId) {
   return allLines().find((line) => line.id === lineId)?.name || lineId;
 }
@@ -942,7 +953,6 @@ function renderPaychecks() {
   ensureAccountsData();
   const paycheckOptions = state.paychecks.map((paycheck) => `<option value="${paycheck.date}">${paycheck.name} - ${money.format(paycheck.amount)}</option>`).join("");
   const lineOptions = allLines().map((line) => `<option value="${line.id}">${line.category} - ${line.name}</option>`).join("");
-  const amountOptions = [50, 100, 150, 200, 250, 300, 350, 450, 520, 620, 850, 1850].map((amount) => `<option value="${amount}">${money.format(amount)}</option>`).join("");
   return `
     <section class="work-grid">
       <div class="main-stack">
@@ -951,7 +961,7 @@ function renderPaychecks() {
           <div class="paycheck-builder">
             <label>Paycheck/Income<select id="paycheckSelect">${paycheckOptions}</select></label>
             <label>Budget line<select id="paycheckLineSelect">${lineOptions}</select></label>
-            <label>Amount<select id="paycheckAmountSelect">${amountOptions}</select></label>
+            <label>Amount<input id="paycheckAmountSelect" type="number" min="0" step="0.01" placeholder="150.48"></label>
             <button id="assignBillButton" type="button">Assign bill</button>
           </div>
           <div class="paycheck-grid">
@@ -4476,6 +4486,12 @@ function bindViewEvents() {
     const lineId = $("#paycheckLineSelect")?.value;
     if (!paycheck || !lineId) return;
     if (!paycheck.assignedLineIds.includes(lineId)) paycheck.assignedLineIds.push(lineId);
+    const amountInput = $("#paycheckAmountSelect");
+    const amount = Number(amountInput?.value);
+    if (amountInput?.value && amount >= 0) {
+      const line = findLineById(lineId);
+      if (line) line.planned = amount;
+    }
     render();
   });
 
