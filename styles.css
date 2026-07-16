@@ -1102,11 +1102,19 @@ main {
 }
 
 .budget-line-value {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
   min-width: 0;
 }
 
 .budget-line-value > small {
-  display: none;
+  display: block;
+  color: var(--muted);
+  font-size: 0.66rem;
+  font-weight: 800;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
 }
 
 .budget-line-value span,
@@ -3711,19 +3719,7 @@ main {
   }
 
   .budget-line-value {
-    display: grid;
-    align-content: start;
-    gap: 0.2rem;
     text-align: left;
-  }
-
-  .budget-line-value > small {
-    display: block;
-    margin: 0;
-    color: var(--muted);
-    font-size: 0.66rem;
-    font-weight: 800;
-    text-transform: uppercase;
   }
 
   .budget-line-value .money-input {
