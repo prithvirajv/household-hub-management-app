@@ -918,6 +918,7 @@ function renderBudget() {
             <button id="addCategoryButton" class="ghost" type="button">Add category</button>
             <button id="deleteCategoryByNameButton" class="danger-button" type="button">Delete selected</button>
           </div>
+          <p class="muted">Bills like HOA, insurance, property tax, subscriptions, or memberships can be made recurring to automatically set aside savings each month.</p>
           <div class="budget-table">
             ${state.budget.categories.map((category, categoryIndex) => `
               <div class="category-row">
@@ -948,7 +949,7 @@ function renderBudget() {
                     <label class="row-field"><small>Frequency</small><select data-budget-recurring-frequency="${categoryIndex}:${lineIndex}">${Object.entries(recurringBudgetFrequencyLabels).map(([value, label]) => `<option value="${value}" ${recurring.frequency === value ? "selected" : ""}>${label}</option>`).join("")}</select></label>
                     <div class="recurring-budget-summary"><strong>${exactMoney.format(recurring.monthlyAmount)}/mo</strong><small>${recurringBudgetFrequencyLabels[recurring.frequency]} bill due ${formatShortDate(recurring.nextDueDate)} · ${recurring.monthsRemaining} month${recurring.monthsRemaining === 1 ? "" : "s"} to save</small></div>
                     <button class="ghost" data-disable-recurring-budget="${categoryIndex}:${lineIndex}" type="button">Remove recurring</button>
-                  </div>` : `<div class="recurring-budget-panel recurring-budget-start"><span>HOA, insurance, property tax, subscriptions, and memberships can be set aside automatically.</span><button class="ghost" data-enable-recurring-budget="${categoryIndex}:${lineIndex}" type="button">Make recurring</button></div>`}
+                  </div>` : `<button class="ghost recurring-budget-toggle" data-enable-recurring-budget="${categoryIndex}:${lineIndex}" type="button" title="Automatically set aside savings each month for bills like HOA, insurance, property tax, subscriptions, or memberships.">Make recurring</button>`}
                 </div>`;
               }).join("")}
             `).join("")}

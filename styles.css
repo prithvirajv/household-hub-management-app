@@ -1067,15 +1067,10 @@ main {
   background: var(--soft-blue);
 }
 
-.recurring-budget-panel.recurring-budget-start {
-  grid-template-columns: minmax(180px, 1fr) auto;
-  align-items: center;
-}
-
-.recurring-budget-panel.recurring-budget-start span {
-  color: var(--muted);
+.recurring-budget-toggle {
+  padding: 0.35rem 0.6rem;
   font-size: 0.82rem;
-  font-weight: 750;
+  white-space: nowrap;
 }
 
 .recurring-budget-summary {
@@ -3826,8 +3821,7 @@ main {
     min-height: 36px;
   }
 
-  .recurring-budget-panel,
-  .recurring-budget-panel.recurring-budget-start {
+  .recurring-budget-panel {
     grid-template-columns: 1fr;
     align-items: stretch;
   }
