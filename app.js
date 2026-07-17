@@ -1019,13 +1019,13 @@ function recurringExpenseRow(recurring, index) {
     <div class="recurring-expense-row">
       <label class="row-field row-payee"><small>Payee</small><input data-recurring-payee="${index}" value="${escapeHtml(recurring.payee)}"></label>
       <label class="row-field row-amount"><small>Amount</small><input class="money-input" type="number" step="0.01" data-recurring-amount="${index}" value="${recurring.amount}"></label>
-      <label class="row-field row-select"><small>Subcategory</small><select data-recurring-line="${index}">${lineOptions}</select></label>
-      ${state.accounts.length ? `<label class="row-field row-select"><small>Account</small><select data-recurring-account="${index}"><option value="">Not linked</option>${accountOptions(recurring.accountId || "")}</select></label>` : ""}
       <label class="row-field row-select"><small>Repeats</small><select data-recurring-recurrence="${index}">
         <option value="weekly" ${recurring.recurrence === "weekly" ? "selected" : ""}>Weekly</option>
         <option value="biweekly" ${recurring.recurrence === "biweekly" ? "selected" : ""}>Biweekly</option>
         <option value="monthly" ${recurring.recurrence === "monthly" ? "selected" : ""}>Monthly</option>
       </select></label>
+      <label class="row-field row-select"><small>Subcategory</small><select data-recurring-line="${index}">${lineOptions}</select></label>
+      ${state.accounts.length ? `<label class="row-field row-select"><small>Account</small><select data-recurring-account="${index}"><option value="">Not linked</option>${accountOptions(recurring.accountId || "")}</select></label>` : ""}
       <button class="icon-button danger-button" data-delete-recurring="${index}" type="button" aria-label="Stop recurring ${escapeHtml(recurring.payee)}">×</button>
     </div>`;
 }
@@ -1084,6 +1084,7 @@ function renderTransactions() {
               <button data-assign-ledger="${transaction.id}:${transaction.payee}:${transaction.amount}:${transaction.date}" type="button">Assign</button>
             </div>
           `).join("")}
+          <div class="card-label">Recent transactions</div>
           ${state.transactions.length ? state.transactions.slice(0, 6).map((transaction, index) => ledgerEntryRow(transaction, index)).join("") : `<div class="empty-inline">No transactions yet</div>`}
         </section>
       </div>
