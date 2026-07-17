@@ -477,6 +477,15 @@ function debtAssetOptions(debt) {
   ].join("");
 }
 
+function debtLineOptions(debt) {
+  return [
+    `<option value="">Not linked</option>`,
+    ...allLines().map((line) =>
+      `<option value="${line.id}" ${debt.lineId === line.id ? "selected" : ""}>${line.category} - ${line.name}</option>`
+    )
+  ].join("");
+}
+
 function monthLabel() {
   return formatMonth(state.budget.month);
 }
@@ -2531,11 +2540,12 @@ function renderWealth() {
               <label>Monthly EMI<input data-debt-minimum="${index}" type="number" min="0" step="0.01" inputmode="decimal" value="${Number(debt.minimum || 0)}" aria-label="Monthly EMI for ${escapeHtml(debt.name)}"></label>
               <label>Loan term (months)<input data-debt-term="${index}" type="number" min="0" step="1" inputmode="numeric" value="${Number(debt.termMonths || 0)}" aria-label="Loan term for ${escapeHtml(debt.name)}"></label>
               <label class="debt-asset-field">Secured by asset<select data-debt-asset="${index}" aria-label="Asset assigned to ${escapeHtml(debt.name)}">${debtAssetOptions(debt)}</select></label>
+              <label class="debt-asset-field">Subcategory<select data-debt-line="${index}" aria-label="Subcategory for ${escapeHtml(debt.name)} payments">${debtLineOptions(debt)}</select></label>
             </div>
             <div class="debt-payoff-summary"><span><b>Estimated payoff</b>${termLabel(payoffMonths(debt))}</span><span><b>Suggested EMI</b>${debt.termMonths ? money.format(suggestedEmi(debt)) : "Set a loan term"}</span>${debt.termMonths ? `<button class="ghost" data-use-suggested-emi="${index}" type="button">Use suggested EMI</button>` : ""}</div>
             <div class="bar"><span style="width:${Math.max(4, Math.min(95, Math.round((1 - debt.balance / 15000) * 100)))}%"></span></div>
             <div class="payment-row"><label>Additional payment<input data-debt-payment="${index}" value="0" type="number" min="0" step="0.01"></label><button class="ghost" data-apply-debt-payment="${index}" type="button" ${Number(debt.minimum || 0) <= 0 ? "disabled" : ""}>Record EMI payment</button><button class="icon-button danger-button" data-delete-debt="${index}" type="button" aria-label="Delete ${escapeHtml(debt.name)}">×</button></div>
-            ${debt.payments?.length ? `<details class="payment-history"><summary>Payment history (${debt.payments.length})</summary>${debt.payments.slice(0, 8).map((payment) => `<div><span>${formatShortDate(payment.date)}</span><span>${money.format(payment.amount)} paid</span><span>${money.format(payment.principal)} principal</span><span>${money.format(payment.interest)} interest</span></div>`).join("")}</details>` : ""}
+            ${debt.payments?.length ? `<details class="payment-history"><summary>Payment history (${debt.payments.length})</summary>${debt.payments.slice(0, 8).map((payment, paymentIndex) => `<div><input type="date" data-debt-payment-date="${index}:${paymentIndex}" value="${payment.date}" aria-label="Date for this ${escapeHtml(debt.name)} payment"><span>${money.format(payment.amount)} paid</span><span>${money.format(payment.principal)} principal</span><span>${money.format(payment.interest)} interest</span></div>`).join("")}</details>` : ""}
           </article>`).join("") : `<div class="onboarding-empty compact-onboarding"><div class="empty-symbol" aria-hidden="true">↓</div><h3>Add a debt when you are ready</h3><p>Track its balance, rate, payment, and the asset it secures.</p></div>`}
         </section>
       </div>
@@ -5327,6 +5337,23 @@ function bindViewEvents() {
     });
   });
 
+  document.querySelectorAll("[data-debt-line]").forEach((select) => {
+    select.addEventListener("change", () => {
+      const debt = state.goals.debts[Number(select.dataset.debtLine)];
+      debt.lineId = select.value;
+      autosaveState();
+    });
+  });
+
+  document.querySelectorAll("[data-debt-payment-date]").forEach((input) => {
+    input.addEventListener("change", () => {
+      const [debtIndex, paymentIndex] = input.dataset.debtPaymentDate.split(":").map(Number);
+      const payment = state.goals.debts[debtIndex]?.payments?.[paymentIndex];
+      if (payment && input.value) payment.date = input.value;
+      autosaveState();
+    });
+  });
+
   document.querySelectorAll("[data-debt-name]").forEach((input) => {
     input.addEventListener("input", () => {
       const debt = state.goals.debts[Number(input.dataset.debtName)];
@@ -5389,8 +5416,12 @@ function bindViewEvents() {
       const amount = Math.min(debt.balance + interest, emi + extra);
       const principal = Math.max(0, amount - interest);
       debt.balance = Math.max(0, debt.balance - principal);
+      const paymentDate = new Date().toISOString().slice(0, 10);
       debt.payments ||= [];
-      debt.payments.unshift({ id: uniqueId("payment"), date: new Date().toISOString().slice(0, 10), amount, principal, interest, extra, balance: debt.balance });
+      debt.payments.unshift({ id: uniqueId("payment"), date: paymentDate, amount, principal, interest, extra, balance: debt.balance });
+      if (debt.lineId) {
+        state.transactions.unshift(makeTransaction({ date: paymentDate, payee: debt.name, lineId: debt.lineId, amount, memo: "EMI payment" }));
+      }
       const liability = liabilityForDebt(debt);
       if (liability) liability.value = debt.balance;
       state.household.activity.unshift(`Recorded ${money.format(amount)} EMI payment for ${debt.name}`);
