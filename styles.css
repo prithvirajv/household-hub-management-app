@@ -3782,8 +3782,8 @@ main {
     grid-template-columns: 7px minmax(0, 1fr) 36px;
     grid-template-areas:
       "color name delete"
-      "color spent delete"
       "color planned delete"
+      "color spent delete"
       "add add add";
     align-items: center;
     row-gap: 0.3rem;

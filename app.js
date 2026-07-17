@@ -933,8 +933,8 @@ function renderBudget() {
                 <div class="category-title">
                   <i style="background:${category.color}"></i>
                   <div class="category-name"><strong>${category.name}</strong><small data-category-left="${categoryIndex}">${money.format(category.lines.reduce((sum, line) => sum + Number(line.planned) - spentByLine(line.id), 0))} left</small></div>
-                  <span class="category-spent" data-category-spent="${categoryIndex}">${money.format(category.lines.reduce((sum, line) => sum + spentByLine(line.id), 0))} spent</span>
                   <b class="category-planned" data-category-planned="${categoryIndex}">${money.format(category.lines.reduce((sum, line) => sum + Number(line.planned), 0))} planned</b>
+                  <span class="category-spent" data-category-spent="${categoryIndex}">${money.format(category.lines.reduce((sum, line) => sum + spentByLine(line.id), 0))} spent</span>
                   <button class="category-add-line" data-add-line-category="${categoryIndex}" type="button">+ Add subcategory</button>
                   <button class="icon-button danger-button" data-delete-category="${categoryIndex}" type="button" aria-label="Remove ${category.name}">×</button>
                 </div>
