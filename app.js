@@ -234,11 +234,15 @@ function paycheckAssignedAmount(paycheck) {
 }
 
 function spentByLine(lineId) {
-  return state.transactions.filter((transaction) => transaction.lineId === lineId).reduce((sum, transaction) => sum + Number(transaction.amount || 0), 0);
+  return state.transactions
+    .filter((transaction) => transaction.lineId === lineId && transaction.date?.slice(0, 7) === state.budget.month)
+    .reduce((sum, transaction) => sum + Number(transaction.amount || 0), 0);
 }
 
 function spentTotal() {
-  return state.transactions.reduce((sum, transaction) => sum + Number(transaction.amount || 0), 0);
+  return state.transactions
+    .filter((transaction) => transaction.date?.slice(0, 7) === state.budget.month)
+    .reduce((sum, transaction) => sum + Number(transaction.amount || 0), 0);
 }
 
 function lowerActivityMargin() {
