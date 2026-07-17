@@ -6958,6 +6958,9 @@ $("#monthPicker").addEventListener("change", (event) => {
   rememberCurrentBudgetSnapshot();
   state.budget.month = event.target.value;
   state.budget.monthPreferenceSet = true;
+  const existing = (state.budgetHistory || []).find((budget) => budget.month === state.budget.month);
+  state.budget.categories = existing ? cloneBudgetCategories(existing.categories) : [];
+  state.budget.income = existing ? Number(existing.income || 0) : 0;
   autosaveState();
   render();
 });
