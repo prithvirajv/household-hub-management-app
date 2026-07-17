@@ -2819,6 +2819,11 @@ function renderAdmin() {
   return `
     <section class="admin-layout">
       <section class="card">
+        <div class="section-head"><div><span class="card-label">Data maintenance</span><h3>One-time fix</h3></div></div>
+        <p class="muted">Copies the August 2026 budget into July 2026, removes every other months budget history, and removes every transaction not dated in July 2026. Run this once, then it can be removed.</p>
+        <button id="fixJuly2026Button" class="danger-button" type="button">Copy August 2026 budget into July 2026</button>
+      </section>
+      <section class="card">
         <div class="section-head">
           <div><span class="card-label">Owner controls</span><h3>Application administration</h3></div>
           <button id="refreshAdminButton" class="ghost" type="button">Refresh stats</button>
@@ -6055,6 +6060,17 @@ function bindViewEvents() {
   $("#refreshAdminButton")?.addEventListener("click", () => {
     adminData = null;
     render();
+  });
+
+  $("#fixJuly2026Button")?.addEventListener("click", async () => {
+    if (!window.confirm("This copies August 2026 into July 2026 and permanently deletes every other months budget history and every transaction outside July 2026. This cannot be undone. Continue?")) return;
+    try {
+      const result = await api("/api/admin/one-time-fix-july-2026", { method: "POST", body: "{}" });
+      window.alert(`Done. July 2026 now has ${result.categoriesCount} categories and ${result.transactionsRemaining} transactions remain in total.`);
+      await loadApp();
+    } catch (error) {
+      window.alert(error.message);
+    }
   });
 
   document.querySelectorAll("[data-admin-toggle-disabled]").forEach((button) => {
