@@ -1139,7 +1139,8 @@ function renderPaychecks() {
               const assigned = paycheckAssignedAmount(paycheck);
               const monthStart = `${state.budget.month}-01`;
               const monthEnd = monthEndDateKey(state.budget.month);
-              const occurrenceDates = paycheckOccurrenceDatesInRange(paycheck, monthStart, monthEnd);
+              const allOccurrenceDates = paycheckAllOccurrenceDatesInRange(paycheck, monthStart, monthEnd);
+              const skippedDates = paycheck.skippedDates || [];
               return `<article class="paycheck-card">
                 <div class="paycheck-card-header">
                   <input class="paycheck-name-input" data-income-name="${index}" value="${escapeHtml(paycheck.name)}" aria-label="Name for this paycheck/income entry">
@@ -1153,7 +1154,10 @@ function renderPaychecks() {
                 <label class="paycheck-recurrence-field">End date (optional)<input type="date" data-paycheck-end-date="${index}" value="${paycheck.endDate || ""}" aria-label="Stop ${escapeHtml(paycheck.name)} from repeating after this date"></label>
                 ${state.accounts.length ? `<label class="paycheck-recurrence-field">Deposit to<select data-paycheck-deposit-account="${index}" aria-label="Deposit account for ${escapeHtml(paycheck.name)}"><option value="">Not linked</option>${accountOptions(paycheck.depositAccountId || "", { excludeType: "credit_card" })}</select></label>` : ""}
                 <div class="mini-tags">${paycheck.assignedLineIds.map((id) => `<span>${lineName(id)}</span>`).join("")}</div>
-                ${occurrenceDates.length ? `<div class="pay-dates-this-month"><small>Pay dates in ${formatMonth(state.budget.month)}</small><div class="mini-tags">${occurrenceDates.map((date) => `<span>${formatShortDate(date)} · ${money.format(paycheck.amount)}</span>`).join("")}</div></div>` : ""}
+                ${allOccurrenceDates.length ? `<div class="pay-dates-this-month"><small>Pay dates in ${formatMonth(state.budget.month)}</small><div class="mini-tags">${allOccurrenceDates.map((date) => {
+                  const isSkipped = skippedDates.includes(date);
+                  return `<button class="pay-date-toggle ${isSkipped ? "skipped" : ""}" data-toggle-paycheck-skip="${index}:${date}" type="button" aria-label="${isSkipped ? "Mark" : "Skip"} the ${formatShortDate(date)} payment for ${escapeHtml(paycheck.name)}">${formatShortDate(date)} · ${isSkipped ? "Skipped" : money.format(paycheck.amount)}</button>`;
+                }).join("")}</div></div>` : ""}
                 <div class="split-stat" data-paycheck-split="${index}"><span>Income ${money.format(paycheck.amount)}</span><b>Assigned ${money.format(assigned)}</b></div>
               </article>`;
             }).join("")}
@@ -5048,6 +5052,23 @@ function bindViewEvents() {
     input.addEventListener("change", () => {
       const paycheck = state.paychecks[Number(input.dataset.paycheckEndDate)];
       if (paycheck) paycheck.endDate = input.value || "";
+      state.budget.income = budgetIncomeFromPaychecks();
+      autosaveState();
+      render();
+    });
+  });
+
+  document.querySelectorAll("[data-toggle-paycheck-skip]").forEach((button) => {
+    button.addEventListener("click", () => {
+      const separatorIndex = button.dataset.togglePaycheckSkip.indexOf(":");
+      const paycheckIndex = Number(button.dataset.togglePaycheckSkip.slice(0, separatorIndex));
+      const date = button.dataset.togglePaycheckSkip.slice(separatorIndex + 1);
+      const paycheck = state.paychecks[paycheckIndex];
+      if (!paycheck) return;
+      paycheck.skippedDates ||= [];
+      const skipIndex = paycheck.skippedDates.indexOf(date);
+      if (skipIndex >= 0) paycheck.skippedDates.splice(skipIndex, 1);
+      else paycheck.skippedDates.push(date);
       state.budget.income = budgetIncomeFromPaychecks();
       autosaveState();
       render();

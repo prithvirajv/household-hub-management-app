@@ -5,7 +5,7 @@ const {
   dailyTaskOccursOnDate, isDailyTaskDoneOnDate, toggleDailyTaskDoneOnDate,
   timeToMinutes, minutesToTime, snapMinutes, layoutTimelineBlocks, comparePlannedToActual,
   sanitizeFilename, buildDocumentObjectPath, wouldCreateFolderCycle, buildFolderTree,
-  smsGatewayAddress, paycheckOccurrencesSince, paycheckOccurrencesInRange, paycheckOccurrenceDatesInRange, recurringExpenseOccurrenceDates, accountBalance, accountsWithBalances,
+  smsGatewayAddress, paycheckOccurrencesSince, paycheckOccurrencesInRange, paycheckOccurrenceDatesInRange, paycheckAllOccurrenceDatesInRange, recurringExpenseOccurrenceDates, accountBalance, accountsWithBalances,
   recurringBudgetSetAside, nextRecurringBudgetDueDate, monthsUntilDueInclusive,
   annualEventDate, nextAnnualEventDate, annualEventNotifyAt, rollAnnualNotifyAtForward
 } = require("../lib/shared-logic");
@@ -551,6 +551,26 @@ test("paycheckOccurrenceDatesInRange: an endDate excludes dates after it but kee
   const paycheck = { date: "2026-07-10", recurrence: "biweekly", endDate: "2026-07-15" };
   assert.deepEqual(paycheckOccurrenceDatesInRange(paycheck, "2026-07-01", "2026-07-31"), ["2026-07-10"]);
   assert.deepEqual(paycheckOccurrenceDatesInRange(paycheck, "2026-08-01", "2026-08-31"), []);
+});
+
+test("paycheckOccurrenceDatesInRange: skippedDates excludes only that one occurrence", () => {
+  const paycheck = { date: "2026-07-10", recurrence: "monthly", skippedDates: ["2026-10-10"] };
+  assert.deepEqual(paycheckOccurrenceDatesInRange(paycheck, "2026-09-01", "2026-09-30"), ["2026-09-10"]);
+  assert.deepEqual(paycheckOccurrenceDatesInRange(paycheck, "2026-10-01", "2026-10-31"), []);
+  assert.deepEqual(paycheckOccurrenceDatesInRange(paycheck, "2026-11-01", "2026-11-30"), ["2026-11-10"]);
+});
+
+test("paycheckOccurrencesInRange: skippedDates excludes only that one months income, other months untouched", () => {
+  const paycheck = { date: "2026-07-10", recurrence: "monthly", skippedDates: ["2026-10-10"] };
+  assert.equal(paycheckOccurrencesInRange(paycheck, "2026-09-01", "2026-09-30"), 1);
+  assert.equal(paycheckOccurrencesInRange(paycheck, "2026-10-01", "2026-10-31"), 0);
+  assert.equal(paycheckOccurrencesInRange(paycheck, "2026-11-01", "2026-11-30"), 1);
+});
+
+test("paycheckAllOccurrenceDatesInRange: still lists a skipped date so the UI can show and un-skip it", () => {
+  const paycheck = { date: "2026-07-10", recurrence: "monthly", skippedDates: ["2026-10-10"] };
+  assert.deepEqual(paycheckAllOccurrenceDatesInRange(paycheck, "2026-10-01", "2026-10-31"), ["2026-10-10"]);
+  assert.deepEqual(paycheckOccurrenceDatesInRange(paycheck, "2026-10-01", "2026-10-31"), []);
 });
 
 test("recurringExpenseOccurrenceDates: a one-time bill posts only its anchor date once reached", () => {

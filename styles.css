@@ -1909,6 +1909,22 @@ main {
   font-size: 0.74rem;
 }
 
+.pay-date-toggle {
+  border-radius: 999px;
+  background: var(--green-soft);
+  color: #07654b;
+  border: none;
+  padding: 0.25rem 0.45rem;
+  font-weight: 800;
+  font-size: 0.72rem;
+}
+
+.pay-date-toggle.skipped {
+  background: var(--soft-blue);
+  color: var(--muted);
+  text-decoration: line-through;
+}
+
 .mini-tags span {
   border-radius: 999px;
   background: var(--green-soft);
