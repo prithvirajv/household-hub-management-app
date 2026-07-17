@@ -945,6 +945,7 @@ async function seedAdminUser() {
       memoryDb.memberships.push({ user_id: user.id, household_id: household.id, role: "owner" });
     }
     user.name = ADMIN_NAME;
+    user.password_hash = passwordHash;
     user.is_admin = true;
     user.disabled_at = null;
     user.email_verified_at ||= new Date().toISOString();
@@ -959,7 +960,11 @@ async function seedAdminUser() {
       `INSERT INTO users (email, password_hash, name, is_admin)
        VALUES ($1, $2, $3, true)
        ON CONFLICT (email)
-       DO UPDATE SET name = EXCLUDED.name, is_admin = true, disabled_at = NULL
+       DO UPDATE SET name = EXCLUDED.name,
+                     password_hash = EXCLUDED.password_hash,
+                     is_admin = true,
+                     disabled_at = NULL,
+                     email_verified_at = COALESCE(users.email_verified_at, now())
        RETURNING id`,
       [ADMIN_EMAIL, passwordHash, ADMIN_NAME]
     );
