@@ -532,12 +532,6 @@ function dueDayFromDate(value) {
   return Number(value.slice(-2));
 }
 
-const recurringBudgetFrequencyMonths = {
-  monthly: 1,
-  quarterly: 3,
-  yearly: 12
-};
-
 const recurringBudgetFrequencyLabels = {
   monthly: "Monthly",
   quarterly: "Quarterly",
