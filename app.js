@@ -229,6 +229,12 @@ function plannedTotal() {
   return allLines().reduce((sum, line) => sum + Number(line.planned || 0), 0);
 }
 
+function budgetIncomeFromPaychecks() {
+  const monthStart = `${state.budget.month}-01`;
+  const monthEnd = monthEndDateKey(state.budget.month);
+  return state.paychecks.reduce((sum, paycheck) => sum + Number(paycheck.amount || 0) * paycheckOccurrencesInRange(paycheck, monthStart, monthEnd), 0);
+}
+
 function paycheckAssignedAmount(paycheck) {
   return paycheck.assignedLineIds.reduce((sum, id) => sum + (allLines().find((line) => line.id === id)?.planned || 0), 0);
 }
@@ -787,6 +793,7 @@ function render() {
   state.household.timeZone ||= Intl.DateTimeFormat().resolvedOptions().timeZone;
   if (currentView === "admin" && !sessionUser?.isAdmin) currentView = "home";
   ensureRecurringBudgetBills();
+  state.budget.income = budgetIncomeFromPaychecks();
   syncHistoryToView();
   if (currentView === "wealth") { ensureDebtNetWorthSync(); ensureAccountsData(); }
   renderShell();
@@ -4655,7 +4662,7 @@ function bindViewEvents() {
     input.addEventListener("input", () => {
       const index = Number(input.dataset.incomeAmount);
       state.paychecks[index].amount = Number(input.value || 0);
-      state.budget.income = state.paychecks.reduce((sum, paycheck) => sum + Number(paycheck.amount || 0), 0);
+      state.budget.income = budgetIncomeFromPaychecks();
       refreshIncomeTotals();
       autosaveState();
     });
@@ -4679,7 +4686,9 @@ function bindViewEvents() {
     select.addEventListener("change", () => {
       const paycheck = state.paychecks[Number(select.dataset.incomeRecurrence)];
       if (paycheck) paycheck.recurrence = select.value;
+      state.budget.income = budgetIncomeFromPaychecks();
       autosaveState();
+      render();
     });
   });
 
@@ -4723,7 +4732,7 @@ function bindViewEvents() {
 
   $("#addIncomeButton")?.addEventListener("click", () => {
     state.paychecks.push({ date: new Date().toISOString().slice(0, 10), name: `Income ${state.paychecks.length + 1}`, amount: 0, assignedLineIds: [] });
-    state.budget.income = state.paychecks.reduce((sum, paycheck) => sum + Number(paycheck.amount || 0), 0);
+    state.budget.income = budgetIncomeFromPaychecks();
     render();
   });
 
@@ -4994,7 +5003,7 @@ function bindViewEvents() {
   document.querySelectorAll("[data-delete-paycheck]").forEach((button) => {
     button.addEventListener("click", () => {
       state.paychecks.splice(Number(button.dataset.deletePaycheck), 1);
-      state.budget.income = state.paychecks.reduce((sum, paycheck) => sum + Number(paycheck.amount || 0), 0);
+      state.budget.income = budgetIncomeFromPaychecks();
       render();
     });
   });
@@ -5003,6 +5012,8 @@ function bindViewEvents() {
     input.addEventListener("change", () => {
       const paycheck = state.paychecks[Number(input.dataset.paycheckDate)];
       if (paycheck && input.value) paycheck.date = input.value;
+      state.budget.income = budgetIncomeFromPaychecks();
+      autosaveState();
       render();
     });
   });
@@ -5011,6 +5022,8 @@ function bindViewEvents() {
     select.addEventListener("change", () => {
       const paycheck = state.paychecks[Number(select.dataset.paycheckRecurrence)];
       if (paycheck) paycheck.recurrence = select.value;
+      state.budget.income = budgetIncomeFromPaychecks();
+      autosaveState();
       render();
     });
   });
@@ -5030,7 +5043,7 @@ function bindViewEvents() {
       const paycheck = state.paychecks[index];
       if (!paycheck) return;
       paycheck.amount = Number(input.value || 0);
-      state.budget.income = state.paychecks.reduce((sum, item) => sum + Number(item.amount || 0), 0);
+      state.budget.income = budgetIncomeFromPaychecks();
       const splitEl = document.querySelector(`[data-paycheck-split="${index}"]`);
       if (splitEl) {
         const assigned = paycheckAssignedAmount(paycheck);
