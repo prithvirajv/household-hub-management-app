@@ -2074,56 +2074,6 @@ app.patch("/api/admin/users/:id", requireAdmin, async (req, res, next) => {
   }
 });
 
-// One-time data-repair endpoint for a budget-month isolation bug: copies the
-// August 2026 budget into July 2026, drops every other months budget
-// history, and drops every transaction not dated in July 2026. Scoped to the
-// admins own household (the same session-based household resolution
-// /api/state uses). Meant to be removed once run.
-app.post("/api/admin/one-time-fix-july-2026", requireAdmin, async (req, res, next) => {
-  try {
-    const householdId = req.sessionUser.household_id;
-    const cloneCategories = (categories) => JSON.parse(JSON.stringify(categories || [])).map((category) => ({
-      ...category,
-      lines: category.lines.map((line) => ({ ...line }))
-    }));
-
-    const loadAppState = async () => {
-      if (MEMORY_DB) return memoryDb.households.find((item) => item.id === householdId)?.app_state;
-      const result = await pool.query("SELECT app_state FROM households WHERE id = $1", [householdId]);
-      return result.rows[0]?.app_state;
-    };
-    const saveAppState = async (appState) => {
-      if (MEMORY_DB) {
-        const household = memoryDb.households.find((item) => item.id === householdId);
-        household.app_state = appState;
-        return;
-      }
-      await pool.query("UPDATE households SET app_state = $1, updated_at = now() WHERE id = $2", [appState, householdId]);
-    };
-
-    const appState = await loadAppState();
-    if (!appState) return res.status(404).json({ error: "Household not found" });
-
-    const augustEntry = (appState.budgetHistory || []).find((budget) => budget.month === "2026-08");
-    const augustSource = augustEntry
-      || (appState.budget?.month === "2026-08" ? { categories: appState.budget.categories, income: appState.budget.income } : null);
-    if (!augustSource) return res.status(400).json({ error: "No August 2026 budget data found to copy from" });
-
-    const categories = cloneCategories(augustSource.categories);
-    const income = Number(augustSource.income || 0);
-    appState.budget.month = "2026-07";
-    appState.budget.categories = categories;
-    appState.budget.income = income;
-    appState.budgetHistory = [{ month: "2026-07", income, categories: cloneCategories(categories) }];
-    appState.transactions = (appState.transactions || []).filter((transaction) => String(transaction.date || "").startsWith("2026-07"));
-
-    await saveAppState(appState);
-    res.json({ ok: true, categoriesCount: categories.length, transactionsRemaining: appState.transactions.length });
-  } catch (error) {
-    next(error);
-  }
-});
-
 app.post("/api/auth/signout", (_req, res) => {
   clearSession(res);
   res.json({ ok: true });
