@@ -5,7 +5,7 @@ const {
   dailyTaskOccursOnDate, isDailyTaskDoneOnDate, toggleDailyTaskDoneOnDate,
   timeToMinutes, minutesToTime, snapMinutes, layoutTimelineBlocks, comparePlannedToActual,
   sanitizeFilename, buildDocumentObjectPath, wouldCreateFolderCycle, buildFolderTree,
-  smsGatewayAddress, paycheckOccurrencesSince, paycheckOccurrencesInRange, recurringExpenseOccurrenceDates, accountBalance, accountsWithBalances,
+  smsGatewayAddress, paycheckOccurrencesSince, paycheckOccurrencesInRange, paycheckOccurrenceDatesInRange, recurringExpenseOccurrenceDates, accountBalance, accountsWithBalances,
   recurringBudgetSetAside, nextRecurringBudgetDueDate, monthsUntilDueInclusive,
   annualEventDate, nextAnnualEventDate, annualEventNotifyAt, rollAnnualNotifyAtForward
 } = require("../lib/shared-logic");
@@ -521,6 +521,23 @@ test("paycheckOccurrencesInRange: a one-time paycheck only counts in the month i
   const paycheck = { date: "2026-06-15", recurrence: "once" };
   assert.equal(paycheckOccurrencesInRange(paycheck, "2026-06-01", "2026-06-30"), 1);
   assert.equal(paycheckOccurrencesInRange(paycheck, "2026-07-01", "2026-07-31"), 0);
+});
+
+test("paycheckOccurrenceDatesInRange: a biweekly paycheck lists every individual pay date within the month", () => {
+  const paycheck = { date: "2026-07-10", recurrence: "biweekly" };
+  assert.deepEqual(paycheckOccurrenceDatesInRange(paycheck, "2026-07-01", "2026-07-31"), ["2026-07-10", "2026-07-24"]);
+});
+
+test("paycheckOccurrenceDatesInRange: a monthly paycheck lists exactly one date per month", () => {
+  const paycheck = { date: "2026-04-11", recurrence: "monthly" };
+  assert.deepEqual(paycheckOccurrenceDatesInRange(paycheck, "2026-05-01", "2026-05-31"), ["2026-05-11"]);
+  assert.deepEqual(paycheckOccurrenceDatesInRange(paycheck, "2026-03-01", "2026-03-31"), []);
+});
+
+test("paycheckOccurrenceDatesInRange: a one-time paycheck only lists its own date when inside the range", () => {
+  const paycheck = { date: "2026-06-15", recurrence: "once" };
+  assert.deepEqual(paycheckOccurrenceDatesInRange(paycheck, "2026-06-01", "2026-06-30"), ["2026-06-15"]);
+  assert.deepEqual(paycheckOccurrenceDatesInRange(paycheck, "2026-07-01", "2026-07-31"), []);
 });
 
 test("recurringExpenseOccurrenceDates: a one-time bill posts only its anchor date once reached", () => {

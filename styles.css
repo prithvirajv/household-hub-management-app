@@ -1897,6 +1897,18 @@ main {
   gap: 0.35rem;
 }
 
+.pay-dates-this-month {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+}
+
+.pay-dates-this-month > small {
+  color: var(--muted);
+  font-weight: 750;
+  font-size: 0.74rem;
+}
+
 .mini-tags span {
   border-radius: 999px;
   background: var(--green-soft);
