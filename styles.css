@@ -1055,6 +1055,51 @@ main {
   border-bottom: none;
 }
 
+.recurring-budget-panel {
+  flex: 1 0 100%;
+  display: grid;
+  grid-template-columns: minmax(140px, 0.75fr) minmax(140px, 0.7fr) minmax(220px, 1.2fr) auto;
+  gap: 0.55rem;
+  align-items: end;
+  margin-top: 0.35rem;
+  padding: 0.6rem;
+  border-radius: 8px;
+  background: var(--soft-blue);
+}
+
+.recurring-budget-panel.recurring-budget-start {
+  grid-template-columns: minmax(180px, 1fr) auto;
+  align-items: center;
+}
+
+.recurring-budget-panel.recurring-budget-start span {
+  color: var(--muted);
+  font-size: 0.82rem;
+  font-weight: 750;
+}
+
+.recurring-budget-summary {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  min-width: 0;
+  padding: 0.45rem 0.6rem;
+  border-radius: 7px;
+  background: #fff;
+  border: 1px solid var(--line);
+}
+
+.recurring-budget-summary small {
+  color: var(--muted);
+  font-size: 0.74rem;
+  font-weight: 750;
+}
+
+.money-input[readonly] {
+  color: var(--navy);
+  background: var(--soft-blue);
+}
+
 .category-title {
   display: grid;
   grid-template-columns: 7px minmax(120px, 1fr) auto auto auto 28px;
@@ -3779,6 +3824,12 @@ main {
     min-width: 36px;
     height: 36px;
     min-height: 36px;
+  }
+
+  .recurring-budget-panel,
+  .recurring-budget-panel.recurring-budget-start {
+    grid-template-columns: 1fr;
+    align-items: stretch;
   }
 
   .line-name-input {

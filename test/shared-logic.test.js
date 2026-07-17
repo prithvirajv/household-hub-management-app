@@ -6,6 +6,7 @@ const {
   timeToMinutes, minutesToTime, snapMinutes, layoutTimelineBlocks, comparePlannedToActual,
   sanitizeFilename, buildDocumentObjectPath, wouldCreateFolderCycle, buildFolderTree,
   smsGatewayAddress, paycheckOccurrencesSince, paycheckOccurrencesInRange, recurringExpenseOccurrenceDates, accountBalance, accountsWithBalances,
+  recurringBudgetSetAside, nextRecurringBudgetDueDate, monthsUntilDueInclusive,
   annualEventDate, nextAnnualEventDate, annualEventNotifyAt, rollAnnualNotifyAtForward
 } = require("../lib/shared-logic");
 
@@ -543,6 +544,35 @@ test("recurringExpenseOccurrenceDates: weekly and biweekly bills post one date p
 test("recurringExpenseOccurrenceDates: a monthly bill clamps to the last day of shorter months", () => {
   const monthly = { anchorDate: "2026-01-31", recurrence: "monthly" };
   assert.deepEqual(recurringExpenseOccurrenceDates(monthly, "2026-04-30"), ["2026-01-31", "2026-02-28", "2026-03-31", "2026-04-30"]);
+});
+
+test("recurringBudgetSetAside divides a yearly bill across only the months remaining before it is due", () => {
+  const bill = { amount: 1200, frequency: "yearly", dueDate: "2026-12-15" };
+  assert.equal(nextRecurringBudgetDueDate(bill, "2026-07"), "2026-12-15");
+  assert.equal(monthsUntilDueInclusive("2026-07", "2026-12-15"), 6);
+  assert.deepEqual(recurringBudgetSetAside(bill, "2026-07"), {
+    amountDue: 1200,
+    frequency: "yearly",
+    nextDueDate: "2026-12-15",
+    monthsRemaining: 6,
+    monthlyAmount: 200
+  });
+});
+
+test("recurringBudgetSetAside charges the full amount when the due month is the current budget month", () => {
+  const bill = { amount: 1200, frequency: "yearly", dueDate: "2026-07-20" };
+  assert.equal(recurringBudgetSetAside(bill, "2026-07").monthlyAmount, 1200);
+});
+
+test("recurringBudgetSetAside supports quarterly and monthly budget bills", () => {
+  const quarterly = recurringBudgetSetAside({ amount: 600, frequency: "quarterly", dueDate: "2026-09-30" }, "2026-07");
+  assert.equal(quarterly.nextDueDate, "2026-09-30");
+  assert.equal(quarterly.monthsRemaining, 3);
+  assert.equal(quarterly.monthlyAmount, 200);
+
+  const monthly = recurringBudgetSetAside({ amount: 75, frequency: "monthly", dueDate: "2026-01-31" }, "2026-02");
+  assert.equal(monthly.nextDueDate, "2026-02-28");
+  assert.equal(monthly.monthlyAmount, 75);
 });
 
 test("accountBalance: a monthly recurring paycheck deposits multiple times into its linked account", () => {

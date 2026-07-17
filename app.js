@@ -532,6 +532,106 @@ function dueDayFromDate(value) {
   return Number(value.slice(-2));
 }
 
+const recurringBudgetFrequencyMonths = {
+  monthly: 1,
+  quarterly: 3,
+  yearly: 12
+};
+
+const recurringBudgetFrequencyLabels = {
+  monthly: "Monthly",
+  quarterly: "Quarterly",
+  yearly: "Yearly"
+};
+
+function validDateKey(value) {
+  return /^\d{4}-\d{2}-\d{2}$/.test(String(value || ""));
+}
+
+function dateKeyToMonthKey(value) {
+  return String(value || "").slice(0, 7);
+}
+
+function dateFromDateKey(value) {
+  const [year, month, day] = String(value || "").split("-").map(Number);
+  if (!year || !month || !day) return null;
+  const date = new Date(year, month - 1, day);
+  return Number.isNaN(date.getTime()) ? null : date;
+}
+
+function dateKeyFromParts(year, monthIndex, day) {
+  const firstOfTargetMonth = new Date(year, monthIndex, 1);
+  const targetYear = firstOfTargetMonth.getFullYear();
+  const targetMonthIndex = firstOfTargetMonth.getMonth();
+  const lastDay = new Date(targetYear, targetMonthIndex + 1, 0).getDate();
+  const clampedDay = Math.min(Math.max(1, Number(day || 1)), lastDay);
+  return `${targetYear}-${String(targetMonthIndex + 1).padStart(2, "0")}-${String(clampedDay).padStart(2, "0")}`;
+}
+
+function addMonthsToDateKey(value, months) {
+  const date = dateFromDateKey(value);
+  if (!date) return "";
+  const targetMonthIndex = date.getMonth() + months;
+  return dateKeyFromParts(date.getFullYear(), targetMonthIndex, date.getDate());
+}
+
+function nextRecurringBudgetDueDate(bill, selectedMonth = state.budget.month) {
+  if (!bill?.dueDate || !selectedMonth) return "";
+  const interval = recurringBudgetFrequencyMonths[bill.frequency] || 12;
+  let cursor = validDateKey(bill.dueDate) ? bill.dueDate : `${selectedMonth}-01`;
+  while (dateKeyToMonthKey(cursor).localeCompare(selectedMonth) < 0) {
+    cursor = addMonthsToDateKey(cursor, interval);
+  }
+  return cursor;
+}
+
+function monthsUntilDueInclusive(selectedMonth, dueDateKey) {
+  if (!selectedMonth || !dueDateKey) return 1;
+  const [selectedYear, selectedMonthNumber] = selectedMonth.split("-").map(Number);
+  const [dueYear, dueMonthNumber] = dateKeyToMonthKey(dueDateKey).split("-").map(Number);
+  if (!selectedYear || !selectedMonthNumber || !dueYear || !dueMonthNumber) return 1;
+  return Math.max(1, (dueYear - selectedYear) * 12 + (dueMonthNumber - selectedMonthNumber) + 1);
+}
+
+function recurringBudgetSetAside(bill, selectedMonth = state.budget.month) {
+  const frequency = recurringBudgetFrequencyMonths[bill?.frequency] ? bill.frequency : "yearly";
+  const amountDue = Math.max(0, Number(bill?.amount || 0));
+  const nextDueDate = nextRecurringBudgetDueDate({ ...bill, frequency }, selectedMonth);
+  const monthsRemaining = monthsUntilDueInclusive(selectedMonth, nextDueDate);
+  return {
+    amountDue,
+    frequency,
+    nextDueDate,
+    monthsRemaining,
+    monthlyAmount: Number((amountDue / Math.max(monthsRemaining, 1)).toFixed(2))
+  };
+}
+
+function applyRecurringBudgetToLine(line) {
+  if (!line?.recurringBill?.enabled) return null;
+  const summary = recurringBudgetSetAside(line.recurringBill);
+  line.recurringBill.amount = summary.amountDue;
+  line.recurringBill.frequency = summary.frequency;
+  line.recurringBill.dueDate = summary.nextDueDate || line.recurringBill.dueDate || `${state.budget.month}-01`;
+  line.planned = summary.monthlyAmount;
+  line.dueDay = summary.nextDueDate?.startsWith(`${state.budget.month}-`) ? Number(summary.nextDueDate.slice(-2)) : null;
+  return summary;
+}
+
+function ensureRecurringBudgetBills() {
+  state.budget.categories.forEach((category) => {
+    category.lines.forEach((line) => {
+      if (!line.recurringBill?.enabled) return;
+      if (!validDateKey(line.recurringBill.dueDate)) {
+        line.recurringBill.dueDate = dueDateValue(line.dueDay) || `${state.budget.month}-01`;
+      }
+      if (!recurringBudgetFrequencyMonths[line.recurringBill.frequency]) line.recurringBill.frequency = "yearly";
+      if (!Number.isFinite(Number(line.recurringBill.amount))) line.recurringBill.amount = Number(line.planned || 0);
+      applyRecurringBudgetToLine(line);
+    });
+  });
+}
+
 function formatShortDate(value) {
   if (!value) return "";
   const date = new Date(`${value}T00:00:00`);
@@ -684,6 +784,7 @@ function render() {
   // (see notificationCandidates/formatDueLabel in server/index.js).
   state.household.timeZone ||= Intl.DateTimeFormat().resolvedOptions().timeZone;
   if (currentView === "admin" && !sessionUser?.isAdmin) currentView = "home";
+  ensureRecurringBudgetBills();
   syncHistoryToView();
   if (currentView === "wealth") { ensureDebtNetWorthSync(); ensureAccountsData(); }
   renderShell();
@@ -836,15 +937,24 @@ function renderBudget() {
                 </div>
               </div>
               ${category.lines.map((line, lineIndex) => {
+                const recurring = line.recurringBill?.enabled ? recurringBudgetSetAside(line.recurringBill) : null;
                 const spent = spentByLine(line.id);
                 const remaining = Number(line.planned) - spent;
                 return `<div class="budget-line">
                   <label class="row-field row-payee"><small>Subcategory</small><input class="line-name-input" data-budget-line-name="${categoryIndex}:${lineIndex}" value="${line.name}"></label>
-                  <label class="row-field row-date"><small>Due date</small><input data-budget-due-date="${categoryIndex}:${lineIndex}" type="date" min="${monthDateMin()}" max="${monthDateMax()}" value="${dueDateValue(line.dueDay)}"></label>
-                  <label class="row-field row-amount"><small>Planned</small><input class="money-input" data-budget-line="${categoryIndex}:${lineIndex}" type="number" step="0.01" value="${line.planned}" min="0" aria-label="Planned amount for ${line.name}"></label>
+                  ${recurring
+                    ? `<label class="row-field row-date"><small>Next due</small><input data-budget-recurring-due-date="${categoryIndex}:${lineIndex}" type="date" value="${recurring.nextDueDate}"></label>`
+                    : `<label class="row-field row-date"><small>Due date</small><input data-budget-due-date="${categoryIndex}:${lineIndex}" type="date" min="${monthDateMin()}" max="${monthDateMax()}" value="${dueDateValue(line.dueDay)}"></label>`}
+                  <label class="row-field row-amount"><small>${recurring ? "Monthly set-aside" : "Planned"}</small><input class="money-input" data-budget-line="${categoryIndex}:${lineIndex}" type="number" step="0.01" value="${line.planned}" min="0" ${recurring ? "readonly" : ""} aria-label="Planned amount for ${line.name}"></label>
                   <div class="row-field row-amount"><small>Spent</small><span>${exactMoney.format(spent)}</span></div>
                   <div class="row-field row-amount"><small>Remaining</small><b data-line-remaining="${categoryIndex}:${lineIndex}" class="${remaining < 0 ? "danger" : ""}">${exactMoney.format(remaining)}</b></div>
                   <button class="icon-button danger-button" data-delete-line="${categoryIndex}:${lineIndex}" type="button" aria-label="Remove ${line.name}">×</button>
+                  ${recurring ? `<div class="recurring-budget-panel">
+                    <label class="row-field"><small>Amount due</small><input class="money-input" data-budget-recurring-amount="${categoryIndex}:${lineIndex}" type="number" step="0.01" min="0" value="${recurring.amountDue}"></label>
+                    <label class="row-field"><small>Frequency</small><select data-budget-recurring-frequency="${categoryIndex}:${lineIndex}">${Object.entries(recurringBudgetFrequencyLabels).map(([value, label]) => `<option value="${value}" ${recurring.frequency === value ? "selected" : ""}>${label}</option>`).join("")}</select></label>
+                    <div class="recurring-budget-summary"><strong>${exactMoney.format(recurring.monthlyAmount)}/mo</strong><small>${recurringBudgetFrequencyLabels[recurring.frequency]} bill due ${formatShortDate(recurring.nextDueDate)} · ${recurring.monthsRemaining} month${recurring.monthsRemaining === 1 ? "" : "s"} to save</small></div>
+                    <button class="ghost" data-disable-recurring-budget="${categoryIndex}:${lineIndex}" type="button">Remove recurring</button>
+                  </div>` : `<div class="recurring-budget-panel recurring-budget-start"><span>HOA, insurance, property tax, subscriptions, and memberships can be set aside automatically.</span><button class="ghost" data-enable-recurring-budget="${categoryIndex}:${lineIndex}" type="button">Make recurring</button></div>`}
                 </div>`;
               }).join("")}
             `).join("")}
@@ -4430,6 +4540,7 @@ function bindViewEvents() {
 
   document.querySelectorAll("[data-budget-line]").forEach((input) => {
     input.addEventListener("input", () => {
+      if (input.readOnly) return;
       const [categoryIndex, lineIndex] = input.dataset.budgetLine.split(":").map(Number);
       state.budget.categories[categoryIndex].lines[lineIndex].planned = Number(input.value || 0);
       refreshBudgetTotals(categoryIndex, lineIndex);
@@ -4439,6 +4550,78 @@ function bindViewEvents() {
     input.addEventListener("change", () => {
       render();
     });
+  });
+
+  document.querySelectorAll("[data-enable-recurring-budget]").forEach((button) => {
+    button.addEventListener("click", () => {
+      const [categoryIndex, lineIndex] = button.dataset.enableRecurringBudget.split(":").map(Number);
+      const line = state.budget.categories[categoryIndex]?.lines[lineIndex];
+      if (!line) return;
+      line.recurringBill = {
+        enabled: true,
+        amount: Number(line.planned || 0),
+        frequency: "yearly",
+        dueDate: dueDateValue(line.dueDay) || `${state.budget.month}-01`
+      };
+      applyRecurringBudgetToLine(line);
+      refreshBudgetTotals(categoryIndex, lineIndex);
+      refreshIncomeTotals();
+      autosaveState();
+      render();
+    });
+  });
+
+  document.querySelectorAll("[data-disable-recurring-budget]").forEach((button) => {
+    button.addEventListener("click", () => {
+      const [categoryIndex, lineIndex] = button.dataset.disableRecurringBudget.split(":").map(Number);
+      const line = state.budget.categories[categoryIndex]?.lines[lineIndex];
+      if (!line) return;
+      delete line.recurringBill;
+      autosaveState();
+      render();
+    });
+  });
+
+  document.querySelectorAll("[data-budget-recurring-amount]").forEach((input) => {
+    input.addEventListener("input", () => {
+      const [categoryIndex, lineIndex] = input.dataset.budgetRecurringAmount.split(":").map(Number);
+      const line = state.budget.categories[categoryIndex]?.lines[lineIndex];
+      if (!line?.recurringBill) return;
+      line.recurringBill.amount = Number(input.value || 0);
+      applyRecurringBudgetToLine(line);
+      refreshBudgetTotals(categoryIndex, lineIndex);
+      refreshIncomeTotals();
+      autosaveState();
+    });
+    input.addEventListener("change", () => render());
+  });
+
+  document.querySelectorAll("[data-budget-recurring-frequency]").forEach((select) => {
+    select.addEventListener("change", () => {
+      const [categoryIndex, lineIndex] = select.dataset.budgetRecurringFrequency.split(":").map(Number);
+      const line = state.budget.categories[categoryIndex]?.lines[lineIndex];
+      if (!line?.recurringBill) return;
+      line.recurringBill.frequency = select.value;
+      applyRecurringBudgetToLine(line);
+      refreshBudgetTotals(categoryIndex, lineIndex);
+      refreshIncomeTotals();
+      autosaveState();
+      render();
+    });
+  });
+
+  document.querySelectorAll("[data-budget-recurring-due-date]").forEach((input) => {
+    input.addEventListener("input", () => {
+      const [categoryIndex, lineIndex] = input.dataset.budgetRecurringDueDate.split(":").map(Number);
+      const line = state.budget.categories[categoryIndex]?.lines[lineIndex];
+      if (!line?.recurringBill) return;
+      line.recurringBill.dueDate = input.value || `${state.budget.month}-01`;
+      applyRecurringBudgetToLine(line);
+      refreshBudgetTotals(categoryIndex, lineIndex);
+      refreshIncomeTotals();
+      autosaveState();
+    });
+    input.addEventListener("change", () => render());
   });
 
   document.querySelectorAll("[data-budget-line-name]").forEach((input) => {
@@ -4506,6 +4689,8 @@ function bindViewEvents() {
       return;
     }
     copyBudgetFromMonth(month);
+    ensureRecurringBudgetBills();
+    autosaveState();
     render();
   });
 
@@ -7071,9 +7256,23 @@ function csvEscape(value) {
 function downloadCsv() {
   if (!state) return;
   const rowsByView = {
-    budget: () => [["month", "category", "subcategory", "due_date", "planned", "spent", "remaining"], ...allLines().map((line) => {
+    budget: () => [["month", "category", "subcategory", "due_date", "planned", "spent", "remaining", "recurring_amount_due", "recurring_frequency", "recurring_next_due", "recurring_months_remaining", "recurring_monthly_set_aside"], ...allLines().map((line) => {
       const spent = spentByLine(line.id);
-      return [state.budget.month, line.category, line.name, dueDateValue(line.dueDay), Number(line.planned || 0).toFixed(2), spent.toFixed(2), (Number(line.planned || 0) - spent).toFixed(2)];
+      const recurring = line.recurringBill?.enabled ? recurringBudgetSetAside(line.recurringBill) : null;
+      return [
+        state.budget.month,
+        line.category,
+        line.name,
+        recurring?.nextDueDate || dueDateValue(line.dueDay),
+        Number(line.planned || 0).toFixed(2),
+        spent.toFixed(2),
+        (Number(line.planned || 0) - spent).toFixed(2),
+        recurring ? recurring.amountDue.toFixed(2) : "",
+        recurring?.frequency || "",
+        recurring?.nextDueDate || "",
+        recurring?.monthsRemaining || "",
+        recurring ? recurring.monthlyAmount.toFixed(2) : ""
+      ];
     })],
     transactions: () => [["date", "payee", "amount", "category", "subcategory", "memo"], ...state.transactions.map((transaction) => {
       const line = allLines().find((item) => item.id === transaction.lineId);
