@@ -88,6 +88,10 @@ function currencyFormatter(exact = false) {
 const money = { format: (value) => currencyFormatter(false).format(Number(value || 0)) };
 const exactMoney = { format: (value) => currencyFormatter(true).format(Number(value || 0)) };
 const $ = (selector) => document.querySelector(selector);
+function setAuthMessage(text, isSuccess = false) {
+  $("#authMessage").textContent = text;
+  $("#authMessage").classList.toggle("success", isSuccess);
+}
 const nav = $("#nav");
 const view = $("#view");
 
@@ -118,7 +122,7 @@ async function handleAuthExpired() {
   $("#workspace").hidden = true;
   $("#authPanel").hidden = false;
   showSigninForm();
-  $("#authMessage").textContent = "Your session expired. Please sign in again.";
+  setAuthMessage("Your session expired. Please sign in again.");
 }
 
 function api(path, options = {}) {
@@ -6805,7 +6809,7 @@ $("#signinForm").addEventListener("submit", async (event) => {
     await api("/api/auth/signin", { method: "POST", body: JSON.stringify(Object.fromEntries(new FormData(event.currentTarget))) });
     await loadApp();
   } catch (error) {
-    $("#authMessage").textContent = error.message;
+    setAuthMessage(error.message);
   }
 });
 
@@ -6872,7 +6876,7 @@ $("#passwordResetConfirmForm").addEventListener("submit", async (event) => {
     history.replaceState({}, "", location.pathname);
     showSigninForm();
     $("#signinForm [name=email]").value = data.email;
-    $("#authMessage").textContent = "Password updated. Sign in with your new password.";
+    setAuthMessage("Password updated. Sign in with your new password.", true);
   } catch (error) {
     message.textContent = error.message;
   }
@@ -6896,12 +6900,12 @@ $("#invitationAcceptForm").addEventListener("submit", async (event) => {
 $("#demoLoginButton").addEventListener("click", async (event) => {
   const button = event.currentTarget;
   button.disabled = true;
-  $("#authMessage").textContent = "";
+  setAuthMessage("");
   try {
     await api("/api/auth/demo", { method: "POST", body: "{}" });
     await loadApp();
   } catch (error) {
-    $("#authMessage").textContent = error.message;
+    setAuthMessage(error.message);
   } finally {
     button.disabled = false;
   }
@@ -6913,7 +6917,7 @@ $("#signupForm").addEventListener("submit", async (event) => {
     await api("/api/auth/signup", { method: "POST", body: JSON.stringify(Object.fromEntries(new FormData(event.currentTarget))) });
     await loadApp();
   } catch (error) {
-    $("#authMessage").textContent = error.message;
+    setAuthMessage(error.message);
   }
 });
 
@@ -7127,7 +7131,7 @@ async function handleGoogleCredential(response) {
     await api("/api/auth/google", { method: "POST", body: JSON.stringify({ credential: response.credential }) });
     await loadApp();
   } catch (error) {
-    $("#authMessage").textContent = error.message;
+    setAuthMessage(error.message);
   }
 }
 
@@ -7309,9 +7313,9 @@ async function initializeApp() {
     history.replaceState({}, "", location.pathname);
     try {
       await api("/api/auth/verify-email/confirm", { method: "POST", body: JSON.stringify({ email: resetEmail, token: verifyToken }) });
-      $("#authMessage").textContent = "Email verified. Sign in to continue.";
+      setAuthMessage("Email verified. Sign in to continue.", true);
     } catch (error) {
-      $("#authMessage").textContent = error.message;
+      setAuthMessage(error.message);
     }
     $("#signinForm [name=email]").value = resetEmail;
     setAuthShell("Sign in");
@@ -7331,7 +7335,7 @@ async function initializeApp() {
 }
 
 initializeApp().catch((error) => {
-  $("#authMessage").textContent = error.message;
+  setAuthMessage(error.message);
 });
 
 window.addEventListener("popstate", (event) => {

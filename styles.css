@@ -376,6 +376,16 @@ main {
   color: var(--muted);
 }
 
+#authMessage:not(:empty) {
+  font-size: 1rem;
+  font-weight: 800;
+  color: var(--coral);
+}
+
+#authMessage.success {
+  color: var(--green);
+}
+
 .text-button {
   justify-self: start;
   min-height: auto;
