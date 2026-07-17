@@ -540,6 +540,19 @@ test("paycheckOccurrenceDatesInRange: a one-time paycheck only lists its own dat
   assert.deepEqual(paycheckOccurrenceDatesInRange(paycheck, "2026-07-01", "2026-07-31"), []);
 });
 
+test("paycheckOccurrencesInRange: an endDate stops future occurrences without changing past ones", () => {
+  const paycheck = { date: "2026-07-10", recurrence: "biweekly", endDate: "2026-09-30" };
+  assert.equal(paycheckOccurrencesInRange(paycheck, "2026-07-01", "2026-07-31"), 2);
+  assert.equal(paycheckOccurrencesInRange(paycheck, "2026-09-01", "2026-09-30"), 2);
+  assert.equal(paycheckOccurrencesInRange(paycheck, "2026-10-01", "2026-10-31"), 0);
+});
+
+test("paycheckOccurrenceDatesInRange: an endDate excludes dates after it but keeps earlier ones", () => {
+  const paycheck = { date: "2026-07-10", recurrence: "biweekly", endDate: "2026-07-15" };
+  assert.deepEqual(paycheckOccurrenceDatesInRange(paycheck, "2026-07-01", "2026-07-31"), ["2026-07-10"]);
+  assert.deepEqual(paycheckOccurrenceDatesInRange(paycheck, "2026-08-01", "2026-08-31"), []);
+});
+
 test("recurringExpenseOccurrenceDates: a one-time bill posts only its anchor date once reached", () => {
   assert.deepEqual(recurringExpenseOccurrenceDates({ anchorDate: "2026-07-11", recurrence: "none" }, "2026-07-11"), ["2026-07-11"]);
   assert.deepEqual(recurringExpenseOccurrenceDates({ anchorDate: "2026-07-11", recurrence: "none" }, "2026-09-01"), ["2026-07-11"]);

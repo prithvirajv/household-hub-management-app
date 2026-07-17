@@ -1150,6 +1150,7 @@ function renderPaychecks() {
                 </div>
                 <label class="paycheck-recurrence-field">Date<input type="date" data-paycheck-date="${index}" value="${paycheck.date}" aria-label="Date for ${escapeHtml(paycheck.name)}"></label>
                 <label class="paycheck-recurrence-field">Repeat<select data-paycheck-recurrence="${index}" aria-label="How often ${escapeHtml(paycheck.name)} repeats">${Object.entries(paycheckRecurrenceLabels).map(([value, label]) => `<option value="${value}" ${paycheck.recurrence === value ? "selected" : ""}>${label}</option>`).join("")}</select></label>
+                <label class="paycheck-recurrence-field">End date (optional)<input type="date" data-paycheck-end-date="${index}" value="${paycheck.endDate || ""}" aria-label="Stop ${escapeHtml(paycheck.name)} from repeating after this date"></label>
                 ${state.accounts.length ? `<label class="paycheck-recurrence-field">Deposit to<select data-paycheck-deposit-account="${index}" aria-label="Deposit account for ${escapeHtml(paycheck.name)}"><option value="">Not linked</option>${accountOptions(paycheck.depositAccountId || "", { excludeType: "credit_card" })}</select></label>` : ""}
                 <div class="mini-tags">${paycheck.assignedLineIds.map((id) => `<span>${lineName(id)}</span>`).join("")}</div>
                 ${occurrenceDates.length ? `<div class="pay-dates-this-month"><small>Pay dates in ${formatMonth(state.budget.month)}</small><div class="mini-tags">${occurrenceDates.map((date) => `<span>${formatShortDate(date)} · ${money.format(paycheck.amount)}</span>`).join("")}</div></div>` : ""}
@@ -5037,6 +5038,16 @@ function bindViewEvents() {
     select.addEventListener("change", () => {
       const paycheck = state.paychecks[Number(select.dataset.paycheckRecurrence)];
       if (paycheck) paycheck.recurrence = select.value;
+      state.budget.income = budgetIncomeFromPaychecks();
+      autosaveState();
+      render();
+    });
+  });
+
+  document.querySelectorAll("[data-paycheck-end-date]").forEach((input) => {
+    input.addEventListener("change", () => {
+      const paycheck = state.paychecks[Number(input.dataset.paycheckEndDate)];
+      if (paycheck) paycheck.endDate = input.value || "";
       state.budget.income = budgetIncomeFromPaychecks();
       autosaveState();
       render();
