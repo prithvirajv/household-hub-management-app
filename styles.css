@@ -1909,20 +1909,19 @@ main {
   font-size: 0.74rem;
 }
 
-.pay-date-toggle {
-  border-radius: 999px;
-  background: var(--green-soft);
-  color: #07654b;
-  border: none;
-  padding: 0.25rem 0.45rem;
-  font-weight: 800;
-  font-size: 0.72rem;
+.paycheck-occurrence-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.4rem;
+  background: var(--soft-blue);
+  border-radius: 8px;
+  padding: 0.4rem;
 }
 
-.pay-date-toggle.skipped {
-  background: var(--soft-blue);
-  color: var(--muted);
-  text-decoration: line-through;
+.paycheck-occurrence-row input {
+  min-width: 0;
+  flex: 1 1 110px;
 }
 
 .mini-tags span {

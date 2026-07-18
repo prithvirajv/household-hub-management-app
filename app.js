@@ -232,7 +232,13 @@ function plannedTotal() {
 function budgetIncomeFromPaychecks() {
   const monthStart = `${state.budget.month}-01`;
   const monthEnd = monthEndDateKey(state.budget.month);
-  return state.paychecks.reduce((sum, paycheck) => sum + Number(paycheck.amount || 0) * paycheckOccurrencesInRange(paycheck, monthStart, monthEnd), 0);
+  const oneTimeIncome = state.paychecks
+    .filter((paycheck) => ["once", "bonus"].includes(paycheck.recurrence || "once"))
+    .reduce((sum, paycheck) => sum + Number(paycheck.amount || 0) * paycheckOccurrencesInRange(paycheck, monthStart, monthEnd), 0);
+  const recurringIncome = (state.paycheckOccurrences || [])
+    .filter((occurrence) => occurrence.date >= monthStart && occurrence.date <= monthEnd)
+    .reduce((sum, occurrence) => sum + Number(occurrence.amount || 0), 0);
+  return oneTimeIncome + recurringIncome;
 }
 
 function paycheckAssignedAmount(paycheck) {
@@ -414,6 +420,7 @@ function currentAccountBalance(accountId) {
     accounts: state.accounts,
     transactions: state.transactions,
     paychecks: state.paychecks,
+    paycheckOccurrences: state.paycheckOccurrences,
     transfers: state.transfers
   }, dateKey(new Date()));
 }
@@ -802,6 +809,8 @@ function render() {
   state.household.timeZone ||= Intl.DateTimeFormat().resolvedOptions().timeZone;
   if (currentView === "admin" && !sessionUser?.isAdmin) currentView = "home";
   ensureRecurringBudgetBills();
+  ensurePaycheckRecurrenceData();
+  ensurePaycheckOccurrencesGenerated();
   state.budget.income = budgetIncomeFromPaychecks();
   syncHistoryToView();
   if (currentView === "wealth") { ensureDebtNetWorthSync(); ensureAccountsData(); }
@@ -1139,8 +1148,12 @@ function renderPaychecks() {
               const assigned = paycheckAssignedAmount(paycheck);
               const monthStart = `${state.budget.month}-01`;
               const monthEnd = monthEndDateKey(state.budget.month);
-              const allOccurrenceDates = paycheckAllOccurrenceDatesInRange(paycheck, monthStart, monthEnd);
-              const skippedDates = paycheck.skippedDates || [];
+              const isRecurring = !["once", "bonus"].includes(paycheck.recurrence || "once");
+              const occurrencesThisMonth = isRecurring
+                ? (state.paycheckOccurrences || [])
+                  .filter((occurrence) => occurrence.seriesId === paycheck.id && occurrence.date >= monthStart && occurrence.date <= monthEnd)
+                  .sort((a, b) => a.date.localeCompare(b.date))
+                : [];
               return `<article class="paycheck-card">
                 <div class="paycheck-card-header">
                   <input class="paycheck-name-input" data-income-name="${index}" value="${escapeHtml(paycheck.name)}" aria-label="Name for this paycheck/income entry">
@@ -1151,13 +1164,19 @@ function renderPaychecks() {
                 </div>
                 <label class="paycheck-recurrence-field">Date<input type="date" data-paycheck-date="${index}" value="${paycheck.date}" aria-label="Date for ${escapeHtml(paycheck.name)}"></label>
                 <label class="paycheck-recurrence-field">Repeat<select data-paycheck-recurrence="${index}" aria-label="How often ${escapeHtml(paycheck.name)} repeats">${Object.entries(paycheckRecurrenceLabels).map(([value, label]) => `<option value="${value}" ${paycheck.recurrence === value ? "selected" : ""}>${label}</option>`).join("")}</select></label>
-                <label class="paycheck-recurrence-field">End date (optional)<input type="date" data-paycheck-end-date="${index}" value="${paycheck.endDate || ""}" aria-label="Stop ${escapeHtml(paycheck.name)} from repeating after this date"></label>
+                ${isRecurring ? `<label class="paycheck-recurrence-field">End date (optional)<input type="date" data-paycheck-end-date="${index}" value="${paycheck.endDate || ""}" aria-label="Stop ${escapeHtml(paycheck.name)} from repeating after this date"></label>` : ""}
                 ${state.accounts.length ? `<label class="paycheck-recurrence-field">Deposit to<select data-paycheck-deposit-account="${index}" aria-label="Deposit account for ${escapeHtml(paycheck.name)}"><option value="">Not linked</option>${accountOptions(paycheck.depositAccountId || "", { excludeType: "credit_card" })}</select></label>` : ""}
                 <div class="mini-tags">${paycheck.assignedLineIds.map((id) => `<span>${lineName(id)}</span>`).join("")}</div>
-                ${allOccurrenceDates.length ? `<div class="pay-dates-this-month"><small>Pay dates in ${formatMonth(state.budget.month)}</small><div class="mini-tags">${allOccurrenceDates.map((date) => {
-                  const isSkipped = skippedDates.includes(date);
-                  return `<button class="pay-date-toggle ${isSkipped ? "skipped" : ""}" data-toggle-paycheck-skip="${index}:${date}" type="button" aria-label="${isSkipped ? "Mark" : "Skip"} the ${formatShortDate(date)} payment for ${escapeHtml(paycheck.name)}">${formatShortDate(date)} · ${isSkipped ? "Skipped" : money.format(paycheck.amount)}</button>`;
-                }).join("")}</div></div>` : ""}
+                ${occurrencesThisMonth.length ? `<div class="pay-dates-this-month">
+                  <small>Pay dates in ${formatMonth(state.budget.month)} (edit or delete individually)</small>
+                  ${occurrencesThisMonth.map((occurrence) => `
+                    <div class="paycheck-occurrence-row">
+                      <input type="date" data-occurrence-date="${occurrence.id}" value="${occurrence.date}" aria-label="Date for this ${escapeHtml(paycheck.name)} payment">
+                      <input class="money-input" type="number" step="0.01" data-occurrence-amount="${occurrence.id}" value="${occurrence.amount}" aria-label="Amount for this ${escapeHtml(paycheck.name)} payment">
+                      <button class="icon-button danger-button" data-delete-occurrence="${occurrence.id}" type="button" aria-label="Delete the ${formatShortDate(occurrence.date)} payment for ${escapeHtml(paycheck.name)}">×</button>
+                    </div>
+                  `).join("")}
+                </div>` : ""}
                 <div class="split-stat" data-paycheck-split="${index}"><span>Income ${money.format(paycheck.amount)}</span><b>Assigned ${money.format(assigned)}</b></div>
               </article>`;
             }).join("")}
@@ -2982,6 +3001,43 @@ function ensurePaycheckRecurrenceData() {
   });
 }
 
+// Recurring paychecks deposit through real, individually editable/deletable
+// rows (state.paycheckOccurrences) rather than being computed on the fly, so
+// a specific missed payday (or any other single occurrence) can be deleted
+// without touching any other month, past or future. Rows are only
+// materialized up to 12 months out - not forever - and this window keeps
+// advancing each time the app is used, since it is recomputed from todays
+// date on every render rather than once at creation time. generatedThroughDate
+// is a watermark: it only ever moves forward, so a deleted occurrence is
+// never silently regenerated.
+function ensurePaycheckOccurrencesGenerated() {
+  state.paycheckOccurrences ||= [];
+  const capDate = new Date();
+  capDate.setMonth(capDate.getMonth() + 12);
+  const capKey = dateKey(capDate);
+  state.paychecks.forEach((paycheck) => {
+    paycheck.id ||= uniqueId("paycheck");
+    const recurrence = paycheck.recurrence || "once";
+    if (recurrence === "once" || recurrence === "bonus") return;
+    if (paycheck.generatedThroughDate && paycheck.generatedThroughDate >= capKey) return;
+    const generateFromKey = paycheck.generatedThroughDate
+      ? dateKey(new Date(new Date(`${paycheck.generatedThroughDate}T00:00:00`).getTime() + 24 * 60 * 60 * 1000))
+      : paycheck.date;
+    if (generateFromKey <= capKey) {
+      paycheckAllOccurrenceDatesInRange(paycheck, generateFromKey, capKey).forEach((date) => {
+        state.paycheckOccurrences.push({
+          id: uniqueId("paycheck-occurrence"),
+          seriesId: paycheck.id,
+          date,
+          amount: paycheck.amount,
+          depositAccountId: paycheck.depositAccountId || ""
+        });
+      });
+    }
+    paycheck.generatedThroughDate = capKey;
+  });
+}
+
 // A recurring bill surfaces each elapsed period as a Bank stream draft for
 // review (amount can vary month to month, e.g. a utility bill) rather than
 // posting straight to the Ledger; it only becomes a real transaction once
@@ -3629,7 +3685,7 @@ function monthEndDateKey(monthKey) {
 // it was worth in the past, so its current value is carried flat across the
 // whole trend — an honest approximation given what data actually exists.
 function netWorthAtDate(referenceDateKey) {
-  const context = { accounts: state.accounts, transactions: state.transactions, paychecks: state.paychecks, transfers: state.transfers };
+  const context = { accounts: state.accounts, transactions: state.transactions, paychecks: state.paychecks, paycheckOccurrences: state.paycheckOccurrences, transfers: state.transfers };
   const assetTotal = state.goals.netWorth.assets.reduce((sum, asset) => {
     const linkedAccount = state.accounts.find((account) => account.netWorthAssetId === asset.id);
     return sum + (linkedAccount ? accountBalance(linkedAccount.id, context, referenceDateKey) : assetValue(asset));
@@ -3652,8 +3708,13 @@ function cashFlowByMonth(count) {
     const expenses = state.transactions
       .filter((transaction) => transaction.date >= monthStart && transaction.date <= monthEnd)
       .reduce((sum, transaction) => sum + Number(transaction.amount || 0), 0);
-    const income = state.paychecks.reduce((sum, paycheck) => sum + Number(paycheck.amount || 0) * paycheckOccurrencesInRange(paycheck, monthStart, monthEnd), 0);
-    return { month: monthKey, income, expenses };
+    const oneTimeIncome = state.paychecks
+      .filter((paycheck) => ["once", "bonus"].includes(paycheck.recurrence || "once"))
+      .reduce((sum, paycheck) => sum + Number(paycheck.amount || 0) * paycheckOccurrencesInRange(paycheck, monthStart, monthEnd), 0);
+    const recurringIncome = (state.paycheckOccurrences || [])
+      .filter((occurrence) => occurrence.date >= monthStart && occurrence.date <= monthEnd)
+      .reduce((sum, occurrence) => sum + Number(occurrence.amount || 0), 0);
+    return { month: monthKey, income: oneTimeIncome + recurringIncome, expenses };
   });
 }
 
@@ -5022,7 +5083,10 @@ function bindViewEvents() {
 
   document.querySelectorAll("[data-delete-paycheck]").forEach((button) => {
     button.addEventListener("click", () => {
-      state.paychecks.splice(Number(button.dataset.deletePaycheck), 1);
+      const [paycheck] = state.paychecks.splice(Number(button.dataset.deletePaycheck), 1);
+      if (paycheck?.id) {
+        state.paycheckOccurrences = (state.paycheckOccurrences || []).filter((occurrence) => occurrence.seriesId !== paycheck.id);
+      }
       state.budget.income = budgetIncomeFromPaychecks();
       render();
     });
@@ -5041,7 +5105,16 @@ function bindViewEvents() {
   document.querySelectorAll("[data-paycheck-recurrence]").forEach((select) => {
     select.addEventListener("change", () => {
       const paycheck = state.paychecks[Number(select.dataset.paycheckRecurrence)];
-      if (paycheck) paycheck.recurrence = select.value;
+      if (paycheck) {
+        paycheck.recurrence = select.value;
+        if (["once", "bonus"].includes(select.value) && paycheck.id) {
+          // No longer recurring, so its previously generated occurrence rows
+          // would otherwise keep counting toward income alongside the
+          // paycheck's own single date, double-counting it.
+          state.paycheckOccurrences = (state.paycheckOccurrences || []).filter((occurrence) => occurrence.seriesId !== paycheck.id);
+          paycheck.generatedThroughDate = "";
+        }
+      }
       state.budget.income = budgetIncomeFromPaychecks();
       autosaveState();
       render();
@@ -5058,17 +5131,31 @@ function bindViewEvents() {
     });
   });
 
-  document.querySelectorAll("[data-toggle-paycheck-skip]").forEach((button) => {
+  document.querySelectorAll("[data-occurrence-date]").forEach((input) => {
+    input.addEventListener("change", () => {
+      const occurrence = (state.paycheckOccurrences || []).find((item) => item.id === input.dataset.occurrenceDate);
+      if (occurrence && input.value) occurrence.date = input.value;
+      state.budget.income = budgetIncomeFromPaychecks();
+      autosaveState();
+      render();
+    });
+  });
+
+  document.querySelectorAll("[data-occurrence-amount]").forEach((input) => {
+    input.addEventListener("input", () => {
+      const occurrence = (state.paycheckOccurrences || []).find((item) => item.id === input.dataset.occurrenceAmount);
+      if (occurrence) occurrence.amount = Number(input.value || 0);
+      state.budget.income = budgetIncomeFromPaychecks();
+      autosaveState();
+    });
+    input.addEventListener("change", () => render());
+  });
+
+  document.querySelectorAll("[data-delete-occurrence]").forEach((button) => {
     button.addEventListener("click", () => {
-      const separatorIndex = button.dataset.togglePaycheckSkip.indexOf(":");
-      const paycheckIndex = Number(button.dataset.togglePaycheckSkip.slice(0, separatorIndex));
-      const date = button.dataset.togglePaycheckSkip.slice(separatorIndex + 1);
-      const paycheck = state.paychecks[paycheckIndex];
-      if (!paycheck) return;
-      paycheck.skippedDates ||= [];
-      const skipIndex = paycheck.skippedDates.indexOf(date);
-      if (skipIndex >= 0) paycheck.skippedDates.splice(skipIndex, 1);
-      else paycheck.skippedDates.push(date);
+      const occurrenceIndex = (state.paycheckOccurrences || []).findIndex((item) => item.id === button.dataset.deleteOccurrence);
+      if (occurrenceIndex < 0) return;
+      state.paycheckOccurrences.splice(occurrenceIndex, 1);
       state.budget.income = budgetIncomeFromPaychecks();
       autosaveState();
       render();
@@ -5721,6 +5808,9 @@ function bindViewEvents() {
         });
         state.paychecks.forEach((paycheck) => {
           if (paycheck.depositAccountId === account.id) paycheck.depositAccountId = "";
+        });
+        (state.paycheckOccurrences || []).forEach((occurrence) => {
+          if (occurrence.depositAccountId === account.id) occurrence.depositAccountId = "";
         });
         // Deliberately leave state.transfers untouched: a transfer that already
         // moved money out of/into a surviving account is a historical fact that

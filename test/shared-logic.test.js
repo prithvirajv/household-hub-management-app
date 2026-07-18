@@ -5,7 +5,7 @@ const {
   dailyTaskOccursOnDate, isDailyTaskDoneOnDate, toggleDailyTaskDoneOnDate,
   timeToMinutes, minutesToTime, snapMinutes, layoutTimelineBlocks, comparePlannedToActual,
   sanitizeFilename, buildDocumentObjectPath, wouldCreateFolderCycle, buildFolderTree,
-  smsGatewayAddress, paycheckOccurrencesSince, paycheckOccurrencesInRange, paycheckOccurrenceDatesInRange, paycheckAllOccurrenceDatesInRange, recurringExpenseOccurrenceDates, accountBalance, accountsWithBalances,
+  smsGatewayAddress, paycheckOccurrencesSince, paycheckOccurrencesInRange, paycheckAllOccurrenceDatesInRange, recurringExpenseOccurrenceDates, accountBalance, accountsWithBalances,
   recurringBudgetSetAside, nextRecurringBudgetDueDate, monthsUntilDueInclusive,
   annualEventDate, nextAnnualEventDate, annualEventNotifyAt, rollAnnualNotifyAtForward
 } = require("../lib/shared-logic");
@@ -523,21 +523,21 @@ test("paycheckOccurrencesInRange: a one-time paycheck only counts in the month i
   assert.equal(paycheckOccurrencesInRange(paycheck, "2026-07-01", "2026-07-31"), 0);
 });
 
-test("paycheckOccurrenceDatesInRange: a biweekly paycheck lists every individual pay date within the month", () => {
+test("paycheckAllOccurrenceDatesInRange: a biweekly paycheck lists every individual pay date within the month", () => {
   const paycheck = { date: "2026-07-10", recurrence: "biweekly" };
-  assert.deepEqual(paycheckOccurrenceDatesInRange(paycheck, "2026-07-01", "2026-07-31"), ["2026-07-10", "2026-07-24"]);
+  assert.deepEqual(paycheckAllOccurrenceDatesInRange(paycheck, "2026-07-01", "2026-07-31"), ["2026-07-10", "2026-07-24"]);
 });
 
-test("paycheckOccurrenceDatesInRange: a monthly paycheck lists exactly one date per month", () => {
+test("paycheckAllOccurrenceDatesInRange: a monthly paycheck lists exactly one date per month", () => {
   const paycheck = { date: "2026-04-11", recurrence: "monthly" };
-  assert.deepEqual(paycheckOccurrenceDatesInRange(paycheck, "2026-05-01", "2026-05-31"), ["2026-05-11"]);
-  assert.deepEqual(paycheckOccurrenceDatesInRange(paycheck, "2026-03-01", "2026-03-31"), []);
+  assert.deepEqual(paycheckAllOccurrenceDatesInRange(paycheck, "2026-05-01", "2026-05-31"), ["2026-05-11"]);
+  assert.deepEqual(paycheckAllOccurrenceDatesInRange(paycheck, "2026-03-01", "2026-03-31"), []);
 });
 
-test("paycheckOccurrenceDatesInRange: a one-time paycheck only lists its own date when inside the range", () => {
+test("paycheckAllOccurrenceDatesInRange: a one-time paycheck only lists its own date when inside the range", () => {
   const paycheck = { date: "2026-06-15", recurrence: "once" };
-  assert.deepEqual(paycheckOccurrenceDatesInRange(paycheck, "2026-06-01", "2026-06-30"), ["2026-06-15"]);
-  assert.deepEqual(paycheckOccurrenceDatesInRange(paycheck, "2026-07-01", "2026-07-31"), []);
+  assert.deepEqual(paycheckAllOccurrenceDatesInRange(paycheck, "2026-06-01", "2026-06-30"), ["2026-06-15"]);
+  assert.deepEqual(paycheckAllOccurrenceDatesInRange(paycheck, "2026-07-01", "2026-07-31"), []);
 });
 
 test("paycheckOccurrencesInRange: an endDate stops future occurrences without changing past ones", () => {
@@ -547,30 +547,10 @@ test("paycheckOccurrencesInRange: an endDate stops future occurrences without ch
   assert.equal(paycheckOccurrencesInRange(paycheck, "2026-10-01", "2026-10-31"), 0);
 });
 
-test("paycheckOccurrenceDatesInRange: an endDate excludes dates after it but keeps earlier ones", () => {
+test("paycheckAllOccurrenceDatesInRange: an endDate excludes dates after it but keeps earlier ones", () => {
   const paycheck = { date: "2026-07-10", recurrence: "biweekly", endDate: "2026-07-15" };
-  assert.deepEqual(paycheckOccurrenceDatesInRange(paycheck, "2026-07-01", "2026-07-31"), ["2026-07-10"]);
-  assert.deepEqual(paycheckOccurrenceDatesInRange(paycheck, "2026-08-01", "2026-08-31"), []);
-});
-
-test("paycheckOccurrenceDatesInRange: skippedDates excludes only that one occurrence", () => {
-  const paycheck = { date: "2026-07-10", recurrence: "monthly", skippedDates: ["2026-10-10"] };
-  assert.deepEqual(paycheckOccurrenceDatesInRange(paycheck, "2026-09-01", "2026-09-30"), ["2026-09-10"]);
-  assert.deepEqual(paycheckOccurrenceDatesInRange(paycheck, "2026-10-01", "2026-10-31"), []);
-  assert.deepEqual(paycheckOccurrenceDatesInRange(paycheck, "2026-11-01", "2026-11-30"), ["2026-11-10"]);
-});
-
-test("paycheckOccurrencesInRange: skippedDates excludes only that one months income, other months untouched", () => {
-  const paycheck = { date: "2026-07-10", recurrence: "monthly", skippedDates: ["2026-10-10"] };
-  assert.equal(paycheckOccurrencesInRange(paycheck, "2026-09-01", "2026-09-30"), 1);
-  assert.equal(paycheckOccurrencesInRange(paycheck, "2026-10-01", "2026-10-31"), 0);
-  assert.equal(paycheckOccurrencesInRange(paycheck, "2026-11-01", "2026-11-30"), 1);
-});
-
-test("paycheckAllOccurrenceDatesInRange: still lists a skipped date so the UI can show and un-skip it", () => {
-  const paycheck = { date: "2026-07-10", recurrence: "monthly", skippedDates: ["2026-10-10"] };
-  assert.deepEqual(paycheckAllOccurrenceDatesInRange(paycheck, "2026-10-01", "2026-10-31"), ["2026-10-10"]);
-  assert.deepEqual(paycheckOccurrenceDatesInRange(paycheck, "2026-10-01", "2026-10-31"), []);
+  assert.deepEqual(paycheckAllOccurrenceDatesInRange(paycheck, "2026-07-01", "2026-07-31"), ["2026-07-10"]);
+  assert.deepEqual(paycheckAllOccurrenceDatesInRange(paycheck, "2026-08-01", "2026-08-31"), []);
 });
 
 test("recurringExpenseOccurrenceDates: a one-time bill posts only its anchor date once reached", () => {
@@ -625,10 +605,16 @@ test("recurringBudgetSetAside supports quarterly and monthly budget bills", () =
   assert.equal(monthly.monthlyAmount, 75);
 });
 
-test("accountBalance: a monthly recurring paycheck deposits multiple times into its linked account", () => {
+test("accountBalance: a recurring paychecks materialized occurrences each deposit into its linked account", () => {
   const accounts = [{ id: "checking", type: "checking", openingBalance: 0 }];
-  const paychecks = [{ date: "2026-04-11", recurrence: "monthly", amount: 1000, depositAccountId: "checking" }];
-  const balance = accountBalance("checking", { accounts, transactions: [], paychecks, transfers: [] }, "2026-07-11");
+  const paycheckOccurrences = [
+    { date: "2026-04-11", amount: 1000, depositAccountId: "checking" },
+    { date: "2026-05-11", amount: 1000, depositAccountId: "checking" },
+    { date: "2026-06-11", amount: 1000, depositAccountId: "checking" },
+    { date: "2026-07-11", amount: 1000, depositAccountId: "checking" },
+    { date: "2026-08-11", amount: 1000, depositAccountId: "checking" }
+  ];
+  const balance = accountBalance("checking", { accounts, transactions: [], paychecks: [], paycheckOccurrences, transfers: [] }, "2026-07-11");
   assert.equal(balance, 4000);
 });
 
