@@ -261,6 +261,18 @@ function paycheckMonthlyIncome(paycheck) {
   return Number(paycheck.amount || 0) * paycheckOccurrencesInRange(paycheck, monthStart, monthEnd);
 }
 
+// Whether this paycheck is still a live income source for the given month —
+// a one-time/bonus paycheck only counts in the month it lands, and a
+// recurring one drops out once its end date falls before that month (or it
+// hasn't started yet), so an ended series stops showing up as active income.
+function paycheckActiveInMonth(paycheck, monthStart, monthEnd) {
+  const isRecurring = !["once", "bonus"].includes(paycheck.recurrence || "once");
+  if (!isRecurring) return paycheckOccurrencesInRange(paycheck, monthStart, monthEnd) > 0;
+  if (!paycheck.date || paycheck.date > monthEnd) return false;
+  if (paycheck.endDate && paycheck.endDate < monthStart) return false;
+  return true;
+}
+
 function spentByLine(lineId) {
   return state.transactions
     .filter((transaction) => transaction.lineId === lineId && transaction.date?.slice(0, 7) === state.budget.month)
@@ -925,6 +937,8 @@ function renderBudget() {
     </section>`;
   }
   const previousBudgets = availablePreviousBudgets();
+  const budgetMonthStart = `${state.budget.month}-01`;
+  const budgetMonthEnd = monthEndDateKey(state.budget.month);
   return `
     <section class="work-grid transactions-grid">
       <div class="main-stack">
@@ -936,7 +950,10 @@ function renderBudget() {
             <span>Repeats</span>
             ${state.accounts.length ? `<span>Deposit to</span>` : ""}
           </div>
-          ${state.paychecks.map((paycheck, index) => `
+          ${state.paychecks
+            .map((paycheck, index) => ({ paycheck, index }))
+            .filter(({ paycheck }) => paycheckActiveInMonth(paycheck, budgetMonthStart, budgetMonthEnd))
+            .map(({ paycheck, index }) => `
             <div class="budget-money-row ${state.accounts.length ? "has-accounts" : ""}">
               <input class="line-name-input" data-income-name="${index}" value="${paycheck.name}">
               <input class="money-input" data-income-amount="${index}" type="number" step="0.01" value="${paycheck.amount}">
