@@ -1076,12 +1076,12 @@ function renderBudget() {
 function ledgerEntryRow(transaction, index) {
   const lineOptions = allLines().map((line) => `<option value="${line.id}" ${line.id === transaction.lineId ? "selected" : ""}>${line.category} - ${line.name}</option>`).join("");
   return `
-    <div class="ledger-entry-row">
-      <label class="row-field row-payee"><small>Payee</small><input data-ledger-entry-payee="${index}" value="${escapeHtml(transaction.payee)}"></label>
-      <label class="row-field row-amount"><small>Amount</small><input class="money-input" type="number" step="0.01" data-ledger-entry-amount="${index}" value="${transaction.amount}"></label>
-      <label class="row-field row-date"><small>Date</small><input type="date" data-ledger-entry-date="${index}" value="${transaction.date}"></label>
-      <label class="row-field row-select"><small>Subcategory</small><select data-ledger-entry-line="${index}">${lineOptions}</select></label>
-      ${state.accounts.length ? `<label class="row-field row-select"><small>Account</small><select data-ledger-entry-account="${index}"><option value="">Not linked</option>${accountOptions(transaction.accountId || "")}</select></label>` : ""}
+    <div class="ledger-entry-row ${state.accounts.length ? "has-accounts" : ""}">
+      <input aria-label="Payee" data-ledger-entry-payee="${index}" value="${escapeHtml(transaction.payee)}">
+      <input class="money-input" aria-label="Amount" type="number" step="0.01" data-ledger-entry-amount="${index}" value="${transaction.amount}">
+      <input aria-label="Date" type="date" data-ledger-entry-date="${index}" value="${transaction.date}">
+      <select aria-label="Subcategory" data-ledger-entry-line="${index}">${lineOptions}</select>
+      ${state.accounts.length ? `<select aria-label="Account" data-ledger-entry-account="${index}"><option value="">Not linked</option>${accountOptions(transaction.accountId || "")}</select>` : ""}
       <button class="icon-button danger-button" data-delete-transaction="${index}" type="button" aria-label="Delete ${escapeHtml(transaction.payee)}">×</button>
     </div>`;
 }
@@ -1164,9 +1164,15 @@ function renderTransactions() {
             const monthTransactions = state.transactions
               .map((transaction, index) => ({ transaction, index }))
               .filter(({ transaction }) => transaction.date?.slice(0, 7) === state.budget.month);
-            return monthTransactions.length
-              ? monthTransactions.slice(0, 6).map(({ transaction, index }) => ledgerEntryRow(transaction, index)).join("")
-              : `<div class="empty-inline">No transactions yet</div>`;
+            if (!monthTransactions.length) return `<div class="empty-inline">No transactions yet</div>`;
+            return `<div class="ledger-entry-head ${state.accounts.length ? "has-accounts" : ""}">
+              <span>Payee</span>
+              <span>Amount</span>
+              <span>Date</span>
+              <span>Subcategory</span>
+              ${state.accounts.length ? `<span>Account</span>` : ""}
+              <span></span>
+            </div>` + monthTransactions.slice(0, 6).map(({ transaction, index }) => ledgerEntryRow(transaction, index)).join("");
           })()}
         </section>
       </div>

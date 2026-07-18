@@ -1555,14 +1555,13 @@ main {
   max-width: 100%;
 }
 
-/* Bank stream / Ledger / Recurring bill rows use unconditional flex-wrap
-   rather than fixed grid columns: the Ledger card lives in .side-stack, a
-   narrow column next to the wide budget grid, so a rigid multi-column grid
-   squeezes long before a viewport media query would ever fire (see the
-   Income-row lesson). Flex-wrap reflows based on each row's own available
-   space regardless of which stack it ends up in. */
+/* Bank stream / Recurring bill rows use unconditional flex-wrap rather than
+   fixed grid columns: the Bank stream card lives in .side-stack, a narrow
+   column next to the wide budget grid, so a rigid multi-column grid squeezes
+   long before a viewport media query would ever fire (see the Income-row
+   lesson). Flex-wrap reflows based on each row's own available space
+   regardless of which stack it ends up in. */
 .bank-stream-row,
-.ledger-entry-row,
 .recurring-expense-row {
   display: flex;
   flex-wrap: wrap;
@@ -1577,14 +1576,50 @@ main {
   background: var(--soft-blue);
 }
 
-.ledger-entry-row,
 .recurring-expense-row {
   background: var(--soft-blue);
 }
 
 .bank-stream-row > *,
-.ledger-entry-row > *,
 .recurring-expense-row > * {
+  min-width: 0;
+}
+
+/* Recent transactions always lives in the wide main-stack column (unlike
+   Bank stream above), so a grid with a header shown once — instead of
+   repeating Payee/Amount/Date/etc. labels on every row — is safe here. */
+.ledger-entry-head {
+  display: grid;
+  grid-template-columns: minmax(120px, 1fr) minmax(80px, 100px) minmax(120px, 130px) minmax(140px, 1fr) 48px;
+  gap: 0.5rem;
+  padding: 0 0.6rem;
+  color: var(--muted);
+  font-size: 0.68rem;
+  font-weight: 900;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+}
+
+.ledger-entry-head.has-accounts {
+  grid-template-columns: minmax(120px, 1fr) minmax(80px, 100px) minmax(120px, 130px) minmax(140px, 1fr) minmax(120px, 140px) 48px;
+}
+
+.ledger-entry-row {
+  display: grid;
+  grid-template-columns: minmax(120px, 1fr) minmax(80px, 100px) minmax(120px, 130px) minmax(140px, 1fr) 48px;
+  gap: 0.5rem;
+  align-items: center;
+  border-radius: 8px;
+  padding: 0.6rem;
+  margin-bottom: 0.5rem;
+  background: var(--soft-blue);
+}
+
+.ledger-entry-row.has-accounts {
+  grid-template-columns: minmax(120px, 1fr) minmax(80px, 100px) minmax(120px, 130px) minmax(140px, 1fr) minmax(120px, 140px) 48px;
+}
+
+.ledger-entry-row > * {
   min-width: 0;
 }
 
