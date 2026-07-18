@@ -1977,12 +1977,25 @@ main {
 }
 
 .mini-tags span {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
   border-radius: 999px;
   background: var(--green-soft);
   color: #07654b;
   padding: 0.25rem 0.45rem;
   font-weight: 800;
   font-size: 0.72rem;
+}
+
+.mini-tag-remove {
+  padding: 0;
+  border: none;
+  background: transparent;
+  color: inherit;
+  font-weight: 900;
+  line-height: 1;
+  cursor: pointer;
 }
 
 .split-stat {

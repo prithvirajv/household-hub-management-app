@@ -1211,7 +1211,7 @@ function renderPaychecks() {
                 <label class="paycheck-recurrence-field">Repeat<select data-paycheck-recurrence="${index}" aria-label="How often ${escapeHtml(paycheck.name)} repeats">${Object.entries(paycheckRecurrenceLabels).map(([value, label]) => `<option value="${value}" ${paycheck.recurrence === value ? "selected" : ""}>${label}</option>`).join("")}</select></label>
                 ${isRecurring ? `<label class="paycheck-recurrence-field">End date (optional)<input type="date" data-paycheck-end-date="${index}" value="${paycheck.endDate || ""}" aria-label="Stop ${escapeHtml(paycheck.name)} from repeating after this date"></label>` : ""}
                 ${state.accounts.length ? `<label class="paycheck-recurrence-field">Deposit to<select data-paycheck-deposit-account="${index}" aria-label="Deposit account for ${escapeHtml(paycheck.name)}"><option value="">Not linked</option>${accountOptions(paycheck.depositAccountId || "", { excludeType: "credit_card" })}</select></label>` : ""}
-                <div class="mini-tags">${paycheck.assignedLineIds.map((id) => `<span>${lineName(id)}</span>`).join("")}</div>
+                <div class="mini-tags">${paycheck.assignedLineIds.map((id) => `<span>${escapeHtml(lineName(id))}<button type="button" class="mini-tag-remove" data-remove-paycheck-line="${index}:${id}" aria-label="Remove ${escapeHtml(lineName(id))} from ${escapeHtml(paycheck.name)}">×</button></span>`).join("")}</div>
                 ${occurrencesThisMonth.length ? `<div class="pay-dates-this-month">
                   <small>Pay dates in ${formatMonth(state.budget.month)} (edit or delete individually)</small>
                   ${occurrencesThisMonth.map((occurrence) => `
@@ -5263,6 +5263,17 @@ function bindViewEvents() {
     render();
   });
 
+  document.querySelectorAll("[data-remove-paycheck-line]").forEach((button) => {
+    button.addEventListener("click", () => {
+      const [index, lineId] = button.dataset.removePaycheckLine.split(":");
+      const paycheck = state.paychecks[Number(index)];
+      if (!paycheck) return;
+      paycheck.assignedLineIds = paycheck.assignedLineIds.filter((id) => id !== lineId);
+      autosaveState();
+      render();
+    });
+  });
+
   // Once the user starts a new meals action, clear the leftover confirmation
   // message so it doesn't look stuck/stale while they're doing something else
   // (mirrors the same pattern used for the calendar quick-add form).
@@ -7193,7 +7204,14 @@ $("#monthPicker").addEventListener("change", (event) => {
   state.budget.month = event.target.value;
   state.budget.monthPreferenceSet = true;
   const existing = (state.budgetHistory || []).find((budget) => budget.month === state.budget.month);
-  state.budget.categories = existing ? cloneBudgetCategories(existing.categories) : [];
+  // A month with no snapshot of its own yet (never visited) inherits
+  // categories/subcategories from the most recent earlier month instead of
+  // starting blank — otherwise recurring-bill savings lines (and any bill a
+  // paycheck is assigned to) silently vanish the first time you look at a
+  // new month, since ids are preserved by cloneBudgetCategories and nothing
+  // else carries them forward automatically.
+  const carryForwardSource = existing || availablePreviousBudgets()[0];
+  state.budget.categories = carryForwardSource ? cloneBudgetCategories(carryForwardSource.categories) : [];
   state.budget.income = existing ? Number(existing.income || 0) : 0;
   autosaveState();
   render();
