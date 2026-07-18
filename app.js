@@ -464,21 +464,20 @@ function applyDebtPayment(debt, rawAmount, date) {
 
 // A debt linked to a budget subcategory (debt.lineId) auto-applies any
 // Ledger transaction posted there as an EMI payment, instead of requiring
-// the "Record EMI payment" button every time. debt.appliedPaymentSignatures
-// is seeded (not applied) the first time a debt gets linked, since whatever
-// is already in the ledger at that point is presumed already reflected in
-// the debt's current balance — only transactions posted from then on should
-// reduce it, so switching on this sync never silently double-counts history.
+// the "Record EMI payment" button every time — including transactions that
+// already existed at the moment you linked it (e.g. an EMI you'd been
+// posting to the Ledger for months before ever setting up the debt
+// tracker), so linking a debt catches it up immediately rather than only
+// counting payments from that point forward. appliedPaymentSignatures still
+// guards against re-applying the same transaction twice on a later render,
+// and the "Record EMI payment" button marks its own created transaction the
+// same way so the two paths never double-count each other.
 function ensureDebtPaymentsAppliedFromLedger() {
   state.goals.debts.forEach((debt) => {
     if (!debt.lineId) return;
-    const linkedTransactions = state.transactions.filter((transaction) => transaction.lineId === debt.lineId);
-    if (!debt.appliedPaymentSignatures) {
-      debt.appliedPaymentSignatures = linkedTransactions.map(transactionSignature);
-      return;
-    }
-    linkedTransactions
-      .filter((transaction) => !debt.appliedPaymentSignatures.includes(transactionSignature(transaction)))
+    debt.appliedPaymentSignatures ||= [];
+    state.transactions
+      .filter((transaction) => transaction.lineId === debt.lineId && !debt.appliedPaymentSignatures.includes(transactionSignature(transaction)))
       .sort((a, b) => a.date.localeCompare(b.date))
       .forEach((transaction) => {
         applyDebtPayment(debt, transaction.amount, transaction.date);
