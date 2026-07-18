@@ -3078,6 +3078,15 @@ function ensurePaycheckRecurrenceData() {
 // never silently regenerated.
 function ensurePaycheckOccurrencesGenerated() {
   state.paycheckOccurrences ||= [];
+  // Enforced on every render (not just reactively when the end date field
+  // itself changes) so an occurrence materialized before an end date existed
+  // — or from before this pruning existed at all — doesn't linger forever;
+  // the invariant "no occurrence past a paycheck's end date" always holds.
+  const paychecksById = new Map(state.paychecks.map((paycheck) => [paycheck.id, paycheck]));
+  state.paycheckOccurrences = state.paycheckOccurrences.filter((occurrence) => {
+    const paycheck = paychecksById.get(occurrence.seriesId);
+    return !paycheck?.endDate || occurrence.date <= paycheck.endDate;
+  });
   const capDate = new Date();
   capDate.setMonth(capDate.getMonth() + 12);
   const capKey = dateKey(capDate);
