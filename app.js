@@ -1158,7 +1158,14 @@ function renderTransactions() {
             </div>
           `).join("")}
           <div class="card-label">Recent transactions</div>
-          ${state.transactions.length ? state.transactions.slice(0, 6).map((transaction, index) => ledgerEntryRow(transaction, index)).join("") : `<div class="empty-inline">No transactions yet</div>`}
+          ${(() => {
+            const monthTransactions = state.transactions
+              .map((transaction, index) => ({ transaction, index }))
+              .filter(({ transaction }) => transaction.date?.slice(0, 7) === state.budget.month);
+            return monthTransactions.length
+              ? monthTransactions.slice(0, 6).map(({ transaction, index }) => ledgerEntryRow(transaction, index)).join("")
+              : `<div class="empty-inline">No transactions yet</div>`;
+          })()}
         </section>
       </div>
       <aside class="side-stack">
