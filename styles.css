@@ -2661,11 +2661,20 @@ main {
 
 .payment-history > div {
   display: grid;
-  grid-template-columns: repeat(4, minmax(110px, 1fr));
+  grid-template-columns: repeat(4, minmax(110px, 1fr)) 36px;
+  align-items: center;
   gap: 0.5rem;
   padding: 0.5rem 0;
   border-bottom: 1px solid var(--line);
   font-size: 0.78rem;
+}
+
+.payment-history .icon-button {
+  width: 32px;
+  min-width: 32px;
+  height: 32px;
+  min-height: 32px;
+  font-size: 0.85rem;
 }
 
 .net-worth-items {

@@ -2801,7 +2801,7 @@ function renderWealth() {
             <div class="debt-payoff-summary"><span><b>Estimated payoff</b>${termLabel(payoffMonths(debt))}</span><span><b>Suggested EMI</b>${debt.termMonths ? money.format(suggestedEmi(debt)) : "Set a loan term"}</span>${debt.termMonths ? `<button class="ghost" data-use-suggested-emi="${index}" type="button">Use suggested EMI</button>` : ""}</div>
             <div class="bar"><span style="width:${Math.max(4, Math.min(95, Math.round((1 - debt.balance / 15000) * 100)))}%"></span></div>
             <div class="payment-row"><label>Additional payment<input data-debt-payment="${index}" value="0" type="number" min="0" step="0.01"></label><button class="ghost" data-apply-debt-payment="${index}" type="button" ${Number(debt.minimum || 0) <= 0 ? "disabled" : ""}>Record EMI payment</button><button class="icon-button danger-button" data-delete-debt="${index}" type="button" aria-label="Delete ${escapeHtml(debt.name)}">×</button></div>
-            ${debt.payments?.length ? `<details class="payment-history"><summary>Payment history (${debt.payments.length})</summary>${debt.payments.slice(0, 8).map((payment, paymentIndex) => `<div><input type="date" data-debt-payment-date="${index}:${paymentIndex}" value="${payment.date}" aria-label="Date for this ${escapeHtml(debt.name)} payment"><span>${money.format(payment.amount)} paid</span><span>${money.format(payment.principal)} principal</span><span>${money.format(payment.interest)} interest</span></div>`).join("")}</details>` : ""}
+            ${debt.payments?.length ? `<details class="payment-history"><summary>Payment history (${debt.payments.length})</summary>${debt.payments.slice(0, 8).map((payment, paymentIndex) => `<div><input type="date" data-debt-payment-date="${index}:${paymentIndex}" value="${payment.date}" aria-label="Date for this ${escapeHtml(debt.name)} payment"><span>${money.format(payment.amount)} paid</span><span>${money.format(payment.principal)} principal</span><span>${money.format(payment.interest)} interest</span><button class="icon-button danger-button" data-delete-debt-payment="${index}:${paymentIndex}" type="button" aria-label="Remove this ${escapeHtml(debt.name)} payment and restore its balance">×</button></div>`).join("")}</details>` : ""}
           </article>`).join("") : `<div class="onboarding-empty compact-onboarding"><div class="empty-symbol" aria-hidden="true">↓</div><h3>Add a debt when you are ready</h3><p>Track its balance, rate, payment, and the asset it secures.</p></div>`}
         </section>
       </div>
@@ -5793,6 +5793,25 @@ function bindViewEvents() {
       const payment = state.goals.debts[debtIndex]?.payments?.[paymentIndex];
       if (payment && input.value) payment.date = input.value;
       autosaveState();
+    });
+  });
+
+  document.querySelectorAll("[data-delete-debt-payment]").forEach((button) => {
+    button.addEventListener("click", () => {
+      const [debtIndex, paymentIndex] = button.dataset.deleteDebtPayment.split(":").map(Number);
+      const debt = state.goals.debts[debtIndex];
+      const payment = debt?.payments?.[paymentIndex];
+      if (!debt || !payment) return;
+      // Restores the balance this payment reduced, without touching
+      // appliedPaymentSignatures — the underlying Ledger transaction (if any)
+      // stays marked as already accounted for, so removing a wrongly
+      // recorded payment here never causes it to silently reapply later.
+      debt.balance = Math.max(0, Number(debt.balance || 0) + Number(payment.principal || 0));
+      debt.payments.splice(paymentIndex, 1);
+      const liability = liabilityForDebt(debt);
+      if (liability) liability.value = debt.balance;
+      autosaveState();
+      render();
     });
   });
 
