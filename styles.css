@@ -1047,12 +1047,26 @@ main {
    continuous list (plain row separators, no per-row card), rather than each
    one looking like its own separate floating card the way Ledger/Bank
    stream rows do — those are independent records, these belong together
-   under one category. */
-.budget-line {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
+   under one category. Column labels (Subcategory/Due date/Planned/etc.) are
+   shown once via .budget-line-head instead of repeating per row, matching
+   the same grid columns so values line up underneath their header. */
+.budget-line-head {
+  display: grid;
+  grid-template-columns: minmax(140px, 1fr) minmax(120px, 130px) minmax(90px, 110px) minmax(80px, 100px) minmax(80px, 100px) 80px;
   gap: 0.5rem;
+  padding: 0.3rem 0.6rem 0.15rem;
+  color: var(--muted);
+  font-size: 0.68rem;
+  font-weight: 900;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+}
+
+.budget-line {
+  display: grid;
+  grid-template-columns: minmax(140px, 1fr) minmax(120px, 130px) minmax(90px, 110px) minmax(80px, 100px) minmax(80px, 100px) 80px;
+  gap: 0.5rem;
+  align-items: center;
   padding: 0.55rem 0.6rem;
   border-bottom: 1px solid var(--line);
 }
@@ -1065,8 +1079,23 @@ main {
   border-bottom: none;
 }
 
+.budget-line-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 0.3rem;
+}
+
+.budget-line-actions .icon-button {
+  width: 32px;
+  min-width: 32px;
+  height: 32px;
+  min-height: 32px;
+  font-size: 0.85rem;
+}
+
 .recurring-budget-panel {
-  flex: 1 0 100%;
+  grid-column: 1 / -1;
   display: grid;
   grid-template-columns: minmax(140px, 0.75fr) minmax(140px, 0.7fr) minmax(220px, 1.2fr) auto;
   gap: 0.55rem;
@@ -1075,12 +1104,6 @@ main {
   padding: 0.6rem;
   border-radius: 8px;
   background: var(--soft-blue);
-}
-
-.recurring-budget-toggle {
-  padding: 0.35rem 0.6rem;
-  font-size: 0.82rem;
-  white-space: nowrap;
 }
 
 .recurring-budget-summary {

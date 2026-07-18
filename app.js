@@ -964,25 +964,36 @@ function renderBudget() {
                   <button class="icon-button danger-button" data-delete-category="${categoryIndex}" type="button" aria-label="Remove ${category.name}">×</button>
                 </div>
               </div>
+              ${category.lines.length ? `<div class="budget-line-head">
+                <span>Subcategory</span>
+                <span>Due date</span>
+                <span>Planned</span>
+                <span>Spent</span>
+                <span>Remaining</span>
+                <span></span>
+              </div>` : ""}
               ${category.lines.map((line, lineIndex) => {
                 const recurring = line.recurringBill?.enabled ? recurringBudgetSetAside(line.recurringBill) : null;
                 const spent = spentByLine(line.id);
                 const remaining = Number(line.planned) - spent;
                 return `<div class="budget-line">
-                  <label class="row-field row-payee"><small>Subcategory</small><input class="line-name-input" data-budget-line-name="${categoryIndex}:${lineIndex}" value="${line.name}"></label>
+                  <input class="line-name-input" data-budget-line-name="${categoryIndex}:${lineIndex}" value="${line.name}" aria-label="Subcategory name">
                   ${recurring
-                    ? `<label class="row-field row-date"><small>Next due</small><input data-budget-recurring-due-date="${categoryIndex}:${lineIndex}" type="date" value="${recurring.nextDueDate}"></label>`
-                    : `<label class="row-field row-date"><small>Due date</small><input data-budget-due-date="${categoryIndex}:${lineIndex}" type="date" min="${monthDateMin()}" max="${monthDateMax()}" value="${dueDateValue(line.dueDay)}"></label>`}
-                  <label class="row-field row-amount"><small>${recurring ? "Monthly set-aside" : "Planned"}</small><input class="money-input" data-budget-line="${categoryIndex}:${lineIndex}" type="number" step="0.01" value="${line.planned}" min="0" ${recurring ? "readonly" : ""} aria-label="Planned amount for ${line.name}"></label>
-                  <div class="row-field row-amount"><small>Spent</small><span>${exactMoney.format(spent)}</span></div>
-                  <div class="row-field row-amount"><small>Remaining</small><b data-line-remaining="${categoryIndex}:${lineIndex}" class="${remaining < 0 ? "danger" : ""}">${exactMoney.format(remaining)}</b></div>
-                  <button class="icon-button danger-button" data-delete-line="${categoryIndex}:${lineIndex}" type="button" aria-label="Remove ${line.name}">×</button>
+                    ? `<input data-budget-recurring-due-date="${categoryIndex}:${lineIndex}" type="date" value="${recurring.nextDueDate}" aria-label="Next due date for ${line.name}">`
+                    : `<input data-budget-due-date="${categoryIndex}:${lineIndex}" type="date" min="${monthDateMin()}" max="${monthDateMax()}" value="${dueDateValue(line.dueDay)}" aria-label="Due date for ${line.name}">`}
+                  <input class="money-input" data-budget-line="${categoryIndex}:${lineIndex}" type="number" step="0.01" value="${line.planned}" min="0" ${recurring ? "readonly" : ""} aria-label="Planned amount for ${line.name}">
+                  <span>${exactMoney.format(spent)}</span>
+                  <b data-line-remaining="${categoryIndex}:${lineIndex}" class="${remaining < 0 ? "danger" : ""}">${exactMoney.format(remaining)}</b>
+                  <div class="budget-line-actions">
+                    ${recurring ? "" : `<button class="icon-button recurring-budget-toggle" data-enable-recurring-budget="${categoryIndex}:${lineIndex}" type="button" title="Automatically set aside savings each month for bills like HOA, insurance, property tax, subscriptions, or memberships." aria-label="Make ${line.name} recurring">↻</button>`}
+                    <button class="icon-button danger-button" data-delete-line="${categoryIndex}:${lineIndex}" type="button" aria-label="Remove ${line.name}">×</button>
+                  </div>
                   ${recurring ? `<div class="recurring-budget-panel">
                     <label class="row-field"><small>Amount due</small><input class="money-input" data-budget-recurring-amount="${categoryIndex}:${lineIndex}" type="number" step="0.01" min="0" value="${recurring.amountDue}"></label>
                     <label class="row-field"><small>Frequency</small><select data-budget-recurring-frequency="${categoryIndex}:${lineIndex}">${Object.entries(recurringBudgetFrequencyLabels).map(([value, label]) => `<option value="${value}" ${recurring.frequency === value ? "selected" : ""}>${label}</option>`).join("")}</select></label>
                     <div class="recurring-budget-summary"><strong>${exactMoney.format(recurring.monthlyAmount)}/mo</strong><small>${recurringBudgetFrequencyLabels[recurring.frequency]} bill due ${formatShortDate(recurring.nextDueDate)} · ${recurring.monthsRemaining} month${recurring.monthsRemaining === 1 ? "" : "s"} to save</small></div>
                     <button class="ghost" data-disable-recurring-budget="${categoryIndex}:${lineIndex}" type="button">Remove recurring</button>
-                  </div>` : `<button class="ghost recurring-budget-toggle" data-enable-recurring-budget="${categoryIndex}:${lineIndex}" type="button" title="Automatically set aside savings each month for bills like HOA, insurance, property tax, subscriptions, or memberships.">Make recurring</button>`}
+                  </div>` : ""}
                 </div>`;
               }).join("")}
             `).join("")}
