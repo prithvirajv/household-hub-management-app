@@ -245,6 +245,22 @@ function paycheckAssignedAmount(paycheck) {
   return paycheck.assignedLineIds.reduce((sum, id) => sum + (allLines().find((line) => line.id === id)?.planned || 0), 0);
 }
 
+// How much of this paycheck actually lands in the currently viewed budget
+// month — not just its flat per-occurrence amount — so a paycheck past its
+// end date (or simply not due this month) correctly shows $0 instead of the
+// series' amount forever.
+function paycheckMonthlyIncome(paycheck) {
+  const monthStart = `${state.budget.month}-01`;
+  const monthEnd = monthEndDateKey(state.budget.month);
+  const isRecurring = !["once", "bonus"].includes(paycheck.recurrence || "once");
+  if (isRecurring) {
+    return (state.paycheckOccurrences || [])
+      .filter((occurrence) => occurrence.seriesId === paycheck.id && occurrence.date >= monthStart && occurrence.date <= monthEnd)
+      .reduce((sum, occurrence) => sum + Number(occurrence.amount || 0), 0);
+  }
+  return Number(paycheck.amount || 0) * paycheckOccurrencesInRange(paycheck, monthStart, monthEnd);
+}
+
 function spentByLine(lineId) {
   return state.transactions
     .filter((transaction) => transaction.lineId === lineId && transaction.date?.slice(0, 7) === state.budget.month)
@@ -1165,6 +1181,7 @@ function renderPaychecks() {
                   .filter((occurrence) => occurrence.seriesId === paycheck.id && occurrence.date >= monthStart && occurrence.date <= monthEnd)
                   .sort((a, b) => a.date.localeCompare(b.date))
                 : [];
+              const monthlyIncome = paycheckMonthlyIncome(paycheck);
               return `<article class="paycheck-card">
                 <div class="paycheck-card-header">
                   <input class="paycheck-name-input" data-income-name="${index}" value="${escapeHtml(paycheck.name)}" aria-label="Name for this paycheck/income entry">
@@ -1188,7 +1205,7 @@ function renderPaychecks() {
                     </div>
                   `).join("")}
                 </div>` : ""}
-                <div class="split-stat" data-paycheck-split="${index}"><span>Income ${money.format(paycheck.amount)}</span><b>Assigned ${money.format(assigned)}</b></div>
+                <div class="split-stat" data-paycheck-split="${index}"><span>Income ${money.format(monthlyIncome)}</span><b>Assigned ${money.format(assigned)}</b></div>
               </article>`;
             }).join("")}
           </div>
@@ -5140,7 +5157,16 @@ function bindViewEvents() {
   document.querySelectorAll("[data-paycheck-end-date]").forEach((input) => {
     input.addEventListener("change", () => {
       const paycheck = state.paychecks[Number(input.dataset.paycheckEndDate)];
-      if (paycheck) paycheck.endDate = input.value || "";
+      if (paycheck) {
+        paycheck.endDate = input.value || "";
+        // Rows already materialized past a newly-set (or newly-lowered) end
+        // date would otherwise keep counting as income forever — generation
+        // only prevents new rows going forward, so already-existing ones
+        // need to be pruned here too.
+        if (paycheck.endDate) {
+          state.paycheckOccurrences = (state.paycheckOccurrences || []).filter((occurrence) => occurrence.seriesId !== paycheck.id || occurrence.date <= paycheck.endDate);
+        }
+      }
       state.budget.income = budgetIncomeFromPaychecks();
       autosaveState();
       render();
@@ -5197,7 +5223,7 @@ function bindViewEvents() {
       const splitEl = document.querySelector(`[data-paycheck-split="${index}"]`);
       if (splitEl) {
         const assigned = paycheckAssignedAmount(paycheck);
-        splitEl.innerHTML = `<span>Income ${money.format(paycheck.amount)}</span><b>Assigned ${money.format(assigned)}</b>`;
+        splitEl.innerHTML = `<span>Income ${money.format(paycheckMonthlyIncome(paycheck))}</span><b>Assigned ${money.format(assigned)}</b>`;
       }
       autosaveState();
     });
