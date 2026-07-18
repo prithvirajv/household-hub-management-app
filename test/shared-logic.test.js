@@ -464,6 +464,41 @@ test("accountBalance returns 0 for an unknown or deleted account id", () => {
   assert.equal(balance, 0);
 });
 
+test("accountBalance: borrowing money is an immediate cash inflow, still outstanding", () => {
+  const accounts = [{ id: "checking", type: "checking", openingBalance: 100 }];
+  const ious = [{ direction: "i_owe", amount: 45, date: "2026-07-05", accountId: "checking", settled: false }];
+  const balance = accountBalance("checking", { accounts, transactions: [], paychecks: [], transfers: [], ious }, "2026-07-11");
+  assert.equal(balance, 145);
+});
+
+test("accountBalance: paying back a borrowed IOU nets it back out once settled", () => {
+  const accounts = [{ id: "checking", type: "checking", openingBalance: 100 }];
+  const ious = [{ direction: "i_owe", amount: 45, date: "2026-07-05", accountId: "checking", settled: true, settledDate: "2026-07-09" }];
+  const context = { accounts, transactions: [], paychecks: [], transfers: [], ious };
+  assert.equal(accountBalance("checking", context, "2026-07-08"), 145);
+  assert.equal(accountBalance("checking", context, "2026-07-10"), 100);
+});
+
+test("accountBalance: a split expense owed to you does not affect the account until settled", () => {
+  const accounts = [{ id: "checking", type: "checking", openingBalance: 100 }];
+  const ious = [{ direction: "owed_to_me", amount: 33, date: "2026-07-05", accountId: "checking", settled: false }];
+  const context = { accounts, transactions: [], paychecks: [], transfers: [], ious };
+  assert.equal(accountBalance("checking", context, "2026-07-11"), 100);
+  ious[0].settled = true;
+  ious[0].settledDate = "2026-07-09";
+  assert.equal(accountBalance("checking", context, "2026-07-11"), 133);
+});
+
+test("accountBalance: an IOU linked to a different account does not leak into this one", () => {
+  const accounts = [
+    { id: "checking", type: "checking", openingBalance: 100 },
+    { id: "savings", type: "savings", openingBalance: 200 }
+  ];
+  const ious = [{ direction: "i_owe", amount: 45, date: "2026-07-05", accountId: "savings", settled: false }];
+  const balance = accountBalance("checking", { accounts, transactions: [], paychecks: [], transfers: [], ious }, "2026-07-11");
+  assert.equal(balance, 100);
+});
+
 test("accountsWithBalances attaches a computed balance to every account", () => {
   const state = {
     accounts: [

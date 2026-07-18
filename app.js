@@ -471,7 +471,8 @@ function currentAccountBalance(accountId) {
     transactions: state.transactions,
     paychecks: state.paychecks,
     paycheckOccurrences: state.paycheckOccurrences,
-    transfers: state.transfers
+    transfers: state.transfers,
+    ious: state.ious || []
   }, dateKey(new Date()));
 }
 
@@ -871,6 +872,7 @@ function render() {
   ensureRecurringBudgetBills();
   ensurePaycheckRecurrenceData();
   ensurePaycheckOccurrencesGenerated();
+  ensureIOUsData();
   state.budget.income = budgetIncomeFromPaychecks();
   syncHistoryToView();
   if (currentView === "wealth") { ensureDebtNetWorthSync(); ensureAccountsData(); }
@@ -2518,6 +2520,7 @@ function ensureIOUsData() {
     iou.reason ||= "";
     iou.settled = Boolean(iou.settled);
     iou.settledDate ||= "";
+    iou.accountId ||= "";
   });
 }
 
@@ -2525,6 +2528,7 @@ function iouRow(iou, index) {
   return `<div class="compact-row">
     <div><strong>${escapeHtml(iou.person)}</strong><small>${iou.reason ? `${escapeHtml(iou.reason)} · ` : ""}${formatShortDate(iou.date)}</small></div>
     <b>${exactMoney.format(iou.amount)}</b>
+    ${state.accounts.length ? `<select class="income-recurrence-select" data-iou-account="${index}" aria-label="Account for ${escapeHtml(iou.person)}"><option value="">Not linked</option>${accountOptions(iou.accountId || "", { excludeType: "credit_card" })}</select>` : ""}
     <div class="compact-row-actions">
       ${iou.settled ? "" : `<button class="icon-button" data-settle-iou="${index}" type="button" aria-label="Mark settled with ${escapeHtml(iou.person)}">✓</button>`}
       <button class="icon-button danger-button" data-delete-iou="${index}" type="button" aria-label="Delete IOU with ${escapeHtml(iou.person)}">×</button>
@@ -2553,6 +2557,7 @@ function renderIOUs() {
           </select></label>
           <label class="form-row-full">Reason (optional)<input name="reason" placeholder="Gas money"></label>
           <label>Date<input name="date" type="date" value="${today}"></label>
+          ${state.accounts.length ? `<label>Account (optional)<select name="accountId"><option value="">Not linked</option>${accountOptions("", { excludeType: "credit_card" })}</select></label>` : ""}
           <button type="submit" class="form-row-full">Add IOU</button>
         </form>
       </div>
@@ -2564,6 +2569,7 @@ function renderIOUs() {
           <label>Total amount<input name="amount" type="number" step="0.01" min="0.01" placeholder="90" required></label>
           <label>Date<input name="date" type="date" value="${today}"></label>
           <label class="form-row-full">Friends (comma-separated, not including you)<input name="people" placeholder="Sam, Priya, Jordan" required></label>
+          ${state.accounts.length ? `<label>Account their repayment lands in (optional)<select name="accountId"><option value="">Not linked</option>${accountOptions("", { excludeType: "credit_card" })}</select></label>` : ""}
           <button type="submit" class="form-row-full">Split evenly and add</button>
         </form>
       </div>
@@ -3907,7 +3913,7 @@ function monthEndDateKey(monthKey) {
 // it was worth in the past, so its current value is carried flat across the
 // whole trend — an honest approximation given what data actually exists.
 function netWorthAtDate(referenceDateKey) {
-  const context = { accounts: state.accounts, transactions: state.transactions, paychecks: state.paychecks, paycheckOccurrences: state.paycheckOccurrences, transfers: state.transfers };
+  const context = { accounts: state.accounts, transactions: state.transactions, paychecks: state.paychecks, paycheckOccurrences: state.paycheckOccurrences, transfers: state.transfers, ious: state.ious || [] };
   const assetTotal = state.goals.netWorth.assets.reduce((sum, asset) => {
     const linkedAccount = state.accounts.find((account) => account.netWorthAssetId === asset.id);
     return sum + (linkedAccount ? accountBalance(linkedAccount.id, context, referenceDateKey) : assetValue(asset));
@@ -6768,6 +6774,7 @@ function bindViewEvents() {
       direction: data.direction === "owed_to_me" ? "owed_to_me" : "i_owe",
       reason: String(data.reason || "").trim(),
       date: data.date || dateKey(new Date()),
+      accountId: data.accountId || "",
       settled: false,
       settledDate: ""
     });
@@ -6793,12 +6800,22 @@ function bindViewEvents() {
         direction: "owed_to_me",
         reason,
         date,
+        accountId: data.accountId || "",
         settled: false,
         settledDate: ""
       });
     });
     autosaveState();
     render();
+  });
+
+  document.querySelectorAll("[data-iou-account]").forEach((select) => {
+    select.addEventListener("change", () => {
+      const iou = state.ious[Number(select.dataset.iouAccount)];
+      if (iou) iou.accountId = select.value;
+      autosaveState();
+      render();
+    });
   });
 
   document.querySelectorAll("[data-settle-iou]").forEach((button) => {
