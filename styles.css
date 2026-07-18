@@ -1257,6 +1257,28 @@ main {
   margin-left: auto;
 }
 
+.calendar-manage-row-head {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.calendar-manage-row-meta {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  min-width: 0;
+}
+
+.calendar-manage-row-meta small {
+  display: inline;
+  margin-top: 0;
+}
+
+.calendar-manage-row > strong {
+  flex: 1 1 100%;
+}
+
 .compact-row.overdue {
   background: #fde9e8;
 }

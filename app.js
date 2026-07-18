@@ -2938,14 +2938,17 @@ function calendarManageRow(item) {
   // to one-time reminders shown here.
   const isReminder = kind === "event" && item.type === "reminder";
   const reminderEvent = isReminder ? state.calendar.events.find((event) => event.id === id) : null;
-  return `<div class="compact-row">
-    <div>${assigneeDots(assignees)}<strong>${escapeHtml(title)}</strong>${detail ? `<small>${escapeHtml(detail)}</small>` : ""}</div>
+  return `<div class="compact-row calendar-manage-row">
+    <div class="calendar-manage-row-head">
+      <div class="calendar-manage-row-meta">${assigneeDots(assignees)}${detail ? `<small>${escapeHtml(detail)}</small>` : ""}</div>
+      <div class="compact-row-actions">
+        <button class="icon-button" data-edit-calendar-item="${kind}:${id}" type="button" aria-label="Edit ${escapeHtml(title)}">✎</button>
+        <button class="icon-button danger-button" data-delete-calendar-item="${kind}:${id}" type="button" aria-label="Remove ${escapeHtml(title)}">×</button>
+      </div>
+    </div>
+    <strong>${escapeHtml(title)}</strong>
     ${badge ? `<span class="pill">${escapeHtml(badge)}</span>` : ""}
     ${reminderEvent ? `<div class="chore-complete-group">${reminderCompletionControl(reminderEvent)}</div>` : ""}
-    <div class="compact-row-actions">
-      <button class="icon-button" data-edit-calendar-item="${kind}:${id}" type="button" aria-label="Edit ${escapeHtml(title)}">✎</button>
-      <button class="icon-button danger-button" data-delete-calendar-item="${kind}:${id}" type="button" aria-label="Remove ${escapeHtml(title)}">×</button>
-    </div>
   </div>`;
 }
 
