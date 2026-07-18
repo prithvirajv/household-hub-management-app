@@ -1250,6 +1250,13 @@ main {
   min-width: 0;
 }
 
+.compact-row-actions {
+  display: flex;
+  flex: 0 0 auto;
+  gap: 0.4rem;
+  margin-left: auto;
+}
+
 .compact-row.overdue {
   background: #fde9e8;
 }
