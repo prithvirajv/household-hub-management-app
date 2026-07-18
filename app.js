@@ -440,6 +440,53 @@ function ensureDebtNetWorthSync() {
   return true;
 }
 
+function transactionSignature(transaction) {
+  return `${transaction.date}|${transaction.amount}`;
+}
+
+// The shared interest/principal math behind every debt payment, however it
+// was triggered (the "Record EMI payment" button, or a Ledger transaction
+// posted to the debt's linked subcategory) — one formula, so the two can
+// never compute a payoff differently.
+function applyDebtPayment(debt, rawAmount, date) {
+  if (!debt.balance) return null;
+  const interest = Math.min(debt.balance, (debt.balance * Math.max(0, Number(debt.rate || 0))) / 1200);
+  const amount = Math.min(debt.balance + interest, Math.max(0, Number(rawAmount || 0)));
+  const principal = Math.max(0, amount - interest);
+  debt.balance = Math.max(0, debt.balance - principal);
+  const payment = { id: uniqueId("payment"), date, amount, principal, interest, extra: 0, balance: debt.balance };
+  debt.payments ||= [];
+  debt.payments.unshift(payment);
+  const liability = liabilityForDebt(debt);
+  if (liability) liability.value = debt.balance;
+  return payment;
+}
+
+// A debt linked to a budget subcategory (debt.lineId) auto-applies any
+// Ledger transaction posted there as an EMI payment, instead of requiring
+// the "Record EMI payment" button every time. debt.appliedPaymentSignatures
+// is seeded (not applied) the first time a debt gets linked, since whatever
+// is already in the ledger at that point is presumed already reflected in
+// the debt's current balance — only transactions posted from then on should
+// reduce it, so switching on this sync never silently double-counts history.
+function ensureDebtPaymentsAppliedFromLedger() {
+  state.goals.debts.forEach((debt) => {
+    if (!debt.lineId) return;
+    const linkedTransactions = state.transactions.filter((transaction) => transaction.lineId === debt.lineId);
+    if (!debt.appliedPaymentSignatures) {
+      debt.appliedPaymentSignatures = linkedTransactions.map(transactionSignature);
+      return;
+    }
+    linkedTransactions
+      .filter((transaction) => !debt.appliedPaymentSignatures.includes(transactionSignature(transaction)))
+      .sort((a, b) => a.date.localeCompare(b.date))
+      .forEach((transaction) => {
+        applyDebtPayment(debt, transaction.amount, transaction.date);
+        debt.appliedPaymentSignatures.push(transactionSignature(transaction));
+      });
+  });
+}
+
 // Unlike ensureDebtNetWorthSync (which links once, then lets the two lists be
 // edited independently), a linked account must drive its paired net-worth
 // value on every render — the whole point is one computed number, never two
@@ -875,7 +922,7 @@ function render() {
   ensureIOUsData();
   state.budget.income = budgetIncomeFromPaychecks();
   syncHistoryToView();
-  if (currentView === "wealth") { ensureDebtNetWorthSync(); ensureAccountsData(); }
+  if (currentView === "wealth") { ensureDebtNetWorthSync(); ensureAccountsData(); ensureDebtPaymentsAppliedFromLedger(); }
   renderShell();
   view.innerHTML = (renderers[currentView] || renderers.budget)();
   bindViewEvents();
@@ -5815,7 +5862,13 @@ function bindViewEvents() {
       debt.payments ||= [];
       debt.payments.unshift({ id: uniqueId("payment"), date: paymentDate, amount, principal, interest, extra, balance: debt.balance });
       if (debt.lineId) {
-        state.transactions.unshift(makeTransaction({ date: paymentDate, payee: debt.name, lineId: debt.lineId, amount, memo: "EMI payment" }));
+        const paymentTransaction = makeTransaction({ date: paymentDate, payee: debt.name, lineId: debt.lineId, amount, memo: "EMI payment" });
+        state.transactions.unshift(paymentTransaction);
+        // Prevents ensureDebtPaymentsAppliedFromLedger from treating the
+        // transaction this button just created as a brand new payment and
+        // reducing the balance a second time.
+        debt.appliedPaymentSignatures ||= [];
+        debt.appliedPaymentSignatures.push(transactionSignature(paymentTransaction));
       }
       const liability = liabilityForDebt(debt);
       if (liability) liability.value = debt.balance;
