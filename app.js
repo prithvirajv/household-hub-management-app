@@ -1087,11 +1087,11 @@ function ledgerEntryRow(transaction, index) {
   const lineOptions = allLines().map((line) => `<option value="${line.id}" ${line.id === transaction.lineId ? "selected" : ""}>${line.category} - ${line.name}</option>`).join("");
   return `
     <div class="ledger-entry-row ${state.accounts.length ? "has-accounts" : ""}">
-      <input aria-label="Payee" data-ledger-entry-payee="${index}" value="${escapeHtml(transaction.payee)}">
+      <input class="line-name-input" aria-label="Payee" data-ledger-entry-payee="${index}" value="${escapeHtml(transaction.payee)}">
       <input class="money-input" aria-label="Amount" type="number" step="0.01" data-ledger-entry-amount="${index}" value="${transaction.amount}">
       <input aria-label="Date" type="date" data-ledger-entry-date="${index}" value="${transaction.date}">
-      <select aria-label="Subcategory" data-ledger-entry-line="${index}">${lineOptions}</select>
-      ${state.accounts.length ? `<select aria-label="Account" data-ledger-entry-account="${index}"><option value="">Not linked</option>${accountOptions(transaction.accountId || "")}</select>` : ""}
+      <select class="income-recurrence-select" aria-label="Subcategory" data-ledger-entry-line="${index}">${lineOptions}</select>
+      ${state.accounts.length ? `<select class="income-recurrence-select" aria-label="Account" data-ledger-entry-account="${index}"><option value="">Not linked</option>${accountOptions(transaction.accountId || "")}</select>` : ""}
       <button class="icon-button danger-button" data-delete-transaction="${index}" type="button" aria-label="Delete ${escapeHtml(transaction.payee)}">×</button>
     </div>`;
 }
