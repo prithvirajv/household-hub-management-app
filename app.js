@@ -284,6 +284,16 @@ function paycheckActiveInMonth(paycheck, monthStart, monthEnd) {
   return true;
 }
 
+// Same idea as paycheckActiveInMonth: a recurring bill drops out of the
+// Recurring bills list once its end date falls before the month being
+// viewed (or it hasn't started yet), instead of listing every recurring
+// bill ever created regardless of whether it still applies.
+function recurringExpenseActiveInMonth(recurring, monthStart, monthEnd) {
+  if (!recurring.anchorDate || recurring.anchorDate > monthEnd) return false;
+  if (recurring.endDate && recurring.endDate < monthStart) return false;
+  return true;
+}
+
 function spentByLine(lineId) {
   return state.transactions
     .filter((transaction) => transaction.lineId === lineId && transaction.date?.slice(0, 7) === state.budget.month)
@@ -1145,12 +1155,18 @@ function renderTransactions() {
             ${state.accounts.length ? `<label class="form-row-full">Account<select name="accountId"><option value="">Not linked</option>${accountOptions("")}</select></label>` : ""}
             <button type="submit" class="form-row-full">Add transaction</button>
           </form>
-          ${state.recurringExpenses.length ? `
-            <div class="recurring-expenses-block">
+          ${(() => {
+            const monthStart = `${state.budget.month}-01`;
+            const monthEnd = monthEndDateKey(state.budget.month);
+            const activeRecurring = state.recurringExpenses
+              .map((recurring, index) => ({ recurring, index }))
+              .filter(({ recurring }) => recurringExpenseActiveInMonth(recurring, monthStart, monthEnd));
+            if (!activeRecurring.length) return "";
+            return `<div class="recurring-expenses-block">
               <div class="card-label">Recurring bills</div>
-              ${state.recurringExpenses.map((recurring, index) => recurringExpenseRow(recurring, index)).join("")}
-            </div>
-          ` : ""}
+              ${activeRecurring.map(({ recurring, index }) => recurringExpenseRow(recurring, index)).join("")}
+            </div>`;
+          })()}
           ${unassignedLedger.map((transaction) => `
             <div class="ledger-assign-row">
               <div><strong>${transaction.payee}</strong><small>${formatShortDate(transaction.date)}</small></div>
