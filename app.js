@@ -9,6 +9,7 @@ const views = [
   ["plan", "Plan", "📋"],
   ["documents", "Documents", "📁"],
   ["decisions", "Decisions", "⚖️"],
+  ["ious", "IOUs", "💸"],
   ["meals", "Meals", "🍲"],
   ["recipes", "Recipes", "📖"],
   ["goals", "Goals", "🎯"],
@@ -744,6 +745,7 @@ function renderShell() {
   const isPlanView = currentView === "plan";
   const isDocumentsView = currentView === "documents";
   const isDecisionsView = currentView === "decisions";
+  const isIousView = currentView === "ious";
   const isProfileView = currentView === "profile";
   const isHomeView = currentView === "home";
   $("#viewTitle").textContent = isAdminView
@@ -766,10 +768,12 @@ function renderShell() {
                     ? "Household documents"
                     : isDecisionsView
                       ? "Household decisions"
-                      : isProfileView
-                        ? "Your profile"
-                        : isHomeView
-                          ? "Home"
+                      : isIousView
+                        ? "Borrowed & owed"
+                        : isProfileView
+                          ? "Your profile"
+                          : isHomeView
+                            ? "Home"
           : `${monthLabel()} plan`;
   $("#householdName").textContent = title.toUpperCase();
   $("#userName").textContent = sessionUser?.name || "Demo User";
@@ -792,9 +796,9 @@ function renderShell() {
   const selectedHousehold = households.find((household) => household.selected);
   $("#defaultHouseholdButton").disabled = Boolean(selectedHousehold?.isDefault);
   $("#defaultHouseholdButton").textContent = selectedHousehold?.isDefault ? "Default household" : "Set as default";
-  $(".month-control").hidden = isAdminView || isNotesView || isHelpView || isRecipesView || isGoalsView || isWealthView || isJournalView || isPlanView || isDocumentsView || isDecisionsView || isProfileView || isHomeView;
+  $(".month-control").hidden = isAdminView || isNotesView || isHelpView || isRecipesView || isGoalsView || isWealthView || isJournalView || isPlanView || isDocumentsView || isDecisionsView || isIousView || isProfileView || isHomeView;
   $("#syncButton").hidden = isAdminView || isHelpView;
-  $("#downloadCsvButton").hidden = isAdminView || isNotesView || isHelpView || isJournalView || isPlanView || isDocumentsView || isDecisionsView || isProfileView || isHomeView;
+  $("#downloadCsvButton").hidden = isAdminView || isNotesView || isHelpView || isJournalView || isPlanView || isDocumentsView || isDecisionsView || isIousView || isProfileView || isHomeView;
   renderNav();
   const metrics = metricsForView();
   $("#metrics").hidden = metrics.length === 0;
@@ -821,6 +825,13 @@ function metricsForView() {
   if (currentView === "calendar") {
     const annualEventsThisMonth = annualEventOccurrencesForMonth().length;
     return [["Chore rotation", String(state.calendar.chores.length), "household chores"], ["Birthdays & anniversaries", String(annualEventsThisMonth), `annual events in ${monthLabel()}`], [`${monthLabel()} events`, String(upcoming), "chores, birthdays, anniversaries and reminders"], ["Shared calendar", "Household", "tasks in every member"]];
+  }
+  if (currentView === "ious") {
+    ensureIOUsData();
+    const active = state.ious.filter((iou) => !iou.settled);
+    const youOweTotal = active.filter((iou) => iou.direction === "i_owe").reduce((sum, iou) => sum + Number(iou.amount || 0), 0);
+    const owedToYouTotal = active.filter((iou) => iou.direction === "owed_to_me").reduce((sum, iou) => sum + Number(iou.amount || 0), 0);
+    return [["You owe", money.format(youOweTotal), "to pay back"], ["Owed to you", money.format(owedToYouTotal), "coming back to you"], ["Net", money.format(owedToYouTotal - youOweTotal), "owed to you minus what you owe"], ["Open IOUs", String(active.length), "not yet settled"]];
   }
   if (currentView === "notes") return [];
   if (currentView === "journal") return [];
@@ -884,6 +895,7 @@ const renderers = {
   plan: renderPlan,
   documents: renderDocuments,
   decisions: renderDecisions,
+  ious: renderIOUs,
   meals: renderMeals,
   recipes: renderRecipes,
   goals: renderGoals,
@@ -2494,6 +2506,78 @@ function renderDecisions() {
     </div>
     ${decisions.length ? decisions.map(renderDecisionCard).join("") : `<p class="muted">No decisions yet — add one above to start weighing it together.</p>`}
   </section>`;
+}
+
+function ensureIOUsData() {
+  state.ious ||= [];
+  state.ious.forEach((iou) => {
+    iou.id ||= uniqueId("iou");
+    iou.reason ||= "";
+    iou.settled = Boolean(iou.settled);
+    iou.settledDate ||= "";
+  });
+}
+
+function iouRow(iou, index) {
+  return `<div class="compact-row">
+    <div><strong>${escapeHtml(iou.person)}</strong><small>${iou.reason ? `${escapeHtml(iou.reason)} · ` : ""}${formatShortDate(iou.date)}</small></div>
+    <b>${exactMoney.format(iou.amount)}</b>
+    <div class="compact-row-actions">
+      ${iou.settled ? "" : `<button class="icon-button" data-settle-iou="${index}" type="button" aria-label="Mark settled with ${escapeHtml(iou.person)}">✓</button>`}
+      <button class="icon-button danger-button" data-delete-iou="${index}" type="button" aria-label="Delete IOU with ${escapeHtml(iou.person)}">×</button>
+    </div>
+  </div>`;
+}
+
+function renderIOUs() {
+  ensureIOUsData();
+  const today = dateKey(new Date());
+  const withIndex = state.ious.map((iou, index) => ({ iou, index }));
+  const youOwe = withIndex.filter(({ iou }) => !iou.settled && iou.direction === "i_owe");
+  const owedToYou = withIndex.filter(({ iou }) => !iou.settled && iou.direction === "owed_to_me");
+  const settled = withIndex.filter(({ iou }) => iou.settled);
+  return `
+    <section class="ious-layout">
+      <p class="muted">Track money you've borrowed from people, and split a shared expense you already paid so friends can pay you back.</p>
+      <div class="card">
+        <div class="card-label">Add</div><h3>Record an IOU</h3>
+        <form id="iouForm" class="mini-form iou-form">
+          <label>Person<input name="person" placeholder="Sam" required></label>
+          <label>Amount<input name="amount" type="number" step="0.01" min="0.01" placeholder="20" required></label>
+          <label>Direction<select name="direction">
+            <option value="i_owe">I owe them</option>
+            <option value="owed_to_me">They owe me</option>
+          </select></label>
+          <label class="form-row-full">Reason (optional)<input name="reason" placeholder="Gas money"></label>
+          <label>Date<input name="date" type="date" value="${today}"></label>
+          <button type="submit" class="form-row-full">Add IOU</button>
+        </form>
+      </div>
+      <div class="card">
+        <div class="card-label">Shared expense</div><h3>Split a bill with friends</h3>
+        <p class="muted">You already paid the full amount — this just adds an IOU for each friend's share.</p>
+        <form id="splitExpenseForm" class="mini-form split-expense-form">
+          <label>What for<input name="reason" placeholder="Dinner" required></label>
+          <label>Total amount<input name="amount" type="number" step="0.01" min="0.01" placeholder="90" required></label>
+          <label>Date<input name="date" type="date" value="${today}"></label>
+          <label class="form-row-full">Friends (comma-separated, not including you)<input name="people" placeholder="Sam, Priya, Jordan" required></label>
+          <button type="submit" class="form-row-full">Split evenly and add</button>
+        </form>
+      </div>
+      <div class="card">
+        <div class="card-label">You owe</div><h3>Money you need to pay back</h3>
+        ${youOwe.length ? youOwe.map(({ iou, index }) => iouRow(iou, index)).join("") : `<div class="empty-inline">Nothing you owe right now</div>`}
+      </div>
+      <div class="card">
+        <div class="card-label">Owed to you</div><h3>Money coming back to you</h3>
+        ${owedToYou.length ? owedToYou.map(({ iou, index }) => iouRow(iou, index)).join("") : `<div class="empty-inline">Nobody owes you right now</div>`}
+      </div>
+      ${settled.length ? `<details class="card ious-settled-details">
+        <summary>Settled (${settled.length})</summary>
+        ${settled.map(({ iou, index }) => iouRow(iou, index)).join("")}
+      </details>` : ""}
+    </section>
+  `;
 }
 
 function renderMeals() {
@@ -6665,6 +6749,72 @@ function bindViewEvents() {
     });
     event.currentTarget.reset();
     render();
+  });
+
+  $("#iouForm")?.addEventListener("submit", (event) => {
+    event.preventDefault();
+    const data = Object.fromEntries(new FormData(event.currentTarget));
+    const person = String(data.person || "").trim();
+    const amount = Number(data.amount);
+    if (!person || !(amount > 0)) return;
+    state.ious ||= [];
+    state.ious.push({
+      id: uniqueId("iou"),
+      person,
+      amount,
+      direction: data.direction === "owed_to_me" ? "owed_to_me" : "i_owe",
+      reason: String(data.reason || "").trim(),
+      date: data.date || dateKey(new Date()),
+      settled: false,
+      settledDate: ""
+    });
+    autosaveState();
+    render();
+  });
+
+  $("#splitExpenseForm")?.addEventListener("submit", (event) => {
+    event.preventDefault();
+    const data = Object.fromEntries(new FormData(event.currentTarget));
+    const reason = String(data.reason || "").trim();
+    const totalAmount = Number(data.amount);
+    const people = String(data.people || "").split(",").map((name) => name.trim()).filter(Boolean);
+    if (!reason || !(totalAmount > 0) || !people.length) return;
+    const date = data.date || dateKey(new Date());
+    const shares = splitAmountEvenly(totalAmount, people.length);
+    state.ious ||= [];
+    people.forEach((person, index) => {
+      state.ious.push({
+        id: uniqueId("iou"),
+        person,
+        amount: shares[index],
+        direction: "owed_to_me",
+        reason,
+        date,
+        settled: false,
+        settledDate: ""
+      });
+    });
+    autosaveState();
+    render();
+  });
+
+  document.querySelectorAll("[data-settle-iou]").forEach((button) => {
+    button.addEventListener("click", () => {
+      const iou = state.ious[Number(button.dataset.settleIou)];
+      if (!iou) return;
+      iou.settled = true;
+      iou.settledDate = dateKey(new Date());
+      autosaveState();
+      render();
+    });
+  });
+
+  document.querySelectorAll("[data-delete-iou]").forEach((button) => {
+    button.addEventListener("click", () => {
+      state.ious.splice(Number(button.dataset.deleteIou), 1);
+      autosaveState();
+      render();
+    });
   });
 
   document.querySelectorAll("[data-decision-title]").forEach((input) => {

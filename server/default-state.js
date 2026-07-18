@@ -264,6 +264,10 @@ const defaultState = {
       createdAt: "2026-05-15T12:00:00.000Z"
     }
   ],
+  ious: [
+    { id: "iou-demo-1", person: "Sam", amount: 20, direction: "i_owe", reason: "Gas money", date: "2026-07-10", settled: false, settledDate: "" },
+    { id: "iou-demo-2", person: "Priya", amount: 33.34, direction: "owed_to_me", reason: "Dinner split", date: "2026-07-12", settled: false, settledDate: "" }
+  ],
   meals: {
     nutritionGoals: { calories: 2100, protein: 140 },
     selectedWeekByMonth: { "2026-05": 1 },

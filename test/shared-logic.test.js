@@ -6,6 +6,7 @@ const {
   timeToMinutes, minutesToTime, snapMinutes, layoutTimelineBlocks, comparePlannedToActual,
   sanitizeFilename, buildDocumentObjectPath, wouldCreateFolderCycle, buildFolderTree,
   smsGatewayAddress, paycheckOccurrencesSince, paycheckOccurrencesInRange, paycheckAllOccurrenceDatesInRange, recurringExpenseOccurrenceDates, accountBalance, accountsWithBalances,
+  splitAmountEvenly,
   recurringBudgetSetAside, nextRecurringBudgetDueDate, monthsUntilDueInclusive,
   annualEventDate, nextAnnualEventDate, annualEventNotifyAt, rollAnnualNotifyAtForward
 } = require("../lib/shared-logic");
@@ -584,6 +585,21 @@ test("recurringExpenseOccurrenceDates: an end date stops posting new occurrences
 
 test("recurringExpenseOccurrenceDates: an end date before the anchor date means it never occurred", () => {
   assert.deepEqual(recurringExpenseOccurrenceDates({ anchorDate: "2026-07-11", recurrence: "weekly", endDate: "2026-07-01" }, "2026-09-01"), []);
+});
+
+test("splitAmountEvenly divides evenly when the amount divides cleanly", () => {
+  assert.deepEqual(splitAmountEvenly(90, 3), [30, 30, 30]);
+});
+
+test("splitAmountEvenly hands leftover cents to the first shares instead of losing them to rounding", () => {
+  const shares = splitAmountEvenly(100, 3);
+  assert.deepEqual(shares, [33.34, 33.33, 33.33]);
+  assert.equal(shares.reduce((sum, share) => sum + share, 0), 100);
+});
+
+test("splitAmountEvenly returns an empty list for a zero or negative count", () => {
+  assert.deepEqual(splitAmountEvenly(50, 0), []);
+  assert.deepEqual(splitAmountEvenly(50, -2), []);
 });
 
 test("recurringBudgetSetAside divides a yearly bill across only the months remaining before it is due", () => {

@@ -5312,6 +5312,25 @@ main {
   }
 }
 
+.ious-layout {
+  display: grid;
+  gap: 0.9rem;
+}
+
+.iou-form .form-row-full,
+.split-expense-form .form-row-full {
+  grid-column: 1 / -1;
+}
+
+.ious-settled-details summary {
+  cursor: pointer;
+  font-weight: 800;
+  color: var(--muted);
+  text-transform: uppercase;
+  font-size: 0.76rem;
+  letter-spacing: 0.03em;
+}
+
 .profile-layout {
   display: grid;
   gap: 0.9rem;
