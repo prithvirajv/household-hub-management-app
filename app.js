@@ -1099,6 +1099,7 @@ function recurringExpenseRow(recurring, index) {
       </select></label>
       <label class="row-field row-select"><small>Subcategory</small><select data-recurring-line="${index}">${lineOptions}</select></label>
       ${state.accounts.length ? `<label class="row-field row-select"><small>Account</small><select data-recurring-account="${index}"><option value="">Not linked</option>${accountOptions(recurring.accountId || "")}</select></label>` : ""}
+      <label class="row-field row-date"><small>End date</small><input type="date" data-recurring-end-date="${index}" value="${recurring.endDate || ""}" aria-label="Stop ${escapeHtml(recurring.payee)} from repeating after this date"></label>
       <button class="icon-button danger-button" data-delete-recurring="${index}" type="button" aria-label="Stop recurring ${escapeHtml(recurring.payee)}">×</button>
     </div>`;
 }
@@ -1139,9 +1140,10 @@ function renderTransactions() {
               <option value="biweekly">Biweekly</option>
               <option value="monthly">Monthly</option>
             </select></label>
+            <label data-transaction-end-date-field hidden>End date (optional)<input name="endDate" type="date"></label>
             <label class="form-row-full">Subcategory<select name="lineId">${allLines().map((line) => `<option value="${line.id}">${line.category} - ${line.name}</option>`).join("")}</select></label>
             ${state.accounts.length ? `<label class="form-row-full">Account<select name="accountId"><option value="">Not linked</option>${accountOptions("")}</select></label>` : ""}
-            <button type="submit" class="form-row-full">Split</button>
+            <button type="submit" class="form-row-full">Add transaction</button>
           </form>
           ${state.recurringExpenses.length ? `
             <div class="recurring-expenses-block">
@@ -4904,7 +4906,7 @@ function bindViewEvents() {
     const date = data.date || dateKey(new Date());
     const recurrence = data.recurrence || "none";
     if (recurrence === "none") {
-      state.transactions.unshift(makeTransaction({ date, payee: data.payee, lineId: data.lineId, amount: Number(data.amount), memo: "Manual split", accountId: data.accountId || "" }));
+      state.transactions.unshift(makeTransaction({ date, payee: data.payee, lineId: data.lineId, amount: Number(data.amount), memo: "Manual entry", accountId: data.accountId || "" }));
     } else {
       state.recurringExpenses ||= [];
       state.recurringExpenses.unshift({
@@ -4915,12 +4917,22 @@ function bindViewEvents() {
         accountId: data.accountId || "",
         recurrence,
         anchorDate: date,
+        endDate: data.endDate || "",
         postedDates: []
       });
       ensureRecurringExpensesPosted();
     }
     render();
   });
+
+  const updateTransactionFormFields = () => {
+    const form = $("#transactionForm");
+    if (!form) return;
+    const endDateField = form.querySelector("[data-transaction-end-date-field]");
+    if (endDateField) endDateField.hidden = form.recurrence.value === "none";
+  };
+  $("#transactionForm select[name='recurrence']")?.addEventListener("change", updateTransactionFormFields);
+  updateTransactionFormFields();
 
   $("#addIncomeButton")?.addEventListener("click", () => {
     state.paychecks.push({ date: new Date().toISOString().slice(0, 10), name: `Income ${state.paychecks.length + 1}`, amount: 0, assignedLineIds: [] });
@@ -5166,6 +5178,24 @@ function bindViewEvents() {
     select.addEventListener("change", () => {
       const recurring = state.recurringExpenses[Number(select.dataset.recurringRecurrence)];
       if (recurring) recurring.recurrence = select.value;
+      render();
+    });
+  });
+
+  document.querySelectorAll("[data-recurring-end-date]").forEach((input) => {
+    input.addEventListener("change", () => {
+      const recurring = state.recurringExpenses[Number(input.dataset.recurringEndDate)];
+      if (recurring) {
+        recurring.endDate = input.value || "";
+        // A bank stream draft already surfaced past a newly-set (or
+        // newly-lowered) end date would otherwise sit there unreviewed
+        // forever — pending drafts get the same cleanup paycheck
+        // occurrences get when their end date changes.
+        if (recurring.endDate) {
+          state.transactionInboxDrafts = (state.transactionInboxDrafts || []).filter((draft) => draft.recurringId !== recurring.id || draft.date <= recurring.endDate);
+        }
+      }
+      autosaveState();
       render();
     });
   });

@@ -576,6 +576,16 @@ test("recurringExpenseOccurrenceDates: a monthly bill clamps to the last day of 
   assert.deepEqual(recurringExpenseOccurrenceDates(monthly, "2026-04-30"), ["2026-01-31", "2026-02-28", "2026-03-31", "2026-04-30"]);
 });
 
+test("recurringExpenseOccurrenceDates: an end date stops posting new occurrences after it without touching earlier ones", () => {
+  const monthly = { anchorDate: "2026-01-31", recurrence: "monthly", endDate: "2026-03-15" };
+  assert.deepEqual(recurringExpenseOccurrenceDates(monthly, "2026-04-30"), ["2026-01-31", "2026-02-28"]);
+  assert.deepEqual(recurringExpenseOccurrenceDates(monthly, "2026-02-28"), ["2026-01-31", "2026-02-28"]);
+});
+
+test("recurringExpenseOccurrenceDates: an end date before the anchor date means it never occurred", () => {
+  assert.deepEqual(recurringExpenseOccurrenceDates({ anchorDate: "2026-07-11", recurrence: "weekly", endDate: "2026-07-01" }, "2026-09-01"), []);
+});
+
 test("recurringBudgetSetAside divides a yearly bill across only the months remaining before it is due", () => {
   const bill = { amount: 1200, frequency: "yearly", dueDate: "2026-12-15" };
   assert.equal(nextRecurringBudgetDueDate(bill, "2026-07"), "2026-12-15");
