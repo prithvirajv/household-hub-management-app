@@ -193,7 +193,18 @@ function findLineById(lineId) {
 }
 
 function lineName(lineId) {
-  return allLines().find((line) => line.id === lineId)?.name || lineId;
+  const line = allLines().find((item) => item.id === lineId);
+  if (line) return line.name;
+  // A paycheck's bill assignment survives into every month (even ones whose
+  // own categories don't happen to carry that exact line id — e.g. a month
+  // snapshotted before categories started carrying forward automatically),
+  // so fall back to any earlier saved month that still has it rather than
+  // showing the raw internal id.
+  for (const budget of state.budgetHistory || []) {
+    const historicalLine = (budget.categories || []).flatMap((category) => category.lines || []).find((item) => item.id === lineId);
+    if (historicalLine) return historicalLine.name;
+  }
+  return lineId;
 }
 
 function lineSnapshot(lineId) {
@@ -1174,7 +1185,9 @@ function renderTransactions() {
 function renderPaychecks() {
   ensurePaycheckRecurrenceData();
   ensureAccountsData();
-  const paycheckOptions = state.paychecks.map((paycheck) => `<option value="${paycheck.date}">${paycheck.name} - ${money.format(paycheck.amount)}</option>`).join("");
+  const paycheckOptions = state.paychecks
+    .filter((paycheck) => paycheckActiveInMonth(paycheck, `${state.budget.month}-01`, monthEndDateKey(state.budget.month)))
+    .map((paycheck) => `<option value="${paycheck.date}">${paycheck.name} - ${money.format(paycheck.amount)}</option>`).join("");
   const lineOptions = allLines().map((line) => `<option value="${line.id}">${line.category} - ${line.name}</option>`).join("");
   return `
     <section class="work-grid">
