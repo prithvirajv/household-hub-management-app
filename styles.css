@@ -1585,6 +1585,43 @@ main {
   min-width: 0;
 }
 
+/* Collapses the End date field down to a single icon by default — clicking
+   it reveals the actual date input, matching the icon-button sizing used
+   everywhere else so it doesn't look out of place next to the delete
+   button. */
+.end-date-toggle summary {
+  width: 48px;
+  min-width: 48px;
+  height: 48px;
+  min-height: 48px;
+  padding: 0;
+  display: inline-grid;
+  place-items: center;
+  border-radius: 999px;
+  background: var(--green-soft);
+  color: var(--green);
+  cursor: pointer;
+  list-style: none;
+}
+
+.end-date-toggle summary::-webkit-details-marker {
+  display: none;
+}
+
+.end-date-toggle[open] summary {
+  background: var(--green);
+  color: white;
+}
+
+.end-date-toggle summary.has-end-date {
+  background: #fff0f0;
+  color: var(--coral);
+}
+
+.end-date-toggle .row-date {
+  margin-top: 0.4rem;
+}
+
 /* Recent transactions always lives in the wide main-stack column (unlike
    Bank stream above), so a grid with a header shown once — instead of
    repeating Payee/Amount/Date/etc. labels on every row — is safe here. */

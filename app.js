@@ -1121,7 +1121,10 @@ function recurringExpenseRow(recurring, index) {
       </select></label>
       <label class="row-field row-select"><small>Subcategory</small><select data-recurring-line="${index}">${lineOptions}</select></label>
       ${state.accounts.length ? `<label class="row-field row-select"><small>Account</small><select data-recurring-account="${index}"><option value="">Not linked</option>${accountOptions(recurring.accountId || "")}</select></label>` : ""}
-      <label class="row-field row-date"><small>End date</small><input type="date" data-recurring-end-date="${index}" value="${recurring.endDate || ""}" aria-label="Stop ${escapeHtml(recurring.payee)} from repeating after this date"></label>
+      <details class="end-date-toggle">
+        <summary class="icon-button ${recurring.endDate ? "has-end-date" : ""}" aria-label="${recurring.endDate ? `End date set for ${escapeHtml(recurring.payee)}` : `Set an end date for ${escapeHtml(recurring.payee)}`}">↻</summary>
+        <label class="row-field row-date"><small>End date</small><input type="date" data-recurring-end-date="${index}" value="${recurring.endDate || ""}" aria-label="Stop ${escapeHtml(recurring.payee)} from repeating after this date"></label>
+      </details>
       <button class="icon-button danger-button" data-delete-recurring="${index}" type="button" aria-label="Stop recurring ${escapeHtml(recurring.payee)}">×</button>
     </div>`;
 }
