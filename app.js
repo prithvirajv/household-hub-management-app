@@ -3216,16 +3216,45 @@ function reminderCompletionControl(event) {
   return `<button class="ghost chore-complete-button ${done ? "is-done" : ""}" data-complete-reminder="${event.id}:${escapeHtml(effectiveKey)}" type="button" aria-pressed="${done}">${done ? "✓ Done" : "Mark done"}${suffix}</button>`;
 }
 
+function daysBetweenDateKeys(fromKey, toKey) {
+  const [fromYear, fromMonth, fromDay] = fromKey.split("-").map(Number);
+  const [toYear, toMonth, toDay] = toKey.split("-").map(Number);
+  return Math.round((Date.UTC(toYear, toMonth - 1, toDay) - Date.UTC(fromYear, fromMonth - 1, fromDay)) / 86400000);
+}
+
 // Recomputed every render (mirrors annualEventNotifyAt for birthdays) so the
 // reminder always points at the next occurrence nobody has fully completed
 // yet, instead of staying pinned to whichever date the chore was first
 // created with and never firing again for later occurrences.
+//
+// Unlike a fresh `new Date(pending.date + "T00:00:00")` every time, this only
+// shifts the already-correct instant forward by whole days once one exists,
+// rather than re-deriving the time-of-day from scratch. A fresh re-derive is
+// parsed in whichever browser happens to render it, embedding THAT device's
+// local timezone — for a household with members across timezones (e.g. a US
+// member and an India member), a later device recomputing the same
+// wall-clock reminder would otherwise store a different absolute UTC
+// instant, bypassing the notification_jobs de-dupe (which keys off the exact
+// due_at) and sending a genuine duplicate email hours apart, both still
+// displaying the same "11:25 AM" because the email re-localizes to the
+// household's fixed timezone rather than reflecting the underlying drift.
 function choreNotifyAt(chore) {
   const pending = nextPendingChoreOccurrence(chore);
   if (!pending) return "";
-  const [hour, minute] = String(chore.time || "09:00").split(":").map(Number);
+  const sourceTime = String(chore.time || "09:00");
+  const previousInstant = chore.notifyAt ? new Date(chore.notifyAt) : null;
+  const canShift = previousInstant && !Number.isNaN(previousInstant.getTime()) && chore.notifyAtDateKey && chore.notifyAtSourceTime === sourceTime;
+  if (canShift && chore.notifyAtDateKey === pending.date) return chore.notifyAt;
+  if (canShift) {
+    const dayDiff = daysBetweenDateKeys(chore.notifyAtDateKey, pending.date);
+    chore.notifyAtDateKey = pending.date;
+    return new Date(previousInstant.getTime() + dayDiff * 86400000).toISOString();
+  }
+  const [hour, minute] = sourceTime.split(":").map(Number);
   const notifyDate = new Date(`${pending.date}T00:00:00`);
   notifyDate.setHours(hour, minute, 0, 0);
+  chore.notifyAtDateKey = pending.date;
+  chore.notifyAtSourceTime = sourceTime;
   return notifyDate.toISOString();
 }
 
