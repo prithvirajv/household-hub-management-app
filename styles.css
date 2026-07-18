@@ -1592,7 +1592,7 @@ main {
   display: grid;
   grid-template-columns: minmax(120px, 1fr) minmax(80px, 100px) minmax(120px, 130px) minmax(140px, 1fr) 48px;
   gap: 0.5rem;
-  padding: 0 0.6rem;
+  padding: 0.3rem 0.6rem 0.15rem;
   color: var(--muted);
   font-size: 0.68rem;
   font-weight: 900;
@@ -1609,14 +1609,16 @@ main {
   grid-template-columns: minmax(120px, 1fr) minmax(80px, 100px) minmax(120px, 130px) minmax(140px, 1fr) 48px;
   gap: 0.5rem;
   align-items: center;
-  border-radius: 8px;
-  padding: 0.6rem;
-  margin-bottom: 0.5rem;
-  background: var(--soft-blue);
+  padding: 0.4rem 0.6rem;
+  border-bottom: 1px solid var(--line);
 }
 
 .ledger-entry-row.has-accounts {
   grid-template-columns: minmax(120px, 1fr) minmax(80px, 100px) minmax(120px, 130px) minmax(140px, 1fr) minmax(120px, 140px) 48px;
+}
+
+.ledger-entry-row:last-of-type {
+  border-bottom: none;
 }
 
 .ledger-entry-row > * {
