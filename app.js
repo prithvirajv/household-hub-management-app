@@ -1188,7 +1188,10 @@ function renderPaychecks() {
             <button id="assignBillButton" type="button">Assign bill</button>
           </div>
           <div class="paycheck-grid">
-            ${state.paychecks.map((paycheck, index) => {
+            ${state.paychecks
+              .map((paycheck, index) => ({ paycheck, index }))
+              .filter(({ paycheck }) => paycheckActiveInMonth(paycheck, `${state.budget.month}-01`, monthEndDateKey(state.budget.month)))
+              .map(({ paycheck, index }) => {
               const assigned = paycheckAssignedAmount(paycheck);
               const monthStart = `${state.budget.month}-01`;
               const monthEnd = monthEndDateKey(state.budget.month);
