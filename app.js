@@ -43,6 +43,7 @@ let calendarFeedback = "";
 // gets saved into the shared household blob and replayed for every login.
 let mealsFeedback = "";
 let bankImportFeedback = "";
+let ledgerAcceptFeedback = "";
 let profileNameFeedback = "";
 let profileNameFeedbackIsError = false;
 let profilePasswordFeedback = "";
@@ -673,6 +674,22 @@ function rememberCurrentBudgetSnapshot() {
   else state.budgetHistory.push(snapshot);
 }
 
+// Shared by the month picker and anything else that needs to jump the whole
+// app to a different month (e.g. accepting a bank stream item dated in a
+// month other than the one currently being viewed) — snapshotting the
+// month being left and carrying categories forward into an unvisited one
+// has to happen every time a switch occurs, not just from the picker.
+function switchBudgetMonth(newMonth) {
+  if (!newMonth || newMonth === state.budget.month) return;
+  rememberCurrentBudgetSnapshot();
+  state.budget.month = newMonth;
+  state.budget.monthPreferenceSet = true;
+  const existing = (state.budgetHistory || []).find((budget) => budget.month === newMonth);
+  const carryForwardSource = existing || availablePreviousBudgets()[0];
+  state.budget.categories = carryForwardSource ? cloneBudgetCategories(carryForwardSource.categories) : [];
+  state.budget.income = existing ? Number(existing.income || 0) : 0;
+}
+
 function monthDateMin() {
   return `${state.budget.month}-01`;
 }
@@ -1273,6 +1290,7 @@ function renderTransactions() {
             </div>
           `).join("")}
           <div class="card-label">Recent transactions</div>
+          ${ledgerAcceptFeedback ? `<p class="muted" role="status">${escapeHtml(ledgerAcceptFeedback)}</p>` : ""}
           ${(() => {
             const monthTransactions = state.transactions
               .map((transaction, index) => ({ transaction, index }))
@@ -7475,6 +7493,17 @@ function acceptImportTransaction(button) {
   if (!state.transactionInboxDone.includes(inboxItem.id)) state.transactionInboxDone.push(inboxItem.id);
   state.transactionInboxDrafts = (state.transactionInboxDrafts || []).filter((item) => item.id !== inboxItem.id);
   state.household.activity.unshift(`Assigned ${inboxItem.payee} to ${transactionAssignmentLabel({ lineId })}`);
+  // Recent transactions only ever shows the month currently being viewed
+  // (see budget.month filtering), so an accepted item dated in a different
+  // month would otherwise seem to vanish — jump to that month too, the same
+  // way switching the month picker would, so it's visibly there right away.
+  const acceptedMonth = inboxItem.date?.slice(0, 7);
+  if (acceptedMonth && acceptedMonth !== state.budget.month) {
+    switchBudgetMonth(acceptedMonth);
+    ledgerAcceptFeedback = `Added "${inboxItem.payee}" and switched to ${formatMonth(acceptedMonth)} so you can see it in the ledger.`;
+  } else {
+    ledgerAcceptFeedback = "";
+  }
   render();
 }
 
@@ -7639,19 +7668,7 @@ $("#syncButton").addEventListener("click", async (event) => {
 });
 
 $("#monthPicker").addEventListener("change", (event) => {
-  rememberCurrentBudgetSnapshot();
-  state.budget.month = event.target.value;
-  state.budget.monthPreferenceSet = true;
-  const existing = (state.budgetHistory || []).find((budget) => budget.month === state.budget.month);
-  // A month with no snapshot of its own yet (never visited) inherits
-  // categories/subcategories from the most recent earlier month instead of
-  // starting blank — otherwise recurring-bill savings lines (and any bill a
-  // paycheck is assigned to) silently vanish the first time you look at a
-  // new month, since ids are preserved by cloneBudgetCategories and nothing
-  // else carries them forward automatically.
-  const carryForwardSource = existing || availablePreviousBudgets()[0];
-  state.budget.categories = carryForwardSource ? cloneBudgetCategories(carryForwardSource.categories) : [];
-  state.budget.income = existing ? Number(existing.income || 0) : 0;
+  switchBudgetMonth(event.target.value);
   autosaveState();
   render();
 });
