@@ -33,6 +33,11 @@ let autosaveTimer = null;
 let inviteEmailStatus = "";
 let googleSignInInitialized = false;
 let calendarFilterOwner = "";
+// Recent transactions defaults to newest-first regardless of the order rows
+// were entered/edited in — an ephemeral view preference (like
+// calendarFilterOwner), not household data, so it isn't persisted to state
+// and resets to the date-desc default on reload.
+let transactionSort = { field: "date", direction: "desc" };
 let calendarFeedback = "";
 // Kept out of state (like calendarFeedback) so a confirmation message never
 // gets saved into the shared household blob and replayed for every login.
@@ -525,6 +530,34 @@ function currentAccountBalance(accountId) {
 
 function accountName(accountId) {
   return state.accounts.find((account) => account.id === accountId)?.name || "";
+}
+
+function transactionSortValue(transaction, field) {
+  if (field === "amount") return Number(transaction.amount || 0);
+  if (field === "date") return transaction.date || "";
+  if (field === "subcategory") return lineName(transaction.lineId).toLowerCase();
+  if (field === "account") return accountName(transaction.accountId).toLowerCase();
+  return String(transaction.payee || "").toLowerCase();
+}
+
+function sortByTransactionField(entries, field, direction) {
+  const sign = direction === "asc" ? 1 : -1;
+  return [...entries].sort((a, b) => {
+    const valueA = transactionSortValue(a.transaction, field);
+    const valueB = transactionSortValue(b.transaction, field);
+    if (valueA < valueB) return -sign;
+    if (valueA > valueB) return sign;
+    return 0;
+  });
+}
+
+// The little ▲/▼ next to whichever Recent transactions column is currently
+// driving the sort, so it's clear both which field is active and which
+// direction — otherwise clicking a header and seeing the list reorder gives
+// no lasting indication of why.
+function transactionSortIndicator(field) {
+  if (transactionSort.field !== field) return "";
+  return transactionSort.direction === "asc" ? " ▲" : " ▼";
 }
 
 function isAccountLinked(type, id) {
@@ -1245,14 +1278,15 @@ function renderTransactions() {
               .map((transaction, index) => ({ transaction, index }))
               .filter(({ transaction }) => transaction.date?.slice(0, 7) === state.budget.month);
             if (!monthTransactions.length) return `<div class="empty-inline">No transactions yet</div>`;
+            const sorted = sortByTransactionField(monthTransactions, transactionSort.field, transactionSort.direction);
             return `<div class="ledger-entry-head ${state.accounts.length ? "has-accounts" : ""}">
-              <span>Payee</span>
-              <span>Amount</span>
-              <span>Date</span>
-              <span>Subcategory</span>
-              ${state.accounts.length ? `<span>Account</span>` : ""}
+              <button type="button" data-sort-transactions="payee">Payee${transactionSortIndicator("payee")}</button>
+              <button type="button" data-sort-transactions="amount">Amount${transactionSortIndicator("amount")}</button>
+              <button type="button" data-sort-transactions="date">Date${transactionSortIndicator("date")}</button>
+              <button type="button" data-sort-transactions="subcategory">Subcategory${transactionSortIndicator("subcategory")}</button>
+              ${state.accounts.length ? `<button type="button" data-sort-transactions="account">Account${transactionSortIndicator("account")}</button>` : ""}
               <span></span>
-            </div>` + monthTransactions.slice(0, 6).map(({ transaction, index }) => ledgerEntryRow(transaction, index)).join("");
+            </div>` + sorted.slice(0, 6).map(({ transaction, index }) => ledgerEntryRow(transaction, index)).join("");
           })()}
         </section>
       </div>
@@ -5260,6 +5294,18 @@ function bindViewEvents() {
     };
     reader.readAsText(file);
     event.target.value = "";
+  });
+
+  document.querySelectorAll("[data-sort-transactions]").forEach((button) => {
+    button.addEventListener("click", () => {
+      const field = button.dataset.sortTransactions;
+      if (transactionSort.field === field) {
+        transactionSort = { field, direction: transactionSort.direction === "asc" ? "desc" : "asc" };
+      } else {
+        transactionSort = { field, direction: field === "date" ? "desc" : "asc" };
+      }
+      render();
+    });
   });
 
   document.querySelectorAll("[data-bank-stream-payee]").forEach((input) => {
