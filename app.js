@@ -1304,7 +1304,8 @@ function renderTransactions() {
               <button type="button" data-sort-transactions="subcategory">Subcategory${transactionSortIndicator("subcategory")}</button>
               ${state.accounts.length ? `<button type="button" data-sort-transactions="account">Account${transactionSortIndicator("account")}</button>` : ""}
               <span></span>
-            </div>` + sorted.slice(0, 6).map(({ transaction, index }) => ledgerEntryRow(transaction, index)).join("");
+            </div>
+            <div class="ledger-entry-list">${sorted.map(({ transaction, index }) => ledgerEntryRow(transaction, index)).join("")}</div>`;
           })()}
         </section>
       </div>

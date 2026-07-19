@@ -1675,6 +1675,11 @@ main {
   border-bottom: none;
 }
 
+.ledger-entry-list {
+  max-height: 26rem;
+  overflow-y: auto;
+}
+
 .ledger-entry-row > * {
   min-width: 0;
 }
