@@ -7,6 +7,7 @@ const {
   sanitizeFilename, buildDocumentObjectPath, wouldCreateFolderCycle, buildFolderTree,
   smsGatewayAddress, paycheckOccurrencesSince, paycheckOccurrencesInRange, paycheckAllOccurrenceDatesInRange, recurringExpenseOccurrenceDates, accountBalance, accountsWithBalances,
   splitAmountEvenly,
+  parseDelimitedText, parseBankCsvTransactions, normalizeForAccountMatch, matchAccountByFilename,
   recurringBudgetSetAside, nextRecurringBudgetDueDate, monthsUntilDueInclusive,
   annualEventDate, nextAnnualEventDate, annualEventNotifyAt, rollAnnualNotifyAtForward
 } = require("../lib/shared-logic");
@@ -635,6 +636,72 @@ test("splitAmountEvenly hands leftover cents to the first shares instead of losi
 test("splitAmountEvenly returns an empty list for a zero or negative count", () => {
   assert.deepEqual(splitAmountEvenly(50, 0), []);
   assert.deepEqual(splitAmountEvenly(50, -2), []);
+});
+
+test("parseDelimitedText keeps a comma inside a properly quoted field as one cell", () => {
+  const rows = parseDelimitedText('a,"b, and c",d\n1,2,3\n');
+  assert.deepEqual(rows, [["a", "b, and c", "d"], ["1", "2", "3"]]);
+});
+
+test("parseDelimitedText treats an unescaped quote as literal unless followed by a comma or line end", () => {
+  const rows = parseDelimitedText('07/03/2026,"Zelle payment to X for "Niralya math"; Conf# abc","-160.00","484.30"\n');
+  assert.deepEqual(rows[0], ["07/03/2026", 'Zelle payment to X for "Niralya math"; Conf# abc', "-160.00", "484.30"]);
+});
+
+test("parseBankCsvTransactions: a Debit/Credit format imports only debit rows as positive expenses", () => {
+  const csv = [
+    "Status,Date,Description,Debit,Credit,Member Name",
+    'Cleared,07/13/2026,"REGAL MEDLOCK 18 0354 DULUTH GA",1.08,,PRITHVI RAJ VELUCHAMY',
+    'Cleared,07/10/2026,"AUTOPAY 220115055210464RAUTOPAY AUTO-PMT",,-1768.09,PRITHVI RAJ VELUCHAMY',
+    'Cleared,06/30/2026,"COSTCO WHSE #1175 CUMMING GA",,-26.74,PRITHVI RAJ VELUCHAMY',
+    'Cleared,06/30/2026,"COSTCO GAS #1175 CUMMING GA",50.52,,PRITHVI RAJ VELUCHAMY'
+  ].join("\n");
+  assert.deepEqual(parseBankCsvTransactions(csv), [
+    { date: "2026-07-13", payee: "REGAL MEDLOCK 18 0354 DULUTH GA", amount: 1.08 },
+    { date: "2026-06-30", payee: "COSTCO GAS #1175 CUMMING GA", amount: 50.52 }
+  ]);
+});
+
+test("parseBankCsvTransactions: a signed single-Amount format imports only negative (money-out) rows", () => {
+  const csv = [
+    "Date,Description,Amount,Running Bal.",
+    '06/18/2026,"Zelle payment from SURENDRAN JAYABAL Conf# bc4nd92zb","63.75","1,291.97"',
+    '06/22/2026,"T-MOBILE DES:PCS SVC ID:9514047","-215.59","1,108.34"',
+    '07/17/2026,"ROCKET MORTGAGE DES:LOAN ID:8698964","-2,258.90","1,040.86"'
+  ].join("\n");
+  assert.deepEqual(parseBankCsvTransactions(csv), [
+    { date: "2026-06-22", payee: "T-MOBILE DES:PCS SVC ID:9514047", amount: 215.59 },
+    { date: "2026-07-17", payee: "ROCKET MORTGAGE DES:LOAN ID:8698964", amount: 2258.9 }
+  ]);
+});
+
+test("parseBankCsvTransactions: skips a leading summary block and finds the real transaction header", () => {
+  const csv = [
+    "Description,,Summary Amt.",
+    "Beginning balance as of 06/18/2026,,\"1,228.22\"",
+    "Total credits,,\"5,253.21\"",
+    "Total debits,,\"-5,938.62\"",
+    "Ending balance as of 07/19/2026,,\"542.81\"",
+    "",
+    "Date,Description,Amount,Running Bal.",
+    '06/18/2026,Beginning balance as of 06/18/2026,,"1,228.22"',
+    '07/02/2026,"SAWNEE EMC Bill Payment","-138.06","664.47"'
+  ].join("\n");
+  assert.deepEqual(parseBankCsvTransactions(csv), [
+    { date: "2026-07-02", payee: "SAWNEE EMC Bill Payment", amount: 138.06 }
+  ]);
+});
+
+test("normalizeForAccountMatch strips punctuation, spaces, and case", () => {
+  assert.equal(normalizeForAccountMatch("Costco Citi"), "costcociti");
+  assert.equal(normalizeForAccountMatch("BoFA"), "bofa");
+});
+
+test("matchAccountByFilename matches a filename with extra words/dates against a shorter account name", () => {
+  const accounts = [{ id: "a1", name: "Costco Citi" }, { id: "a2", name: "BoFA" }];
+  assert.equal(matchAccountByFilename("Costco Citi Jul 142026.CSV", accounts).id, "a1");
+  assert.equal(matchAccountByFilename("BoFA.csv", accounts).id, "a2");
+  assert.equal(matchAccountByFilename("unrelated-export.csv", accounts), null);
 });
 
 test("recurringBudgetSetAside divides a yearly bill across only the months remaining before it is due", () => {

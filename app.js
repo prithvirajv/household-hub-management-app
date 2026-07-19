@@ -37,6 +37,7 @@ let calendarFeedback = "";
 // Kept out of state (like calendarFeedback) so a confirmation message never
 // gets saved into the shared household blob and replayed for every login.
 let mealsFeedback = "";
+let bankImportFeedback = "";
 let profileNameFeedback = "";
 let profileNameFeedbackIsError = false;
 let profilePasswordFeedback = "";
@@ -1258,7 +1259,14 @@ function renderTransactions() {
       <aside class="side-stack">
         <section class="card soft-card"><div class="card-label">Transactions</div><h3>Connected accounts</h3><div class="sync-empty">Connect a bank to import transactions</div></section>
         <section class="card">
-          <div class="section-head"><div><span class="card-label">Bank expense</span><h3>Bank stream</h3></div><button id="addTransactionButton" type="button">+ Add transaction</button></div>
+          <div class="section-head">
+            <div><span class="card-label">Bank expense</span><h3>Bank stream</h3></div>
+            <div class="button-row">
+              <label class="documents-upload-button">+ Import CSV<input type="file" id="bankStreamCsvInput" accept=".csv,text/csv"></label>
+              <button id="addTransactionButton" type="button">+ Add transaction</button>
+            </div>
+          </div>
+          ${bankImportFeedback ? `<p class="muted" role="status">${escapeHtml(bankImportFeedback)}</p>` : ""}
           ${imported.map((transaction) => `
             <div class="bank-stream-row" data-bank-stream-row="${transaction.id}">
               ${transaction.recurringId ? `<span class="pill">Recurring</span>` : ""}
@@ -5221,6 +5229,37 @@ function bindViewEvents() {
       date: new Date().toISOString().slice(0, 10)
     });
     render();
+  });
+
+  $("#bankStreamCsvInput")?.addEventListener("change", (event) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = () => {
+      const rows = parseBankCsvTransactions(String(reader.result || ""));
+      if (!rows.length) {
+        bankImportFeedback = `No transactions found in ${file.name} — check that it has Date, Description, and Amount (or Debit) columns.`;
+        render();
+        return;
+      }
+      const matchedAccount = matchAccountByFilename(file.name, state.accounts);
+      state.transactionInboxDrafts ||= [];
+      rows.forEach((row) => {
+        state.transactionInboxDrafts.unshift({
+          id: uniqueId("csv-import"),
+          payee: row.payee,
+          amount: row.amount,
+          lineId: "",
+          accountId: matchedAccount?.id || "",
+          date: row.date
+        });
+      });
+      bankImportFeedback = `Imported ${rows.length} transaction${rows.length === 1 ? "" : "s"} from ${file.name}${matchedAccount ? ` — linked to ${matchedAccount.name}` : " — no matching account found, pick one per row below"}.`;
+      autosaveState();
+      render();
+    };
+    reader.readAsText(file);
+    event.target.value = "";
   });
 
   document.querySelectorAll("[data-bank-stream-payee]").forEach((input) => {
