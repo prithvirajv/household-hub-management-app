@@ -87,7 +87,15 @@ put_secret() {
   if ! gcloud secrets describe "${secret_name}" --project "${PROJECT_ID}" >/dev/null 2>&1; then
     printf '%s' "${secret_value}" | gcloud secrets create "${secret_name}" --project "${PROJECT_ID}" --data-file=-
   else
-    printf '%s' "${secret_value}" | gcloud secrets versions add "${secret_name}" --project "${PROJECT_ID}" --data-file=-
+    # Secret Manager bills per active version per month, and every deploy
+    # used to call `versions add` unconditionally even when the value was
+    # unchanged, silently piling up hundreds of redundant versions. Only
+    # write a new version when the value actually differs from `latest`.
+    local current_value=""
+    current_value="$(gcloud secrets versions access latest --secret="${secret_name}" --project "${PROJECT_ID}" 2>/dev/null || true)"
+    if [[ "${current_value}" != "${secret_value}" ]]; then
+      printf '%s' "${secret_value}" | gcloud secrets versions add "${secret_name}" --project "${PROJECT_ID}" --data-file=-
+    fi
   fi
   gcloud secrets add-iam-policy-binding "${secret_name}" \
     --project "${PROJECT_ID}" \
