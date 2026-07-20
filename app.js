@@ -654,10 +654,29 @@ function cloneBudgetCategories(categories) {
   }));
 }
 
+// Category and subcategory structure (name, color, due day, recurring bill
+// config) is shared across every month — state.budget.categories is the one
+// canonical list, never replaced wholesale. Only each line's planned amount
+// is month-specific, so switching months / copying a budget only ever
+// touches .planned, keyed by the line's stable id, never the line list
+// itself. This is what makes a subcategory visible in every past and future
+// month instead of only the months it happened to be saved under.
+function plannedByLineIdFromSnapshot(snapshot) {
+  const plannedByLineId = new Map();
+  (snapshot?.categories || []).forEach((category) => {
+    category.lines.forEach((line) => plannedByLineId.set(line.id, Number(line.planned || 0)));
+  });
+  return plannedByLineId;
+}
+
 function copyBudgetFromMonth(month) {
   const source = (state.budgetHistory || []).find((budget) => budget.month === month);
   if (!source) return;
-  state.budget.categories = cloneBudgetCategories(source.categories);
+  const plannedByLineId = plannedByLineIdFromSnapshot(source);
+  state.budget.categories = state.budget.categories.map((category) => ({
+    ...category,
+    lines: category.lines.map((line) => ({ ...line, planned: plannedByLineId.has(line.id) ? plannedByLineId.get(line.id) : Number(line.planned || 0) }))
+  }));
   state.budget.income = Number(source.income || state.budget.income || 0);
   state.household.activity.unshift(`Copied budget from ${formatMonth(source.month)} into ${monthLabel()}`);
 }
@@ -674,11 +693,37 @@ function rememberCurrentBudgetSnapshot() {
   else state.budgetHistory.push(snapshot);
 }
 
+// One-time backfill for households that already had different category
+// lists saved across different months before structure became shared:
+// pulls in any category/line seen in budget history but missing from the
+// live (canonical) list, so nothing that used to exist in some month
+// disappears the first time this ships. Guarded so it only ever runs once
+// per household — after that, deleting a subcategory should actually stick.
+function ensureUnifiedBudgetTaxonomy() {
+  if (state.budget.taxonomyUnified) return;
+  state.budget.taxonomyUnified = true;
+  const seenLineIds = new Set(allLines().map((line) => line.id));
+  (state.budgetHistory || []).forEach((snapshot) => {
+    (snapshot.categories || []).forEach((historyCategory) => {
+      historyCategory.lines.forEach((historyLine) => {
+        if (seenLineIds.has(historyLine.id)) return;
+        seenLineIds.add(historyLine.id);
+        let targetCategory = state.budget.categories.find((category) => category.name === historyCategory.name);
+        if (!targetCategory) {
+          targetCategory = { name: historyCategory.name, color: historyCategory.color, lines: [] };
+          state.budget.categories.push(targetCategory);
+        }
+        targetCategory.lines.push({ ...historyLine, planned: 0 });
+      });
+    });
+  });
+}
+
 // Shared by the month picker and anything else that needs to jump the whole
 // app to a different month (e.g. accepting a bank stream item dated in a
 // month other than the one currently being viewed) — snapshotting the
-// month being left and carrying categories forward into an unvisited one
-// has to happen every time a switch occurs, not just from the picker.
+// month being left has to happen every time a switch occurs, not just from
+// the picker.
 function switchBudgetMonth(newMonth) {
   if (!newMonth || newMonth === state.budget.month) return;
   rememberCurrentBudgetSnapshot();
@@ -686,7 +731,11 @@ function switchBudgetMonth(newMonth) {
   state.budget.monthPreferenceSet = true;
   const existing = (state.budgetHistory || []).find((budget) => budget.month === newMonth);
   const carryForwardSource = existing || availablePreviousBudgets()[0];
-  state.budget.categories = carryForwardSource ? cloneBudgetCategories(carryForwardSource.categories) : [];
+  const plannedByLineId = plannedByLineIdFromSnapshot(carryForwardSource);
+  state.budget.categories = state.budget.categories.map((category) => ({
+    ...category,
+    lines: category.lines.map((line) => ({ ...line, planned: plannedByLineId.get(line.id) ?? 0 }))
+  }));
   state.budget.income = existing ? Number(existing.income || 0) : 0;
 }
 
@@ -966,6 +1015,7 @@ function render() {
   // (see notificationCandidates/formatDueLabel in server/index.js).
   state.household.timeZone ||= Intl.DateTimeFormat().resolvedOptions().timeZone;
   if (currentView === "admin" && !sessionUser?.isAdmin) currentView = "home";
+  ensureUnifiedBudgetTaxonomy();
   ensureRecurringBudgetBills();
   ensurePaycheckRecurrenceData();
   ensurePaycheckOccurrencesGenerated();
