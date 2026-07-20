@@ -83,6 +83,58 @@ test("a past-due job is sent, marked sent, and not double-processed on the next 
   assert.equal(jobAfterSecondRun.sent_at, jobAfterFirstRun.sent_at, "job should not be reprocessed once sent");
 });
 
+test("a weekly chores next occurrence still gets a reminder even if no client reopens the app to advance it", async () => {
+  const signup = await server.request("/api/auth/signup", {
+    method: "POST",
+    body: JSON.stringify({ email: "chore-rollover-owner@example.com", password: "Chore-Rollover-Password-123!", name: "Chore Rollover Owner", householdName: "Chore Rollover Household", country: "US" })
+  });
+  assert.equal(signup.status, 201);
+  const cookie = signup.cookie;
+
+  const current = await server.request("/api/state", { headers: { cookie } });
+  const state = current.body;
+  const firstDueInstant = new Date(Date.now() - 8 * 24 * 60 * 60 * 1000);
+  const firstDueKey = firstDueInstant.toISOString().slice(0, 10);
+  state.calendar.chores = [{
+    id: "chore-rollover-1",
+    title: "Weekly chore rollover test",
+    recurrence: "weekly",
+    startDate: firstDueKey,
+    time: "00:00",
+    assignees: [],
+    completedBy: { [firstDueKey]: ["household"] },
+    notifyAt: firstDueInstant.toISOString(),
+    notifyAtDateKey: firstDueKey,
+    notifyAtSourceTime: "00:00"
+  }];
+  const save = await server.request("/api/state", { method: "PUT", headers: { cookie }, body: JSON.stringify(state) });
+  assert.equal(save.status, 200);
+
+  const choreJobs = async () => {
+    const jobs = await server.request("/api/test/notification-jobs");
+    return jobs.body.filter((job) => job.source_id === "chore-rollover-1");
+  };
+
+  // The stored state already has the first occurrence marked complete (as a
+  // real household would after checking it off), but the chore's notifyAt
+  // was never advanced past that first occurrence by any client - nobody
+  // reopened the app between the two due dates to recompute it. The worker
+  // must discover the next (already-due) occurrence purely from the chore's
+  // own recurrence rule and completion state, without any client's help.
+  const run = await server.request("/api/internal/notifications/process", {
+    method: "POST",
+    headers: { authorization: `Bearer ${NOTIFICATION_SECRET}` },
+    body: "{}"
+  });
+  assert.equal(run.status, 200);
+  const jobs = await choreJobs();
+  assert.equal(jobs.length, 2, "both the first and next occurrence get their own distinct job, discovered without any client re-saving state");
+  const [earlier, later] = [...jobs].sort((a, b) => new Date(a.due_at) - new Date(b.due_at));
+  assert.ok(earlier.sent_at && later.sent_at, "both occurrences are sent");
+  assert.ok(new Date(later.due_at).getTime() > new Date(earlier.due_at).getTime(), "the next occurrence's due date is a week later than the first");
+  assert.equal(Math.round((new Date(later.due_at) - new Date(earlier.due_at)) / 86400000), 7, "the next weekly occurrence is exactly 7 days after the first");
+});
+
 test("a future-due job is not processed", async () => {
   const signup = await server.request("/api/auth/signup", {
     method: "POST",

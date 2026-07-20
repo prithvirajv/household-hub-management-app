@@ -14,7 +14,7 @@ const { Pool } = require("pg");
 const { OAuth2Client } = require("google-auth-library");
 const { countries } = require("countries-list");
 const { defaultState } = require("./default-state");
-const { validateJournalPayload, buildDocumentObjectPath, wouldCreateFolderCycle, SMS_CARRIERS, smsGatewayAddress, rollAnnualNotifyAtForward } = require("../lib/shared-logic");
+const { validateJournalPayload, buildDocumentObjectPath, wouldCreateFolderCycle, SMS_CARRIERS, smsGatewayAddress, rollAnnualNotifyAtForward, choreNotifyAt } = require("../lib/shared-logic");
 
 const ANNUAL_EVENT_TYPES = ["birthday", "anniversary"];
 const { createSignedUploadUrl, createSignedDownloadUrl, deleteObject } = require("./gcs");
@@ -227,9 +227,18 @@ function notificationCandidates(appState, fallbackEmail) {
     }
   }
   for (const chore of appState?.calendar?.chores || []) {
-    if (!chore.notifyAt || !chore.id) continue;
+    if (!chore.id) continue;
+    // A recurring chore only has its notifyAt advanced to the next occurrence
+    // when a client renders the app and re-saves state (app.js's
+    // ensureChoreRecurrenceData). Recomputing it here too means the
+    // scheduled worker keeps sending reminders for later occurrences even if
+    // nobody opens the app between one occurrence firing and the next one
+    // coming due — otherwise notification_jobs just never gets a row for
+    // that next due date and it silently never fires.
+    const dueAt = choreNotifyAt(chore) || chore.notifyAt;
+    if (!dueAt) continue;
     for (const email of recipientEmails(chore, fallbackEmail)) {
-      candidates.push({ sourceType: "calendar-chore", sourceId: chore.id, title: chore.title || "Chore reminder", email, dueAt: chore.notifyAt, timeZone });
+      candidates.push({ sourceType: "calendar-chore", sourceId: chore.id, title: chore.title || "Chore reminder", email, dueAt, timeZone });
     }
   }
   for (const note of appState?.notes?.entries || []) {
@@ -265,6 +274,76 @@ async function syncNotificationJobs({ householdId, appState, user }) {
   } catch (error) {
     await client.query("ROLLBACK");
     throw error;
+  } finally {
+    client.release();
+  }
+}
+
+// Only ever adds a row for a candidate that has no matching job yet -
+// never deletes or touches an existing row. syncNotificationJobs's full
+// delete-then-reinsert is right for an actual client save (a deliberate,
+// authoritative new snapshot of state), but running that on every scheduled
+// worker tick for every household would reset claimed_at/attempts on
+// in-flight retries and race the FOR UPDATE SKIP LOCKED claim query. This is
+// the gentler, additive-only version used purely to backfill a next-due row
+// for a recurring item (see refreshAllHouseholdNotificationJobs) - safe to
+// call repeatedly against unchanged state since ON CONFLICT DO NOTHING (and
+// its manual equivalent for the in-memory test path) makes it a no-op once
+// a matching row already exists, sent or not.
+async function addMissingNotificationJobs({ householdId, appState, user }) {
+  const candidates = notificationCandidates(appState, user.email);
+  if (MEMORY_DB) {
+    for (const item of candidates) {
+      const exists = memoryDb.notificationJobs.some((job) =>
+        job.household_id === householdId &&
+        job.source_type === item.sourceType &&
+        job.source_id === item.sourceId &&
+        job.recipient_email.toLowerCase() === item.email.toLowerCase() &&
+        job.due_at === item.dueAt
+      );
+      if (exists) continue;
+      const recipient = memoryDb.users.find((candidate) => candidate.email.toLowerCase() === item.email.toLowerCase());
+      memoryDb.notificationJobs.push({ id: crypto.randomUUID(), household_id: householdId, user_id: recipient?.id || null, source_type: item.sourceType, source_id: item.sourceId, title: item.title, recipient_email: item.email, due_at: item.dueAt, time_zone: item.timeZone, sent_at: null, claimed_at: null, attempts: 0, last_error: null });
+    }
+    return;
+  }
+  for (const item of candidates) {
+    await pool.query(
+      `INSERT INTO notification_jobs (household_id, user_id, source_type, source_id, title, recipient_email, due_at, time_zone)
+       VALUES ($1, (SELECT id FROM users WHERE lower(email) = lower($2) LIMIT 1), $3, $4, $5, $2, $6, $7)
+       ON CONFLICT (household_id, source_type, source_id, recipient_email, due_at) DO NOTHING`,
+      [householdId, item.email, item.sourceType, item.sourceId, item.title, item.dueAt, item.timeZone]
+    );
+  }
+}
+
+// syncNotificationJobs only ever runs from PUT /api/state, so a recurring
+// chore's due date only advances when a client actually opens the app and
+// re-saves between one occurrence and the next. This backfills any missing
+// next-due row for every household from whatever state is already stored,
+// so the scheduled notification worker keeps chore reminders flowing even
+// when nobody has the app open at all.
+async function refreshAllHouseholdNotificationJobs() {
+  if (MEMORY_DB) {
+    for (const household of memoryDb.households) {
+      const ownerId = memoryPrimaryOwnerId(household.id);
+      const owner = memoryDb.users.find((candidate) => candidate.id === ownerId);
+      if (!owner) continue;
+      await addMissingNotificationJobs({ householdId: household.id, appState: household.app_state, user: owner });
+    }
+    return;
+  }
+  const client = await pool.connect();
+  try {
+    const households = await client.query("SELECT id, app_state FROM households");
+    for (const household of households.rows) {
+      const ownerId = await databasePrimaryOwnerId(client, household.id);
+      if (!ownerId) continue;
+      const ownerResult = await client.query("SELECT email FROM users WHERE id = $1", [ownerId]);
+      const ownerEmail = ownerResult.rows[0]?.email;
+      if (!ownerEmail) continue;
+      await addMissingNotificationJobs({ householdId: household.id, appState: household.app_state, user: { email: ownerEmail } });
+    }
   } finally {
     client.release();
   }
@@ -3094,6 +3173,7 @@ app.patch("/api/documents/:id", requireSession, async (req, res, next) => {
 
 app.post("/api/internal/notifications/process", requireNotificationSecret, async (req, res, next) => {
   try {
+    await refreshAllHouseholdNotificationJobs();
     const limit = Math.min(500, Math.max(1, Number(req.body?.limit) || 200));
     const jobs = MEMORY_DB ? claimDueNotificationJobsMemory(limit) : await claimDueNotificationJobsDb(limit);
 

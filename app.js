@@ -3539,27 +3539,6 @@ function ensureChoreRecurrenceData() {
   });
 }
 
-function isChoreOccurrenceComplete(chore, date) {
-  const assigneeKeys = (chore.assignees || []).map((assignee) => assignee.key);
-  const completedKeys = (chore.completedBy || {})[date] || [];
-  if (!assigneeKeys.length) return completedKeys.length > 0;
-  return assigneeKeys.every((key) => completedKeys.includes(key));
-}
-
-// Whether a given occurrence still belongs on viewerKey's own pending list.
-// Once a specific assignee has marked their own button for this date, it
-// drops off THEIR view even if other assignees haven't finished their part
-// yet — the shared "is everyone done" check only applies when there's no
-// particular viewer to personalize for (or the viewer isn't an assignee).
-function isChoreOccurrencePendingFor(chore, date, viewerKey) {
-  const assigneeKeys = (chore.assignees || []).map((assignee) => assignee.key);
-  if (viewerKey && assigneeKeys.includes(viewerKey)) {
-    const completedKeys = (chore.completedBy || {})[date] || [];
-    return !completedKeys.includes(viewerKey);
-  }
-  return !isChoreOccurrenceComplete(chore, date);
-}
-
 // A single button tied to whoever is actually signed in — never a menu of
 // every assignee's own checkbox, which would let one person mark the chore
 // done on someone else's behalf. A jointly-assigned chore only counts as
@@ -3608,48 +3587,6 @@ function reminderCompletionControl(event) {
   }
   const suffix = assignees.length > 1 ? ` (${completedKeys.length}/${assignees.length})` : "";
   return `<button class="ghost chore-complete-button ${done ? "is-done" : ""}" data-complete-reminder="${event.id}:${escapeHtml(effectiveKey)}" type="button" aria-pressed="${done}">${done ? "✓ Done" : "Mark done"}${suffix}</button>`;
-}
-
-function daysBetweenDateKeys(fromKey, toKey) {
-  const [fromYear, fromMonth, fromDay] = fromKey.split("-").map(Number);
-  const [toYear, toMonth, toDay] = toKey.split("-").map(Number);
-  return Math.round((Date.UTC(toYear, toMonth - 1, toDay) - Date.UTC(fromYear, fromMonth - 1, fromDay)) / 86400000);
-}
-
-// Recomputed every render (mirrors annualEventNotifyAt for birthdays) so the
-// reminder always points at the next occurrence nobody has fully completed
-// yet, instead of staying pinned to whichever date the chore was first
-// created with and never firing again for later occurrences.
-//
-// Unlike a fresh `new Date(pending.date + "T00:00:00")` every time, this only
-// shifts the already-correct instant forward by whole days once one exists,
-// rather than re-deriving the time-of-day from scratch. A fresh re-derive is
-// parsed in whichever browser happens to render it, embedding THAT device's
-// local timezone — for a household with members across timezones (e.g. a US
-// member and an India member), a later device recomputing the same
-// wall-clock reminder would otherwise store a different absolute UTC
-// instant, bypassing the notification_jobs de-dupe (which keys off the exact
-// due_at) and sending a genuine duplicate email hours apart, both still
-// displaying the same "11:25 AM" because the email re-localizes to the
-// household's fixed timezone rather than reflecting the underlying drift.
-function choreNotifyAt(chore) {
-  const pending = nextPendingChoreOccurrence(chore);
-  if (!pending) return "";
-  const sourceTime = String(chore.time || "09:00");
-  const previousInstant = chore.notifyAt ? new Date(chore.notifyAt) : null;
-  const canShift = previousInstant && !Number.isNaN(previousInstant.getTime()) && chore.notifyAtDateKey && chore.notifyAtSourceTime === sourceTime;
-  if (canShift && chore.notifyAtDateKey === pending.date) return chore.notifyAt;
-  if (canShift) {
-    const dayDiff = daysBetweenDateKeys(chore.notifyAtDateKey, pending.date);
-    chore.notifyAtDateKey = pending.date;
-    return new Date(previousInstant.getTime() + dayDiff * 86400000).toISOString();
-  }
-  const [hour, minute] = sourceTime.split(":").map(Number);
-  const notifyDate = new Date(`${pending.date}T00:00:00`);
-  notifyDate.setHours(hour, minute, 0, 0);
-  chore.notifyAtDateKey = pending.date;
-  chore.notifyAtSourceTime = sourceTime;
-  return notifyDate.toISOString();
 }
 
 function choreCadenceLabel(chore) {
@@ -3716,51 +3653,6 @@ function nextChoreOccurrenceInMonth(chore) {
 }
 
 const UPCOMING_LIST_LIMIT = 5;
-
-// The side-panel "what's due" row for a chore — the earliest occurrence that
-// hasn't been marked complete yet, regardless of which month is displayed.
-// If that date is already in the past it's the same row, just overdue,
-// rather than a whole backlog of missed rows piling up. Pass viewerKey (the
-// signed-in user's own assignee key) to personalize this to their own
-// completion instead of the whole household's.
-function nextPendingChoreOccurrence(chore, viewerKey) {
-  const recurrence = chore.recurrence || "once";
-  const start = new Date(`${chore.startDate}T00:00:00`);
-  if (Number.isNaN(start.getTime())) return null;
-  // Once an occurrence would fall after the chore's end date, the chore has
-  // finished repeating — there is nothing left to be pending.
-  const choreEnd = chore.endDate ? new Date(`${chore.endDate}T00:00:00`) : null;
-
-  if (recurrence === "once") {
-    const key = dateKey(start);
-    return isChoreOccurrencePendingFor(chore, key, viewerKey) ? { date: key } : null;
-  }
-
-  if (recurrence === "monthly") {
-    const cursor = new Date(start.getFullYear(), start.getMonth(), 1);
-    for (let i = 0; i < 240; i += 1) {
-      const lastDay = new Date(cursor.getFullYear(), cursor.getMonth() + 1, 0).getDate();
-      const occurrence = new Date(cursor.getFullYear(), cursor.getMonth(), Math.min(start.getDate(), lastDay));
-      if (occurrence >= start) {
-        if (choreEnd && occurrence > choreEnd) return null;
-        const key = dateKey(occurrence);
-        if (isChoreOccurrencePendingFor(chore, key, viewerKey)) return { date: key };
-      }
-      cursor.setMonth(cursor.getMonth() + 1);
-    }
-    return null;
-  }
-
-  const intervalDays = recurrence === "triweekly" ? 21 : recurrence === "biweekly" ? 14 : 7;
-  const cursor = new Date(start);
-  for (let i = 0; i < 3650; i += 1) {
-    if (choreEnd && cursor > choreEnd) return null;
-    const key = dateKey(cursor);
-    if (isChoreOccurrencePendingFor(chore, key, viewerKey)) return { date: key };
-    cursor.setDate(cursor.getDate() + intervalDays);
-  }
-  return null;
-}
 
 const ANNUAL_EVENT_TYPES = ["birthday", "anniversary"];
 const annualEventLabels = { birthday: "Birthday", anniversary: "Anniversary" };
