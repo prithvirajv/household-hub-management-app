@@ -1380,6 +1380,10 @@ main {
   color: white;
 }
 
+.directions-link {
+  text-decoration: none;
+}
+
 .mini-form,
 .paycheck-builder,
 .meal-toolbar,

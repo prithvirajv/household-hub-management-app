@@ -1686,6 +1686,15 @@ function assigneeDots(assignees) {
     .join("");
 }
 
+// A plain Google Maps deep link — no API key, no billing, works for any
+// free-text address or place name. Opens in a new tab so the household
+// calendar stays put behind it.
+function directionsLinkHtml(location) {
+  if (!location) return "";
+  const url = `https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(location)}`;
+  return `<a class="pill-button directions-link" href="${url}" target="_blank" rel="noopener noreferrer" title="Get directions to ${escapeHtml(location)}">📍 Directions</a>`;
+}
+
 const memberColorPalette = ["#2f6fed", "#e05252", "#13936d", "#d99a24", "#8a5cf6", "#0891b2", "#c2410c", "#be185d"];
 function memberColor(ownerKey) {
   const key = String(ownerKey || "").trim().toLowerCase();
@@ -1755,6 +1764,7 @@ function renderCalendar() {
                 }).join("")}
               </div>
             </div>
+            <label data-location-field>Location (optional)<input name="location" placeholder="123 Main St or a place name"></label>
             <label data-chore-recurrence-field>Repeat<select name="recurrence"><option value="once">Once</option><option value="weekly" selected>Weekly</option><option value="biweekly">Every 2 weeks</option><option value="triweekly">Every 3 weeks</option><option value="monthly">Monthly</option></select></label>
             <label data-chore-end-date-field hidden>End date (optional)<input name="choreEndDate" type="date"></label>
             <label data-annual-reminder-field hidden>Remind before<select name="reminderDays"><option value="0">Same day</option><option value="1" selected>1 day</option><option value="3">3 days</option><option value="7">7 days</option><option value="14">14 days</option><option value="-1">Don't remind</option></select></label>
@@ -1780,7 +1790,7 @@ function renderCalendar() {
           ${choreRows.length ? choreRows.map(({ chore, index, occurrence }) => {
             const overdue = occurrence.date < today;
             return `<div class="compact-row ${overdue ? "overdue" : ""}">
-              <div>${assigneeDots(chore.assignees)}<strong>${escapeHtml(chore.title)}</strong><small>${occurrence.date}${overdue ? " · Past due" : ""} · ${escapeHtml(assigneeNames(chore.assignees) || "Unassigned")} · ${choreCadenceLabel(chore)}</small></div>
+              <div>${assigneeDots(chore.assignees)}<strong>${escapeHtml(chore.title)}</strong><small>${occurrence.date}${overdue ? " · Past due" : ""} · ${escapeHtml(assigneeNames(chore.assignees) || "Unassigned")} · ${choreCadenceLabel(chore)}</small>${directionsLinkHtml(chore.location)}</div>
               <div class="chore-complete-group">${choreCompletionButtons(chore, index, occurrence.date)}</div>
               <button class="icon-button" data-edit-calendar-item="chore:${chore.id}" type="button" aria-label="Edit ${escapeHtml(chore.title)}">✎</button>
               <button class="icon-button danger-button" data-delete-calendar-item="chore:${chore.id}" type="button" aria-label="Remove ${escapeHtml(chore.title)}">×</button>
@@ -3460,6 +3470,7 @@ function calendarManageRow(item) {
     </div>
     <strong>${escapeHtml(title)}</strong>
     ${badge ? `<span class="pill">${escapeHtml(badge)}</span>` : ""}
+    ${directionsLinkHtml(reminderEvent?.location)}
     ${reminderEvent ? `<div class="chore-complete-group">${reminderCompletionControl(reminderEvent)}</div>` : ""}
   </div>`;
 }
@@ -6554,6 +6565,7 @@ function bindViewEvents() {
         nextDue: selectedDate,
         time: selectedDateTime.slice(11, 16) || "09:00",
         notifyAt: selectedDateTime ? new Date(selectedDateTime).toISOString() : "",
+        location: String(data.location || "").trim(),
         completedBy: existing?.completedBy || {}
       };
       if (existing) {
@@ -6586,6 +6598,7 @@ function bindViewEvents() {
         monthDay,
         type: isAnnual ? data.type : "reminder",
         annual: isAnnual,
+        location: isAnnual ? "" : String(data.location || "").trim(),
         reminderDays,
         assignees
       };
@@ -7449,6 +7462,7 @@ function editCalendarItem(reference) {
   form.reminderDays.value = kind === "event" && ANNUAL_EVENT_TYPES.includes(item.type) ? String(item.reminderDays ?? 1) : "1";
   form.annualTime.value = kind === "event" && ANNUAL_EVENT_TYPES.includes(item.type) ? (item.dateTime?.slice(11, 16) || "09:00") : "09:00";
   form.reminderAt.value = kind === "event" && item.type === "reminder" ? (item.reminderAt || item.dateTime || form.date.value) : "";
+  form.location.value = item.location || "";
   form.querySelector("[data-calendar-submit]").textContent = "Save changes";
   form.querySelector("[data-calendar-delete]").textContent = `Delete ${form.type.value === "chore" ? "chore" : annualEventLabels[form.type.value]?.toLowerCase() || "reminder"}`;
   form.querySelector("[data-calendar-delete]").hidden = false;
@@ -7498,6 +7512,8 @@ function updateCalendarQuickAddFields() {
   const reminderField = form.querySelector("[data-annual-reminder-field]");
   const timeField = form.querySelector("[data-annual-time-field]");
   const plainReminderField = form.querySelector("[data-plain-reminder-field]");
+  const locationField = form.querySelector("[data-location-field]");
+  if (locationField) locationField.hidden = isAnnual;
   if (recurrenceField) recurrenceField.hidden = type !== "chore";
   // An end date only means something for a chore that actually repeats —
   // a one-time chore already stops after its single occurrence.
