@@ -1231,7 +1231,19 @@ function recurringExpenseRow(recurring, index) {
 function renderTransactions() {
   ensureAccountsData();
   ensureRecurringExpensesPosted();
-  const allImported = transactionInboxItems().filter((transaction) => !(state.transactionInboxDone || []).includes(transaction.id));
+  // possibleDuplicate is recomputed live on every render, never trusted from
+  // the stored draft — otherwise an item imported before a matching-logic
+  // fix shipped (or before another transaction it now matches existed)
+  // would stay stuck showing its stale result forever.
+  const allImported = transactionInboxItems()
+    .filter((transaction) => !(state.transactionInboxDone || []).includes(transaction.id))
+    .map((transaction) => ({
+      ...transaction,
+      possibleDuplicate: isDuplicateTransaction(transaction, [
+        ...state.transactions,
+        ...(state.transactionInboxDrafts || []).filter((other) => other.id !== transaction.id)
+      ])
+    }));
   // Recent transactions is already filtered to the viewed month, so filter
   // Bank stream to match — otherwise a pending item from a different month
   // sits next to a ledger list it can never be compared against.
@@ -5313,18 +5325,15 @@ function bindViewEvents() {
       const matchedAccount = matchAccountByFilename(file.name, state.accounts);
       state.transactionInboxDrafts ||= [];
       const alreadyKnown = [...state.transactions, ...state.transactionInboxDrafts];
-      let duplicateCount = 0;
+      const duplicateCount = rows.filter((row) => isDuplicateTransaction(row, alreadyKnown)).length;
       rows.forEach((row) => {
-        const possibleDuplicate = isDuplicateTransaction(row, alreadyKnown);
-        if (possibleDuplicate) duplicateCount += 1;
         state.transactionInboxDrafts.unshift({
           id: uniqueId("csv-import"),
           payee: row.payee,
           amount: row.amount,
           lineId: "",
           accountId: matchedAccount?.id || "",
-          date: row.date,
-          possibleDuplicate
+          date: row.date
         });
       });
       const duplicateNote = duplicateCount ? ` ${duplicateCount} look${duplicateCount === 1 ? "s" : ""} like a duplicate of a transaction you already have — check before accepting.` : "";
