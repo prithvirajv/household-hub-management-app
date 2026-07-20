@@ -1581,6 +1581,18 @@ main {
   background: var(--soft-blue);
 }
 
+.bank-stream-other-months {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.4rem;
+  margin-bottom: 0.6rem;
+}
+
+.bank-stream-other-months small {
+  color: var(--muted);
+}
+
 .recurring-expense-row {
   background: var(--soft-blue);
 }

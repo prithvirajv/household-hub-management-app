@@ -1231,7 +1231,17 @@ function recurringExpenseRow(recurring, index) {
 function renderTransactions() {
   ensureAccountsData();
   ensureRecurringExpensesPosted();
-  const imported = transactionInboxItems().filter((transaction) => !(state.transactionInboxDone || []).includes(transaction.id));
+  const allImported = transactionInboxItems().filter((transaction) => !(state.transactionInboxDone || []).includes(transaction.id));
+  // Recent transactions is already filtered to the viewed month, so filter
+  // Bank stream to match — otherwise a pending item from a different month
+  // sits next to a ledger list it can never be compared against.
+  const imported = allImported.filter((transaction) => transaction.date?.slice(0, 7) === state.budget.month);
+  const otherMonthCounts = {};
+  allImported.forEach((transaction) => {
+    const month = transaction.date?.slice(0, 7);
+    if (month && month !== state.budget.month) otherMonthCounts[month] = (otherMonthCounts[month] || 0) + 1;
+  });
+  const otherMonthEntries = Object.entries(otherMonthCounts).sort(([a], [b]) => a.localeCompare(b));
   const unassignedLedger = [];
   const lineOptions = (selectedLineId) => allLines().map((line) => `<option value="${line.id}" ${line.id === selectedLineId ? "selected" : ""}>${line.category} - ${line.name}</option>`).join("");
   const firstCategory = state.budget.categories[0];
@@ -1320,6 +1330,10 @@ function renderTransactions() {
             </div>
           </div>
           ${bankImportFeedback ? `<p class="muted" role="status">${escapeHtml(bankImportFeedback)}</p>` : ""}
+          ${otherMonthEntries.length ? `<div class="bank-stream-other-months">
+            <small>Also pending in:</small>
+            ${otherMonthEntries.map(([month, count]) => `<button type="button" class="pill-button" data-switch-budget-month="${month}">${formatMonth(month)} (${count})</button>`).join("")}
+          </div>` : ""}
           ${imported.map((transaction) => `
             <div class="bank-stream-row" data-bank-stream-row="${transaction.id}">
               ${transaction.recurringId ? `<span class="pill">Recurring</span>` : ""}
@@ -5330,6 +5344,14 @@ function bindViewEvents() {
       } else {
         transactionSort = { field, direction: field === "date" ? "desc" : "asc" };
       }
+      render();
+    });
+  });
+
+  document.querySelectorAll("[data-switch-budget-month]").forEach((button) => {
+    button.addEventListener("click", () => {
+      switchBudgetMonth(button.dataset.switchBudgetMonth);
+      autosaveState();
       render();
     });
   });
