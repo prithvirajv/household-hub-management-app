@@ -1323,7 +1323,7 @@ function renderTransactions() {
           ${imported.map((transaction) => `
             <div class="bank-stream-row" data-bank-stream-row="${transaction.id}">
               ${transaction.recurringId ? `<span class="pill">Recurring</span>` : ""}
-              ${transaction.possibleDuplicate ? `<span class="pill pill-warning" title="Matches an existing transaction with the same date, amount, and payee">Possible duplicate</span>` : ""}
+              ${transaction.possibleDuplicate ? `<span class="pill pill-warning" title="Matches an existing transaction with the same amount and payee within 2 days">Possible duplicate</span>` : ""}
               <label class="row-field row-payee"><small>Payee</small><input data-bank-stream-payee="${transaction.id}" value="${escapeHtml(transaction.payee)}"></label>
               <label class="row-field row-date"><small>Date</small><input type="date" data-bank-stream-date="${transaction.id}" value="${transaction.date}"></label>
               <label class="row-field row-amount"><small>Amount</small><input class="money-input" type="number" step="0.01" data-bank-stream-amount="${transaction.id}" value="${transaction.amount}"></label>
