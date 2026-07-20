@@ -1323,6 +1323,7 @@ function renderTransactions() {
           ${imported.map((transaction) => `
             <div class="bank-stream-row" data-bank-stream-row="${transaction.id}">
               ${transaction.recurringId ? `<span class="pill">Recurring</span>` : ""}
+              ${transaction.possibleDuplicate ? `<span class="pill pill-warning" title="Matches an existing transaction with the same date, amount, and payee">Possible duplicate</span>` : ""}
               <label class="row-field row-payee"><small>Payee</small><input data-bank-stream-payee="${transaction.id}" value="${escapeHtml(transaction.payee)}"></label>
               <label class="row-field row-date"><small>Date</small><input type="date" data-bank-stream-date="${transaction.id}" value="${transaction.date}"></label>
               <label class="row-field row-amount"><small>Amount</small><input class="money-input" type="number" step="0.01" data-bank-stream-amount="${transaction.id}" value="${transaction.amount}"></label>
@@ -5297,17 +5298,23 @@ function bindViewEvents() {
       }
       const matchedAccount = matchAccountByFilename(file.name, state.accounts);
       state.transactionInboxDrafts ||= [];
+      const alreadyKnown = [...state.transactions, ...state.transactionInboxDrafts];
+      let duplicateCount = 0;
       rows.forEach((row) => {
+        const possibleDuplicate = isDuplicateTransaction(row, alreadyKnown);
+        if (possibleDuplicate) duplicateCount += 1;
         state.transactionInboxDrafts.unshift({
           id: uniqueId("csv-import"),
           payee: row.payee,
           amount: row.amount,
           lineId: "",
           accountId: matchedAccount?.id || "",
-          date: row.date
+          date: row.date,
+          possibleDuplicate
         });
       });
-      bankImportFeedback = `Imported ${rows.length} transaction${rows.length === 1 ? "" : "s"} from ${file.name}${matchedAccount ? ` — linked to ${matchedAccount.name}` : " — no matching account found, pick one per row below"}.`;
+      const duplicateNote = duplicateCount ? ` ${duplicateCount} look${duplicateCount === 1 ? "s" : ""} like a duplicate of a transaction you already have — check before accepting.` : "";
+      bankImportFeedback = `Imported ${rows.length} transaction${rows.length === 1 ? "" : "s"} from ${file.name}${matchedAccount ? ` — linked to ${matchedAccount.name}` : " — no matching account found, pick one per row below"}.${duplicateNote}`;
       autosaveState();
       render();
     };

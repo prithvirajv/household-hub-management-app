@@ -7,7 +7,7 @@ const {
   sanitizeFilename, buildDocumentObjectPath, wouldCreateFolderCycle, buildFolderTree,
   smsGatewayAddress, paycheckOccurrencesSince, paycheckOccurrencesInRange, paycheckAllOccurrenceDatesInRange, recurringExpenseOccurrenceDates, accountBalance, accountsWithBalances,
   splitAmountEvenly,
-  parseDelimitedText, parseBankCsvTransactions, normalizeForAccountMatch, matchAccountByFilename,
+  parseDelimitedText, parseBankCsvTransactions, normalizeForAccountMatch, matchAccountByFilename, isDuplicateTransaction,
   recurringBudgetSetAside, nextRecurringBudgetDueDate, monthsUntilDueInclusive,
   annualEventDate, nextAnnualEventDate, annualEventNotifyAt, rollAnnualNotifyAtForward
 } = require("../lib/shared-logic");
@@ -702,6 +702,15 @@ test("matchAccountByFilename matches a filename with extra words/dates against a
   assert.equal(matchAccountByFilename("Costco Citi Jul 142026.CSV", accounts).id, "a1");
   assert.equal(matchAccountByFilename("BoFA.csv", accounts).id, "a2");
   assert.equal(matchAccountByFilename("unrelated-export.csv", accounts), null);
+});
+
+test("isDuplicateTransaction matches on exact date, amount, and case/whitespace-insensitive payee", () => {
+  const existing = [{ date: "2026-07-10", amount: 35, payee: "RETURN CHECK FEE - 071026" }];
+  assert.equal(isDuplicateTransaction({ date: "2026-07-10", amount: 35, payee: "  return check fee - 071026  " }, existing), true);
+  assert.equal(isDuplicateTransaction({ date: "2026-07-10", amount: 35, payee: "Different Payee" }, existing), false);
+  assert.equal(isDuplicateTransaction({ date: "2026-07-11", amount: 35, payee: "RETURN CHECK FEE - 071026" }, existing), false);
+  assert.equal(isDuplicateTransaction({ date: "2026-07-10", amount: 36, payee: "RETURN CHECK FEE - 071026" }, existing), false);
+  assert.equal(isDuplicateTransaction({ date: "2026-07-10", amount: 35, payee: "RETURN CHECK FEE - 071026" }, []), false);
 });
 
 test("recurringBudgetSetAside divides a yearly bill across only the months remaining before it is due", () => {
