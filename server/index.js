@@ -36,6 +36,11 @@ const ADMIN_EMAIL = String(process.env.ADMIN_EMAIL || "").trim().toLowerCase();
 const ADMIN_PASSWORD = String(process.env.ADMIN_PASSWORD || "");
 const ADMIN_NAME = String(process.env.ADMIN_NAME || "FamilyLoop Administrator").trim();
 const GOOGLE_CLIENT_ID = String(process.env.GOOGLE_CLIENT_ID || "").trim();
+// Browser key, not a true secret - protected by HTTP referrer restriction
+// (familyloop.net/famelo.net only) on the Google Cloud side rather than by
+// being hidden, since it has to ship in client-side JS to call the Maps
+// JavaScript API for address autocomplete.
+const GOOGLE_MAPS_API_KEY = String(process.env.GOOGLE_MAPS_API_KEY || "").trim();
 // No client secret needed here: the browser's "Sign in with Google" button
 // returns a signed ID token directly, which this verifies against Google's
 // public keys (fetched automatically by the library) and our client ID.
@@ -1219,7 +1224,8 @@ app.get("/api/session", async (req, res, next) => {
       authenticated: Boolean(session),
       user: publicUser(session),
       household: session ? { id: session.household_id, name: session.household_name } : null,
-      googleClientId: GOOGLE_CLIENT_ID
+      googleClientId: GOOGLE_CLIENT_ID,
+      googleMapsApiKey: GOOGLE_MAPS_API_KEY
     });
   } catch (error) {
     next(error);

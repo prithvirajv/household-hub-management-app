@@ -32,6 +32,8 @@ let currentView = "home";
 let autosaveTimer = null;
 let inviteEmailStatus = "";
 let googleSignInInitialized = false;
+let googleMapsApiKey = "";
+let googleMapsLoadPromise = null;
 let calendarFilterOwner = "";
 // Recent transactions defaults to newest-first regardless of the order rows
 // were entered/edited in — an ephemeral view preference (like
@@ -4222,6 +4224,8 @@ function transactionInboxItems() {
 }
 
 function bindViewEvents() {
+  if (googleMapsApiKey) attachLocationAutocomplete();
+
   $("#startBudgetButton")?.addEventListener("click", () => {
     state.budget.setupStarted = true;
     autosaveState();
@@ -8109,6 +8113,41 @@ function populateCarrierSelects() {
   });
 }
 
+// Loaded lazily (only once a key is actually configured, and only the first
+// time a calendar location field needs it) rather than unconditionally in
+// index.html, so households without Maps configured never pay for the
+// script fetch at all. Cached as a promise so repeated calendar renders
+// don't re-inject the script tag.
+function loadGoogleMapsScript(apiKey) {
+  if (googleMapsLoadPromise) return googleMapsLoadPromise;
+  googleMapsLoadPromise = new Promise((resolve, reject) => {
+    if (window.google?.maps?.places) { resolve(); return; }
+    window.__familyLoopGoogleMapsReady = resolve;
+    const script = document.createElement("script");
+    script.src = `https://maps.googleapis.com/maps/api/js?key=${encodeURIComponent(apiKey)}&libraries=places&loading=async&callback=__familyLoopGoogleMapsReady`;
+    script.async = true;
+    script.onerror = () => reject(new Error("Failed to load Google Maps"));
+    document.head.appendChild(script);
+  });
+  return googleMapsLoadPromise;
+}
+
+// Re-attached every render (bindViewEvents runs after every render() call,
+// and the calendar form's innerHTML — including the location input — is
+// fully regenerated each time, so any previous Autocomplete instance is
+// already gone with its old input node). A no-op wherever the location
+// field isn't currently in the DOM (every view but Calendar) or Maps hasn't
+// finished loading yet.
+function attachLocationAutocomplete() {
+  const input = document.querySelector('#calendarQuickAdd [name="location"]');
+  if (!input || !window.google?.maps?.places) return;
+  const autocomplete = new google.maps.places.Autocomplete(input, { fields: ["formatted_address"] });
+  autocomplete.addListener("place_changed", () => {
+    const place = autocomplete.getPlace();
+    if (place?.formatted_address) input.value = place.formatted_address;
+  });
+}
+
 // Polls briefly for the Google Identity Services script to finish loading
 // (it's fetched async, so it may not be ready the instant loadApp() runs)
 // before wiring up the "Sign in with Google" button. A no-op if the server
@@ -8139,6 +8178,8 @@ async function handleGoogleCredential(response) {
 async function loadApp() {
   const session = await api("/api/session");
   initGoogleSignIn(session.googleClientId);
+  googleMapsApiKey = session.googleMapsApiKey || "";
+  if (googleMapsApiKey) loadGoogleMapsScript(googleMapsApiKey).then(attachLocationAutocomplete).catch(() => {});
   if (!session.authenticated) {
     sessionUser = null;
     households = [];
