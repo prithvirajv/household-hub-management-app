@@ -44,6 +44,7 @@ let calendarFeedback = "";
 let mealsFeedback = "";
 let bankImportFeedback = "";
 let ledgerAcceptFeedback = "";
+let transactionValidationFeedback = "";
 // Holds { lineIds, perform } between opening the delete-subcategory
 // confirmation dialog and the user actually confirming/cancelling it — never
 // persisted, it only ever lives for the duration of one confirmation.
@@ -562,6 +563,7 @@ function ensureAccountsData() {
     account.openingBalance = Number(account.openingBalance || 0);
     account.netWorthAssetId ||= "";
     account.netWorthLiabilityId ||= "";
+    account.closedAt ||= "";
   });
   state.accounts.forEach((account) => {
     const balance = currentAccountBalance(account.id);
@@ -683,8 +685,18 @@ function isAccountLinked(type, id) {
 function accountOptions(selectedId, { excludeType } = {}) {
   return state.accounts
     .filter((account) => !excludeType || account.type !== excludeType)
-    .map((account) => `<option value="${account.id}" ${account.id === selectedId ? "selected" : ""}>${escapeHtml(account.name)}</option>`)
+    .map((account) => `<option value="${account.id}" ${account.id === selectedId ? "selected" : ""}>${escapeHtml(account.name)}${account.closedAt ? " (closed)" : ""}</option>`)
     .join("");
+}
+
+// A closed account can still take backdated entries (catching up on
+// something missed before it was closed) but nothing dated after the
+// close date - an unlinked accountId ("") is never restricted.
+function accountAllowsDate(accountId, dateValue) {
+  if (!accountId) return true;
+  const account = state.accounts.find((item) => item.id === accountId);
+  if (!account?.closedAt) return true;
+  return Boolean(dateValue) && dateValue <= account.closedAt;
 }
 
 function suggestedEmi(debt) {
@@ -1448,6 +1460,7 @@ function renderTransactions() {
         </section>
         <section class="card">
           <div class="card-label">Entries</div><h3>Ledger</h3>
+          ${transactionValidationFeedback ? `<p class="muted" role="status">${escapeHtml(transactionValidationFeedback)}</p>` : ""}
           <form id="transactionForm" class="mini-form transaction-entry-form">
             <label>Payee<input name="payee" placeholder="Coffee House" required></label>
             <label>Amount<input name="amount" type="number" step="0.01" placeholder="18.72" required></label>
@@ -3077,9 +3090,11 @@ function accountItemRow(account, index) {
       <label class="debt-name-field">Account name<input data-account-name="${index}" value="${escapeHtml(account.name)}" aria-label="Account name"></label>
       <label>Type<select data-account-type="${index}" aria-label="Type for ${escapeHtml(account.name)}">${Object.entries(typeLabels).map(([value, label]) => `<option value="${value}" ${account.type === value ? "selected" : ""}>${label}</option>`).join("")}</select></label>
       <label>Opening balance<input data-account-opening-balance="${index}" type="number" step="0.01" inputmode="decimal" value="${account.openingBalance}" aria-label="Opening balance for ${escapeHtml(account.name)}"></label>
+      <label>Close date<input type="date" data-account-close-date="${index}" value="${account.closedAt}" aria-label="Close date for ${escapeHtml(account.name)}"></label>
     </div>
     <div class="account-balance-row">
       <div class="split-stat"><span>${isLiability ? "Owed" : "Balance"}</span><b class="${isLiability && balance > 0 ? "danger" : ""}">${money.format(balance)}</b></div>
+      ${account.closedAt ? `<span class="pill pill-warning" title="No new transactions can be added after ${formatShortDate(account.closedAt)}">Closed ${formatShortDate(account.closedAt)}</span>` : ""}
       <button class="icon-button danger-button" data-delete-account="${index}" type="button" aria-label="Remove ${escapeHtml(account.name)}">×</button>
     </div>
   </article>`;
@@ -5218,6 +5233,12 @@ function bindViewEvents() {
     const data = Object.fromEntries(new FormData(event.currentTarget));
     const date = data.date || dateKey(new Date());
     const recurrence = data.recurrence || "none";
+    if (!accountAllowsDate(data.accountId, date)) {
+      transactionValidationFeedback = `${accountName(data.accountId)} is closed - pick a date on or before its close date, or choose a different account.`;
+      render();
+      return;
+    }
+    transactionValidationFeedback = "";
     if (recurrence === "none") {
       state.transactions.unshift(makeTransaction({ date, payee: data.payee, lineId: data.lineId, amount: Number(data.amount), memo: "Manual entry", accountId: data.accountId || "" }));
     } else {
@@ -5453,7 +5474,14 @@ function bindViewEvents() {
   document.querySelectorAll("[data-bank-stream-date]").forEach((input) => {
     input.addEventListener("change", () => {
       const draft = (state.transactionInboxDrafts || []).find((item) => item.id === input.dataset.bankStreamDate);
-      if (draft && input.value) draft.date = input.value;
+      if (!draft || !input.value) return;
+      if (!accountAllowsDate(draft.accountId, input.value)) {
+        transactionValidationFeedback = `${accountName(draft.accountId)} is closed - pick a date on or before its close date.`;
+        render();
+        return;
+      }
+      draft.date = input.value;
+      transactionValidationFeedback = "";
       render();
     });
   });
@@ -5477,7 +5505,14 @@ function bindViewEvents() {
   document.querySelectorAll("[data-bank-stream-account]").forEach((select) => {
     select.addEventListener("change", () => {
       const draft = (state.transactionInboxDrafts || []).find((item) => item.id === select.dataset.bankStreamAccount);
-      if (draft) draft.accountId = select.value;
+      if (!draft) return;
+      if (!accountAllowsDate(select.value, draft.date)) {
+        transactionValidationFeedback = `${accountName(select.value)} is closed - this item is dated after its close date.`;
+        render();
+        return;
+      }
+      draft.accountId = select.value;
+      transactionValidationFeedback = "";
       autosaveState();
     });
   });
@@ -5501,7 +5536,14 @@ function bindViewEvents() {
   document.querySelectorAll("[data-ledger-entry-date]").forEach((input) => {
     input.addEventListener("change", () => {
       const transaction = state.transactions[Number(input.dataset.ledgerEntryDate)];
-      if (transaction && input.value) transaction.date = input.value;
+      if (!transaction || !input.value) return;
+      if (!accountAllowsDate(transaction.accountId, input.value)) {
+        transactionValidationFeedback = `${accountName(transaction.accountId)} is closed - pick a date on or before its close date.`;
+        render();
+        return;
+      }
+      transaction.date = input.value;
+      transactionValidationFeedback = "";
       render();
     });
   });
@@ -5517,7 +5559,14 @@ function bindViewEvents() {
   document.querySelectorAll("[data-ledger-entry-account]").forEach((select) => {
     select.addEventListener("change", () => {
       const transaction = state.transactions[Number(select.dataset.ledgerEntryAccount)];
-      if (transaction) transaction.accountId = select.value;
+      if (!transaction) return;
+      if (!accountAllowsDate(select.value, transaction.date)) {
+        transactionValidationFeedback = `${accountName(select.value)} is closed - this transaction is dated after its close date.`;
+        render();
+        return;
+      }
+      transaction.accountId = select.value;
+      transactionValidationFeedback = "";
       render();
     });
   });
@@ -6371,6 +6420,15 @@ function bindViewEvents() {
       autosaveState();
     });
     input.addEventListener("change", () => render());
+  });
+
+  document.querySelectorAll("[data-account-close-date]").forEach((input) => {
+    input.addEventListener("change", () => {
+      const account = state.accounts[Number(input.dataset.accountCloseDate)];
+      account.closedAt = input.value || "";
+      autosaveState();
+      render();
+    });
   });
 
   document.querySelectorAll("[data-delete-account]").forEach((button) => {
@@ -7619,6 +7677,12 @@ function acceptImportTransaction(button) {
   }
 
   if (!inboxItem) return;
+  if (!accountAllowsDate(inboxItem.accountId, inboxItem.date)) {
+    transactionValidationFeedback = `${accountName(inboxItem.accountId)} is closed - "${inboxItem.payee}" is dated after its close date. Change the date, pick a different account, or dismiss it.`;
+    render();
+    return;
+  }
+  transactionValidationFeedback = "";
   const lineId = inboxItem.lineId || allLines()[0]?.id;
   const memo = inboxItem.recurringId ? "Recurring bill" : "Accepted bank stream item";
   state.transactions.unshift(makeTransaction({ date: inboxItem.date, payee: inboxItem.payee, amount: Number(inboxItem.amount), lineId, memo, accountId: inboxItem.accountId || "" }));
