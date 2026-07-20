@@ -2488,7 +2488,7 @@ function renderPlanTaskDaily(task) {
   const done = isDailyTaskDoneOnDate(task, planSelectedDate);
   const linkedLogs = actualLogsForDate(planSelectedDate).filter((log) => (log.linkedTaskIds || []).includes(task.id));
   const { label: actualLabel } = describeLinkedActualLogs(task, linkedLogs);
-  return `<div class="plan-task-row ${done ? "done" : ""}" data-plan-task-id="${task.id}">
+  return `<div class="plan-task-row plan-task-row-daily ${done ? "done" : ""}" data-plan-task-id="${task.id}">
     <input type="checkbox" data-plan-task-check="${task.id}" ${done ? "checked" : ""} aria-label="Complete ${escapeHtml(task.title)}">
     <div class="plan-task-copy">
       <input class="plan-task-title" data-plan-task-title="${task.id}" value="${escapeHtml(task.title)}" aria-label="Task title">

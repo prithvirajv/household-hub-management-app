@@ -4548,6 +4548,10 @@ main {
   background: white;
 }
 
+.plan-task-row-daily {
+  grid-template-columns: auto minmax(0, 1fr) 34px 34px;
+}
+
 .plan-task-row.done .plan-task-title {
   color: var(--muted);
   text-decoration: line-through;
