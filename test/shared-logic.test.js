@@ -9,7 +9,8 @@ const {
   splitAmountEvenly,
   parseDelimitedText, parseBankCsvTransactions, normalizeForAccountMatch, matchAccountByFilename, isDuplicateTransaction,
   recurringBudgetSetAside, nextRecurringBudgetDueDate, monthsUntilDueInclusive,
-  annualEventDate, nextAnnualEventDate, annualEventNotifyAt, rollAnnualNotifyAtForward
+  annualEventDate, nextAnnualEventDate, annualEventNotifyAt, rollAnnualNotifyAtForward,
+  nextPendingChoreOccurrence, choreNotifyAt
 } = require("../lib/shared-logic");
 
 test("layoutTimelineBlocks gives non-overlapping tasks full width", () => {
@@ -834,4 +835,45 @@ test("rollAnnualNotifyAtForward returns null for a missing or invalid notifyAt",
   assert.equal(rollAnnualNotifyAtForward(""), null);
   assert.equal(rollAnnualNotifyAtForward(null), null);
   assert.equal(rollAnnualNotifyAtForward("not-a-date"), null);
+});
+
+test("nextPendingChoreOccurrence never returns a date off the recurrence grid, even with a stale completedBy entry", () => {
+  const chore = { startDate: "2026-07-19", recurrence: "weekly", completedBy: {} };
+  assert.equal(nextPendingChoreOccurrence(chore).date, "2026-07-19");
+  chore.completedBy = { "2026-07-19": ["household"] };
+  assert.equal(nextPendingChoreOccurrence(chore).date, "2026-07-26", "the next Sunday, never a Monday");
+});
+
+test("choreNotifyAt re-derives from scratch instead of drifting when the stored anchor no longer matches the current recurrence grid", () => {
+  const chore = {
+    startDate: "2026-07-19",
+    recurrence: "weekly",
+    time: "13:50",
+    completedBy: {},
+    // Simulates a chore whose startDate/recurrence was edited after
+    // notifyAt was last set - the old anchor (a Monday) is stale and no
+    // longer a real point on the new Sunday-anchored grid.
+    notifyAt: "2026-07-13T17:50:00.000Z",
+    notifyAtDateKey: "2026-07-13",
+    notifyAtSourceTime: "13:50"
+  };
+  const result = choreNotifyAt(chore);
+  assert.equal(chore.notifyAtDateKey, "2026-07-19", "re-derives against the current grid instead of shifting the stale anchor");
+  assert.equal(result.slice(0, 10), "2026-07-19");
+});
+
+test("choreNotifyAt still uses the cheap day-shift path when the anchor is still on the current grid", () => {
+  const chore = {
+    startDate: "2026-07-19",
+    recurrence: "weekly",
+    time: "13:50",
+    completedBy: { "2026-07-19": ["household"] },
+    notifyAt: "2026-07-19T17:50:00.000Z",
+    notifyAtDateKey: "2026-07-19",
+    notifyAtSourceTime: "13:50"
+  };
+  const result = choreNotifyAt(chore);
+  assert.equal(chore.notifyAtDateKey, "2026-07-26");
+  assert.equal(result.slice(0, 10), "2026-07-26");
+  assert.equal(new Date(result).getUTCHours(), 17, "the original time-of-day is preserved by the shift, not re-derived");
 });
