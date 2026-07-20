@@ -219,35 +219,20 @@ nav {
 
 .nav-calendar-icon {
   display: inline-flex;
-  flex-direction: column;
+  align-items: center;
+  justify-content: center;
   width: 20px;
   height: 20px;
   border-radius: 3px;
   overflow: hidden;
   border: 1px solid rgba(255, 255, 255, 0.25);
-}
-
-.nav-calendar-icon-month {
-  flex: 0 0 8px;
-  min-height: 0;
-  background: var(--coral);
-  color: white;
-  font-size: 6px;
-  line-height: 8px;
-  font-weight: 900;
-  letter-spacing: 0.02em;
-  text-align: center;
+  border-top: 4px solid var(--coral);
+  background: white;
 }
 
 .nav-calendar-icon-day {
-  flex: 0 0 12px;
-  min-height: 0;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  background: white;
   color: var(--navy);
-  font-size: 9px;
+  font-size: 11px;
   line-height: 1;
   font-weight: 900;
 }

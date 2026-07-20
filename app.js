@@ -998,12 +998,17 @@ function formatReminderTime(value) {
 }
 
 // The 📅 emoji glyph is baked into the font — it can't show a real date, so
-// the Calendar nav item gets its own small live tear-off-calendar icon
-// (month + day of month) built from the actual current date instead.
+// the Calendar nav item gets its own small live tear-off-calendar icon (day
+// of month) built from the actual current date instead. No month text: a
+// 3-letter month abbreviation has no font size that reads cleanly in a 20px
+// badge across browsers/displays — it rendered as illegible noise on at
+// least one real device even though it looked fine here. A plain color
+// strip carries the same "tear-off calendar" look without that risk, and
+// the full date is still available via the title tooltip.
 function calendarNavIconHtml() {
   const now = new Date();
-  const month = now.toLocaleDateString("en-US", { month: "short" }).toUpperCase();
-  return `<span class="nav-calendar-icon" aria-hidden="true"><span class="nav-calendar-icon-month">${month}</span><span class="nav-calendar-icon-day">${now.getDate()}</span></span>`;
+  const fullLabel = now.toLocaleDateString("en-US", { month: "long", day: "numeric" });
+  return `<span class="nav-calendar-icon" aria-hidden="true" title="${fullLabel}"><span class="nav-calendar-icon-day">${now.getDate()}</span></span>`;
 }
 
 function renderNav() {
@@ -2490,6 +2495,7 @@ function renderPlanTaskDaily(task) {
       ${task.recurrence && task.recurrence !== "none" ? `<small>${planRecurrenceLabels[task.recurrence]}</small>` : ""}
       ${actualLabel ? `<small>${escapeHtml(actualLabel)}</small>` : ""}
     </div>
+    <button class="icon-button" data-schedule-plan-task="${task.id}" type="button" aria-label="Schedule ${escapeHtml(task.title)}" title="Give this a start time">🕐</button>
     <button class="icon-button danger-button" data-delete-plan-task="${task.id}" type="button" aria-label="Delete task">×</button>
   </div>${renderSubtasks(task)}`;
 }
@@ -5057,6 +5063,16 @@ function bindViewEvents() {
         autosavePlans();
       }
       planDragState = null;
+      render();
+    });
+  });
+
+  // Opens the same edit form a scheduled timeline block uses (title,
+  // start time, duration, repeat) pre-filled for this task, so an
+  // unscheduled item can be given a start time without recreating it.
+  document.querySelectorAll("[data-schedule-plan-task]").forEach((button) => {
+    button.addEventListener("click", () => {
+      planEditingDailyTaskId = button.dataset.schedulePlanTask;
       render();
     });
   });
