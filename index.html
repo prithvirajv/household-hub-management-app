@@ -171,6 +171,26 @@
       </div>
     </dialog>
 
+    <dialog id="accountActionConfirmDialog" class="app-dialog">
+      <div class="delete-budget-line-dialog-content">
+        <div class="section-head">
+          <div><span class="card-label">Wealth</span><h2 id="accountActionConfirmTitle">Confirm</h2></div>
+          <button id="closeAccountActionConfirmDialogButton" class="icon-button ghost" type="button" aria-label="Close">×</button>
+        </div>
+        <p id="accountActionConfirmSummary" class="form-message"></p>
+        <div id="accountActionConfirmImpactList" class="delete-budget-line-impact"></div>
+        <label id="accountActionReassignField">Reassign these to
+          <select id="accountActionReassignSelect">
+            <option value="">Leave unassigned</option>
+          </select>
+        </label>
+        <div class="dialog-actions">
+          <button id="cancelAccountActionConfirmButton" class="ghost" type="button">Cancel</button>
+          <button id="confirmAccountActionConfirmButton" type="button">Confirm</button>
+        </div>
+      </div>
+    </dialog>
+
     <template id="emptyTemplate">
       <div class="empty-state">
         <h3>No data yet</h3>

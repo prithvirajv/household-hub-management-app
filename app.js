@@ -48,6 +48,9 @@ let ledgerAcceptFeedback = "";
 // confirmation dialog and the user actually confirming/cancelling it — never
 // persisted, it only ever lives for the duration of one confirmation.
 let pendingBudgetLineDeletion = null;
+// Holds { onConfirm, onCancel } between opening the account rename/delete
+// confirmation dialog and the user actually confirming/cancelling it.
+let pendingAccountAction = null;
 let profileNameFeedback = "";
 let profileNameFeedbackIsError = false;
 let profilePasswordFeedback = "";
@@ -586,6 +589,61 @@ function currentAccountBalance(accountId) {
 
 function accountName(accountId) {
   return state.accounts.find((account) => account.id === accountId)?.name || "";
+}
+
+// Everything referencing this account by id: real transactions, recurring
+// bills, and paycheck deposits. Used to decide whether a rename/delete needs
+// confirmation at all, and what to show in that confirmation.
+function accountUsage(accountId) {
+  return {
+    transactions: state.transactions.filter((transaction) => transaction.accountId === accountId),
+    recurringExpenses: state.recurringExpenses.filter((recurring) => recurring.accountId === accountId),
+    paychecks: state.paychecks.filter((paycheck) => paycheck.depositAccountId === accountId)
+  };
+}
+
+// Shared confirmation for a wealth-account rename or delete that would
+// otherwise silently touch real transactions/recurring bills/paycheck
+// deposits linked to it. `reassignable` offers a "reassign to a different
+// account" dropdown (delete); a rename never needs it since the account id
+// itself never changes, so nothing linked to it is actually affected -
+// this is confirmation for awareness, not data safety.
+function openAccountActionConfirm({ title, summarySuffix, account, reassignable, confirmLabel, onConfirm, onCancel }) {
+  const usage = accountUsage(account.id);
+  const totalUsed = usage.transactions.length + usage.recurringExpenses.length + usage.paychecks.length;
+  if (totalUsed === 0) {
+    onConfirm("");
+    return;
+  }
+  pendingAccountAction = { onConfirm, onCancel };
+  const summaryParts = [];
+  if (usage.transactions.length) summaryParts.push(`${usage.transactions.length} transaction${usage.transactions.length === 1 ? "" : "s"}`);
+  if (usage.recurringExpenses.length) summaryParts.push(`${usage.recurringExpenses.length} recurring bill${usage.recurringExpenses.length === 1 ? "" : "s"}`);
+  if (usage.paychecks.length) summaryParts.push(`${usage.paychecks.length} paycheck deposit${usage.paychecks.length === 1 ? "" : "s"}`);
+  $("#accountActionConfirmTitle").textContent = title;
+  $("#accountActionConfirmSummary").textContent = `${summaryParts.join(", ")} still linked to this account. ${summarySuffix}`;
+  const listSections = [];
+  if (usage.transactions.length) {
+    const shown = usage.transactions.slice(0, 15);
+    listSections.push(`<div class="delete-budget-line-impact-group"><h4>Transactions</h4><ul>${shown.map((transaction) => `<li>${escapeHtml(transaction.payee)} — ${exactMoney.format(transaction.amount)} on ${formatShortDate(transaction.date)}</li>`).join("")}${usage.transactions.length > shown.length ? `<li>+${usage.transactions.length - shown.length} more</li>` : ""}</ul></div>`);
+  }
+  if (usage.recurringExpenses.length) {
+    listSections.push(`<div class="delete-budget-line-impact-group"><h4>Recurring bills</h4><ul>${usage.recurringExpenses.map((recurring) => `<li>${escapeHtml(recurring.payee)} — ${exactMoney.format(recurring.amount)}</li>`).join("")}</ul></div>`);
+  }
+  if (usage.paychecks.length) {
+    listSections.push(`<div class="delete-budget-line-impact-group"><h4>Paycheck deposits</h4><ul>${usage.paychecks.map((paycheck) => `<li>${escapeHtml(paycheck.name)} — ${exactMoney.format(paycheck.amount)}</li>`).join("")}</ul></div>`);
+  }
+  $("#accountActionConfirmImpactList").innerHTML = listSections.join("");
+  const reassignField = $("#accountActionReassignField");
+  reassignField.hidden = !reassignable;
+  if (reassignable) {
+    const otherAccounts = state.accounts.filter((item) => item.id !== account.id);
+    $("#accountActionReassignSelect").innerHTML = `<option value="">Leave unassigned</option>${otherAccounts.map((item) => `<option value="${item.id}">${escapeHtml(item.name)}</option>`).join("")}`;
+  }
+  const confirmButton = $("#confirmAccountActionConfirmButton");
+  confirmButton.textContent = confirmLabel;
+  confirmButton.className = reassignable ? "danger-button" : "";
+  $("#accountActionConfirmDialog").showModal();
 }
 
 function transactionSortValue(transaction, field) {
@@ -6239,23 +6297,31 @@ function bindViewEvents() {
   });
 
   document.querySelectorAll("[data-account-name]").forEach((input) => {
-    const syncName = (name) => {
-      const account = state.accounts[Number(input.dataset.accountName)];
-      account.name = name;
-      const asset = state.goals.netWorth.assets.find((item) => item.id === account.netWorthAssetId);
-      if (asset) asset.name = name;
-      const liability = state.goals.netWorth.liabilities.find((item) => item.id === account.netWorthLiabilityId);
-      if (liability) liability.name = name;
-    };
-    input.addEventListener("input", () => {
-      syncName(input.value);
-      autosaveState();
-    });
     input.addEventListener("change", () => {
       const account = state.accounts[Number(input.dataset.accountName)];
-      syncName(input.value.trim() || "Untitled account");
-      input.value = account.name;
-      autosaveState();
+      const newName = input.value.trim() || "Untitled account";
+      if (newName === account.name) {
+        input.value = account.name;
+        return;
+      }
+      const applyRename = () => {
+        account.name = newName;
+        const asset = state.goals.netWorth.assets.find((item) => item.id === account.netWorthAssetId);
+        if (asset) asset.name = newName;
+        const liability = state.goals.netWorth.liabilities.find((item) => item.id === account.netWorthLiabilityId);
+        if (liability) liability.name = newName;
+        input.value = newName;
+        autosaveState();
+      };
+      openAccountActionConfirm({
+        title: `Rename ${account.name} to "${newName}"?`,
+        summarySuffix: "Renaming will not change what they are linked to - this is just so you know before continuing.",
+        account,
+        reassignable: false,
+        confirmLabel: "Rename",
+        onConfirm: applyRename,
+        onCancel: () => { input.value = account.name; }
+      });
     });
   });
 
@@ -6309,26 +6375,35 @@ function bindViewEvents() {
 
   document.querySelectorAll("[data-delete-account]").forEach((button) => {
     button.addEventListener("click", () => {
-      const [account] = state.accounts.splice(Number(button.dataset.deleteAccount), 1);
-      if (account) {
-        state.transactions.forEach((transaction) => {
-          if (transaction.accountId === account.id) transaction.accountId = "";
-        });
-        state.paychecks.forEach((paycheck) => {
-          if (paycheck.depositAccountId === account.id) paycheck.depositAccountId = "";
-        });
-        (state.paycheckOccurrences || []).forEach((occurrence) => {
-          if (occurrence.depositAccountId === account.id) occurrence.depositAccountId = "";
-        });
-        // Deliberately leave state.transfers untouched: a transfer that already
-        // moved money out of/into a surviving account is a historical fact that
-        // must keep affecting that account's balance, even after the other side
-        // of the transfer is deleted. accountBalance() only looks up the account
-        // currently being computed, so a transfer referencing a deleted account
-        // id on the *other* side is simply inert going forward, never an error.
-      }
-      autosaveState();
-      render();
+      const accountIndex = Number(button.dataset.deleteAccount);
+      const account = state.accounts[accountIndex];
+      if (!account) return;
+      openAccountActionConfirm({
+        title: `Remove ${account.name}?`,
+        summarySuffix: "Reassign them to a different account below, or leave them unassigned.",
+        account,
+        reassignable: true,
+        confirmLabel: "Delete",
+        onConfirm: (targetAccountId) => {
+          const usage = accountUsage(account.id);
+          usage.transactions.forEach((transaction) => { transaction.accountId = targetAccountId; });
+          usage.recurringExpenses.forEach((recurring) => { recurring.accountId = targetAccountId; });
+          usage.paychecks.forEach((paycheck) => { paycheck.depositAccountId = targetAccountId; });
+          (state.paycheckOccurrences || []).forEach((occurrence) => {
+            if (occurrence.depositAccountId === account.id) occurrence.depositAccountId = targetAccountId;
+          });
+          state.accounts.splice(accountIndex, 1);
+          // Deliberately leave state.transfers untouched: a transfer that already
+          // moved money out of/into a surviving account is a historical fact that
+          // must keep affecting that account's balance, even after the other side
+          // of the transfer is deleted (or reassigned). accountBalance() only
+          // looks up the account currently being computed, so a transfer
+          // referencing a stale account id on the *other* side is simply inert
+          // going forward, never an error.
+          autosaveState();
+          render();
+        }
+      });
     });
   });
 
@@ -7833,6 +7908,23 @@ $("#confirmDeleteBudgetLineButton").addEventListener("click", () => {
   pendingBudgetLineDeletion = null;
   $("#deleteBudgetLineDialog").close();
   render();
+});
+
+function closeAccountActionConfirmDialog() {
+  const pending = pendingAccountAction;
+  pendingAccountAction = null;
+  $("#accountActionConfirmDialog").close();
+  pending?.onCancel?.();
+}
+$("#closeAccountActionConfirmDialogButton").addEventListener("click", closeAccountActionConfirmDialog);
+$("#cancelAccountActionConfirmButton").addEventListener("click", closeAccountActionConfirmDialog);
+$("#confirmAccountActionConfirmButton").addEventListener("click", () => {
+  if (!pendingAccountAction) return;
+  const { onConfirm } = pendingAccountAction;
+  const targetAccountId = $("#accountActionReassignSelect")?.value || "";
+  pendingAccountAction = null;
+  $("#accountActionConfirmDialog").close();
+  onConfirm(targetAccountId);
 });
 
 $("#householdForm").addEventListener("submit", async (event) => {
