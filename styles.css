@@ -2881,6 +2881,43 @@ main {
   padding: 1.1rem;
 }
 
+.delete-budget-line-dialog-content {
+  display: grid;
+  gap: 0.85rem;
+  padding: 1.1rem;
+}
+
+.delete-budget-line-impact {
+  max-height: 14rem;
+  overflow-y: auto;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 0.5rem 0.7rem;
+}
+
+.delete-budget-line-impact-group + .delete-budget-line-impact-group {
+  margin-top: 0.6rem;
+  padding-top: 0.6rem;
+  border-top: 1px solid var(--line);
+}
+
+.delete-budget-line-impact-group h4 {
+  margin: 0 0 0.3rem;
+  font-size: 0.78rem;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  color: var(--muted);
+}
+
+.delete-budget-line-impact-group ul {
+  margin: 0;
+  padding-left: 1.1rem;
+}
+
+.delete-budget-line-impact-group li {
+  font-size: 0.85rem;
+}
+
 .note-label-create-form,
 .note-label-manager-row {
   display: grid;

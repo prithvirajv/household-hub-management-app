@@ -151,6 +151,26 @@
       </form>
     </dialog>
 
+    <dialog id="deleteBudgetLineDialog" class="app-dialog">
+      <div class="delete-budget-line-dialog-content">
+        <div class="section-head">
+          <div><span class="card-label">Budget core</span><h2 id="deleteBudgetLineTitle">Remove subcategory?</h2></div>
+          <button id="closeDeleteBudgetLineDialogButton" class="icon-button ghost" type="button" aria-label="Close">×</button>
+        </div>
+        <p id="deleteBudgetLineSummary" class="form-message"></p>
+        <div id="deleteBudgetLineImpactList" class="delete-budget-line-impact"></div>
+        <label>Reassign these to
+          <select id="deleteBudgetLineReassignSelect">
+            <option value="">Leave unassigned</option>
+          </select>
+        </label>
+        <div class="dialog-actions">
+          <button id="cancelDeleteBudgetLineButton" class="ghost" type="button">Cancel</button>
+          <button id="confirmDeleteBudgetLineButton" class="danger-button" type="button">Delete</button>
+        </div>
+      </div>
+    </dialog>
+
     <template id="emptyTemplate">
       <div class="empty-state">
         <h3>No data yet</h3>

@@ -44,6 +44,10 @@ let calendarFeedback = "";
 let mealsFeedback = "";
 let bankImportFeedback = "";
 let ledgerAcceptFeedback = "";
+// Holds { lineIds, perform } between opening the delete-subcategory
+// confirmation dialog and the user actually confirming/cancelling it — never
+// persisted, it only ever lives for the duration of one confirmation.
+let pendingBudgetLineDeletion = null;
 let profileNameFeedback = "";
 let profileNameFeedbackIsError = false;
 let profilePasswordFeedback = "";
@@ -242,6 +246,57 @@ function snapshotTransactionsForLine(line) {
       transaction.subcategoryName = line.name;
     }
   });
+}
+
+// Everything that would be orphaned (or silently left pointing at a dead
+// id) by deleting the given subcategory/subcategories: real ledger
+// transactions, recurring bills, and anything linked from Wealth (a debt
+// tracked against this line). Used to decide whether a delete needs
+// confirmation at all, and what to show in that confirmation.
+function budgetDeletionImpact(lineIds) {
+  const lineIdSet = new Set(lineIds);
+  return {
+    transactions: state.transactions.filter((transaction) => lineIdSet.has(transaction.lineId)),
+    recurringExpenses: state.recurringExpenses.filter((recurring) => lineIdSet.has(recurring.lineId)),
+    debts: state.goals.debts.filter((debt) => lineIdSet.has(debt.lineId))
+  };
+}
+
+// Deletes with nothing linked to them go through immediately - the dialog
+// only interrupts when there's something the household would otherwise lose
+// track of. `perform` is the actual splice (category or single line),
+// deferred until the user confirms (or is skipped straight through here).
+function openDeleteBudgetLineDialog({ title, lineIds, perform }) {
+  const impact = budgetDeletionImpact(lineIds);
+  const totalImpacted = impact.transactions.length + impact.recurringExpenses.length + impact.debts.length;
+  if (totalImpacted === 0) {
+    perform();
+    render();
+    return;
+  }
+  pendingBudgetLineDeletion = { lineIds, perform };
+  const summaryParts = [];
+  if (impact.transactions.length) summaryParts.push(`${impact.transactions.length} transaction${impact.transactions.length === 1 ? "" : "s"}`);
+  if (impact.recurringExpenses.length) summaryParts.push(`${impact.recurringExpenses.length} recurring bill${impact.recurringExpenses.length === 1 ? "" : "s"}`);
+  if (impact.debts.length) summaryParts.push(`${impact.debts.length} item${impact.debts.length === 1 ? "" : "s"} in Wealth`);
+  $("#deleteBudgetLineTitle").textContent = title;
+  $("#deleteBudgetLineSummary").textContent = `${summaryParts.join(", ")} still linked to this. Reassign them below, or leave them unassigned.`;
+  const listSections = [];
+  if (impact.transactions.length) {
+    const shown = impact.transactions.slice(0, 15);
+    listSections.push(`<div class="delete-budget-line-impact-group"><h4>Transactions</h4><ul>${shown.map((transaction) => `<li>${escapeHtml(transaction.payee)} — ${exactMoney.format(transaction.amount)} on ${formatShortDate(transaction.date)}</li>`).join("")}${impact.transactions.length > shown.length ? `<li>+${impact.transactions.length - shown.length} more</li>` : ""}</ul></div>`);
+  }
+  if (impact.recurringExpenses.length) {
+    listSections.push(`<div class="delete-budget-line-impact-group"><h4>Recurring bills</h4><ul>${impact.recurringExpenses.map((recurring) => `<li>${escapeHtml(recurring.payee)} — ${exactMoney.format(recurring.amount)}</li>`).join("")}</ul></div>`);
+  }
+  if (impact.debts.length) {
+    listSections.push(`<div class="delete-budget-line-impact-group"><h4>Wealth</h4><ul>${impact.debts.map((debt) => `<li>${escapeHtml(debt.name)}</li>`).join("")}</ul></div>`);
+  }
+  $("#deleteBudgetLineImpactList").innerHTML = listSections.join("");
+  const excludeSet = new Set(lineIds);
+  const otherLines = allLines().filter((line) => !excludeSet.has(line.id));
+  $("#deleteBudgetLineReassignSelect").innerHTML = `<option value="">Leave unassigned</option>${otherLines.map((line) => `<option value="${line.id}">${escapeHtml(line.category)} - ${escapeHtml(line.name)}</option>`).join("")}`;
+  $("#deleteBudgetLineDialog").showModal();
 }
 
 function plannedTotal() {
@@ -5259,11 +5314,12 @@ function bindViewEvents() {
     const name = ($("#newCategoryName")?.value || "").trim().toLowerCase();
     const categoryIndex = state.budget.categories.findIndex((category) => category.name.toLowerCase() === name);
     if (categoryIndex < 0) return;
-    state.budget.categories[categoryIndex].lines.forEach((line) => {
-      snapshotTransactionsForLine({ ...line, category: state.budget.categories[categoryIndex].name });
+    const category = state.budget.categories[categoryIndex];
+    openDeleteBudgetLineDialog({
+      title: `Remove ${category.name}?`,
+      lineIds: category.lines.map((line) => line.id),
+      perform: () => { state.budget.categories.splice(categoryIndex, 1); }
     });
-    state.budget.categories.splice(categoryIndex, 1);
-    render();
   });
 
   $("#newCategoryName")?.addEventListener("focus", () => {
@@ -5300,10 +5356,14 @@ function bindViewEvents() {
     const lineIndex = category?.lines?.findIndex((line) => line.name.toLowerCase() === name) ?? -1;
     const line = lineIndex >= 0 ? category.lines[lineIndex] : null;
     if (!category || !line) return;
-    snapshotTransactionsForLine({ ...line, category: category.name });
-    category.lines.splice(lineIndex, 1);
-    state.household.activity.unshift(`Deleted ${line.name} subcategory from ${category.name}`);
-    render();
+    openDeleteBudgetLineDialog({
+      title: `Remove ${line.name}?`,
+      lineIds: [line.id],
+      perform: () => {
+        category.lines.splice(lineIndex, 1);
+        state.household.activity.unshift(`Deleted ${line.name} subcategory from ${category.name}`);
+      }
+    });
   });
 
   $("#transactionParentCategory")?.addEventListener("change", () => {
@@ -5332,19 +5392,27 @@ function bindViewEvents() {
   document.querySelectorAll("[data-delete-line]").forEach((button) => {
     button.addEventListener("click", () => {
       const [categoryIndex, lineIndex] = button.dataset.deleteLine.split(":").map(Number);
-      snapshotTransactionsForLine({ ...state.budget.categories[categoryIndex].lines[lineIndex], category: state.budget.categories[categoryIndex].name });
-      state.budget.categories[categoryIndex].lines.splice(lineIndex, 1);
-      if (state.budget.categories[categoryIndex].lines.length === 0) state.budget.categories.splice(categoryIndex, 1);
-      render();
+      const line = state.budget.categories[categoryIndex].lines[lineIndex];
+      openDeleteBudgetLineDialog({
+        title: `Remove ${line.name}?`,
+        lineIds: [line.id],
+        perform: () => {
+          state.budget.categories[categoryIndex].lines.splice(lineIndex, 1);
+          if (state.budget.categories[categoryIndex].lines.length === 0) state.budget.categories.splice(categoryIndex, 1);
+        }
+      });
     });
   });
 
   document.querySelectorAll("[data-delete-category]").forEach((button) => {
     button.addEventListener("click", () => {
-      const category = state.budget.categories[Number(button.dataset.deleteCategory)];
-      category.lines.forEach((line) => snapshotTransactionsForLine({ ...line, category: category.name }));
-      state.budget.categories.splice(Number(button.dataset.deleteCategory), 1);
-      render();
+      const categoryIndex = Number(button.dataset.deleteCategory);
+      const category = state.budget.categories[categoryIndex];
+      openDeleteBudgetLineDialog({
+        title: `Remove ${category.name}?`,
+        lineIds: category.lines.map((line) => line.id),
+        perform: () => { state.budget.categories.splice(categoryIndex, 1); }
+      });
     });
   });
 
@@ -7833,6 +7901,38 @@ $("#closeHouseholdDialogButton").addEventListener("click", () => $("#householdDi
 $("#cancelHouseholdButton").addEventListener("click", () => $("#householdDialog").close());
 $("#closeRemoveHouseholdDialogButton").addEventListener("click", () => $("#removeHouseholdDialog").close());
 $("#cancelRemoveHouseholdButton").addEventListener("click", () => $("#removeHouseholdDialog").close());
+
+function closeDeleteBudgetLineDialog() {
+  pendingBudgetLineDeletion = null;
+  $("#deleteBudgetLineDialog").close();
+}
+$("#closeDeleteBudgetLineDialogButton").addEventListener("click", closeDeleteBudgetLineDialog);
+$("#cancelDeleteBudgetLineButton").addEventListener("click", closeDeleteBudgetLineDialog);
+$("#confirmDeleteBudgetLineButton").addEventListener("click", () => {
+  if (!pendingBudgetLineDeletion) return;
+  const { lineIds, perform } = pendingBudgetLineDeletion;
+  const targetLineId = $("#deleteBudgetLineReassignSelect")?.value || "";
+  const impact = budgetDeletionImpact(lineIds);
+  if (targetLineId) {
+    const targetLine = allLines().find((line) => line.id === targetLineId);
+    impact.transactions.forEach((transaction) => {
+      transaction.lineId = targetLineId;
+      transaction.categoryName = targetLine?.category || transaction.categoryName;
+      transaction.subcategoryName = targetLine?.name || transaction.subcategoryName;
+    });
+    impact.recurringExpenses.forEach((recurring) => { recurring.lineId = targetLineId; });
+    impact.debts.forEach((debt) => { debt.lineId = targetLineId; });
+  } else {
+    lineIds.forEach((lineId) => {
+      const line = allLines().find((item) => item.id === lineId);
+      if (line) snapshotTransactionsForLine(line);
+    });
+  }
+  perform();
+  pendingBudgetLineDeletion = null;
+  $("#deleteBudgetLineDialog").close();
+  render();
+});
 
 $("#householdForm").addEventListener("submit", async (event) => {
   event.preventDefault();
