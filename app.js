@@ -599,7 +599,7 @@ function accountName(accountId) {
 function accountUsage(accountId) {
   return {
     transactions: state.transactions.filter((transaction) => transaction.accountId === accountId),
-    recurringExpenses: state.recurringExpenses.filter((recurring) => recurring.accountId === accountId),
+    recurringExpenses: (state.recurringExpenses || []).filter((recurring) => recurring.accountId === accountId),
     paychecks: state.paychecks.filter((paycheck) => paycheck.depositAccountId === accountId)
   };
 }
@@ -6450,6 +6450,18 @@ function bindViewEvents() {
           (state.paycheckOccurrences || []).forEach((occurrence) => {
             if (occurrence.depositAccountId === account.id) occurrence.depositAccountId = targetAccountId;
           });
+          // The paired net-worth entry is computed entirely from this account
+          // (ensureAccountsData overwrites its value every render) - once the
+          // account is gone that value is frozen and meaningless, so remove
+          // the entry too instead of leaving a stale number in net worth.
+          if (account.netWorthAssetId) {
+            const assetIndex = state.goals.netWorth.assets.findIndex((item) => item.id === account.netWorthAssetId);
+            if (assetIndex >= 0) state.goals.netWorth.assets.splice(assetIndex, 1);
+          }
+          if (account.netWorthLiabilityId) {
+            const liabilityIndex = state.goals.netWorth.liabilities.findIndex((item) => item.id === account.netWorthLiabilityId);
+            if (liabilityIndex >= 0) state.goals.netWorth.liabilities.splice(liabilityIndex, 1);
+          }
           state.accounts.splice(accountIndex, 1);
           // Deliberately leave state.transfers untouched: a transfer that already
           // moved money out of/into a surviving account is a historical fact that
