@@ -927,10 +927,19 @@ function formatReminderTime(value) {
   return date.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" });
 }
 
+// The 📅 emoji glyph is baked into the font — it can't show a real date, so
+// the Calendar nav item gets its own small live tear-off-calendar icon
+// (month + day of month) built from the actual current date instead.
+function calendarNavIconHtml() {
+  const now = new Date();
+  const month = now.toLocaleDateString("en-US", { month: "short" }).toUpperCase();
+  return `<span class="nav-calendar-icon" aria-hidden="true"><span class="nav-calendar-icon-month">${month}</span><span class="nav-calendar-icon-day">${now.getDate()}</span></span>`;
+}
+
 function renderNav() {
   nav.innerHTML = views.filter(([key]) => key !== "admin" || sessionUser?.isAdmin).map(([key, label, icon]) => `
     <button class="nav-button ${key === currentView ? "active" : ""}" data-view="${key}" type="button">
-      <span>${icon}</span>${label}
+      <span>${key === "calendar" ? calendarNavIconHtml() : icon}</span>${label}
     </button>
   `).join("");
 }
