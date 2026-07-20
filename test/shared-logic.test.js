@@ -716,6 +716,13 @@ test("isDuplicateTransaction matches on amount and case/whitespace-insensitive p
   assert.equal(isDuplicateTransaction({ date: "2026-07-10", amount: 35, payee: "RETURN CHECK FEE - 071026" }, []), false);
 });
 
+test("isDuplicateTransaction matches a raw bank CSV description against a short existing payee name", () => {
+  const existing = [{ date: "2026-07-16", amount: 2258.9, payee: "Rocket Mortgage" }];
+  const rawCsvPayee = "ROCKET MORTGAGE DES:LOAN ID:8698964 INDN:PRITHVI *VELUCHAMY CO ID:0000452701 WEB";
+  assert.equal(isDuplicateTransaction({ date: "2026-07-17", amount: 2258.9, payee: rawCsvPayee }, existing), true);
+  assert.equal(isDuplicateTransaction({ date: "2026-07-17", amount: 2258.9, payee: "COMCAST-XFINITY DES:CABLE SVCS" }, existing), false);
+});
+
 test("recurringBudgetSetAside divides a yearly bill across only the months remaining before it is due", () => {
   const bill = { amount: 1200, frequency: "yearly", dueDate: "2026-12-15" };
   assert.equal(nextRecurringBudgetDueDate(bill, "2026-07"), "2026-12-15");
