@@ -704,23 +704,15 @@ test("matchAccountByFilename matches a filename with extra words/dates against a
   assert.equal(matchAccountByFilename("unrelated-export.csv", accounts), null);
 });
 
-test("isDuplicateTransaction matches on amount and case/whitespace-insensitive payee within a 2-day date tolerance", () => {
+test("isDuplicateTransaction matches on amount alone (payee is ignored) within a 2-day date tolerance", () => {
   const existing = [{ date: "2026-07-10", amount: 35, payee: "RETURN CHECK FEE - 071026" }];
-  assert.equal(isDuplicateTransaction({ date: "2026-07-10", amount: 35, payee: "  return check fee - 071026  " }, existing), true);
-  assert.equal(isDuplicateTransaction({ date: "2026-07-08", amount: 35, payee: "RETURN CHECK FEE - 071026" }, existing), true, "2 days earlier still counts as a duplicate");
-  assert.equal(isDuplicateTransaction({ date: "2026-07-12", amount: 35, payee: "RETURN CHECK FEE - 071026" }, existing), true, "2 days later still counts as a duplicate");
-  assert.equal(isDuplicateTransaction({ date: "2026-07-07", amount: 35, payee: "RETURN CHECK FEE - 071026" }, existing), false, "3 days earlier is outside the tolerance");
-  assert.equal(isDuplicateTransaction({ date: "2026-07-13", amount: 35, payee: "RETURN CHECK FEE - 071026" }, existing), false, "3 days later is outside the tolerance");
-  assert.equal(isDuplicateTransaction({ date: "2026-07-10", amount: 35, payee: "Different Payee" }, existing), false);
-  assert.equal(isDuplicateTransaction({ date: "2026-07-10", amount: 36, payee: "RETURN CHECK FEE - 071026" }, existing), false);
+  assert.equal(isDuplicateTransaction({ date: "2026-07-10", amount: 35, payee: "Completely Different Payee" }, existing), true, "payee text is not checked");
+  assert.equal(isDuplicateTransaction({ date: "2026-07-08", amount: 35, payee: "Anything" }, existing), true, "2 days earlier still counts as a duplicate");
+  assert.equal(isDuplicateTransaction({ date: "2026-07-12", amount: 35, payee: "Anything" }, existing), true, "2 days later still counts as a duplicate");
+  assert.equal(isDuplicateTransaction({ date: "2026-07-07", amount: 35, payee: "Anything" }, existing), false, "3 days earlier is outside the tolerance");
+  assert.equal(isDuplicateTransaction({ date: "2026-07-13", amount: 35, payee: "Anything" }, existing), false, "3 days later is outside the tolerance");
+  assert.equal(isDuplicateTransaction({ date: "2026-07-10", amount: 36, payee: "RETURN CHECK FEE - 071026" }, existing), false, "amount must match exactly");
   assert.equal(isDuplicateTransaction({ date: "2026-07-10", amount: 35, payee: "RETURN CHECK FEE - 071026" }, []), false);
-});
-
-test("isDuplicateTransaction matches a raw bank CSV description against a short existing payee name", () => {
-  const existing = [{ date: "2026-07-16", amount: 2258.9, payee: "Rocket Mortgage" }];
-  const rawCsvPayee = "ROCKET MORTGAGE DES:LOAN ID:8698964 INDN:PRITHVI *VELUCHAMY CO ID:0000452701 WEB";
-  assert.equal(isDuplicateTransaction({ date: "2026-07-17", amount: 2258.9, payee: rawCsvPayee }, existing), true);
-  assert.equal(isDuplicateTransaction({ date: "2026-07-17", amount: 2258.9, payee: "COMCAST-XFINITY DES:CABLE SVCS" }, existing), false);
 });
 
 test("recurringBudgetSetAside divides a yearly bill across only the months remaining before it is due", () => {
