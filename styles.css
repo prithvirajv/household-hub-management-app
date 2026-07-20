@@ -1899,6 +1899,11 @@ main {
   white-space: nowrap;
 }
 
+[data-location-directions-preview]:not(:empty) {
+  display: block;
+  margin-top: 0.35rem;
+}
+
 .calendar-member-filter {
   display: flex;
   flex-wrap: wrap;

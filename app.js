@@ -1766,7 +1766,7 @@ function renderCalendar() {
                 }).join("")}
               </div>
             </div>
-            <label data-location-field>Location (optional)<input name="location" placeholder="123 Main St or a place name"></label>
+            <label data-location-field>Location (optional)<input name="location" placeholder="123 Main St or a place name"><span data-location-directions-preview></span></label>
             <label data-chore-recurrence-field>Repeat<select name="recurrence"><option value="once">Once</option><option value="weekly" selected>Weekly</option><option value="biweekly">Every 2 weeks</option><option value="triweekly">Every 3 weeks</option><option value="monthly">Monthly</option></select></label>
             <label data-chore-end-date-field hidden>End date (optional)<input name="choreEndDate" type="date"></label>
             <label data-annual-reminder-field hidden>Remind before<select name="reminderDays"><option value="0">Same day</option><option value="1" selected>1 day</option><option value="3">3 days</option><option value="7">7 days</option><option value="14">14 days</option><option value="-1">Don't remind</option></select></label>
@@ -4225,6 +4225,8 @@ function transactionInboxItems() {
 
 function bindViewEvents() {
   if (googleMapsApiKey) attachLocationAutocomplete();
+  updateLocationDirectionsPreview();
+  $("#calendarQuickAdd [name='location']")?.addEventListener("input", updateLocationDirectionsPreview);
 
   $("#startBudgetButton")?.addEventListener("click", () => {
     state.budget.setupStarted = true;
@@ -7467,6 +7469,7 @@ function editCalendarItem(reference) {
   form.annualTime.value = kind === "event" && ANNUAL_EVENT_TYPES.includes(item.type) ? (item.dateTime?.slice(11, 16) || "09:00") : "09:00";
   form.reminderAt.value = kind === "event" && item.type === "reminder" ? (item.reminderAt || item.dateTime || form.date.value) : "";
   form.location.value = item.location || "";
+  updateLocationDirectionsPreview();
   form.querySelector("[data-calendar-submit]").textContent = "Save changes";
   form.querySelector("[data-calendar-delete]").textContent = `Delete ${form.type.value === "chore" ? "chore" : annualEventLabels[form.type.value]?.toLowerCase() || "reminder"}`;
   form.querySelector("[data-calendar-delete]").hidden = false;
@@ -7485,6 +7488,7 @@ function resetCalendarEditor() {
   form.editingKind.value = "";
   form.editingId.value = "";
   form.date.value = `${state.budget.month}-01T09:00`;
+  updateLocationDirectionsPreview();
   form.querySelector("[data-calendar-submit]").textContent = "Add";
   form.querySelector("[data-calendar-delete]").hidden = true;
   form.querySelector("[data-calendar-cancel]").hidden = true;
@@ -8145,7 +8149,20 @@ function attachLocationAutocomplete() {
   autocomplete.addListener("place_changed", () => {
     const place = autocomplete.getPlace();
     if (place?.formatted_address) input.value = place.formatted_address;
+    updateLocationDirectionsPreview();
   });
+}
+
+// Lets a household preview the route (and get a feel for the distance)
+// right while filling in the form, instead of only after saving and
+// hunting for it in Chore rotation / Upcoming schedule. Reads the input's
+// live value, so it updates for a typed address too, not just one picked
+// from the autocomplete dropdown.
+function updateLocationDirectionsPreview() {
+  const input = document.querySelector('#calendarQuickAdd [name="location"]');
+  const preview = document.querySelector('#calendarQuickAdd [data-location-directions-preview]');
+  if (!input || !preview) return;
+  preview.innerHTML = directionsLinkHtml(input.value.trim());
 }
 
 // Polls briefly for the Google Identity Services script to finish loading
