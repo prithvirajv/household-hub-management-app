@@ -61,6 +61,7 @@ let pendingBudgetLineDeletion = null;
 // Holds { onConfirm, onCancel } between opening the account rename/delete
 // confirmation dialog and the user actually confirming/cancelling it.
 let pendingAccountAction = null;
+let pendingIouDraftId = null;
 let profileNameFeedback = "";
 let profileNameFeedbackIsError = false;
 let profilePasswordFeedback = "";
@@ -1643,6 +1644,7 @@ function renderTransactions() {
               <label class="row-field row-select"><small>Subcategory</small><select data-bank-stream-line="${transaction.id}">${lineOptions(transaction.lineId)}</select></label>
               ${state.accounts.length ? `<label class="row-field row-select"><small>Account</small><select data-bank-stream-account="${transaction.id}"><option value="">Not linked</option>${accountOptions(transaction.accountId || "")}</select></label>` : ""}
               <button class="icon-button" data-accept-import="${transaction.id}" type="button" aria-label="Accept ${escapeHtml(transaction.payee)}">✓</button>
+              <button class="icon-button" data-assign-iou="${transaction.id}" type="button" aria-label="Split with a friend (IOU) ${escapeHtml(transaction.payee)}">👥</button>
               <button class="icon-button danger-button" data-dismiss-import="${transaction.id}" type="button" aria-label="Dismiss ${escapeHtml(transaction.payee)}">×</button>
               ${tagChipsHtml(transaction.tags, "data-remove-bank-stream-tag", "data-add-bank-stream-tag", transaction.id)}
             </div>
@@ -8158,6 +8160,12 @@ view.addEventListener("click", (event) => {
     return;
   }
 
+  const assignIouButton = event.target.closest("[data-assign-iou]");
+  if (assignIouButton) {
+    openAssignIouDialog(assignIouButton.dataset.assignIou);
+    return;
+  }
+
   const deleteTransactionButton = event.target.closest("[data-delete-transaction]");
   if (deleteTransactionButton) {
     state.transactions.splice(Number(deleteTransactionButton.dataset.deleteTransaction), 1);
@@ -8595,6 +8603,71 @@ $("#exportReportForm").addEventListener("submit", async (event) => {
     submitButton.disabled = false;
     submitButton.textContent = originalLabel;
   }
+});
+
+function openAssignIouDialog(draftId) {
+  const draft = transactionInboxItems().find((item) => item.id === draftId);
+  if (!draft) return;
+  pendingIouDraftId = draftId;
+  const form = $("#assignIouForm");
+  form.reset();
+  form.amount.value = Number(draft.amount || 0);
+  form.reason.value = draft.payee || "";
+  form.date.value = draft.date || dateKey(new Date());
+  $("#assignIouMessage").textContent = "";
+  $("#assignIouDialog").showModal();
+}
+
+$("#closeAssignIouDialogButton").addEventListener("click", () => $("#assignIouDialog").close());
+$("#cancelAssignIouButton").addEventListener("click", () => $("#assignIouDialog").close());
+
+$("#assignIouForm").addEventListener("submit", (event) => {
+  event.preventDefault();
+  const draftId = pendingIouDraftId;
+  const draft = transactionInboxItems().find((item) => item.id === draftId);
+  if (!draft) {
+    $("#assignIouMessage").textContent = "This item is no longer in Bank stream.";
+    return;
+  }
+  const data = Object.fromEntries(new FormData(event.currentTarget));
+  const person = String(data.person || "").trim();
+  const amount = Number(data.amount);
+  if (!person || !(amount > 0)) {
+    $("#assignIouMessage").textContent = "Enter a friend's name and a positive amount.";
+    return;
+  }
+
+  const draftAccountId = draft.accountId || "";
+  // This still counts as a normal expense once accepted (the household did
+  // pay the full bill) - the IOU is a separate record tracking the friend's
+  // share owed back, not a replacement for the transaction.
+  acceptImportTransaction({ dataset: { acceptImport: draftId } });
+  const stillPending = (state.transactionInboxDrafts || []).some((item) => item.id === draftId);
+  if (stillPending) {
+    // acceptImportTransaction bailed out (e.g. the linked account is closed
+    // as of this date) and already surfaced its own message above the
+    // Ledger - don't create an orphan IOU for a transaction that was never
+    // actually accepted.
+    $("#assignIouMessage").textContent = "Could not accept this item - see the message above the Ledger, then try again.";
+    return;
+  }
+
+  state.ious ||= [];
+  state.ious.push({
+    id: uniqueId("iou"),
+    person,
+    amount,
+    direction: "owed_to_me",
+    reason: String(data.reason || "").trim(),
+    date: data.date || draft.date,
+    accountId: draftAccountId,
+    settled: false,
+    settledDate: ""
+  });
+  autosaveState();
+  pendingIouDraftId = null;
+  $("#assignIouDialog").close();
+  render();
 });
 
 $("#householdForm").addEventListener("submit", async (event) => {

@@ -223,6 +223,27 @@
       </div>
     </dialog>
 
+    <dialog id="assignIouDialog" class="app-dialog">
+      <div class="delete-budget-line-dialog-content">
+        <div class="section-head">
+          <div><span class="card-label">IOUs</span><h2>Split with a friend</h2></div>
+          <button id="closeAssignIouDialogButton" class="icon-button ghost" type="button" aria-label="Close">×</button>
+        </div>
+        <p class="muted">This still counts as your own expense once accepted - a linked IOU separately tracks what your friend owes you back.</p>
+        <form id="assignIouForm">
+          <label>Friend's name<input name="person" required></label>
+          <label>Amount they owe you<input name="amount" type="number" step="0.01" min="0.01" required></label>
+          <label>Reason<input name="reason"></label>
+          <label>Date<input name="date" type="date" required></label>
+          <p id="assignIouMessage" class="form-message"></p>
+          <div class="dialog-actions">
+            <button id="cancelAssignIouButton" class="ghost" type="button">Cancel</button>
+            <button type="submit">Accept &amp; add IOU</button>
+          </div>
+        </form>
+      </div>
+    </dialog>
+
     <template id="emptyTemplate">
       <div class="empty-state">
         <h3>No data yet</h3>
