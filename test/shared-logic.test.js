@@ -8,7 +8,7 @@ const {
   smsGatewayAddress, paycheckOccurrencesSince, paycheckOccurrencesInRange, paycheckAllOccurrenceDatesInRange, recurringExpenseOccurrenceDates, accountBalance, accountsWithBalances,
   splitAmountEvenly,
   parseDelimitedText, parseBankCsvTransactions, normalizeForAccountMatch, matchAccountByFilename, isDuplicateTransaction,
-  parseCreditCardStatementText,
+  parseCreditCardStatementText, normalizeTag, groupTransactionsByTag,
   recurringBudgetSetAside, nextRecurringBudgetDueDate, monthsUntilDueInclusive,
   annualEventDate, nextAnnualEventDate, annualEventNotifyAt, rollAnnualNotifyAtForward,
   nextPendingChoreOccurrence, choreNotifyAt
@@ -775,6 +775,42 @@ PURCHASE
 test("parseCreditCardStatementText: returns an empty array for text with no matching transaction lines", () => {
   assert.deepEqual(parseCreditCardStatementText("Not a statement at all"), []);
   assert.deepEqual(parseCreditCardStatementText(""), []);
+});
+
+test("normalizeTag trims and lowercases so casing/whitespace differences match", () => {
+  assert.equal(normalizeTag("  Florida Trip "), "florida trip");
+  assert.equal(normalizeTag("florida trip"), "florida trip");
+  assert.equal(normalizeTag(""), "");
+});
+
+test("groupTransactionsByTag groups across categories/months and merges case/whitespace variants into one group", () => {
+  const transactions = [
+    { payee: "Publix", amount: 62.5, tags: ["Florida trip"] },
+    { payee: "Universal tickets", amount: 220, tags: ["florida trip"] },
+    { payee: "Shell gas", amount: 40, tags: [" Florida Trip "] },
+    { payee: "Electric bill", amount: 90, tags: ["Utilities"] },
+    { payee: "Untagged", amount: 15, tags: [] }
+  ];
+  const groups = groupTransactionsByTag(transactions);
+  assert.equal(groups.length, 2);
+  const trip = groups.find((g) => g.key === "florida trip");
+  assert.equal(trip.label, "Florida trip", "keeps the first-seen casing as the display label");
+  assert.equal(trip.total, 322.5);
+  assert.equal(trip.transactions.length, 3);
+  const utilities = groups.find((g) => g.key === "utilities");
+  assert.equal(utilities.total, 90);
+});
+
+test("groupTransactionsByTag counts a multi-tagged transaction toward every one of its groups", () => {
+  const transactions = [{ payee: "Grocery run", amount: 50, tags: ["Florida trip", "Groceries"] }];
+  const groups = groupTransactionsByTag(transactions);
+  assert.equal(groups.length, 2);
+  assert.ok(groups.every((g) => g.total === 50));
+});
+
+test("groupTransactionsByTag returns an empty array when nothing is tagged", () => {
+  assert.deepEqual(groupTransactionsByTag([{ payee: "x", amount: 1, tags: [] }, { payee: "y", amount: 2 }]), []);
+  assert.deepEqual(groupTransactionsByTag([]), []);
 });
 
 test("recurringBudgetSetAside divides a yearly bill across only the months remaining before it is due", () => {

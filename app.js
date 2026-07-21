@@ -40,6 +40,7 @@ let calendarFilterOwner = "";
 // calendarFilterOwner), not household data, so it isn't persisted to state
 // and resets to the date-desc default on reload.
 let transactionSort = { field: "date", direction: "desc" };
+let selectedTransactionTag = "";
 let calendarFeedback = "";
 // Kept out of state (like calendarFeedback) so a confirmation message never
 // gets saved into the shared household blob and replayed for every login.
@@ -199,6 +200,10 @@ function allLines() {
   return state.budget.categories.flatMap((category) => category.lines.map((line) => ({ ...line, category: category.name, color: category.color })));
 }
 
+function allTransactionTagLabels() {
+  return groupTransactionsByTag(state.transactions).map((group) => group.label);
+}
+
 // Unlike allLines(), which copies each line ({ ...line, ... }) to attach its
 // parent category's name/color, this returns the live line object itself so
 // callers can mutate it (e.g. setting .planned) and have it stick.
@@ -240,8 +245,15 @@ function transactionAssignmentLabel(transaction) {
   return `${category} - ${subcategory}`;
 }
 
-function makeTransaction({ date, payee, amount, lineId, memo, accountId = "", orderNumber = "" }) {
-  return { date, payee, amount, lineId, memo, accountId, orderNumber, ...lineSnapshot(lineId) };
+function makeTransaction({ date, payee, amount, lineId, memo, accountId = "", orderNumber = "", tags = [] }) {
+  return { date, payee, amount, lineId, memo, accountId, orderNumber, tags, ...lineSnapshot(lineId) };
+}
+
+// Shared by every place a tags input gets saved (add-transaction form, ledger
+// row, bank stream row) - a plain comma-separated text field is the simplest
+// entry point, split/trimmed into the array the rest of the app works with.
+function parseTagsInput(value) {
+  return String(value || "").split(",").map((tag) => tag.trim()).filter(Boolean);
 }
 
 function snapshotTransactionsForLine(line) {
@@ -1402,6 +1414,7 @@ function ledgerEntryRow(transaction, index) {
       <input aria-label="Date" type="date" data-ledger-entry-date="${index}" value="${transaction.date}">
       <select class="income-recurrence-select" aria-label="Subcategory" data-ledger-entry-line="${index}">${lineOptions}</select>
       ${state.accounts.length ? `<select class="income-recurrence-select" aria-label="Account" data-ledger-entry-account="${index}"><option value="">Not linked</option>${accountOptions(transaction.accountId || "")}</select>` : ""}
+      <input aria-label="Tags" list="transactionTagOptions" placeholder="Florida trip" data-ledger-entry-tags="${index}" value="${escapeHtml((transaction.tags || []).join(", "))}">
       <button class="icon-button danger-button" data-delete-transaction="${index}" type="button" aria-label="Delete ${escapeHtml(transaction.payee)}">×</button>
     </div>`;
 }
@@ -1490,6 +1503,8 @@ function renderTransactions() {
             <label data-transaction-end-date-field hidden>End date (optional)<input name="endDate" type="date"></label>
             <label class="form-row-full">Subcategory<select name="lineId">${allLines().map((line) => `<option value="${line.id}">${line.category} - ${line.name}</option>`).join("")}</select></label>
             ${state.accounts.length ? `<label class="form-row-full">Account<select name="accountId"><option value="">Not linked</option>${accountOptions("")}</select></label>` : ""}
+            <label class="form-row-full">Tags (optional)<input name="tags" list="transactionTagOptions" placeholder="Florida trip"></label>
+            <datalist id="transactionTagOptions">${allTransactionTagLabels().map((tag) => `<option value="${escapeHtml(tag)}">`).join("")}</datalist>
             <button type="submit" class="form-row-full">Add transaction</button>
           </form>
           ${(() => {
@@ -1526,6 +1541,7 @@ function renderTransactions() {
               <button type="button" data-sort-transactions="date">Date${transactionSortIndicator("date")}</button>
               <button type="button" data-sort-transactions="subcategory">Subcategory${transactionSortIndicator("subcategory")}</button>
               ${state.accounts.length ? `<button type="button" data-sort-transactions="account">Account${transactionSortIndicator("account")}</button>` : ""}
+              <span>Tags</span>
               <span></span>
             </div>
             <div class="ledger-entry-list">${sorted.map(({ transaction, index }) => ledgerEntryRow(transaction, index)).join("")}</div>`;
@@ -1534,6 +1550,27 @@ function renderTransactions() {
       </div>
       <aside class="side-stack">
         <section class="card soft-card"><div class="card-label">Transactions</div><h3>Connected accounts</h3><div class="sync-empty">Connect a bank to import transactions</div></section>
+        ${(() => {
+          const tagGroups = groupTransactionsByTag(state.transactions);
+          const selectedGroup = tagGroups.find((group) => group.key === selectedTransactionTag) || null;
+          return `<section class="card">
+            <div class="card-label">Transactions</div><h3>Tags</h3>
+            ${tagGroups.length ? `<label>Group by tag<select id="transactionTagFilter">
+              <option value="">All tags</option>
+              ${tagGroups.map((group) => `<option value="${escapeHtml(group.key)}" ${group.key === selectedTransactionTag ? "selected" : ""}>${escapeHtml(group.label)} (${money.format(group.total)})</option>`).join("")}
+            </select></label>` : `<div class="empty-inline">No tagged transactions yet — add a tag like "Florida trip" to a transaction to group it here.</div>`}
+            ${selectedGroup ? `
+              <div class="tag-summary-total"><span>${escapeHtml(selectedGroup.label)} total</span><b>${money.format(selectedGroup.total)}</b></div>
+              <div class="tag-transaction-list">${[...selectedGroup.transactions].sort((a, b) => (b.date || "").localeCompare(a.date || "")).map((transaction) => `
+                <div class="tag-transaction-row">
+                  <span>${escapeHtml(transaction.payee)}</span>
+                  <small>${formatShortDate(transaction.date)}</small>
+                  <b>${money.format(transaction.amount)}</b>
+                </div>
+              `).join("")}</div>
+            ` : ""}
+          </section>`;
+        })()}
         <section class="card">
           <div class="section-head">
             <div><span class="card-label">Bank expense</span><h3>Bank stream</h3></div>
@@ -1557,6 +1594,7 @@ function renderTransactions() {
               <label class="row-field row-amount"><small>Amount</small><input class="money-input" type="number" step="0.01" data-bank-stream-amount="${transaction.id}" value="${transaction.amount}"></label>
               <label class="row-field row-select"><small>Subcategory</small><select data-bank-stream-line="${transaction.id}">${lineOptions(transaction.lineId)}</select></label>
               ${state.accounts.length ? `<label class="row-field row-select"><small>Account</small><select data-bank-stream-account="${transaction.id}"><option value="">Not linked</option>${accountOptions(transaction.accountId || "")}</select></label>` : ""}
+              <label class="row-field row-select"><small>Tags</small><input list="transactionTagOptions" placeholder="Florida trip" data-bank-stream-tags="${transaction.id}" value="${escapeHtml((transaction.tags || []).join(", "))}"></label>
               <button class="icon-button" data-accept-import="${transaction.id}" type="button" aria-label="Accept ${escapeHtml(transaction.payee)}">✓</button>
               <button class="icon-button danger-button" data-dismiss-import="${transaction.id}" type="button" aria-label="Dismiss ${escapeHtml(transaction.payee)}">×</button>
             </div>
@@ -5278,6 +5316,7 @@ function bindViewEvents() {
     });
     input.addEventListener("change", () => {
       state.paychecks[Number(input.dataset.incomeName)].name = input.value || "Income";
+      autosaveState();
       render();
     });
   });
@@ -5318,7 +5357,7 @@ function bindViewEvents() {
     }
     transactionValidationFeedback = "";
     if (recurrence === "none") {
-      state.transactions.unshift(makeTransaction({ date, payee: data.payee, lineId: data.lineId, amount: Number(data.amount), memo: "Manual entry", accountId: data.accountId || "" }));
+      state.transactions.unshift(makeTransaction({ date, payee: data.payee, lineId: data.lineId, amount: Number(data.amount), memo: "Manual entry", accountId: data.accountId || "", tags: parseTagsInput(data.tags) }));
     } else {
       state.recurringExpenses ||= [];
       state.recurringExpenses.unshift({
@@ -5587,6 +5626,11 @@ function bindViewEvents() {
     });
   });
 
+  $("#transactionTagFilter")?.addEventListener("change", (event) => {
+    selectedTransactionTag = event.currentTarget.value;
+    render();
+  });
+
   document.querySelectorAll("[data-bank-stream-payee]").forEach((input) => {
     input.addEventListener("input", () => {
       const draft = (state.transactionInboxDrafts || []).find((item) => item.id === input.dataset.bankStreamPayee);
@@ -5623,6 +5667,16 @@ function bindViewEvents() {
       const draft = (state.transactionInboxDrafts || []).find((item) => item.id === select.dataset.bankStreamLine);
       if (draft) draft.lineId = select.value;
       autosaveState();
+    });
+  });
+
+  document.querySelectorAll("[data-bank-stream-tags]").forEach((input) => {
+    input.addEventListener("change", () => {
+      const draft = (state.transactionInboxDrafts || []).find((item) => item.id === input.dataset.bankStreamTags);
+      if (!draft) return;
+      draft.tags = parseTagsInput(input.value);
+      autosaveState();
+      render();
     });
   });
 
@@ -5668,6 +5722,7 @@ function bindViewEvents() {
       }
       transaction.date = input.value;
       transactionValidationFeedback = "";
+      autosaveState();
       render();
     });
   });
@@ -5676,6 +5731,7 @@ function bindViewEvents() {
     select.addEventListener("change", () => {
       const transaction = state.transactions[Number(select.dataset.ledgerEntryLine)];
       if (transaction) Object.assign(transaction, { lineId: select.value }, lineSnapshot(select.value));
+      autosaveState();
       render();
     });
   });
@@ -5691,6 +5747,17 @@ function bindViewEvents() {
       }
       transaction.accountId = select.value;
       transactionValidationFeedback = "";
+      autosaveState();
+      render();
+    });
+  });
+
+  document.querySelectorAll("[data-ledger-entry-tags]").forEach((input) => {
+    input.addEventListener("change", () => {
+      const transaction = state.transactions[Number(input.dataset.ledgerEntryTags)];
+      if (!transaction) return;
+      transaction.tags = parseTagsInput(input.value);
+      autosaveState();
       render();
     });
   });
@@ -5715,6 +5782,7 @@ function bindViewEvents() {
     select.addEventListener("change", () => {
       const recurring = state.recurringExpenses[Number(select.dataset.recurringLine)];
       if (recurring) recurring.lineId = select.value;
+      autosaveState();
       render();
     });
   });
@@ -5723,6 +5791,7 @@ function bindViewEvents() {
     select.addEventListener("change", () => {
       const recurring = state.recurringExpenses[Number(select.dataset.recurringAccount)];
       if (recurring) recurring.accountId = select.value;
+      autosaveState();
       render();
     });
   });
@@ -5731,6 +5800,7 @@ function bindViewEvents() {
     select.addEventListener("change", () => {
       const recurring = state.recurringExpenses[Number(select.dataset.recurringRecurrence)];
       if (recurring) recurring.recurrence = select.value;
+      autosaveState();
       render();
     });
   });
@@ -7859,7 +7929,7 @@ function acceptImportTransaction(button) {
   transactionValidationFeedback = "";
   const lineId = inboxItem.lineId || allLines()[0]?.id;
   const memo = inboxItem.recurringId ? "Recurring bill" : "Accepted bank stream item";
-  state.transactions.unshift(makeTransaction({ date: inboxItem.date, payee: inboxItem.payee, amount: Number(inboxItem.amount), lineId, memo, accountId: inboxItem.accountId || "", orderNumber: inboxItem.orderNumber || "" }));
+  state.transactions.unshift(makeTransaction({ date: inboxItem.date, payee: inboxItem.payee, amount: Number(inboxItem.amount), lineId, memo, accountId: inboxItem.accountId || "", orderNumber: inboxItem.orderNumber || "", tags: inboxItem.tags || [] }));
   state.transactionInboxDone ||= [];
   if (!state.transactionInboxDone.includes(inboxItem.id)) state.transactionInboxDone.push(inboxItem.id);
   state.transactionInboxDrafts = (state.transactionInboxDrafts || []).filter((item) => item.id !== inboxItem.id);

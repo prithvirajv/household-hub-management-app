@@ -929,6 +929,42 @@ main {
   font-weight: 800;
 }
 
+.tag-summary-total {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  margin-top: 0.6rem;
+  padding: 0.5rem 0.6rem;
+  border-radius: 8px;
+  background: var(--soft-blue);
+}
+
+.tag-transaction-list {
+  margin-top: 0.5rem;
+  max-height: 16rem;
+  overflow-y: auto;
+}
+
+.tag-transaction-row {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.35rem 0.2rem;
+  border-bottom: 1px solid var(--line);
+}
+
+.tag-transaction-row span {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tag-transaction-row:last-of-type {
+  border-bottom: none;
+}
+
 .budget-table {
   display: grid;
   gap: 0.25rem;
@@ -1673,7 +1709,7 @@ main {
    repeating Payee/Amount/Date/etc. labels on every row — is safe here. */
 .ledger-entry-head {
   display: grid;
-  grid-template-columns: minmax(120px, 1fr) minmax(80px, 100px) minmax(120px, 130px) minmax(140px, 1fr) 48px;
+  grid-template-columns: minmax(120px, 1fr) minmax(80px, 100px) minmax(120px, 130px) minmax(140px, 1fr) minmax(120px, 1fr) 48px;
   gap: 0.5rem;
   padding: 0.3rem 0.6rem 0.15rem;
   color: var(--muted);
@@ -1684,7 +1720,7 @@ main {
 }
 
 .ledger-entry-head.has-accounts {
-  grid-template-columns: minmax(120px, 1fr) minmax(80px, 100px) minmax(120px, 130px) minmax(140px, 1fr) minmax(120px, 140px) 48px;
+  grid-template-columns: minmax(120px, 1fr) minmax(80px, 100px) minmax(120px, 130px) minmax(140px, 1fr) minmax(120px, 140px) minmax(120px, 1fr) 48px;
 }
 
 .ledger-entry-head button {
@@ -1706,7 +1742,7 @@ main {
 
 .ledger-entry-row {
   display: grid;
-  grid-template-columns: minmax(120px, 1fr) minmax(80px, 100px) minmax(120px, 130px) minmax(140px, 1fr) 48px;
+  grid-template-columns: minmax(120px, 1fr) minmax(80px, 100px) minmax(120px, 130px) minmax(140px, 1fr) minmax(120px, 1fr) 48px;
   gap: 0.5rem;
   align-items: center;
   padding: 0.4rem 0.6rem;
@@ -1714,7 +1750,7 @@ main {
 }
 
 .ledger-entry-row.has-accounts {
-  grid-template-columns: minmax(120px, 1fr) minmax(80px, 100px) minmax(120px, 130px) minmax(140px, 1fr) minmax(120px, 140px) 48px;
+  grid-template-columns: minmax(120px, 1fr) minmax(80px, 100px) minmax(120px, 130px) minmax(140px, 1fr) minmax(120px, 140px) minmax(120px, 1fr) 48px;
 }
 
 .ledger-entry-row:last-of-type {
