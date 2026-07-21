@@ -3095,6 +3095,37 @@ main {
   padding: 0.5rem 0.7rem;
 }
 
+.iou-split-total {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  padding: 0.5rem 0.6rem;
+  border-radius: 8px;
+  background: var(--soft-blue);
+}
+
+.iou-split-rows {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.iou-split-row {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.iou-split-row input[type="text"] {
+  flex: 2 1 auto;
+  min-width: 0;
+}
+
+.iou-split-row input[type="number"] {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
 .delete-budget-line-impact-group + .delete-budget-line-impact-group {
   margin-top: 0.6rem;
   padding-top: 0.6rem;

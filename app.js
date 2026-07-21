@@ -47,6 +47,7 @@ let selectedTransactionTag = "";
 // a deliberately-chosen report scope.
 let reportsScope = null;
 let reportsCardFilter = "all";
+let reportsSelectedTag = "";
 let calendarFeedback = "";
 // Kept out of state (like calendarFeedback) so a confirmation message never
 // gets saved into the shared household blob and replayed for every login.
@@ -3361,7 +3362,10 @@ function renderReports() {
   const months = cashFlowByMonth(monthKeys.length ? monthKeys : trailingMonthKeys(6));
   const totalIncome = months.reduce((sum, month) => sum + month.income, 0);
   const totalExpenses = months.reduce((sum, month) => sum + month.expenses, 0);
-  const budgetVsActual = budgetVsActualByCategory(monthKeys);
+  const budgetVsActual = budgetVsActualByCategory(monthKeys).filter((row) => row.planned !== 0 || row.actual !== 0);
+  const rangeTransactions = state.transactions.filter((transaction) => (monthKeys.length ? monthKeys : trailingMonthKeys(6)).includes(transaction.date?.slice(0, 7)));
+  const reportsTagGroups = groupTransactionsByTag(rangeTransactions).sort((a, b) => b.total - a.total);
+  const selectedReportsTagGroup = reportsTagGroups.find((group) => group.key === reportsSelectedTag) || null;
   const showCard = (key) => reportsCardFilter === "all" || reportsCardFilter === key;
   return `
     <section class="card reports-toolbar">
@@ -3381,6 +3385,7 @@ function renderReports() {
           <option value="cashflow" ${reportsCardFilter === "cashflow" ? "selected" : ""}>Cash flow</option>
           <option value="category" ${reportsCardFilter === "category" ? "selected" : ""}>Category spend</option>
           <option value="budgetvsactual" ${reportsCardFilter === "budgetvsactual" ? "selected" : ""}>Budget vs Expense</option>
+          <option value="tags" ${reportsCardFilter === "tags" ? "selected" : ""}>Tags</option>
         </select></label>
       </div>
     </section>
@@ -3410,6 +3415,23 @@ function renderReports() {
       </div>
       <aside class="side-stack">
         <section class="card"><div class="card-label">Budget health</div><h3>Snapshot</h3><div class="snapshot-grid"><span>Planned <b>${money.format(plannedTotal())}</b></span><span>Spent <b>${money.format(spentTotal())}</b></span><span>Cash left <b>${money.format(remainingTotal())}</b></span><span>Net worth <b>${money.format(currentNetWorth)}</b></span></div>${categories.slice(0, 3).map((category) => compactRow(`${category.name} - ${money.format(category.value)}`, "", "")).join("")}</section>
+        ${showCard("tags") ? `<section class="card">
+          <div class="card-label">Insight</div><h3>Tags</h3>
+          ${reportsTagGroups.length ? `<label>Group by tag<select id="reportsTagFilter">
+            <option value="">All tags</option>
+            ${reportsTagGroups.map((group) => `<option value="${escapeHtml(group.key)}" ${group.key === reportsSelectedTag ? "selected" : ""}>${escapeHtml(group.label)} (${money.format(group.total)})</option>`).join("")}
+          </select></label>` : `<div class="empty-inline">No tagged transactions in this range yet.</div>`}
+          ${selectedReportsTagGroup ? `
+            <div class="tag-summary-total"><span>${escapeHtml(selectedReportsTagGroup.label)} total</span><b>${money.format(selectedReportsTagGroup.total)}</b></div>
+            <div class="tag-transaction-list">${[...selectedReportsTagGroup.transactions].sort((a, b) => (b.date || "").localeCompare(a.date || "")).map((transaction) => `
+              <div class="tag-transaction-row">
+                <span>${escapeHtml(transaction.payee)}</span>
+                <small>${formatShortDate(transaction.date)}</small>
+                <b>${money.format(transaction.amount)}</b>
+              </div>
+            `).join("")}</div>
+          ` : ""}
+        </section>` : ""}
       </aside>
     </section>`;
 }
@@ -5836,6 +5858,11 @@ function bindViewEvents() {
 
   $("#transactionTagFilter")?.addEventListener("change", (event) => {
     selectedTransactionTag = event.currentTarget.value;
+    render();
+  });
+
+  $("#reportsTagFilter")?.addEventListener("change", (event) => {
+    reportsSelectedTag = event.currentTarget.value;
     render();
   });
 
@@ -8605,21 +8632,68 @@ $("#exportReportForm").addEventListener("submit", async (event) => {
   }
 });
 
+let assignIouDraftTotal = 0;
+let iouSplitRows = [];
+
+function updateIouRemainder() {
+  const splitTotal = iouSplitRows.reduce((sum, row) => sum + (Number(row.amount) || 0), 0);
+  const remainder = Math.round((assignIouDraftTotal - splitTotal) * 100) / 100;
+  const remainderEl = $("#assignIouRemainder");
+  remainderEl.textContent = money.format(remainder);
+  remainderEl.classList.toggle("danger", remainder < 0);
+}
+
+function renderIouSplitRows() {
+  const container = $("#assignIouSplitRows");
+  container.innerHTML = iouSplitRows.map((row, index) => `
+    <div class="iou-split-row">
+      <input type="text" placeholder="Friend's name" value="${escapeHtml(row.person)}" data-iou-split-person="${index}" required>
+      <input type="number" step="0.01" min="0.01" placeholder="Amount" value="${row.amount || ""}" data-iou-split-amount="${index}">
+      <button type="button" class="icon-button ghost" data-remove-iou-split-row="${index}" aria-label="Remove person">×</button>
+    </div>
+  `).join("");
+  container.querySelectorAll("[data-iou-split-person]").forEach((input) => {
+    input.addEventListener("input", () => { iouSplitRows[Number(input.dataset.iouSplitPerson)].person = input.value; });
+  });
+  container.querySelectorAll("[data-iou-split-amount]").forEach((input) => {
+    input.addEventListener("input", () => {
+      iouSplitRows[Number(input.dataset.iouSplitAmount)].amount = Number(input.value);
+      updateIouRemainder();
+    });
+  });
+  container.querySelectorAll("[data-remove-iou-split-row]").forEach((button) => {
+    button.addEventListener("click", () => {
+      iouSplitRows.splice(Number(button.dataset.removeIouSplitRow), 1);
+      renderIouSplitRows();
+    });
+  });
+  updateIouRemainder();
+}
+
 function openAssignIouDialog(draftId) {
   const draft = transactionInboxItems().find((item) => item.id === draftId);
   if (!draft) return;
   pendingIouDraftId = draftId;
+  assignIouDraftTotal = Math.abs(Number(draft.amount || 0));
   const form = $("#assignIouForm");
   form.reset();
-  form.amount.value = Number(draft.amount || 0);
   form.reason.value = draft.payee || "";
   form.date.value = draft.date || dateKey(new Date());
+  $("#assignIouTotal").textContent = money.format(assignIouDraftTotal);
+  // Default to an even 2-way split (you + one friend), like Splitwise's
+  // default - the user can edit the amount or add more people from here.
+  iouSplitRows = [{ person: "", amount: Math.round((assignIouDraftTotal / 2) * 100) / 100 }];
+  renderIouSplitRows();
   $("#assignIouMessage").textContent = "";
   $("#assignIouDialog").showModal();
 }
 
 $("#closeAssignIouDialogButton").addEventListener("click", () => $("#assignIouDialog").close());
 $("#cancelAssignIouButton").addEventListener("click", () => $("#assignIouDialog").close());
+$("#addIouSplitRowButton").addEventListener("click", () => {
+  iouSplitRows.push({ person: "", amount: 0 });
+  renderIouSplitRows();
+});
 
 $("#assignIouForm").addEventListener("submit", (event) => {
   event.preventDefault();
@@ -8630,39 +8704,53 @@ $("#assignIouForm").addEventListener("submit", (event) => {
     return;
   }
   const data = Object.fromEntries(new FormData(event.currentTarget));
-  const person = String(data.person || "").trim();
-  const amount = Number(data.amount);
-  if (!person || !(amount > 0)) {
-    $("#assignIouMessage").textContent = "Enter a friend's name and a positive amount.";
+  const splits = iouSplitRows
+    .map((row) => ({ person: String(row.person || "").trim(), amount: Number(row.amount) }))
+    .filter((row) => row.person && row.amount > 0);
+  if (!splits.length) {
+    $("#assignIouMessage").textContent = "Enter at least one friend's name and a positive amount.";
+    return;
+  }
+  const total = assignIouDraftTotal;
+  const splitTotal = splits.reduce((sum, row) => sum + row.amount, 0);
+  if (splitTotal > total + 0.005) {
+    $("#assignIouMessage").textContent = `Splits add up to ${money.format(splitTotal)}, more than the ${money.format(total)} total.`;
     return;
   }
 
   const draftAccountId = draft.accountId || "";
-  // This still counts as a normal expense once accepted (the household did
-  // pay the full bill) - the IOU is a separate record tracking the friend's
-  // share owed back, not a replacement for the transaction.
+  const originalAmount = Number(draft.amount);
+  const sign = originalAmount < 0 ? -1 : 1;
+  const yourShare = Math.round((total - splitTotal) * 100) / 100;
+  // Only your remaining share (after everyone else's split) is accepted as
+  // your own expense - mutate the draft's amount in place before accepting
+  // so the real ledger transaction reflects just your portion of the bill.
+  draft.amount = sign * yourShare;
   acceptImportTransaction({ dataset: { acceptImport: draftId } });
   const stillPending = (state.transactionInboxDrafts || []).some((item) => item.id === draftId);
   if (stillPending) {
     // acceptImportTransaction bailed out (e.g. the linked account is closed
     // as of this date) and already surfaced its own message above the
-    // Ledger - don't create an orphan IOU for a transaction that was never
-    // actually accepted.
+    // Ledger - restore the original amount and don't create an orphan IOU
+    // for a transaction that was never actually accepted.
+    draft.amount = originalAmount;
     $("#assignIouMessage").textContent = "Could not accept this item - see the message above the Ledger, then try again.";
     return;
   }
 
   state.ious ||= [];
-  state.ious.push({
-    id: uniqueId("iou"),
-    person,
-    amount,
-    direction: "owed_to_me",
-    reason: String(data.reason || "").trim(),
-    date: data.date || draft.date,
-    accountId: draftAccountId,
-    settled: false,
-    settledDate: ""
+  splits.forEach((split) => {
+    state.ious.push({
+      id: uniqueId("iou"),
+      person: split.person,
+      amount: split.amount,
+      direction: "owed_to_me",
+      reason: String(data.reason || "").trim(),
+      date: data.date || draft.date,
+      accountId: draftAccountId,
+      settled: false,
+      settledDate: ""
+    });
   });
   autosaveState();
   pendingIouDraftId = null;
