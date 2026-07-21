@@ -1192,7 +1192,7 @@ function metricsForView() {
     const active = state.ious.filter((iou) => !iou.settled);
     const youOweTotal = active.filter((iou) => iou.direction === "i_owe").reduce((sum, iou) => sum + Number(iou.amount || 0), 0);
     const owedToYouTotal = active.filter((iou) => iou.direction === "owed_to_me").reduce((sum, iou) => sum + Number(iou.amount || 0), 0);
-    return [["You owe", money.format(youOweTotal), "to pay back"], ["Owed to you", money.format(owedToYouTotal), "coming back to you"], ["Net", money.format(owedToYouTotal - youOweTotal), "owed to you minus what you owe"], ["Open IOUs", String(active.length), "not yet settled"]];
+    return [["You owe", money.format(youOweTotal), "to pay back"], ["Owed to you", money.format(owedToYouTotal), "coming back to you"], ["Net", money.format(owedToYouTotal - youOweTotal), "owed to you minus what you owe"], ["Open items", String(active.length), "not yet settled"]];
   }
   if (currentView === "notes") return [];
   if (currentView === "journal") return [];
@@ -1468,7 +1468,7 @@ function ledgerEntryRow(transaction, index) {
       <input aria-label="Date" type="date" data-ledger-entry-date="${index}" value="${transaction.date}">
       <select class="income-recurrence-select" aria-label="Subcategory" data-ledger-entry-line="${index}">${lineOptions}</select>
       ${state.accounts.length ? `<select class="income-recurrence-select" aria-label="Account" data-ledger-entry-account="${index}"><option value="">Not linked</option>${accountOptions(transaction.accountId || "")}</select>` : ""}
-      <button class="icon-button" data-assign-iou-ledger="${index}" type="button" aria-label="Split with a friend (IOU) ${escapeHtml(transaction.payee)}">👥</button>
+      <button class="icon-button" data-assign-iou-ledger="${index}" type="button" aria-label="Split with a friend ${escapeHtml(transaction.payee)}">👥</button>
       <button class="icon-button danger-button" data-delete-transaction="${index}" type="button" aria-label="Delete ${escapeHtml(transaction.payee)}">×</button>
       ${tagChipsHtml(transaction.tags, "data-remove-ledger-tag", "data-add-ledger-tag", index)}
     </div>`;
@@ -1649,7 +1649,7 @@ function renderTransactions() {
               <label class="row-field row-select"><small>Subcategory</small><select data-bank-stream-line="${transaction.id}">${lineOptions(transaction.lineId)}</select></label>
               ${state.accounts.length ? `<label class="row-field row-select"><small>Account</small><select data-bank-stream-account="${transaction.id}"><option value="">Not linked</option>${accountOptions(transaction.accountId || "")}</select></label>` : ""}
               <button class="icon-button" data-accept-import="${transaction.id}" type="button" aria-label="Accept ${escapeHtml(transaction.payee)}">✓</button>
-              <button class="icon-button" data-assign-iou="${transaction.id}" type="button" aria-label="Split with a friend (IOU) ${escapeHtml(transaction.payee)}">👥</button>
+              <button class="icon-button" data-assign-iou="${transaction.id}" type="button" aria-label="Split with a friend ${escapeHtml(transaction.payee)}">👥</button>
               <button class="icon-button danger-button" data-dismiss-import="${transaction.id}" type="button" aria-label="Dismiss ${escapeHtml(transaction.payee)}">×</button>
               ${tagChipsHtml(transaction.tags, "data-remove-bank-stream-tag", "data-add-bank-stream-tag", transaction.id)}
             </div>
@@ -3186,7 +3186,7 @@ function renderIOUs() {
       </div>
       <div class="card">
         <div class="card-label">Shared expense</div><h3>Split a bill with friends</h3>
-        <p class="muted">Enter the total bill including your own share — only your friends' shares become IOUs.</p>
+        <p class="muted">Enter the total bill including your own share — only your friends' shares are tracked as amounts they owe you.</p>
         <form id="splitExpenseForm" class="mini-form split-expense-form">
           <label>What for<input name="reason" placeholder="Dinner" required></label>
           <label>Total bill (including your share)<input name="amount" type="number" step="0.01" min="0.01" placeholder="90" required></label>
@@ -3204,7 +3204,7 @@ function renderIOUs() {
           <button type="submit" class="form-row-full">Split and add</button>
         </form>
       </div>
-      ${balances.length ? balances.map(personBalanceCard).join("") : `<div class="card"><div class="empty-inline">No IOUs yet</div></div>`}
+      ${balances.length ? balances.map(personBalanceCard).join("") : `<div class="card"><div class="empty-inline">No shared expenses yet</div></div>`}
       ${settled.length ? `<details class="card ious-settled-details">
         <summary>Settled (${settled.length})</summary>
         ${settled.map((iou) => iouRow(iou)).join("")}

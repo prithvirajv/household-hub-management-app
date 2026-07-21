@@ -7,7 +7,7 @@
     <title>FamilyLoop</title>
     <link rel="icon" type="image/svg+xml" href="/assets/favicon.svg">
     <link rel="apple-touch-icon" href="/assets/apple-touch-icon.png">
-    <link rel="stylesheet" href="/styles.css?v=20260721-6">
+    <link rel="stylesheet" href="/styles.css?v=20260721-7">
     <script src="https://accounts.google.com/gsi/client" async defer></script>
   </head>
   <body>
@@ -229,7 +229,7 @@
           <div><span class="card-label">Shared Expenses</span><h2>Split with friends</h2></div>
           <button id="closeAssignIouDialogButton" class="icon-button ghost" type="button" aria-label="Close">×</button>
         </div>
-        <p class="muted">Only your remaining share is accepted as your own expense - everyone else's share becomes a separate IOU you're owed.</p>
+        <p class="muted">Only your remaining share is accepted as your own expense - everyone else's share becomes a separate amount they owe you.</p>
         <form id="assignIouForm">
           <div class="iou-split-total"><span>Total bill</span><b id="assignIouTotal">$0.00</b></div>
           <label>Split type<select id="assignIouSplitType">
@@ -245,7 +245,7 @@
           <p id="assignIouMessage" class="form-message"></p>
           <div class="dialog-actions">
             <button id="cancelAssignIouButton" class="ghost" type="button">Cancel</button>
-            <button type="submit">Accept &amp; add IOUs</button>
+            <button type="submit">Accept &amp; split</button>
           </div>
         </form>
       </div>
@@ -278,7 +278,7 @@
       </div>
     </template>
 
-    <script src="/lib/shared-logic.js?v=20260721-6"></script>
-    <script src="/app.js?v=20260721-6"></script>
+    <script src="/lib/shared-logic.js?v=20260721-7"></script>
+    <script src="/app.js?v=20260721-7"></script>
   </body>
 </html>
