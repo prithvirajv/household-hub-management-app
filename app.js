@@ -1130,7 +1130,7 @@ function renderShell() {
                     : isDecisionsView
                       ? "Household decisions"
                       : isIousView
-                        ? "Shared expenses & IOUs"
+                        ? "Shared expenses & debts"
                         : isProfileView
                           ? "Your profile"
                           : isHomeView
@@ -3043,6 +3043,16 @@ function wireFriendRow(container, index, rows) {
 // still works). Best-effort: if the invite request fails, the friend is
 // still kept on file and the caller's split/IOU still saves - only the
 // invite itself is skipped.
+async function sendFriendInviteAndMark(friend) {
+  try {
+    await api("/api/friends/invite", { method: "POST", body: JSON.stringify({ name: friend.name, email: friend.email, inviterName: sessionUser?.name || "" }) });
+    friend.invitedAt = new Date().toISOString();
+  } catch (_error) {
+    // Invite email failed to send - the friend stays on file so whatever
+    // saved it still saves; just no invite was recorded this time.
+  }
+}
+
 async function inviteFriendIfNew(name, email) {
   const trimmedEmail = String(email || "").trim();
   if (!trimmedEmail) return null;
@@ -3052,14 +3062,68 @@ async function inviteFriendIfNew(name, email) {
   if (existing) return existing;
   const friend = { id: uniqueId("friend"), name: String(name || "").trim() || trimmedEmail, email: trimmedEmail, invitedAt: "" };
   state.friends.push(friend);
-  try {
-    await api("/api/friends/invite", { method: "POST", body: JSON.stringify({ name: friend.name, email: friend.email, inviterName: sessionUser?.name || "" }) });
-    friend.invitedAt = new Date().toISOString();
-  } catch (_error) {
-    // Invite email failed to send - the friend stays on file so the split/
-    // IOU still saves; just no invite was recorded this time.
-  }
+  await sendFriendInviteAndMark(friend);
   return friend;
+}
+
+// Adds or updates a friend by name (rather than by email, like
+// inviteFriendIfNew) - this is how the Friends card on the Shared Expenses
+// page lets you add someone with no email yet (just a name used on a debt
+// record) and come back later to fill in their email, which is what
+// actually triggers the invite: only when the email is genuinely new does
+// this send one, so re-saving an unchanged email is a no-op.
+async function upsertFriend(name, email) {
+  ensureFriendsData();
+  const trimmedName = String(name || "").trim();
+  const trimmedEmail = String(email || "").trim();
+  if (!trimmedName) return null;
+  const key = trimmedName.toLowerCase();
+  let friend = state.friends.find((item) => item.name.trim().toLowerCase() === key);
+  if (!friend) {
+    friend = { id: uniqueId("friend"), name: trimmedName, email: "", invitedAt: "" };
+    state.friends.push(friend);
+  }
+  const isNewEmail = Boolean(trimmedEmail) && trimmedEmail.toLowerCase() !== friend.email.toLowerCase();
+  friend.name = trimmedName;
+  friend.email = trimmedEmail || friend.email;
+  if (isNewEmail) await sendFriendInviteAndMark(friend);
+  return friend;
+}
+
+// Every distinct person named on a debt/shared-expense record that isn't
+// already a real state.friends entry - a name-only debt (e.g. from Record a
+// debt) never creates a friend record on its own since there's no email to
+// invite, so these show up here as a way to add one after the fact.
+function friendsWithoutEmailFromIous() {
+  const known = new Set(state.friends.map((friend) => friend.name.trim().toLowerCase()));
+  const seen = new Set();
+  const names = [];
+  (state.ious || []).forEach((iou) => {
+    const key = String(iou.person || "").trim().toLowerCase();
+    if (!key || known.has(key) || seen.has(key)) return;
+    seen.add(key);
+    names.push(String(iou.person).trim());
+  });
+  return names;
+}
+
+function friendsListForDisplay() {
+  ensureFriendsData();
+  const real = state.friends.map((friend) => ({ ...friend, isVirtual: false }));
+  const virtual = friendsWithoutEmailFromIous().map((name) => ({ id: "", name, email: "", invitedAt: "", isVirtual: true }));
+  return [...real, ...virtual].sort((a, b) => a.name.localeCompare(b.name));
+}
+
+function friendListRow(friend, index) {
+  const statusNote = friend.invitedAt
+    ? `<small>Invited ${formatShortDate(friend.invitedAt.slice(0, 10))}</small>`
+    : friend.email
+      ? "" : `<small>No email yet</small>`;
+  return `<div class="compact-row">
+    <div><strong>${escapeHtml(friend.name)}</strong>${statusNote}</div>
+    <input type="email" placeholder="Add email to invite" value="${escapeHtml(friend.email)}" data-friend-list-email="${index}">
+    ${friend.isVirtual ? "" : `<button class="icon-button danger-button" data-delete-friend="${friend.id}" type="button" aria-label="Remove ${escapeHtml(friend.name)}">×</button>`}
+  </div>`;
 }
 
 function iouRow(iou) {
@@ -3160,11 +3224,22 @@ function renderIOUs() {
   const today = dateKey(new Date());
   const balances = netBalancesByPerson(state.ious);
   const settled = state.ious.filter((iou) => iou.settled);
+  const friendsList = friendsListForDisplay();
   return `
     <section class="ious-layout">
       <p class="muted">Track money you've borrowed from people, and split a shared expense you already paid so friends can pay you back.</p>
       <div class="card">
-        <div class="card-label">Add</div><h3>Record an IOU</h3>
+        <div class="card-label">Shared Expenses</div><h3>Friends</h3>
+        <p class="muted">Everyone you've split a debt or expense with - add an email any time to send them an invite.</p>
+        <form id="addFriendForm" class="mini-form">
+          <label>Name<input name="name" placeholder="Jordan" required></label>
+          <label>Email (optional)<input name="email" type="email" placeholder="jordan@example.com"></label>
+          <button type="submit" class="form-row-full">Add friend</button>
+        </form>
+        ${friendsList.length ? `<div id="friendListRows">${friendsList.map((friend, index) => friendListRow(friend, index)).join("")}</div>` : `<div class="empty-inline">No friends yet</div>`}
+      </div>
+      <div class="card">
+        <div class="card-label">Add</div><h3>Record a debt</h3>
         <form id="iouForm" class="mini-form iou-form">
           <label>Person
             <div class="custom-combobox friend-name-combobox">
@@ -3181,7 +3256,7 @@ function renderIOUs() {
           <label class="form-row-full">Reason (optional)<input name="reason" placeholder="Gas money"></label>
           <label>Date<input name="date" type="date" value="${today}"></label>
           ${state.accounts.length ? `<label>Account (optional)<select name="accountId"><option value="">Not linked</option>${accountOptions("", { excludeType: "credit_card" })}</select></label>` : ""}
-          <button type="submit" class="form-row-full">Add IOU</button>
+          <button type="submit" class="form-row-full">Add debt</button>
         </form>
       </div>
       <div class="card">
@@ -7868,6 +7943,38 @@ function bindViewEvents() {
     event.currentTarget.reset();
     autosaveState();
     render();
+  });
+
+  $("#addFriendForm")?.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    const data = Object.fromEntries(new FormData(event.currentTarget));
+    const name = String(data.name || "").trim();
+    if (!name) return;
+    await upsertFriend(name, data.email);
+    autosaveState();
+    render();
+  });
+
+  document.querySelectorAll("[data-friend-list-email]").forEach((input) => {
+    input.addEventListener("change", async () => {
+      const friend = friendsListForDisplay()[Number(input.dataset.friendListEmail)];
+      if (!friend) return;
+      const newEmail = input.value.trim();
+      if (!newEmail || newEmail.toLowerCase() === friend.email.toLowerCase()) return;
+      await upsertFriend(friend.name, newEmail);
+      autosaveState();
+      render();
+    });
+  });
+
+  document.querySelectorAll("[data-delete-friend]").forEach((button) => {
+    button.addEventListener("click", () => {
+      const index = state.friends.findIndex((friend) => friend.id === button.dataset.deleteFriend);
+      if (index === -1) return;
+      state.friends.splice(index, 1);
+      autosaveState();
+      render();
+    });
   });
 
   $("#iouForm")?.addEventListener("submit", async (event) => {
