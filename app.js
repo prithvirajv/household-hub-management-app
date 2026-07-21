@@ -3192,7 +3192,7 @@ function recomputeSplitBillRows() {
   const remainderEl = $("#splitBillRemainder");
   if (!result.ok) {
     if (messageEl) messageEl.textContent = result.error;
-    if (remainderEl) remainderEl.textContent = money.format(0);
+    if (remainderEl) remainderEl.textContent = exactMoney.format(0);
     return;
   }
   if (messageEl) messageEl.textContent = "";
@@ -3204,7 +3204,7 @@ function recomputeSplitBillRows() {
     });
   }
   if (remainderEl) {
-    remainderEl.textContent = money.format(result.payerAmount);
+    remainderEl.textContent = exactMoney.format(result.payerAmount);
     remainderEl.classList.toggle("danger", result.payerAmount < 0);
   }
 }
@@ -9050,7 +9050,7 @@ function updateIouRemainder() {
   const splitTotal = iouSplitRows.reduce((sum, row) => sum + (Number(row.amount) || 0), 0);
   const remainder = Math.round((assignIouDraftTotal - splitTotal) * 100) / 100;
   const remainderEl = $("#assignIouRemainder");
-  remainderEl.textContent = money.format(remainder);
+  remainderEl.textContent = exactMoney.format(remainder);
   remainderEl.classList.toggle("danger", remainder < 0);
 }
 
@@ -9130,7 +9130,7 @@ function openAssignIouDialog(source) {
   form.reason.value = record.payee || "";
   form.date.value = record.date || dateKey(new Date());
   $("#assignIouSplitType").value = "exact";
-  $("#assignIouTotal").textContent = money.format(assignIouDraftTotal);
+  $("#assignIouTotal").textContent = exactMoney.format(assignIouDraftTotal);
   // Default to an even 2-way split (you + one friend), like Splitwise's
   // default - the user can edit the amount or add more people from here.
   iouSplitRows = [{ person: "", amount: Math.round((assignIouDraftTotal / 2) * 100) / 100, percent: 50, email: "", friendId: "" }];
@@ -9169,31 +9169,50 @@ $("#assignIouForm").addEventListener("submit", async (event) => {
   const total = assignIouDraftTotal;
   const splitTotal = splits.reduce((sum, row) => sum + row.amount, 0);
   if (splitTotal > total + 0.005) {
-    $("#assignIouMessage").textContent = `Splits add up to ${money.format(splitTotal)}, more than the ${money.format(total)} total.`;
+    $("#assignIouMessage").textContent = `Splits add up to ${exactMoney.format(splitTotal)}, more than the ${exactMoney.format(total)} total.`;
     return;
   }
 
   const recordAccountId = record.accountId || "";
   const originalAmount = Number(record.amount);
   const sign = originalAmount < 0 ? -1 : 1;
-  const yourShare = Math.round((total - splitTotal) * 100) / 100;
+  const rawYourShare = Math.round((total - splitTotal) * 100) / 100;
+  // Friends' splits can fully cover the bill, leaving nothing for you to
+  // keep as your own expense - a $0 ledger entry in that case would have no
+  // effect on the budget and just sit there as clutter, so this drops the
+  // draft/transaction entirely instead of accepting/keeping a zero-amount
+  // one. The IOUs pushed below already carry a copy of what it was for
+  // (reason/date), so nothing is lost by not keeping a $0 ledger row too.
+  const fullySplit = rawYourShare <= 0.005;
+  const yourShare = fullySplit ? 0 : rawYourShare;
 
   if (source.type === "draft") {
-    // Only your remaining share (after everyone else's split) is accepted as
-    // your own expense - mutate the draft's amount in place before accepting
-    // so the real ledger transaction reflects just your portion of the bill.
-    record.amount = sign * yourShare;
-    acceptImportTransaction({ dataset: { acceptImport: source.id } });
-    const stillPending = (state.transactionInboxDrafts || []).some((item) => item.id === source.id);
-    if (stillPending) {
-      // acceptImportTransaction bailed out (e.g. the linked account is closed
-      // as of this date) and already surfaced its own message above the
-      // Ledger - restore the original amount and don't create an orphan IOU
-      // for a transaction that was never actually accepted.
-      record.amount = originalAmount;
-      $("#assignIouMessage").textContent = "Could not accept this item - see the message above the Ledger, then try again.";
-      return;
+    if (fullySplit) {
+      state.transactionInboxDrafts = (state.transactionInboxDrafts || []).filter((item) => item.id !== source.id);
+      state.transactionInboxDone ||= [];
+      if (!state.transactionInboxDone.includes(source.id)) state.transactionInboxDone.push(source.id);
+      state.household.activity.unshift(`Split ${record.payee} entirely with friends - nothing left to add to the Ledger`);
+    } else {
+      // Only your remaining share (after everyone else's split) is accepted
+      // as your own expense - mutate the draft's amount in place before
+      // accepting so the real ledger transaction reflects just your portion.
+      record.amount = sign * yourShare;
+      acceptImportTransaction({ dataset: { acceptImport: source.id } });
+      const stillPending = (state.transactionInboxDrafts || []).some((item) => item.id === source.id);
+      if (stillPending) {
+        // acceptImportTransaction bailed out (e.g. the linked account is
+        // closed as of this date) and already surfaced its own message above
+        // the Ledger - restore the original amount and don't create an
+        // orphan IOU for a transaction that was never actually accepted.
+        record.amount = originalAmount;
+        $("#assignIouMessage").textContent = "Could not accept this item - see the message above the Ledger, then try again.";
+        return;
+      }
     }
+  } else if (fullySplit) {
+    const index = Number(source.id);
+    if (index >= 0) state.transactions.splice(index, 1);
+    state.household.activity.unshift(`Split ${record.payee} entirely with friends - removed from the Ledger`);
   } else {
     // Already an accepted Ledger transaction - no accept step needed, just
     // reduce it to your remaining share directly (the plain Ledger amount
