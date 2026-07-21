@@ -1356,6 +1356,11 @@ main {
   color: var(--gold);
 }
 
+.pill-info {
+  background: rgba(53, 105, 212, 0.14);
+  color: var(--blue);
+}
+
 .pill-button {
   display: inline-flex;
   align-items: center;

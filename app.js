@@ -240,8 +240,8 @@ function transactionAssignmentLabel(transaction) {
   return `${category} - ${subcategory}`;
 }
 
-function makeTransaction({ date, payee, amount, lineId, memo, accountId = "" }) {
-  return { date, payee, amount, lineId, memo, accountId, ...lineSnapshot(lineId) };
+function makeTransaction({ date, payee, amount, lineId, memo, accountId = "", orderNumber = "" }) {
+  return { date, payee, amount, lineId, memo, accountId, orderNumber, ...lineSnapshot(lineId) };
 }
 
 function snapshotTransactionsForLine(line) {
@@ -1433,7 +1433,8 @@ function renderTransactions() {
       possibleDuplicate: isDuplicateTransaction(transaction, [
         ...state.transactions,
         ...(state.transactionInboxDrafts || []).filter((other) => other.id !== transaction.id)
-      ])
+      ]),
+      refundMatch: orderRefundMatch(transaction)
     }));
   // Recent transactions is already filtered to the viewed month, so filter
   // Bank stream to match — otherwise a pending item from a different month
@@ -1529,7 +1530,7 @@ function renderTransactions() {
           <div class="section-head">
             <div><span class="card-label">Bank expense</span><h3>Bank stream</h3></div>
             <div class="button-row">
-              <label class="documents-upload-button">+ Import CSV<input type="file" id="bankStreamCsvInput" accept=".csv,text/csv"></label>
+              <label class="documents-upload-button">+ Import CSV/PDF<input type="file" id="bankStreamCsvInput" accept=".csv,text/csv,.pdf,application/pdf"></label>
               <button id="addTransactionButton" type="button">+ Add transaction</button>
             </div>
           </div>
@@ -1542,6 +1543,7 @@ function renderTransactions() {
             <div class="bank-stream-row" data-bank-stream-row="${transaction.id}">
               ${transaction.recurringId ? `<span class="pill">Recurring</span>` : ""}
               ${transaction.possibleDuplicate ? `<span class="pill pill-warning" title="Matches an existing transaction with the same amount within 2 days">Possible duplicate</span>` : ""}
+              ${transaction.refundMatch ? `<span class="pill pill-info" title="Refund for the ${money.format(transaction.refundMatch.amount)} purchase on ${formatShortDate(transaction.refundMatch.date)} (order ${escapeHtml(transaction.orderNumber)})">Refund match</span>` : ""}
               <label class="row-field row-payee"><small>Payee</small><input data-bank-stream-payee="${transaction.id}" value="${escapeHtml(transaction.payee)}"></label>
               <label class="row-field row-date"><small>Date</small><input type="date" data-bank-stream-date="${transaction.id}" value="${transaction.date}"></label>
               <label class="row-field row-amount"><small>Amount</small><input class="money-input" type="number" step="0.01" data-bank-stream-amount="${transaction.id}" value="${transaction.amount}"></label>
@@ -4223,6 +4225,19 @@ function transactionInboxItems() {
   return [...(state.transactionInboxDrafts || [])];
 }
 
+// A refund/return often lands in a separate statement import weeks after the
+// original purchase, so this checks against every real ledger transaction
+// (not just the current import batch) - the same orderNumber persisted on
+// the original purchase is how the two get reconnected across sessions.
+// Recomputed live (never cached on the draft) for the same reason
+// possibleDuplicate is: a match that appears after the fact - because the
+// original purchase was accepted into the ledger later - must not stay
+// stuck showing "no match" forever.
+function orderRefundMatch(candidate) {
+  if (!candidate.orderNumber || Number(candidate.amount) >= 0) return null;
+  return state.transactions.find((transaction) => transaction.orderNumber === candidate.orderNumber && Number(transaction.amount) > 0) || null;
+}
+
 function bindViewEvents() {
   if (googleMapsApiKey) attachLocationAutocomplete();
   updateLocationDirectionsPreview();
@@ -4277,6 +4292,7 @@ function bindViewEvents() {
 
   $("#homeOpenNoteRemindersButton")?.addEventListener("click", () => {
     state.notes.activeView = "reminders";
+    autosaveState();
     goToViewAndRun("notes");
   });
 
@@ -4319,6 +4335,7 @@ function bindViewEvents() {
     button.addEventListener("click", () => {
       state.notes.activeView = button.dataset.notesView;
       state.notes.activeLabel = "";
+      autosaveState();
       render();
     });
   });
@@ -4327,22 +4344,26 @@ function bindViewEvents() {
     button.addEventListener("click", () => {
       state.notes.activeView = "label";
       state.notes.activeLabel = button.dataset.notesLabel;
+      autosaveState();
       render();
     });
   });
 
   $("#openNoteComposerButton")?.addEventListener("click", () => {
     state.notes.composerOpen = true;
+    autosaveState();
     render();
   });
 
   $("#closeNoteComposerButton")?.addEventListener("click", () => {
     state.notes.composerOpen = false;
+    autosaveState();
     render();
   });
 
   $("#emptyNotesTrashButton")?.addEventListener("click", () => {
     state.notes.entries = state.notes.entries.filter((note) => !note.trashed);
+    autosaveState();
     render();
   });
 
@@ -4416,6 +4437,7 @@ function bindViewEvents() {
     state.notes.composerOpen = false;
     state.notes.activeView = "notes";
     state.notes.activeLabel = "";
+    autosaveState();
     render();
   });
 
@@ -4445,6 +4467,7 @@ function bindViewEvents() {
       const note = state.notes.entries.find((item) => item.id === noteId);
       if (!note) return;
       note.checklist = applyChecklistToggle(note.checklist, itemId, input.checked);
+      autosaveState();
       render();
     });
   });
@@ -4472,6 +4495,7 @@ function bindViewEvents() {
           } else {
             checklistItem.text = selectedText;
           }
+          autosaveState();
           render();
         });
       });
@@ -4505,6 +4529,7 @@ function bindViewEvents() {
       const note = state.notes.entries.find((item) => item.id === form.dataset.addNoteItem);
       const text = String(new FormData(form).get("item") || "").trim();
       if (!addOrRestoreChecklistItem(note, text)) return;
+      autosaveState();
       render();
     });
   });
@@ -4525,6 +4550,7 @@ function bindViewEvents() {
         button.addEventListener("click", () => {
           const note = state.notes.entries.find((item) => item.id === input.dataset.noteItemInput);
           if (!addOrRestoreChecklistItem(note, button.dataset.noteItemSuggestion)) return;
+          autosaveState();
           render();
         });
       });
@@ -4533,7 +4559,7 @@ function bindViewEvents() {
       if (event.key === "Enter") {
         event.preventDefault();
         const note = state.notes.entries.find((item) => item.id === input.dataset.noteItemInput);
-        if (addOrRestoreChecklistItem(note, input.value)) render();
+        if (addOrRestoreChecklistItem(note, input.value)) { autosaveState(); render(); }
         return;
       }
       if (event.key === "Escape") {
@@ -4552,6 +4578,7 @@ function bindViewEvents() {
       note.checklist.forEach((item) => {
         if (item.parentId === itemId) item.parentId = "";
       });
+      autosaveState();
       render();
     });
   });
@@ -4602,6 +4629,7 @@ function bindViewEvents() {
         if (!parent) return;
         item.parentId = parent.id;
       }
+      autosaveState();
       render();
     });
   });
@@ -4611,6 +4639,7 @@ function bindViewEvents() {
       const note = state.notes.entries.find((item) => item.id === button.dataset.pinNote);
       if (!note) return;
       note.pinned = !note.pinned;
+      autosaveState();
       render();
     });
   });
@@ -4622,6 +4651,7 @@ function bindViewEvents() {
       note.archived = !note.archived;
       note.trashed = false;
       note.trashedAt = "";
+      autosaveState();
       render();
     });
   });
@@ -4632,6 +4662,7 @@ function bindViewEvents() {
       if (!note) return;
       note.reminder = input.value;
       note.reminderAt = input.value ? new Date(input.value).toISOString() : "";
+      autosaveState();
       render();
     });
   });
@@ -4641,6 +4672,7 @@ function bindViewEvents() {
       const note = state.notes.entries.find((item) => item.id === select.dataset.noteColor);
       if (!note) return;
       note.color = select.value;
+      autosaveState();
       render();
     });
   });
@@ -4666,6 +4698,7 @@ function bindViewEvents() {
         trashedAt: "",
         createdAt: new Date().toISOString()
       });
+      autosaveState();
       render();
     });
   });
@@ -4675,6 +4708,7 @@ function bindViewEvents() {
       const note = state.notes.entries.find((item) => item.id === button.dataset.toggleNoteChecklist);
       if (!note) return;
       note.showChecklist = !note.showChecklist;
+      autosaveState();
       render();
     });
   });
@@ -4687,6 +4721,7 @@ function bindViewEvents() {
       note.trashedAt = new Date().toISOString();
       note.archived = false;
       note.pinned = false;
+      autosaveState();
       render();
     });
   });
@@ -4697,6 +4732,7 @@ function bindViewEvents() {
       if (!note) return;
       note.trashed = false;
       note.trashedAt = "";
+      autosaveState();
       render();
     });
   });
@@ -4704,6 +4740,7 @@ function bindViewEvents() {
   document.querySelectorAll("[data-delete-note-forever]").forEach((button) => {
     button.addEventListener("click", () => {
       state.notes.entries = state.notes.entries.filter((note) => note.id !== button.dataset.deleteNoteForever);
+      autosaveState();
       render();
     });
   });
@@ -5289,6 +5326,7 @@ function bindViewEvents() {
       });
       ensureRecurringExpensesPosted();
     }
+    autosaveState();
     render();
   });
 
@@ -5304,6 +5342,7 @@ function bindViewEvents() {
   $("#addIncomeButton")?.addEventListener("click", () => {
     state.paychecks.push({ date: new Date().toISOString().slice(0, 10), name: `Income ${state.paychecks.length + 1}`, amount: 0, assignedLineIds: [] });
     state.budget.income = budgetIncomeFromPaychecks();
+    autosaveState();
     render();
   });
 
@@ -5311,6 +5350,7 @@ function bindViewEvents() {
     button.addEventListener("click", () => {
       const category = state.budget.categories[Number(button.dataset.addLineCategory)];
       category.lines.push({ id: uniqueId(category.name), name: "New subcategory", planned: 0, dueDay: 28 });
+      autosaveState();
       render();
     });
   });
@@ -5320,6 +5360,7 @@ function bindViewEvents() {
     if (!name) return;
     if (state.budget.categories.some((category) => category.name.toLowerCase() === name.toLowerCase())) return;
     state.budget.categories.push({ name, color: "#13936d", lines: [{ id: uniqueId(name), name: "New subcategory", planned: 0, dueDay: 28 }] });
+    autosaveState();
     render();
   });
 
@@ -5359,6 +5400,7 @@ function bindViewEvents() {
     if (category.lines.some((line) => line.name.toLowerCase() === name.toLowerCase())) return;
     category.lines.push({ id: uniqueId(name), name, planned: 0, dueDay: 28 });
     state.household.activity.unshift(`Added ${name} subcategory under ${category.name} from Transactions`);
+    autosaveState();
     render();
   });
 
@@ -5439,12 +5481,70 @@ function bindViewEvents() {
       accountId: "",
       date: new Date().toISOString().slice(0, 10)
     });
+    autosaveState();
     render();
   });
+
+  // Shared by both CSV and PDF imports: builds bank stream drafts from
+  // parsed rows, matching the target account by filename and flagging
+  // likely duplicates - a PDF row additionally carries an orderNumber, and
+  // when it's a refund (negative amount) with an orderNumber that matches an
+  // existing ledger transaction, the draft is pre-assigned to that
+  // transaction's subcategory so the refund nets against the same line the
+  // original purchase was categorized under, instead of landing unassigned.
+  function addBankStreamRows(rows, file, idPrefix) {
+    const matchedAccount = matchAccountByFilename(file.name, state.accounts);
+    state.transactionInboxDrafts ||= [];
+    const alreadyKnown = [...state.transactions, ...state.transactionInboxDrafts];
+    const duplicateCount = rows.filter((row) => isDuplicateTransaction(row, alreadyKnown)).length;
+    rows.forEach((row) => {
+      const refundMatch = row.orderNumber && Number(row.amount) < 0
+        ? state.transactions.find((transaction) => transaction.orderNumber === row.orderNumber && Number(transaction.amount) > 0)
+        : null;
+      state.transactionInboxDrafts.unshift({
+        id: uniqueId(idPrefix),
+        payee: row.payee,
+        amount: row.amount,
+        lineId: refundMatch?.lineId || "",
+        accountId: matchedAccount?.id || "",
+        date: row.date,
+        orderNumber: row.orderNumber || ""
+      });
+    });
+    const duplicateNote = duplicateCount ? ` ${duplicateCount} look${duplicateCount === 1 ? "s" : ""} like a duplicate of a transaction you already have — check before accepting.` : "";
+    bankImportFeedback = `Imported ${rows.length} transaction${rows.length === 1 ? "" : "s"} from ${file.name}${matchedAccount ? ` — linked to ${matchedAccount.name}` : " — no matching account found, pick one per row below"}.${duplicateNote}`;
+    autosaveState();
+    render();
+  }
 
   $("#bankStreamCsvInput")?.addEventListener("change", (event) => {
     const file = event.target.files?.[0];
     if (!file) return;
+    const isPdf = file.type === "application/pdf" || file.name.toLowerCase().endsWith(".pdf");
+    if (isPdf) {
+      const reader = new FileReader();
+      reader.onload = async () => {
+        const dataUrl = String(reader.result || "");
+        const fileBase64 = dataUrl.slice(dataUrl.indexOf(",") + 1);
+        bankImportFeedback = `Reading ${file.name}…`;
+        render();
+        try {
+          const { rows } = await api("/api/bank-statement/parse-pdf", { method: "POST", body: JSON.stringify({ fileBase64 }) });
+          if (!rows.length) {
+            bankImportFeedback = `No transactions found in ${file.name} — this may be a scanned/image PDF that can't be read as text.`;
+            render();
+            return;
+          }
+          addBankStreamRows(rows, file, "pdf-import");
+        } catch (error) {
+          bankImportFeedback = error.message || `Could not read ${file.name}.`;
+          render();
+        }
+      };
+      reader.readAsDataURL(file);
+      event.target.value = "";
+      return;
+    }
     const reader = new FileReader();
     reader.onload = () => {
       const rows = parseBankCsvTransactions(String(reader.result || ""));
@@ -5453,24 +5553,7 @@ function bindViewEvents() {
         render();
         return;
       }
-      const matchedAccount = matchAccountByFilename(file.name, state.accounts);
-      state.transactionInboxDrafts ||= [];
-      const alreadyKnown = [...state.transactions, ...state.transactionInboxDrafts];
-      const duplicateCount = rows.filter((row) => isDuplicateTransaction(row, alreadyKnown)).length;
-      rows.forEach((row) => {
-        state.transactionInboxDrafts.unshift({
-          id: uniqueId("csv-import"),
-          payee: row.payee,
-          amount: row.amount,
-          lineId: "",
-          accountId: matchedAccount?.id || "",
-          date: row.date
-        });
-      });
-      const duplicateNote = duplicateCount ? ` ${duplicateCount} look${duplicateCount === 1 ? "s" : ""} like a duplicate of a transaction you already have — check before accepting.` : "";
-      bankImportFeedback = `Imported ${rows.length} transaction${rows.length === 1 ? "" : "s"} from ${file.name}${matchedAccount ? ` — linked to ${matchedAccount.name}` : " — no matching account found, pick one per row below"}.${duplicateNote}`;
-      autosaveState();
-      render();
+      addBankStreamRows(rows, file, "csv-import");
     };
     reader.readAsText(file);
     event.target.value = "";
@@ -5665,6 +5748,7 @@ function bindViewEvents() {
   document.querySelectorAll("[data-delete-recurring]").forEach((button) => {
     button.addEventListener("click", () => {
       state.recurringExpenses.splice(Number(button.dataset.deleteRecurring), 1);
+      autosaveState();
       render();
     });
   });
@@ -5675,12 +5759,14 @@ function bindViewEvents() {
       const lineId = document.querySelector(`[data-ledger-line="${id}"]`)?.value || allLines()[0]?.id;
       state.transactions.unshift(makeTransaction({ date, payee, amount: Number(amount), lineId, memo: "Assigned from ledger" }));
       state.household.activity.unshift(`Assigned ${payee} to ${transactionAssignmentLabel({ lineId })}`);
+      autosaveState();
       render();
     });
   });
 
   $("#addPaycheckButton")?.addEventListener("click", () => {
     state.paychecks.push({ date: new Date().toISOString().slice(0, 10), name: `Paycheck/Income ${state.paychecks.length + 1}`, amount: 0, assignedLineIds: [], recurrence: "monthly" });
+    autosaveState();
     render();
   });
 
@@ -5691,6 +5777,7 @@ function bindViewEvents() {
         state.paycheckOccurrences = (state.paycheckOccurrences || []).filter((occurrence) => occurrence.seriesId !== paycheck.id);
       }
       state.budget.income = budgetIncomeFromPaychecks();
+      autosaveState();
       render();
     });
   });
@@ -5813,6 +5900,7 @@ function bindViewEvents() {
       const line = findLineById(lineId);
       if (line) line.planned = amount;
     }
+    autosaveState();
     render();
   });
 
@@ -5902,6 +5990,7 @@ function bindViewEvents() {
     mealsFeedback = existing
       ? `${recipe.name} is already saved — selected it for this meal.`
       : `${recipe.name} added to your recipes. Edit its ingredients and nutrition in the Recipes tab.`;
+    autosaveState();
     render();
   });
 
@@ -5939,6 +6028,7 @@ function bindViewEvents() {
       const index = Number(button.dataset.removePlannedMeal);
       if (!Number.isInteger(index) || !state.meals.plannedWeek[index]) return;
       state.meals.plannedWeek.splice(index, 1);
+      autosaveState();
       render();
     });
   });
@@ -5990,17 +6080,20 @@ function bindViewEvents() {
         protein: Number(data.protein || 0)
       });
     }
+    autosaveState();
     render();
   });
 
   $("#cancelRecipeEditButton")?.addEventListener("click", () => {
     state.meals.editingRecipeId = "";
+    autosaveState();
     render();
   });
 
   document.querySelectorAll("[data-edit-recipe]").forEach((button) => {
     button.addEventListener("click", () => {
       state.meals.editingRecipeId = button.dataset.editRecipe;
+      autosaveState();
       render();
       $("#recipeForm input[name='name']")?.focus();
     });
@@ -6011,6 +6104,7 @@ function bindViewEvents() {
       const form = $("#mealPlanForm");
       state.meals.selectedRecipeId = button.dataset.selectRecipe;
       currentView = "meals";
+      autosaveState();
       render();
       $("#mealPlanForm")?.day.focus();
     });
@@ -6023,6 +6117,7 @@ function bindViewEvents() {
       if (state.meals.selectedRecipeId === button.dataset.deleteRecipe) {
         state.meals.selectedRecipeId = state.meals.recipes[0]?.id || "";
       }
+      autosaveState();
       render();
     });
   });
@@ -6054,6 +6149,7 @@ function bindViewEvents() {
   document.querySelectorAll("[data-delete-goal]").forEach((button) => {
     button.addEventListener("click", () => {
       state.goals.sinkingFunds.splice(Number(button.dataset.deleteGoal), 1);
+      autosaveState();
       render();
     });
   });
@@ -6615,6 +6711,7 @@ function bindViewEvents() {
       } else state.calendar.events.push(calendarEvent);
     }
     calendarFeedback = `${data.type === "chore" ? "Chore" : annualEventLabels[data.type] || "Reminder"} ${wasEditing ? "updated" : "added"}.`;
+    autosaveState();
     render();
   });
 
@@ -6662,6 +6759,7 @@ function bindViewEvents() {
       if (!already && isChoreOccurrenceComplete(chore, occurrenceDate)) {
         state.household.activity.unshift(`Completed ${chore.title} for ${occurrenceDate}`);
       }
+      autosaveState();
       render();
     });
   });
@@ -6679,6 +6777,7 @@ function bindViewEvents() {
       event.completedBy = already
         ? event.completedBy.filter((item) => item !== key)
         : [...event.completedBy, key];
+      autosaveState();
       render();
     });
   });
@@ -6704,6 +6803,7 @@ function bindViewEvents() {
       if (!already && isAnnualEventYearComplete(event, year)) {
         state.household.activity.unshift(`Wished ${annualEventDisplayTitle(event)} for ${year}`);
       }
+      autosaveState();
       render();
     });
   });
@@ -6715,6 +6815,7 @@ function bindViewEvents() {
       const id = button.dataset.deleteCalendarItem.slice(separator + 1);
       if (kind === "event") state.calendar.events = state.calendar.events.filter((event) => event.id !== id);
       if (kind === "chore") state.calendar.chores = state.calendar.chores.filter((chore) => chore.id !== id);
+      autosaveState();
       render();
     });
   });
@@ -6752,6 +6853,7 @@ function bindViewEvents() {
     if (kind === "event") state.calendar.events = state.calendar.events.filter((item) => item.id !== id);
     if (kind === "chore") state.calendar.chores = state.calendar.chores.filter((item) => item.id !== id);
     calendarFeedback = "Calendar item deleted.";
+    autosaveState();
     render();
   });
 
@@ -6779,6 +6881,7 @@ function bindViewEvents() {
       if (input.checked) scopes.add(scope);
       else scopes.delete(scope);
       state.household.sharedScopes = [...scopes];
+      autosaveState();
       render();
     });
   });
@@ -6786,12 +6889,14 @@ function bindViewEvents() {
   $("#shareEverythingToggle")?.addEventListener("change", (event) => {
     const allScopes = [...document.querySelectorAll("[data-share-scope]")].map((input) => input.dataset.shareScope);
     state.household.sharedScopes = event.currentTarget.checked ? allScopes : [];
+    autosaveState();
     render();
   });
 
   $("#inviteButton")?.addEventListener("click", () => {
     state.household.inviteCode = `HUB-${Math.random().toString(36).slice(2, 8).toUpperCase()}`;
     state.household.activity.unshift(`Generated invite code ${state.household.inviteCode}`);
+    autosaveState();
     render();
   });
 
@@ -7169,6 +7274,7 @@ function bindViewEvents() {
       createdAt: new Date().toISOString()
     });
     event.currentTarget.reset();
+    autosaveState();
     render();
   });
 
@@ -7266,6 +7372,7 @@ function bindViewEvents() {
       if (!decision) return;
       const newAttachments = await filesToDecisionAttachments(input.files, decision.attachments.length);
       decision.attachments.push(...newAttachments);
+      autosaveState();
       render();
     });
   });
@@ -7276,6 +7383,7 @@ function bindViewEvents() {
       const decision = state.decisions.find((item) => item.id === decisionId);
       if (!decision) return;
       decision.attachments = decision.attachments.filter((attachment) => attachment.id !== attachmentId);
+      autosaveState();
       render();
     });
   });
@@ -7283,6 +7391,7 @@ function bindViewEvents() {
   document.querySelectorAll("[data-delete-decision]").forEach((button) => {
     button.addEventListener("click", () => {
       state.decisions = state.decisions.filter((item) => item.id !== button.dataset.deleteDecision);
+      autosaveState();
       render();
     });
   });
@@ -7301,6 +7410,7 @@ function bindViewEvents() {
         authorKey: sessionUser?.email || "",
         authorName: sessionUser?.name || "Household member"
       });
+      autosaveState();
       render();
     });
   });
@@ -7321,6 +7431,7 @@ function bindViewEvents() {
       const targetIndex = direction === "up" ? index - 1 : index + 1;
       if (index === -1 || targetIndex < 0 || targetIndex >= list.length) return;
       [list[index], list[targetIndex]] = [list[targetIndex], list[index]];
+      autosaveState();
       render();
     });
   });
@@ -7331,6 +7442,7 @@ function bindViewEvents() {
       const decision = state.decisions.find((item) => item.id === decisionId);
       if (!decision) return;
       decision[listKey] = decision[listKey].filter((item) => item.id !== itemId);
+      autosaveState();
       render();
     });
   });
@@ -7343,6 +7455,7 @@ function bindViewEvents() {
       decision.status = "decided";
       decision.outcome = String(new FormData(form).get("outcome") || "").trim();
       decision.decidedAt = new Date().toISOString();
+      autosaveState();
       render();
     });
   });
@@ -7354,6 +7467,7 @@ function bindViewEvents() {
       decision.status = "open";
       decision.outcome = "";
       decision.decidedAt = "";
+      autosaveState();
       render();
     });
   });
@@ -7737,7 +7851,7 @@ function acceptImportTransaction(button) {
   transactionValidationFeedback = "";
   const lineId = inboxItem.lineId || allLines()[0]?.id;
   const memo = inboxItem.recurringId ? "Recurring bill" : "Accepted bank stream item";
-  state.transactions.unshift(makeTransaction({ date: inboxItem.date, payee: inboxItem.payee, amount: Number(inboxItem.amount), lineId, memo, accountId: inboxItem.accountId || "" }));
+  state.transactions.unshift(makeTransaction({ date: inboxItem.date, payee: inboxItem.payee, amount: Number(inboxItem.amount), lineId, memo, accountId: inboxItem.accountId || "", orderNumber: inboxItem.orderNumber || "" }));
   state.transactionInboxDone ||= [];
   if (!state.transactionInboxDone.includes(inboxItem.id)) state.transactionInboxDone.push(inboxItem.id);
   state.transactionInboxDrafts = (state.transactionInboxDrafts || []).filter((item) => item.id !== inboxItem.id);
@@ -7753,6 +7867,7 @@ function acceptImportTransaction(button) {
   } else {
     ledgerAcceptFeedback = "";
   }
+  autosaveState();
   render();
 }
 
@@ -7762,6 +7877,7 @@ function dismissImportTransaction(button) {
   if (!state.transactionInboxDone.includes(button.dataset.dismissImport)) state.transactionInboxDone.push(button.dataset.dismissImport);
   state.transactionInboxDrafts = (state.transactionInboxDrafts || []).filter((item) => item.id !== button.dataset.dismissImport);
   state.household.activity.unshift(`Dismissed bank stream item: ${inboxItem?.payee || button.dataset.dismissImport}`);
+  autosaveState();
   render();
 }
 
@@ -7925,6 +8041,7 @@ $("#monthPicker").addEventListener("change", (event) => {
 $("#mealWeekHeaderSelect").addEventListener("change", (event) => {
   state.meals.selectedWeekByMonth ||= {};
   state.meals.selectedWeekByMonth[state.budget.month] = Number(event.target.value);
+  autosaveState();
   render();
 });
 
@@ -8023,6 +8140,7 @@ $("#confirmDeleteBudgetLineButton").addEventListener("click", () => {
   perform();
   pendingBudgetLineDeletion = null;
   $("#deleteBudgetLineDialog").close();
+  autosaveState();
   render();
 });
 

@@ -8,6 +8,7 @@ const {
   smsGatewayAddress, paycheckOccurrencesSince, paycheckOccurrencesInRange, paycheckAllOccurrenceDatesInRange, recurringExpenseOccurrenceDates, accountBalance, accountsWithBalances,
   splitAmountEvenly,
   parseDelimitedText, parseBankCsvTransactions, normalizeForAccountMatch, matchAccountByFilename, isDuplicateTransaction,
+  parseCreditCardStatementText,
   recurringBudgetSetAside, nextRecurringBudgetDueDate, monthsUntilDueInclusive,
   annualEventDate, nextAnnualEventDate, annualEventNotifyAt, rollAnnualNotifyAtForward,
   nextPendingChoreOccurrence, choreNotifyAt
@@ -714,6 +715,66 @@ test("isDuplicateTransaction matches on amount alone (payee is ignored) within a
   assert.equal(isDuplicateTransaction({ date: "2026-07-13", amount: 35, payee: "Anything" }, existing), false, "3 days later is outside the tolerance");
   assert.equal(isDuplicateTransaction({ date: "2026-07-10", amount: 36, payee: "RETURN CHECK FEE - 071026" }, existing), false, "amount must match exactly");
   assert.equal(isDuplicateTransaction({ date: "2026-07-10", amount: 35, payee: "RETURN CHECK FEE - 071026" }, []), false);
+});
+
+test("parseCreditCardStatementText: purchases stay positive, refunds go negative, and Order Number lines attach to the row above them", () => {
+  const text = `
+Statement Date: 05/20/26
+
+PAYMENTS AND OTHER CREDITS
+05/17    AUTOMATIC PAYMENT - THANK YOU                          -551.36
+05/20    AMAZON MKTPLACE PMTS Amzn.com/bill WA                  -74.40
+         Order Number   111-7373945-8473814
+05/20    AMAZON MKTPLACE PMTS Amzn.com/bill WA                  -6.40
+         Order Number   113-6200057-6118623
+
+PURCHASE
+04/29    AMAZON MKTPL*BJ4UW0ZI1 Amzn.com/bill WA                 6.40
+         Order Number   113-6200057-6118623
+04/30    AMAZON MKTPL*BS3VY1QQ0 Amzn.com/bill WA               151.92
+         Order Number   111-7373945-8473814
+`;
+  const rows = parseCreditCardStatementText(text);
+  assert.deepEqual(rows, [
+    { date: "2026-05-20", payee: "AMAZON MKTPLACE PMTS Amzn.com/bill WA", amount: -74.40, orderNumber: "111-7373945-8473814" },
+    { date: "2026-05-20", payee: "AMAZON MKTPLACE PMTS Amzn.com/bill WA", amount: -6.40, orderNumber: "113-6200057-6118623" },
+    { date: "2026-04-29", payee: "AMAZON MKTPL*BJ4UW0ZI1 Amzn.com/bill WA", amount: 6.40, orderNumber: "113-6200057-6118623" },
+    { date: "2026-04-30", payee: "AMAZON MKTPL*BS3VY1QQ0 Amzn.com/bill WA", amount: 151.92, orderNumber: "111-7373945-8473814" }
+  ], "AUTOMATIC PAYMENT is skipped; the full refund and the partial refund each keep their own signed amount and matching order number");
+});
+
+test("parseCreditCardStatementText: skips payoff/payment lines even without an Order Number", () => {
+  const text = `
+Statement Date: 05/20/26
+
+PAYMENTS AND OTHER CREDITS
+05/17    AUTOMATIC PAYMENT - THANK YOU                          -551.36
+04/02    ONLINE PAYMENT, THANK YOU                              -200.00
+
+PURCHASE
+04/21    Amazon.com*BJ9U93OB2 Amzn.com/bill WA                  26.28
+         Order Number   111-6080014-1493051
+`;
+  const rows = parseCreditCardStatementText(text);
+  assert.deepEqual(rows, [
+    { date: "2026-04-21", payee: "Amazon.com*BJ9U93OB2 Amzn.com/bill WA", amount: 26.28, orderNumber: "111-6080014-1493051" }
+  ]);
+});
+
+test("parseCreditCardStatementText: a December transaction on a January statement rolls back to the prior year", () => {
+  const text = `
+Statement Date: 01/15/27
+
+PURCHASE
+12/28    Amazon.com*ABC123 Amzn.com/bill WA                     15.00
+`;
+  const rows = parseCreditCardStatementText(text);
+  assert.equal(rows[0].date, "2026-12-28");
+});
+
+test("parseCreditCardStatementText: returns an empty array for text with no matching transaction lines", () => {
+  assert.deepEqual(parseCreditCardStatementText("Not a statement at all"), []);
+  assert.deepEqual(parseCreditCardStatementText(""), []);
 });
 
 test("recurringBudgetSetAside divides a yearly bill across only the months remaining before it is due", () => {

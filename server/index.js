@@ -14,7 +14,8 @@ const { Pool } = require("pg");
 const { OAuth2Client } = require("google-auth-library");
 const { countries } = require("countries-list");
 const { defaultState } = require("./default-state");
-const { validateJournalPayload, buildDocumentObjectPath, wouldCreateFolderCycle, SMS_CARRIERS, smsGatewayAddress, rollAnnualNotifyAtForward, choreNotifyAt } = require("../lib/shared-logic");
+const { validateJournalPayload, buildDocumentObjectPath, wouldCreateFolderCycle, SMS_CARRIERS, smsGatewayAddress, rollAnnualNotifyAtForward, choreNotifyAt, parseCreditCardStatementText } = require("../lib/shared-logic");
+const pdfParse = require("pdf-parse");
 
 const ANNUAL_EVENT_TYPES = ["birthday", "anniversary"];
 const { createSignedUploadUrl, createSignedDownloadUrl, deleteObject } = require("./gcs");
@@ -122,6 +123,7 @@ const memoryDb = {
 const app = express();
 app.disable("x-powered-by");
 app.use("/api/private-data/journal", express.json({ limit: "10mb" }));
+app.use("/api/bank-statement", express.json({ limit: "15mb" }));
 app.use(express.json({ limit: "1mb" }));
 app.use(cookieParser(SESSION_SECRET));
 app.use(express.static(path.join(__dirname, ".."), {
@@ -3121,6 +3123,35 @@ app.delete("/api/documents/:id", requireSession, async (req, res, next) => {
 
     await pool.query("DELETE FROM documents WHERE id = $1 AND owner_user_id = $2", [document.id, ownerId]);
     res.json({ ok: true });
+  } catch (error) {
+    next(error);
+  }
+});
+
+// A bank/credit-card statement PDF can't be parsed client-side without a
+// heavy browser PDF library, so the file is uploaded here (base64, capped at
+// the 15mb json limit above) purely to extract its text server-side with
+// pdf-parse; the actual transaction extraction is the same pure, shared,
+// unit-tested function the client would otherwise have needed to duplicate.
+// Nothing is persisted here - the client turns the returned rows into bank
+// stream drafts itself, same as a parsed CSV.
+const MAX_BANK_STATEMENT_PDF_BYTES = 10 * 1024 * 1024;
+app.post("/api/bank-statement/parse-pdf", requireSession, async (req, res, next) => {
+  try {
+    const fileBase64 = String(req.body?.fileBase64 || "");
+    if (!fileBase64) return res.status(400).json({ error: "No file provided" });
+    const buffer = Buffer.from(fileBase64, "base64");
+    if (!buffer.length) return res.status(400).json({ error: "File could not be read" });
+    if (buffer.length > MAX_BANK_STATEMENT_PDF_BYTES) return res.status(400).json({ error: "File exceeds the 10MB limit" });
+    let text;
+    try {
+      const parsed = await pdfParse(buffer);
+      text = parsed.text;
+    } catch (_parseError) {
+      return res.status(400).json({ error: "Could not read this PDF - it may be scanned/image-based rather than text-based" });
+    }
+    const rows = parseCreditCardStatementText(text);
+    res.json({ rows });
   } catch (error) {
     next(error);
   }
