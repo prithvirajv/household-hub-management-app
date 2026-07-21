@@ -694,6 +694,56 @@ test("parseBankCsvTransactions: skips a leading summary block and finds the real
   ]);
 });
 
+test("parseBankCsvTransactions: detects a credit-card-style export (mostly positive) and keeps purchases positive, skipping autopay rows", () => {
+  const csv = [
+    "Date,Description,Card Member,Account #,Amount,Reference,Category",
+    "06/09/2026,AUTOPAY PAYMENT - THANK YOU,J DOE,-55004,-256.87,'1',",
+    "05/24/2026,DUNKIN #365203 CUMMING GA,J DOE,-55004,1.70,'2',Restaurant",
+    "05/24/2026,KATE SPADE NEW YORK NY,J DOE,-55004,133.16,'3',Merchandise",
+    "05/09/2026,AUTOPAY PAYMENT - THANK YOU,J DOE,-55004,-10.05,'4',",
+    "04/27/2026,BUDGET RENT A CAR LOS ANGELES CA,J DOE,-55004,97.06,'5',Travel"
+  ].join("\n");
+  assert.deepEqual(parseBankCsvTransactions(csv), [
+    { date: "2026-05-24", payee: "DUNKIN #365203 CUMMING GA", amount: 1.70 },
+    { date: "2026-05-24", payee: "KATE SPADE NEW YORK NY", amount: 133.16 },
+    { date: "2026-04-27", payee: "BUDGET RENT A CAR LOS ANGELES CA", amount: 97.06 }
+  ]);
+});
+
+test("parseBankCsvTransactions: keeps a genuine merchant refund on a credit-card-style export as a negative amount", () => {
+  const csv = [
+    "Date,Description,Amount,Reference,Category",
+    "07/01/2026,ONLINE PAYMENT - THANK YOU,-732.35,'1',",
+    "06/20/2026,HOME2 SUITES INDIANAPOLIS IN,203.59,'2',Travel-Lodging",
+    "06/19/2026,HILTON GLOBAL FND/TM REFUND,-2.00,'3',Travel-Lodging",
+    "05/15/2026,DOUBLETREE FORT LEE NJ,163.65,'4',Travel-Lodging",
+    "04/28/2026,DOUBLETREE COLLINSVILLE IL,211.61,'5',Travel-Lodging",
+    "04/11/2026,HAMPTON INN COLUMBUS OH,115.52,'6',Travel-Lodging"
+  ].join("\n");
+  assert.deepEqual(parseBankCsvTransactions(csv), [
+    { date: "2026-06-20", payee: "HOME2 SUITES INDIANAPOLIS IN", amount: 203.59 },
+    { date: "2026-06-19", payee: "HILTON GLOBAL FND/TM REFUND", amount: -2.00 },
+    { date: "2026-05-15", payee: "DOUBLETREE FORT LEE NJ", amount: 163.65 },
+    { date: "2026-04-28", payee: "DOUBLETREE COLLINSVILLE IL", amount: 211.61 },
+    { date: "2026-04-11", payee: "HAMPTON INN COLUMBUS OH", amount: 115.52 }
+  ]);
+});
+
+test("parseBankCsvTransactions: a checking-style export (mostly negative) is unaffected by credit-card detection", () => {
+  const csv = [
+    "Date,Description,Amount",
+    "07/01/2026,Paycheck deposit,2500.00",
+    "07/02/2026,Grocery store,-84.21",
+    "07/03/2026,Gas station,-45.00",
+    "07/05/2026,Electric bill,-120.50"
+  ].join("\n");
+  assert.deepEqual(parseBankCsvTransactions(csv), [
+    { date: "2026-07-02", payee: "Grocery store", amount: 84.21 },
+    { date: "2026-07-03", payee: "Gas station", amount: 45.00 },
+    { date: "2026-07-05", payee: "Electric bill", amount: 120.50 }
+  ]);
+});
+
 test("normalizeForAccountMatch strips punctuation, spaces, and case", () => {
   assert.equal(normalizeForAccountMatch("Costco Citi"), "costcociti");
   assert.equal(normalizeForAccountMatch("BoFA"), "bofa");

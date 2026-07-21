@@ -202,8 +202,18 @@ function autosavePlans() {
   }, 350);
 }
 
+// Sorted alphabetically by category, then by subcategory within each
+// category - used for every subcategory dropdown/lookup across the app.
+// Budget's own management page still shows categories/lines in the order
+// the household created them (an intentional layout the household chose),
+// so this only re-sorts the flattened copy every dropdown reads from, not
+// state.budget.categories itself.
 function allLines() {
-  return state.budget.categories.flatMap((category) => category.lines.map((line) => ({ ...line, category: category.name, color: category.color })));
+  return [...state.budget.categories]
+    .sort((a, b) => a.name.localeCompare(b.name))
+    .flatMap((category) => [...category.lines]
+      .sort((a, b) => a.name.localeCompare(b.name))
+      .map((line) => ({ ...line, category: category.name, color: category.color })));
 }
 
 function allTransactionTagLabels() {
@@ -1372,7 +1382,7 @@ function renderBudget() {
               <div class="category-row">
                 <div class="category-title">
                   <i style="background:${category.color}"></i>
-                  <div class="category-name"><strong>${category.name}</strong><small data-category-left="${categoryIndex}">${money.format(category.lines.reduce((sum, line) => sum + Number(line.planned) - spentByLine(line.id), 0))} left</small></div>
+                  <div class="category-name"><input class="category-name-input" data-budget-category-name="${categoryIndex}" value="${escapeHtml(category.name)}" aria-label="Category name"><small data-category-left="${categoryIndex}">${money.format(category.lines.reduce((sum, line) => sum + Number(line.planned) - spentByLine(line.id), 0))} left</small></div>
                   <b class="category-planned" data-category-planned="${categoryIndex}">${money.format(category.lines.reduce((sum, line) => sum + Number(line.planned), 0))} planned</b>
                   <span class="category-spent" data-category-spent="${categoryIndex}">${money.format(category.lines.reduce((sum, line) => sum + spentByLine(line.id), 0))} spent</span>
                   <button class="category-add-line" data-add-line-category="${categoryIndex}" type="button">+ Add subcategory</button>
@@ -5468,6 +5478,19 @@ function bindViewEvents() {
     });
   });
 
+  document.querySelectorAll("[data-budget-category-name]").forEach((input) => {
+    input.addEventListener("input", () => {
+      const categoryIndex = Number(input.dataset.budgetCategoryName);
+      state.budget.categories[categoryIndex].name = input.value || "Category";
+      autosaveState();
+    });
+    input.addEventListener("change", () => {
+      const categoryIndex = Number(input.dataset.budgetCategoryName);
+      state.budget.categories[categoryIndex].name = input.value.trim() || "Category";
+      render();
+    });
+  });
+
   document.querySelectorAll("[data-budget-due-date]").forEach((input) => {
     input.addEventListener("input", () => {
       const [categoryIndex, lineIndex] = input.dataset.budgetDueDate.split(":").map(Number);
@@ -8988,17 +9011,29 @@ function budgetRowsForMonth(monthKey) {
   ];
 }
 
+// Every household's transaction with the most tags decides how many "Tag N"
+// columns the export gets - scanning all transactions (not just the month
+// being exported) so every month's sheet in a multi-sheet export lines up
+// under the same columns, rather than each sheet having its own tag-count.
+function maxTransactionTagCount() {
+  return state.transactions.reduce((max, transaction) => Math.max(max, (transaction.tags || []).length), 0);
+}
+
 function transactionRowsForMonth(monthKey) {
+  const maxTags = maxTransactionTagCount();
+  const tagHeaders = Array.from({ length: maxTags }, (_, index) => `Tag ${index + 1}`);
   return [
-    ["Date", "Payee", "Amount", "Category", "Subcategory", "Account", "Tags", "Memo"],
+    ["Date", "Payee", "Amount", "Category", "Subcategory", "Account", ...tagHeaders, "Memo"],
     ...state.transactions
       .filter((transaction) => transaction.date?.slice(0, 7) === monthKey)
       .map((transaction) => {
         const line = allLines().find((item) => item.id === transaction.lineId);
+        const tags = transaction.tags || [];
+        const tagCells = Array.from({ length: maxTags }, (_, index) => tags[index] || "");
         return [
           transaction.date, transaction.payee, Number(transaction.amount || 0).toFixed(2),
           line?.category || transaction.categoryName || "", line?.name || "Unassigned",
-          accountName(transaction.accountId) || "", (transaction.tags || []).join(", "), transaction.memo || ""
+          accountName(transaction.accountId) || "", ...tagCells, transaction.memo || ""
         ];
       })
   ];

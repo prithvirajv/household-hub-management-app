@@ -1279,6 +1279,25 @@ main {
   text-align: right;
 }
 
+.category-name-input {
+  display: block;
+  width: 100%;
+  border: none;
+  background: transparent;
+  padding: 0.1rem 0.2rem;
+  margin: 0 -0.2rem;
+  border-radius: 4px;
+  font: inherit;
+  font-weight: 900;
+  color: var(--text);
+}
+
+.category-name-input:hover,
+.category-name-input:focus {
+  background: var(--soft-blue);
+  outline: none;
+}
+
 .category-title .icon-button {
   width: 28px;
   min-width: 28px;
