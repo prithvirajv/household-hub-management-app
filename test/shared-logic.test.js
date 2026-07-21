@@ -8,7 +8,7 @@ const {
   smsGatewayAddress, paycheckOccurrencesSince, paycheckOccurrencesInRange, paycheckAllOccurrenceDatesInRange, recurringExpenseOccurrenceDates, accountBalance, accountsWithBalances,
   splitAmountEvenly,
   parseDelimitedText, parseBankCsvTransactions, normalizeForAccountMatch, matchAccountByFilename, isDuplicateTransaction,
-  parseCreditCardStatementText, normalizeTag, groupTransactionsByTag,
+  parseCreditCardStatementText, normalizeTag, groupTransactionsByTag, monthKeysInRange, spentByLineInMonth,
   recurringBudgetSetAside, nextRecurringBudgetDueDate, monthsUntilDueInclusive,
   annualEventDate, nextAnnualEventDate, annualEventNotifyAt, rollAnnualNotifyAtForward,
   nextPendingChoreOccurrence, choreNotifyAt
@@ -811,6 +811,41 @@ test("groupTransactionsByTag counts a multi-tagged transaction toward every one 
 test("groupTransactionsByTag returns an empty array when nothing is tagged", () => {
   assert.deepEqual(groupTransactionsByTag([{ payee: "x", amount: 1, tags: [] }, { payee: "y", amount: 2 }]), []);
   assert.deepEqual(groupTransactionsByTag([]), []);
+});
+
+test("monthKeysInRange returns a single key when start and end fall in the same month", () => {
+  assert.deepEqual(monthKeysInRange("2026-03-05", "2026-03-28"), ["2026-03"]);
+});
+
+test("monthKeysInRange lists every month touched by a multi-month range, inclusive", () => {
+  assert.deepEqual(monthKeysInRange("2026-03-20", "2026-06-02"), ["2026-03", "2026-04", "2026-05", "2026-06"]);
+});
+
+test("monthKeysInRange spans a full year and correctly rolls over into the next year", () => {
+  assert.deepEqual(monthKeysInRange("2026-01-01", "2026-12-31"), [
+    "2026-01", "2026-02", "2026-03", "2026-04", "2026-05", "2026-06",
+    "2026-07", "2026-08", "2026-09", "2026-10", "2026-11", "2026-12"
+  ]);
+  assert.deepEqual(monthKeysInRange("2025-11-01", "2026-02-28"), ["2025-11", "2025-12", "2026-01", "2026-02"]);
+});
+
+test("monthKeysInRange returns an empty array for a missing or backwards range", () => {
+  assert.deepEqual(monthKeysInRange("", "2026-03-01"), []);
+  assert.deepEqual(monthKeysInRange("2026-03-01", ""), []);
+  assert.deepEqual(monthKeysInRange("2026-06-01", "2026-01-01"), []);
+});
+
+test("spentByLineInMonth sums only the given line's transactions dated within the given month", () => {
+  const transactions = [
+    { lineId: "groceries", date: "2026-03-05", amount: 40 },
+    { lineId: "groceries", date: "2026-03-20", amount: 25 },
+    { lineId: "groceries", date: "2026-04-01", amount: 99 },
+    { lineId: "gas", date: "2026-03-10", amount: 60 }
+  ];
+  assert.equal(spentByLineInMonth(transactions, "groceries", "2026-03"), 65);
+  assert.equal(spentByLineInMonth(transactions, "groceries", "2026-04"), 99);
+  assert.equal(spentByLineInMonth(transactions, "gas", "2026-03"), 60);
+  assert.equal(spentByLineInMonth(transactions, "groceries", "2026-05"), 0);
 });
 
 test("recurringBudgetSetAside divides a yearly bill across only the months remaining before it is due", () => {

@@ -7,7 +7,7 @@
     <title>FamilyLoop</title>
     <link rel="icon" type="image/svg+xml" href="/assets/favicon.svg">
     <link rel="apple-touch-icon" href="/assets/apple-touch-icon.png">
-    <link rel="stylesheet" href="/styles.css?v=20260530-2">
+    <link rel="stylesheet" href="/styles.css?v=20260721-1">
     <script src="https://accounts.google.com/gsi/client" async defer></script>
   </head>
   <body>
@@ -42,7 +42,7 @@
             <label class="month-control">Month<input id="monthPicker" type="month" value="2026-05"></label>
             <label id="mealWeekHeaderControl" class="week-control" hidden>Week<select id="mealWeekHeaderSelect"></select></label>
             <button id="syncButton" class="icon-button ghost" type="button" aria-label="Refresh household data" title="Refresh household data">↻</button>
-            <button id="downloadCsvButton" class="icon-button ghost" type="button" aria-label="Download CSV">⇩</button>
+            <button id="downloadCsvButton" class="icon-button ghost" type="button" aria-label="Export report">⇩</button>
             <div class="user-chip">
               <span id="userInitials">DU</span>
               <div><strong id="userName">Demo User</strong><small id="userEmail">demo@familyloop.net</small></div>
@@ -191,6 +191,38 @@
       </div>
     </dialog>
 
+    <dialog id="exportReportDialog" class="app-dialog">
+      <div class="delete-budget-line-dialog-content">
+        <div class="section-head">
+          <div><span class="card-label">Export</span><h2>Export report</h2></div>
+          <button id="closeExportReportDialogButton" class="icon-button ghost" type="button" aria-label="Close">×</button>
+        </div>
+        <form id="exportReportForm">
+          <label>Section
+            <select name="section" id="exportReportSection"></select>
+          </label>
+          <div id="exportReportScopeField">
+            <label>Time range
+              <select name="scopeType" id="exportReportScopeType">
+                <option value="month">Month</option>
+                <option value="range">Date range</option>
+                <option value="year">Whole year</option>
+              </select>
+            </label>
+            <label data-export-scope="month">Month<input type="month" name="month"></label>
+            <label data-export-scope="range">Start date<input type="date" name="rangeStart"></label>
+            <label data-export-scope="range">End date<input type="date" name="rangeEnd"></label>
+            <label data-export-scope="year">Year<input type="number" name="year" min="2000" max="2100" step="1"></label>
+          </div>
+          <p id="exportReportMessage" class="form-message"></p>
+          <div class="dialog-actions">
+            <button id="cancelExportReportButton" class="ghost" type="button">Cancel</button>
+            <button id="submitExportReportButton" type="submit">Export .xlsx</button>
+          </div>
+        </form>
+      </div>
+    </dialog>
+
     <template id="emptyTemplate">
       <div class="empty-state">
         <h3>No data yet</h3>
@@ -198,7 +230,7 @@
       </div>
     </template>
 
-    <script src="/lib/shared-logic.js?v=20260530-2"></script>
-    <script src="/app.js?v=20260530-2"></script>
+    <script src="/lib/shared-logic.js?v=20260721-1"></script>
+    <script src="/app.js?v=20260721-1"></script>
   </body>
 </html>

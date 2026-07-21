@@ -2668,6 +2668,42 @@ main {
   text-transform: uppercase;
 }
 
+.reports-toolbar-fields {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  align-items: flex-end;
+}
+
+.reports-toolbar-fields label {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  font-size: 0.75rem;
+  font-weight: 800;
+  color: var(--muted);
+}
+
+.budget-vs-actual-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+
+.budget-vs-actual-row {
+  display: grid;
+  grid-template-columns: minmax(140px, 1fr) minmax(100px, auto) minmax(100px, auto) minmax(90px, auto);
+  align-items: center;
+  gap: 0.6rem;
+  padding: 0.4rem 0.2rem;
+  border-bottom: 1px solid var(--line);
+  font-size: 0.85rem;
+}
+
+.budget-vs-actual-row:last-of-type {
+  border-bottom: none;
+}
+
 .cashflow-chart {
   display: flex;
   align-items: flex-end;

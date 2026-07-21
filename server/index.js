@@ -16,6 +16,7 @@ const { countries } = require("countries-list");
 const { defaultState } = require("./default-state");
 const { validateJournalPayload, buildDocumentObjectPath, wouldCreateFolderCycle, SMS_CARRIERS, smsGatewayAddress, rollAnnualNotifyAtForward, choreNotifyAt, parseCreditCardStatementText } = require("../lib/shared-logic");
 const pdfParse = require("pdf-parse");
+const ExcelJS = require("exceljs");
 
 const ANNUAL_EVENT_TYPES = ["birthday", "anniversary"];
 const { createSignedUploadUrl, createSignedDownloadUrl, deleteObject } = require("./gcs");
@@ -124,6 +125,7 @@ const app = express();
 app.disable("x-powered-by");
 app.use("/api/private-data/journal", express.json({ limit: "10mb" }));
 app.use("/api/bank-statement", express.json({ limit: "15mb" }));
+app.use("/api/reports", express.json({ limit: "20mb" }));
 app.use(express.json({ limit: "1mb" }));
 app.use(cookieParser(SESSION_SECRET));
 app.use(express.static(path.join(__dirname, ".."), {
@@ -3152,6 +3154,100 @@ app.post("/api/bank-statement/parse-pdf", requireSession, async (req, res, next)
     }
     const rows = parseCreditCardStatementText(text);
     res.json({ rows });
+  } catch (error) {
+    next(error);
+  }
+});
+
+// A generic, domain-agnostic "build me this workbook" service - it knows
+// nothing about FamilyLoop's budget/transactions/etc, only about arrays of
+// rows and PNG images to place on a sheet. All report assembly (which
+// months, which sections, planned-vs-actual math, chart rasterization)
+// happens client-side; this endpoint's only job is spreadsheet mechanics,
+// mirroring how PDF text extraction above stays a pure technical service.
+const MAX_REPORT_SHEETS = 40;
+const MAX_REPORT_ROWS_PER_SHEET = 50000;
+const INVALID_SHEET_NAME_CHARS = /[*?:\\/[\]]/g;
+
+function sanitizeSheetName(rawName, usedNames) {
+  let name = String(rawName || "Sheet").replace(INVALID_SHEET_NAME_CHARS, "").trim().slice(0, 31) || "Sheet";
+  let finalName = name;
+  let suffix = 2;
+  while (usedNames.has(finalName)) {
+    const suffixText = ` (${suffix})`;
+    finalName = `${name.slice(0, 31 - suffixText.length)}${suffixText}`;
+    suffix += 1;
+  }
+  usedNames.add(finalName);
+  return finalName;
+}
+
+function parseCellReference(cellRef) {
+  const match = String(cellRef || "A1").match(/^([A-Z]+)(\d+)$/i);
+  if (!match) return { col: 0, row: 0 };
+  const [, colLetters, rowNumber] = match;
+  let col = 0;
+  for (const letter of colLetters.toUpperCase()) col = col * 26 + (letter.charCodeAt(0) - 64);
+  return { col: col - 1, row: Number(rowNumber) - 1 };
+}
+
+const PNG_SIGNATURE = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+
+// exceljs's addImage() happily accepts garbage and only fails much later,
+// deep inside its zip writer during writeBuffer() - by then it's too late to
+// drop just the one bad image, so the PNG signature is checked up front
+// instead of trusting a try/catch around addImage to ever fire.
+function decodeValidPng(base64) {
+  try {
+    const buffer = Buffer.from(String(base64 || "").replace(/^data:image\/png;base64,/, ""), "base64");
+    if (buffer.length < PNG_SIGNATURE.length || !buffer.subarray(0, PNG_SIGNATURE.length).equals(PNG_SIGNATURE)) return null;
+    return buffer;
+  } catch (_error) {
+    return null;
+  }
+}
+
+app.post("/api/reports/export", requireSession, async (req, res, next) => {
+  try {
+    const sheets = Array.isArray(req.body?.sheets) ? req.body.sheets : [];
+    if (!sheets.length) return res.status(400).json({ error: "No sheets provided" });
+    if (sheets.length > MAX_REPORT_SHEETS) return res.status(400).json({ error: `A report can have at most ${MAX_REPORT_SHEETS} sheets` });
+    for (const sheet of sheets) {
+      if (!Array.isArray(sheet?.rows)) return res.status(400).json({ error: "Each sheet needs a rows array" });
+      if (sheet.rows.length > MAX_REPORT_ROWS_PER_SHEET) return res.status(400).json({ error: `A sheet can have at most ${MAX_REPORT_ROWS_PER_SHEET} rows` });
+    }
+
+    const workbook = new ExcelJS.Workbook();
+    const usedNames = new Set();
+    for (const sheet of sheets) {
+      const worksheet = workbook.addWorksheet(sanitizeSheetName(sheet.name, usedNames));
+      worksheet.addRows(sheet.rows);
+      const headerRow = worksheet.getRow(1);
+      headerRow.font = { bold: true };
+      worksheet.views = [{ state: "frozen", ySplit: 1 }];
+      (sheet.columnWidths || []).forEach((width, index) => {
+        if (Number.isFinite(width)) worksheet.getColumn(index + 1).width = width;
+      });
+      for (const image of sheet.images || []) {
+        if (!image?.base64) continue;
+        try {
+          const pngBuffer = decodeValidPng(image.base64);
+          if (!pngBuffer) continue;
+          const imageId = workbook.addImage({ buffer: pngBuffer, extension: "png" });
+          const { col, row } = parseCellReference(image.cell);
+          worksheet.addImage(imageId, { tl: { col, row }, ext: { width: Number(image.widthPx) || 400, height: Number(image.heightPx) || 200 } });
+        } catch (_imageError) {
+          // A single bad/corrupt image shouldn't sink the whole report - the
+          // sheet's data rows are already in, just skip the picture.
+        }
+      }
+    }
+
+    const buffer = await workbook.xlsx.writeBuffer();
+    const fileName = String(req.body?.fileName || "familyloop-report.xlsx").replace(/[^a-zA-Z0-9._-]/g, "-");
+    res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
+    res.setHeader("Content-Disposition", `attachment; filename="${fileName}"`);
+    res.send(Buffer.from(buffer));
   } catch (error) {
     next(error);
   }

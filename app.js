@@ -41,6 +41,12 @@ let calendarFilterOwner = "";
 // and resets to the date-desc default on reload.
 let transactionSort = { field: "date", direction: "desc" };
 let selectedTransactionTag = "";
+// null until the Reports page is first opened, at which point it syncs to
+// the currently-viewed budget month - once the user picks a range/year
+// explicitly it's left alone, so switching months elsewhere doesn't stomp on
+// a deliberately-chosen report scope.
+let reportsScope = null;
+let reportsCardFilter = "all";
 let calendarFeedback = "";
 // Kept out of state (like calendarFeedback) so a confirmation message never
 // gets saved into the shared household blob and replayed for every login.
@@ -411,9 +417,7 @@ function recurringExpenseActiveInMonth(recurring, monthStart, monthEnd) {
 }
 
 function spentByLine(lineId) {
-  return state.transactions
-    .filter((transaction) => transaction.lineId === lineId && transaction.date?.slice(0, 7) === state.budget.month)
-    .reduce((sum, transaction) => sum + Number(transaction.amount || 0), 0);
+  return spentByLineInMonth(state.transactions, lineId, state.budget.month);
 }
 
 function spentTotal() {
@@ -3330,27 +3334,67 @@ function renderSharing() {
     </section>`;
 }
 
+function currentReportsScope() {
+  if (!reportsScope) reportsScope = { type: "month", month: state.budget.month };
+  return reportsScope;
+}
+
 function renderReports() {
+  const scope = currentReportsScope();
+  const monthKeys = monthKeysForScope(scope);
   const categories = reportCategories();
-  const trend = netWorthTrend(6);
+  const trend = netWorthTrend(monthKeys.length ? monthKeys : trailingMonthKeys(6));
   const currentNetWorth = trend[trend.length - 1]?.value || 0;
   const netWorthChange = currentNetWorth - (trend[0]?.value || 0);
-  const months = cashFlowByMonth(6);
+  const months = cashFlowByMonth(monthKeys.length ? monthKeys : trailingMonthKeys(6));
   const totalIncome = months.reduce((sum, month) => sum + month.income, 0);
   const totalExpenses = months.reduce((sum, month) => sum + month.expenses, 0);
+  const budgetVsActual = budgetVsActualByCategory(monthKeys);
+  const showCard = (key) => reportsCardFilter === "all" || reportsCardFilter === key;
   return `
+    <section class="card reports-toolbar">
+      <div class="section-head"><div><span class="card-label">Reports</span><h3>Scope</h3></div></div>
+      <div class="reports-toolbar-fields">
+        <label>Time range<select id="reportsScopeType">
+          <option value="month" ${scope.type === "month" ? "selected" : ""}>Month</option>
+          <option value="range" ${scope.type === "range" ? "selected" : ""}>Date range</option>
+          <option value="year" ${scope.type === "year" ? "selected" : ""}>Whole year</option>
+        </select></label>
+        ${scope.type === "month" ? `<label>Month<input type="month" id="reportsScopeMonth" value="${scope.month}"></label>` : ""}
+        ${scope.type === "range" ? `<label>Start<input type="date" id="reportsScopeStart" value="${scope.start || ""}"></label><label>End<input type="date" id="reportsScopeEnd" value="${scope.end || ""}"></label>` : ""}
+        ${scope.type === "year" ? `<label>Year<input type="number" id="reportsScopeYear" min="2000" max="2100" value="${scope.year}"></label>` : ""}
+        <label>Show<select id="reportsCardFilter">
+          <option value="all" ${reportsCardFilter === "all" ? "selected" : ""}>All</option>
+          <option value="networth" ${reportsCardFilter === "networth" ? "selected" : ""}>Net worth</option>
+          <option value="cashflow" ${reportsCardFilter === "cashflow" ? "selected" : ""}>Cash flow</option>
+          <option value="category" ${reportsCardFilter === "category" ? "selected" : ""}>Category spend</option>
+          <option value="budgetvsactual" ${reportsCardFilter === "budgetvsactual" ? "selected" : ""}>Budget vs Expense</option>
+        </select></label>
+      </div>
+    </section>
     <section class="work-grid">
       <div class="main-stack">
-        <section class="card">
+        ${showCard("networth") ? `<section class="card">
           <div class="section-head"><div><span class="card-label">Trend</span><h3>Net worth</h3></div><b class="${netWorthChange < 0 ? "danger" : ""}">${netWorthChange >= 0 ? "+" : ""}${money.format(netWorthChange)} over ${trend.length} months</b></div>
           ${netWorthTrendSvg(trend)}
           <div class="networth-chart-labels">${trend.map((point) => `<span>${formatMonth(point.month).split(" ")[0].slice(0, 3)}</span>`).join("")}</div>
-        </section>
-        <section class="card">
+        </section>` : ""}
+        ${showCard("cashflow") ? `<section class="card">
           <div class="section-head"><div><span class="card-label">Trend</span><h3>Cash flow</h3></div><span>${money.format(totalIncome - totalExpenses)} net over ${months.length} months</span></div>
           ${cashFlowChart(months)}
-        </section>
-        <section class="card"><div class="card-label">Spending</div><h3>Category report</h3>${categories.map((category) => `<div class="report-row"><strong>${category.name}</strong><div class="report-bar"><span style="width:${category.percent}%; background:${category.color}"></span></div><b>${money.format(category.value)}</b></div>`).join("")}</section>
+        </section>` : ""}
+        ${showCard("category") ? `<section class="card"><div class="card-label">Spending</div><h3>Category report</h3>${categories.map((category) => `<div class="report-row"><strong>${category.name}</strong><div class="report-bar"><span style="width:${category.percent}%; background:${category.color}"></span></div><b>${money.format(category.value)}</b></div>`).join("")}</section>` : ""}
+        ${showCard("budgetvsactual") ? `<section class="card">
+          <div class="card-label">Insight</div><h3>Budget vs Expense</h3>
+          <div class="budget-vs-actual-list">${budgetVsActual.map((row) => `
+            <div class="budget-vs-actual-row">
+              <span>${formatMonth(row.month)} · ${escapeHtml(row.category)}</span>
+              <span>Planned ${money.format(row.planned)}</span>
+              <span>Actual ${money.format(row.actual)}</span>
+              <b class="${row.variance < 0 ? "danger" : ""}">${row.variance >= 0 ? "+" : ""}${money.format(row.variance)}${row.variancePercent === null ? "" : ` (${row.variancePercent}%)`}</b>
+            </div>
+          `).join("") || `<div class="empty-inline">No categories to compare yet.</div>`}</div>
+        </section>` : ""}
       </div>
       <aside class="side-stack">
         <section class="card"><div class="card-label">Budget health</div><h3>Snapshot</h3><div class="snapshot-grid"><span>Planned <b>${money.format(plannedTotal())}</b></span><span>Spent <b>${money.format(spentTotal())}</b></span><span>Cash left <b>${money.format(remainingTotal())}</b></span><span>Net worth <b>${money.format(currentNetWorth)}</b></span></div>${categories.slice(0, 3).map((category) => compactRow(`${category.name} - ${money.format(category.value)}`, "", "")).join("")}</section>
@@ -4239,12 +4283,12 @@ function netWorthAtDate(referenceDateKey) {
   return assetTotal - liabilityTotal;
 }
 
-function netWorthTrend(count) {
-  return trailingMonthKeys(count).map((monthKey) => ({ month: monthKey, value: netWorthAtDate(monthEndDateKey(monthKey)) }));
+function netWorthTrend(monthKeys) {
+  return monthKeys.map((monthKey) => ({ month: monthKey, value: netWorthAtDate(monthEndDateKey(monthKey)) }));
 }
 
-function cashFlowByMonth(count) {
-  return trailingMonthKeys(count).map((monthKey) => {
+function cashFlowByMonth(monthKeys) {
+  return monthKeys.map((monthKey) => {
     const monthStart = `${monthKey}-01`;
     const monthEnd = monthEndDateKey(monthKey);
     const expenses = state.transactions
@@ -4299,6 +4343,111 @@ function cashFlowChart(months) {
       `).join("")}
     </div>
     <div class="cashflow-legend"><span class="cashflow-legend-income">Income</span><span class="cashflow-legend-expense">Expenses</span></div>`;
+}
+
+// ---- Export-only chart renderers ----
+//
+// A rasterized image is drawn from a detached data-URI with no access to
+// styles.css, so the live netWorthTrendSvg()/cashFlowChart() (which rely on
+// external classes like .networth-chart-line, or plain CSS height divs for
+// cash flow) would render invisible or not at all once rasterized. These
+// two mirror their layout with every color inlined directly in the markup,
+// used only for the exported report's embedded chart images.
+function netWorthTrendSvgForExport(trend) {
+  const width = 560;
+  const height = 160;
+  const padding = 20;
+  const values = trend.map((point) => point.value);
+  const max = Math.max(...values, 0);
+  const min = Math.min(...values, 0);
+  const range = max - min || 1;
+  const stepX = trend.length > 1 ? (width - padding * 2) / (trend.length - 1) : 0;
+  const toXY = (point, index) => {
+    const x = padding + stepX * index;
+    const y = height - padding - ((point.value - min) / range) * (height - padding * 2);
+    return [x, y];
+  };
+  const coords = trend.map(toXY);
+  const zeroY = height - padding - ((0 - min) / range) * (height - padding * 2);
+  return `
+    <svg viewBox="0 0 ${width} ${height}" width="${width}" height="${height}" xmlns="http://www.w3.org/2000/svg">
+      <rect x="0" y="0" width="${width}" height="${height}" fill="#ffffff"></rect>
+      <line x1="${padding}" y1="${zeroY.toFixed(1)}" x2="${width - padding}" y2="${zeroY.toFixed(1)}" stroke="#dfe7ef" stroke-width="1" stroke-dasharray="4 4"></line>
+      <polyline points="${coords.map(([x, y]) => `${x.toFixed(1)},${y.toFixed(1)}`).join(" ")}" fill="none" stroke="#3569d4" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"></polyline>
+      ${coords.map(([x, y]) => `<circle cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="3" fill="#3569d4"></circle>`).join("")}
+    </svg>`;
+}
+
+function cashFlowChartSvgForExport(months) {
+  const width = 560;
+  const height = 160;
+  const padding = 20;
+  const max = Math.max(...months.flatMap((month) => [month.income, month.expenses]), 1);
+  const slotWidth = months.length ? (width - padding * 2) / months.length : 0;
+  const barWidth = Math.max(4, slotWidth * 0.3);
+  const chartHeight = height - padding * 2;
+  const bars = months.map((month, index) => {
+    const slotX = padding + slotWidth * index;
+    const incomeHeight = Math.max(1, (month.income / max) * chartHeight);
+    const expenseHeight = Math.max(1, (month.expenses / max) * chartHeight);
+    const incomeX = slotX + slotWidth / 2 - barWidth - 2;
+    const expenseX = slotX + slotWidth / 2 + 2;
+    return `
+      <rect x="${incomeX.toFixed(1)}" y="${(height - padding - incomeHeight).toFixed(1)}" width="${barWidth.toFixed(1)}" height="${incomeHeight.toFixed(1)}" fill="#13936d"></rect>
+      <rect x="${expenseX.toFixed(1)}" y="${(height - padding - expenseHeight).toFixed(1)}" width="${barWidth.toFixed(1)}" height="${expenseHeight.toFixed(1)}" fill="#e05252"></rect>`;
+  }).join("");
+  return `
+    <svg viewBox="0 0 ${width} ${height}" width="${width}" height="${height}" xmlns="http://www.w3.org/2000/svg">
+      <rect x="0" y="0" width="${width}" height="${height}" fill="#ffffff"></rect>
+      <line x1="${padding}" y1="${height - padding}" x2="${width - padding}" y2="${height - padding}" stroke="#dfe7ef" stroke-width="1"></line>
+      ${bars}
+    </svg>`;
+}
+
+// Rasterizes an SVG string to a PNG (base64, no data-URI prefix) via an
+// off-screen canvas - the standard no-library technique (Image loaded from
+// a data-URI, drawn to canvas, read back with toDataURL). Resolves null
+// instead of throwing on any failure, so one bad chart never sinks the rest
+// of the export - the caller just omits that image and keeps the data rows.
+function svgStringToPngBase64(svgString, { width, height }) {
+  return new Promise((resolve) => {
+    try {
+      const image = new Image();
+      image.onload = () => {
+        try {
+          const canvas = document.createElement("canvas");
+          canvas.width = width;
+          canvas.height = height;
+          canvas.getContext("2d").drawImage(image, 0, 0, width, height);
+          resolve(canvas.toDataURL("image/png").replace(/^data:image\/png;base64,/, ""));
+        } catch (_drawError) {
+          resolve(null);
+        }
+      };
+      image.onerror = () => resolve(null);
+      image.src = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svgString)}`;
+    } catch (_error) {
+      resolve(null);
+    }
+  });
+}
+
+// Fills in the "Overview" sheet's chart images once buildWorkbookSpec has
+// returned - kept as a separate async step so buildWorkbookSpec itself can
+// stay synchronous and easy to reason about.
+async function attachReportChartImages(sheets, chartData) {
+  if (!chartData) return sheets;
+  const overviewSheet = sheets.find((sheet) => sheet.name === "Overview");
+  if (!overviewSheet) return sheets;
+  const [netWorthPng, cashFlowPng] = await Promise.all([
+    svgStringToPngBase64(netWorthTrendSvgForExport(chartData.trend), { width: 560, height: 160 }),
+    svgStringToPngBase64(cashFlowChartSvgForExport(chartData.cashFlow), { width: 560, height: 160 })
+  ]);
+  const images = [];
+  if (netWorthPng) images.push({ base64: netWorthPng, cell: "H2", widthPx: 400, heightPx: 114 });
+  if (cashFlowPng) images.push({ base64: cashFlowPng, cell: "H12", widthPx: 400, heightPx: 114 });
+  overviewSheet.images = images;
+  return sheets;
 }
 
 function transactionInboxItems() {
@@ -5662,6 +5811,34 @@ function bindViewEvents() {
 
   $("#transactionTagFilter")?.addEventListener("change", (event) => {
     selectedTransactionTag = event.currentTarget.value;
+    render();
+  });
+
+  $("#reportsScopeType")?.addEventListener("change", (event) => {
+    const type = event.currentTarget.value;
+    if (type === "month") reportsScope = { type: "month", month: state.budget.month };
+    else if (type === "range") reportsScope = { type: "range", start: `${state.budget.month}-01`, end: monthEndDateKey(state.budget.month) };
+    else reportsScope = { type: "year", year: state.budget.month.slice(0, 4) };
+    render();
+  });
+  $("#reportsScopeMonth")?.addEventListener("change", (event) => {
+    reportsScope = { type: "month", month: event.currentTarget.value || state.budget.month };
+    render();
+  });
+  $("#reportsScopeStart")?.addEventListener("change", (event) => {
+    reportsScope = { ...currentReportsScope(), type: "range", start: event.currentTarget.value };
+    render();
+  });
+  $("#reportsScopeEnd")?.addEventListener("change", (event) => {
+    reportsScope = { ...currentReportsScope(), type: "range", end: event.currentTarget.value };
+    render();
+  });
+  $("#reportsScopeYear")?.addEventListener("change", (event) => {
+    reportsScope = { type: "year", year: event.currentTarget.value || state.budget.month.slice(0, 4) };
+    render();
+  });
+  $("#reportsCardFilter")?.addEventListener("change", (event) => {
+    reportsCardFilter = event.currentTarget.value;
     render();
   });
 
@@ -8157,10 +8334,6 @@ $("#signOutButton").addEventListener("click", async () => {
   showSigninForm();
 });
 
-$("#downloadCsvButton").addEventListener("click", () => {
-  downloadCsv();
-});
-
 $("#syncButton").addEventListener("click", async (event) => {
   const button = event.currentTarget;
   button.disabled = true;
@@ -8303,6 +8476,102 @@ $("#confirmAccountActionConfirmButton").addEventListener("click", () => {
   pendingAccountAction = null;
   $("#accountActionConfirmDialog").close();
   onConfirm(targetAccountId);
+});
+
+function updateExportReportScopeFields() {
+  const form = $("#exportReportForm");
+  if (!form) return;
+  const section = form.section.value;
+  const isSnapshot = REPORT_SECTIONS[section]?.periodicity === "snapshot";
+  $("#exportReportScopeField").hidden = isSnapshot;
+  const scopeType = form.scopeType.value;
+  form.querySelectorAll("[data-export-scope]").forEach((field) => {
+    field.hidden = field.dataset.exportScope !== scopeType;
+  });
+}
+
+function openExportReportDialog(defaultSection) {
+  const form = $("#exportReportForm");
+  const sectionSelect = $("#exportReportSection");
+  sectionSelect.innerHTML = Object.entries(REPORT_SECTIONS).map(([key, meta]) => `<option value="${key}">${escapeHtml(meta.label)}</option>`).join("");
+  sectionSelect.value = REPORT_SECTIONS[defaultSection] ? defaultSection : "budget";
+  // Opening the dialog from Reports itself defaults to whatever scope the
+  // page is already showing, so the export and the on-screen view never
+  // drift apart - every other page just defaults to the current month.
+  const defaultScope = defaultSection === "reports" ? currentReportsScope() : { type: "month", month: state.budget.month };
+  form.scopeType.value = defaultScope.type;
+  form.month.value = defaultScope.type === "month" ? defaultScope.month : state.budget.month;
+  form.rangeStart.value = defaultScope.type === "range" ? defaultScope.start : `${state.budget.month}-01`;
+  form.rangeEnd.value = defaultScope.type === "range" ? defaultScope.end : monthEndDateKey(state.budget.month);
+  form.year.value = defaultScope.type === "year" ? defaultScope.year : state.budget.month.slice(0, 4);
+  $("#exportReportMessage").textContent = "";
+  updateExportReportScopeFields();
+  $("#exportReportDialog").showModal();
+}
+
+$("#downloadCsvButton").addEventListener("click", () => {
+  openExportReportDialog(currentView);
+});
+
+$("#closeExportReportDialogButton").addEventListener("click", () => $("#exportReportDialog").close());
+$("#cancelExportReportButton").addEventListener("click", () => $("#exportReportDialog").close());
+$("#exportReportSection").addEventListener("change", updateExportReportScopeFields);
+$("#exportReportScopeType").addEventListener("change", updateExportReportScopeFields);
+
+$("#exportReportForm").addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const form = event.currentTarget;
+  const data = Object.fromEntries(new FormData(form));
+  const section = data.section;
+  let scope;
+  if (REPORT_SECTIONS[section]?.periodicity === "snapshot") {
+    scope = { type: "month", month: state.budget.month };
+  } else if (data.scopeType === "range") {
+    if (!data.rangeStart || !data.rangeEnd || data.rangeStart > data.rangeEnd) {
+      $("#exportReportMessage").textContent = "Pick a valid start and end date.";
+      return;
+    }
+    scope = { type: "range", start: data.rangeStart, end: data.rangeEnd };
+  } else if (data.scopeType === "year") {
+    scope = { type: "year", year: data.year || state.budget.month.slice(0, 4) };
+  } else {
+    scope = { type: "month", month: data.month || state.budget.month };
+  }
+
+  const submitButton = $("#submitExportReportButton");
+  submitButton.disabled = true;
+  const originalLabel = submitButton.textContent;
+  submitButton.textContent = "Generating…";
+  $("#exportReportMessage").textContent = "";
+  try {
+    const spec = buildWorkbookSpec({ section, scope });
+    if (spec.chartData) await attachReportChartImages(spec.sheets, spec.chartData);
+    const response = await fetch("/api/reports/export", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      credentials: "same-origin",
+      body: JSON.stringify({ fileName: spec.fileName, sheets: spec.sheets })
+    });
+    if (!response.ok) {
+      const body = await response.json().catch(() => ({}));
+      throw new Error(body.error || "Could not build the report");
+    }
+    const blob = await response.blob();
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = spec.fileName;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    URL.revokeObjectURL(url);
+    $("#exportReportDialog").close();
+  } catch (error) {
+    $("#exportReportMessage").textContent = error.message;
+  } finally {
+    submitButton.disabled = false;
+    submitButton.textContent = originalLabel;
+  }
 });
 
 $("#householdForm").addEventListener("submit", async (event) => {
@@ -8569,56 +8838,302 @@ async function updateAdminUser(userId, patch) {
   await loadAdminData();
 }
 
-function csvEscape(value) {
-  return `"${String(value ?? "").replaceAll("\"", "\"\"")}"`;
+// ---- Rich report export (replaces the old flat single-sheet CSV) ----
+//
+// Every section can be exported scoped to a single month, a date range, or a
+// whole year - "periodic" sections get one sheet per calendar month in that
+// range (reusing the same per-month row-builder in a loop), "semi-periodic"
+// (wealth) gets one sheet per month showing net worth as of that month's
+// end, and "snapshot" sections (no stored history to split by) always get
+// exactly one current-state sheet regardless of scope.
+const REPORT_SECTIONS = {
+  budget: { label: "Budget", periodicity: "periodic" },
+  transactions: { label: "Transactions", periodicity: "periodic" },
+  paychecks: { label: "Paycheck/Income", periodicity: "periodic" },
+  calendar: { label: "Calendar", periodicity: "periodic" },
+  meals: { label: "Meals", periodicity: "periodic" },
+  wealth: { label: "Wealth", periodicity: "semi-periodic" },
+  reports: { label: "Reports", periodicity: "periodic" },
+  recipes: { label: "Recipes", periodicity: "snapshot" },
+  goals: { label: "Goals", periodicity: "snapshot" },
+  sharing: { label: "Sharing", periodicity: "snapshot" }
+};
+
+function monthSheetName(monthKey) {
+  const [year, month] = monthKey.split("-").map(Number);
+  const label = new Date(year, month - 1, 1).toLocaleDateString("en-US", { month: "short" });
+  return `${label}${year}`;
 }
 
-function downloadCsv() {
-  if (!state) return;
-  const rowsByView = {
-    budget: () => [["month", "category", "subcategory", "due_date", "planned", "spent", "remaining", "recurring_amount_due", "recurring_frequency", "recurring_next_due", "recurring_months_remaining", "recurring_monthly_set_aside"], ...allLines().map((line) => {
-      const spent = spentByLine(line.id);
-      const recurring = line.recurringBill?.enabled ? recurringBudgetSetAside(line.recurringBill) : null;
-      return [
-        state.budget.month,
-        line.category,
-        line.name,
-        recurring?.nextDueDate || dueDateValue(line.dueDay),
-        Number(line.planned || 0).toFixed(2),
-        spent.toFixed(2),
-        (Number(line.planned || 0) - spent).toFixed(2),
-        recurring ? recurring.amountDue.toFixed(2) : "",
-        recurring?.frequency || "",
-        recurring?.nextDueDate || "",
-        recurring?.monthsRemaining || "",
-        recurring ? recurring.monthlyAmount.toFixed(2) : ""
-      ];
-    })],
-    transactions: () => [["date", "payee", "amount", "category", "subcategory", "memo"], ...state.transactions.map((transaction) => {
-      const line = allLines().find((item) => item.id === transaction.lineId);
-      return [transaction.date, transaction.payee, Number(transaction.amount || 0).toFixed(2), line?.category || transaction.categoryName || "", line?.name || "Unassigned", transaction.memo || ""];
-    })],
-    paychecks: () => [["date", "paycheck_income", "amount", "assigned_subcategories"], ...state.paychecks.map((paycheck) => [paycheck.date, paycheck.name, Number(paycheck.amount || 0).toFixed(2), (paycheck.assignedLineIds || []).map((id) => allLines().find((line) => line.id === id)?.name || id).join("; ")])],
-    calendar: () => [["kind", "title", "date_time", "assigned_to", "repeat"], ...state.calendar.events.map((item) => [item.type, item.title, item.dateTime || item.date, assigneeNames(item.assignees), item.annual ? "Yearly" : "Once"]), ...state.calendar.chores.map((item) => ["chore", item.title, `${item.startDate || item.nextDue}T${item.time || "09:00"}`, assigneeNames(item.assignees), choreCadenceLabel(item)])],
-    meals: () => [["month", "week", "day", "meal", "recipe", "servings"], ...state.meals.plannedWeek.map((item) => [item.month || state.budget.month, item.week || 1, item.day, item.slot || "Dinner", item.meal, item.servings])],
-    recipes: () => [["recipe", "calories", "protein_g", "ingredients"], ...state.meals.recipes.map((recipe) => [recipe.name, recipe.calories, recipe.protein, (recipe.ingredients || []).join("; ")])],
-    goals: () => [["goal", "target_date", "target", "saved", "remaining"], ...state.goals.sinkingFunds.map((goal) => [goal.name, goal.targetDate || "", goal.target, goal.saved, Math.max(0, Number(goal.target || 0) - Number(goal.saved || 0))])],
-    wealth: () => [["record_type", "name", "class_or_apr", "shares_or_term", "price_or_emi", "value_or_balance"], ...state.goals.netWorth.assets.map((asset) => ["asset", asset.name, asset.assetClass || "other", asset.shares || "", asset.price || "", assetValue(asset)]), ...state.goals.debts.map((debt) => ["debt", debt.name, debt.rate, debt.termMonths || "", debt.minimum || 0, debt.balance])],
-    reports: () => [["metric", "value"], ["Income", state.budget.income], ["Assigned", plannedTotal()], ["Spent", spentTotal()], ["Available", state.budget.income - plannedTotal()], ["Cash left", remainingTotal()], ...state.budget.categories.map((category) => [`Category: ${category.name}`, category.lines.reduce((sum, line) => sum + spentByLine(line.id), 0)])],
-    sharing: () => [["name", "email", "role", "status"], ...(sharingAccess?.members || []).map((member) => [member.name, member.email, member.role, member.status])]
-  };
-  const rows = (rowsByView[currentView] || rowsByView.budget)();
+function monthKeysForScope(scope) {
+  if (scope.type === "year") return monthKeysInRange(`${scope.year}-01-01`, `${scope.year}-12-31`);
+  if (scope.type === "range") return monthKeysInRange(scope.start, scope.end);
+  const month = scope.month || state.budget.month;
+  return monthKeysInRange(`${month}-01`, monthEndDateKey(month));
+}
 
-  const csv = rows.map((row) => row.map(csvEscape).join(",")).join("\n");
-  const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
-  const url = URL.createObjectURL(blob);
-  const link = document.createElement("a");
-  link.href = url;
-  link.download = `familyloop-${currentView}-${state.budget.month}.csv`;
-  document.body.appendChild(link);
-  link.click();
-  link.remove();
-  URL.revokeObjectURL(url);
+function scopeDescriptionText(scope) {
+  if (scope.type === "month") return formatMonth(scope.month);
+  if (scope.type === "year") return `Whole year ${scope.year}`;
+  if (scope.type === "range") return `${scope.start} to ${scope.end}`;
+  return "";
+}
+
+function reportFileName(section, scope) {
+  const label = (REPORT_SECTIONS[section]?.label || section).toLowerCase().replace(/[^a-z0-9]+/g, "-");
+  const scopeTag = scope.type === "year" ? scope.year : scope.type === "month" ? scope.month : `${scope.start}_to_${scope.end}`;
+  return `familyloop-${label}-${scopeTag}.xlsx`;
+}
+
+function buildReportMetaRows({ section, scope }) {
+  return [
+    ["Generated at", new Date().toISOString()],
+    ["Generated by", sessionUser?.name || sessionUser?.email || ""],
+    ["Household", state.household?.name || ""],
+    ["Section", REPORT_SECTIONS[section]?.label || section],
+    ["Scope", scopeDescriptionText(scope)]
+  ];
+}
+
+// Mirrors switchBudgetMonth's own carry-forward rule (an exact snapshot for
+// this month if one was ever saved, else the nearest prior month's, else 0)
+// so an exported month shows the same planned amount the app itself would
+// show if you actually navigated there - not a re-derived guess.
+function plannedForLineInMonth(lineId, monthKey) {
+  if (monthKey === state.budget.month) return Number(findLineById(lineId)?.planned || 0);
+  const history = state.budgetHistory || [];
+  const exact = history.find((budget) => budget.month === monthKey);
+  if (exact) return plannedByLineIdFromSnapshot(exact).get(lineId) || 0;
+  const priorSnapshots = history.filter((budget) => budget.month < monthKey).sort((a, b) => b.month.localeCompare(a.month));
+  return priorSnapshots.length ? (plannedByLineIdFromSnapshot(priorSnapshots[0]).get(lineId) || 0) : 0;
+}
+
+// The "deeper insight" the Reports page and the Budget export both surface:
+// planned vs. actual spend per category, per month, across whatever range
+// was picked - not just current-month totals.
+function budgetVsActualByCategory(monthKeys) {
+  const rows = [];
+  monthKeys.forEach((monthKey) => {
+    state.budget.categories.forEach((category) => {
+      const planned = category.lines.reduce((sum, line) => sum + plannedForLineInMonth(line.id, monthKey), 0);
+      const actual = category.lines.reduce((sum, line) => sum + spentByLineInMonth(state.transactions, line.id, monthKey), 0);
+      const variance = planned - actual;
+      rows.push({ category: category.name, month: monthKey, planned, actual, variance, variancePercent: planned ? Math.round((variance / planned) * 100) : null });
+    });
+  });
+  return rows;
+}
+
+function budgetVsActualOverviewRows(monthKeys) {
+  const comparisons = budgetVsActualByCategory(monthKeys);
+  return [
+    ["Month", "Category", "Planned", "Actual", "Variance", "Variance %"],
+    ...comparisons.map((row) => [formatMonth(row.month), row.category, row.planned.toFixed(2), row.actual.toFixed(2), row.variance.toFixed(2), row.variancePercent === null ? "" : `${row.variancePercent}%`])
+  ];
+}
+
+// Stitches several labeled {title, rows} blocks into one sheet with a blank
+// line between them - simpler than giving every overview sheet its own
+// bespoke multi-table layout.
+function combineReportBlocks(blocks) {
+  const rows = [];
+  blocks.forEach((block, index) => {
+    if (index > 0) rows.push([]);
+    rows.push([block.title]);
+    rows.push(...block.rows);
+  });
+  return rows;
+}
+
+function transactionsOverviewSummary(monthKeys) {
+  const rangeTransactions = state.transactions.filter((transaction) => monthKeys.includes(transaction.date?.slice(0, 7)));
+  const byCategory = new Map();
+  rangeTransactions.forEach((transaction) => {
+    const line = allLines().find((item) => item.id === transaction.lineId);
+    const key = line?.category || transaction.categoryName || "Unassigned";
+    byCategory.set(key, (byCategory.get(key) || 0) + Number(transaction.amount || 0));
+  });
+  const categoryRows = [["Category", "Total spent"], ...[...byCategory.entries()].sort((a, b) => b[1] - a[1]).map(([name, total]) => [name, total.toFixed(2)])];
+  const tagGroups = groupTransactionsByTag(rangeTransactions).sort((a, b) => b.total - a.total);
+  const tagRows = [["Tag", "Total", "Transaction count"], ...tagGroups.map((group) => [group.label, group.total.toFixed(2), group.transactions.length])];
+  const totalSpend = rangeTransactions.reduce((sum, transaction) => sum + Number(transaction.amount || 0), 0);
+  return { totalSpend, totalCount: rangeTransactions.length, categoryRows, tagRows };
+}
+
+// Builds the same net worth trend / cash flow / budget-vs-expense insight
+// the Reports page itself shows, for an arbitrary month range - the images
+// array starts empty and is filled in by attachReportChartImages() once the
+// charts are rasterized (see cashFlowChartSvg/svgStringToPngBase64).
+function reportsOverviewRows(monthKeys) {
+  const trend = netWorthTrend(monthKeys);
+  const cashFlow = cashFlowByMonth(monthKeys);
+  const rows = combineReportBlocks([
+    { title: "Net worth trend", rows: [["Month", "Net worth"], ...trend.map((point) => [formatMonth(point.month), point.value.toFixed(2)])] },
+    { title: "Cash flow", rows: [["Month", "Income", "Expenses", "Net"], ...cashFlow.map((month) => [formatMonth(month.month), month.income.toFixed(2), month.expenses.toFixed(2), (month.income - month.expenses).toFixed(2)])] },
+    { title: "Budget vs Expense", rows: budgetVsActualOverviewRows(monthKeys) },
+    { title: "Spend by category", rows: transactionsOverviewSummary(monthKeys).categoryRows }
+  ]);
+  return { rows, trend, cashFlow };
+}
+
+function budgetRowsForMonth(monthKey) {
+  return [
+    ["Category", "Subcategory", "Planned", "Spent", "Remaining", "Recurring bill"],
+    ...allLines().map((line) => {
+      const spent = spentByLineInMonth(state.transactions, line.id, monthKey);
+      const planned = plannedForLineInMonth(line.id, monthKey);
+      const recurringLabel = line.recurringBill?.enabled ? `${line.recurringBill.frequency} - ${money.format(line.recurringBill.amount)} due ${line.recurringBill.dueDate}` : "";
+      return [line.category, line.name, planned.toFixed(2), spent.toFixed(2), (planned - spent).toFixed(2), recurringLabel];
+    })
+  ];
+}
+
+function transactionRowsForMonth(monthKey) {
+  return [
+    ["Date", "Payee", "Amount", "Category", "Subcategory", "Account", "Tags", "Memo"],
+    ...state.transactions
+      .filter((transaction) => transaction.date?.slice(0, 7) === monthKey)
+      .map((transaction) => {
+        const line = allLines().find((item) => item.id === transaction.lineId);
+        return [
+          transaction.date, transaction.payee, Number(transaction.amount || 0).toFixed(2),
+          line?.category || transaction.categoryName || "", line?.name || "Unassigned",
+          accountName(transaction.accountId) || "", (transaction.tags || []).join(", "), transaction.memo || ""
+        ];
+      })
+  ];
+}
+
+function paycheckRowsForMonth(monthKey) {
+  const monthStart = `${monthKey}-01`;
+  const monthEnd = monthEndDateKey(monthKey);
+  const rows = [];
+  state.paychecks.forEach((paycheck) => {
+    paycheckAllOccurrenceDatesInRange(paycheck, monthStart, monthEnd).forEach((date) => {
+      rows.push([date, paycheck.name, Number(paycheck.amount || 0).toFixed(2), (paycheck.assignedLineIds || []).map((id) => allLines().find((line) => line.id === id)?.name || id).join("; ")]);
+    });
+  });
+  return [["Date", "Paycheck", "Amount", "Assigned subcategories"], ...rows];
+}
+
+function calendarRowsForMonth(monthKey) {
+  const monthStart = `${monthKey}-01`;
+  const monthEnd = monthEndDateKey(monthKey);
+  const events = state.calendar.events.filter((item) => {
+    const date = item.date || item.dateTime?.slice(0, 10) || "";
+    return date >= monthStart && date <= monthEnd;
+  });
+  const chores = state.calendar.chores.filter((item) => {
+    const date = item.startDate || item.nextDue || "";
+    return date >= monthStart && date <= monthEnd;
+  });
+  return [
+    ["Kind", "Title", "Date/time", "Assigned to", "Repeat"],
+    ...events.map((item) => [item.type, item.title, item.dateTime || item.date, assigneeNames(item.assignees), item.annual ? "Yearly" : "Once"]),
+    ...chores.map((item) => ["chore", item.title, `${item.startDate || item.nextDue}T${item.time || "09:00"}`, assigneeNames(item.assignees), choreCadenceLabel(item)])
+  ];
+}
+
+function mealRowsForMonth(monthKey) {
+  return [
+    ["Month", "Week", "Day", "Slot", "Meal", "Servings"],
+    ...state.meals.plannedWeek.filter((item) => (item.month || state.budget.month) === monthKey).map((item) => [item.month || monthKey, item.week || 1, item.day, item.slot || "Dinner", item.meal, item.servings])
+  ];
+}
+
+function wealthRowsForMonth(monthKey) {
+  const asOfDate = monthEndDateKey(monthKey);
+  const context = { accounts: state.accounts, transactions: state.transactions, paychecks: state.paychecks, paycheckOccurrences: state.paycheckOccurrences, transfers: state.transfers, ious: state.ious || [] };
+  const assetRows = state.goals.netWorth.assets.map((asset) => {
+    const linkedAccount = state.accounts.find((account) => account.netWorthAssetId === asset.id);
+    return ["asset", asset.name, asset.assetClass || "other", (linkedAccount ? accountBalance(linkedAccount.id, context, asOfDate) : assetValue(asset)).toFixed(2)];
+  });
+  const liabilityRows = state.goals.netWorth.liabilities.map((liability) => {
+    const linkedAccount = state.accounts.find((account) => account.netWorthLiabilityId === liability.id);
+    return ["liability", liability.name, "", (linkedAccount ? accountBalance(linkedAccount.id, context, asOfDate) : Number(liability.value || 0)).toFixed(2)];
+  });
+  return [["Record type", "Name", "Class/APR", `Value as of ${asOfDate}`], ...assetRows, ...liabilityRows];
+}
+
+function reportSummaryRowsForMonth(monthKey) {
+  return [
+    ["Category", "Planned", "Spent", "Remaining"],
+    ...state.budget.categories.map((category) => {
+      const planned = category.lines.reduce((sum, line) => sum + plannedForLineInMonth(line.id, monthKey), 0);
+      const actual = category.lines.reduce((sum, line) => sum + spentByLineInMonth(state.transactions, line.id, monthKey), 0);
+      return [category.name, planned.toFixed(2), actual.toFixed(2), (planned - actual).toFixed(2)];
+    })
+  ];
+}
+
+function recipeRows() {
+  return [["Recipe", "Calories", "Protein (g)", "Ingredients"], ...state.meals.recipes.map((recipe) => [recipe.name, recipe.calories, recipe.protein, (recipe.ingredients || []).join("; ")])];
+}
+
+function goalRows() {
+  return [["Goal", "Target date", "Target", "Saved", "Remaining"], ...state.goals.sinkingFunds.map((goal) => [goal.name, goal.targetDate || "", goal.target, goal.saved, Math.max(0, Number(goal.target || 0) - Number(goal.saved || 0))])];
+}
+
+function sharingRows() {
+  return [["Name", "Email", "Role", "Status"], ...(sharingAccess?.members || []).map((member) => [member.name, member.email, member.role, member.status])];
+}
+
+const SECTION_MONTH_ROW_BUILDERS = {
+  budget: budgetRowsForMonth,
+  transactions: transactionRowsForMonth,
+  paychecks: paycheckRowsForMonth,
+  calendar: calendarRowsForMonth,
+  meals: mealRowsForMonth,
+  wealth: wealthRowsForMonth,
+  reports: reportSummaryRowsForMonth
+};
+
+const SNAPSHOT_SECTION_BUILDERS = { recipes: recipeRows, goals: goalRows, sharing: sharingRows };
+
+// The one entry point every download button (and the Reports export dialog)
+// calls into. Returns { fileName, sheets, chartData } - chartData is null
+// unless section is "reports", in which case attachReportChartImages()
+// (chart-rasterization step) fills in that sheet's images before the spec
+// is POSTed to /api/reports/export.
+function buildWorkbookSpec({ section, scope }) {
+  const meta = REPORT_SECTIONS[section] || REPORT_SECTIONS.budget;
+  const sheets = [];
+  let chartData = null;
+
+  if (meta.periodicity === "snapshot") {
+    const builder = SNAPSHOT_SECTION_BUILDERS[section];
+    sheets.push({ name: "Current", rows: builder ? builder() : [["No data"]] });
+  } else {
+    const monthKeys = monthKeysForScope(scope);
+    const todayMonth = dateKey(new Date()).slice(0, 7);
+
+    if (section === "budget") {
+      sheets.push({ name: "Budget vs Expense", rows: budgetVsActualOverviewRows(monthKeys) });
+    } else if (section === "transactions") {
+      const summary = transactionsOverviewSummary(monthKeys);
+      sheets.push({ name: "Overview", rows: combineReportBlocks([
+        { title: "Totals", rows: [["Total spend", summary.totalSpend.toFixed(2)], ["Transactions", summary.totalCount]] },
+        { title: "By category", rows: summary.categoryRows },
+        { title: "By tag", rows: summary.tagRows }
+      ]) });
+    } else if (section === "reports") {
+      const overview = reportsOverviewRows(monthKeys);
+      sheets.push({ name: "Overview", rows: overview.rows, images: [] });
+      chartData = { trend: overview.trend, cashFlow: overview.cashFlow };
+    }
+
+    const builder = SECTION_MONTH_ROW_BUILDERS[section] || SECTION_MONTH_ROW_BUILDERS.budget;
+    monthKeys.forEach((monthKey) => {
+      const rows = builder(monthKey);
+      const isFuture = monthKey > todayMonth;
+      const hasData = rows.length > 1;
+      if (isFuture && !hasData) return;
+      sheets.push({ name: monthSheetName(monthKey), rows });
+    });
+  }
+
+  sheets.push({ name: "Report info", rows: buildReportMetaRows({ section, scope }) });
+  return { fileName: reportFileName(section, scope), sheets, chartData };
 }
 
 async function initializeApp() {
