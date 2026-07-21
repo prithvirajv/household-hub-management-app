@@ -967,6 +967,13 @@ function applyRecurringBudgetToLine(line) {
 }
 
 function ensureRecurringBudgetBills() {
+  // The sinking-fund set-aside amount is a live plan for "how much to save
+  // starting now" - only ever recomputed for the real current month and
+  // months after it. A month that has already happened is closed history:
+  // re-deriving its planned amount from today's due date would retroactively
+  // invent a savings target for a month that had already passed (or, for a
+  // brand-new recurring bill, a month before the bill even existed).
+  const isPastMonth = state.budget.month < dateKey(new Date()).slice(0, 7);
   state.budget.categories.forEach((category) => {
     category.lines.forEach((line) => {
       if (!line.recurringBill?.enabled) return;
@@ -975,6 +982,7 @@ function ensureRecurringBudgetBills() {
       }
       if (!recurringBudgetFrequencyMonths[line.recurringBill.frequency]) line.recurringBill.frequency = "yearly";
       if (!Number.isFinite(Number(line.recurringBill.amount))) line.recurringBill.amount = Number(line.planned || 0);
+      if (isPastMonth) return;
       applyRecurringBudgetToLine(line);
     });
   });
