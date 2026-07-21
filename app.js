@@ -204,6 +204,28 @@ function allTransactionTagLabels() {
   return groupTransactionsByTag(state.transactions).map((group) => group.label);
 }
 
+// Shared by the Ledger and Bank stream rows: a full-width row of its own
+// (not squeezed into a shared grid/flex column) so a transaction can carry
+// several chips plus an inline add-input with real room to breathe.
+// removeAttr/addAttr are dataset attribute names, keyed by `ref` (a ledger
+// row's index, or a bank stream draft's id) - the add-tag handler reads the
+// ref straight off the input, and the remove-chip handler reads which exact
+// tag to drop off the chip's own data-tag attribute instead of encoding it
+// into the dataset value, so a tag containing ":" or other punctuation is
+// never at risk of being mis-parsed.
+function tagChipsHtml(tags, removeAttr, addAttr, ref) {
+  const chips = (tags || []).map((tag) => `
+    <span class="tag-chip" data-tag="${escapeHtml(tag)}">
+      ${escapeHtml(tag)}
+      <button type="button" class="tag-chip-remove" ${removeAttr}="${ref}" aria-label="Remove tag ${escapeHtml(tag)}">×</button>
+    </span>`).join("");
+  return `
+    <div class="tag-chip-row">
+      ${chips}
+      <input class="tag-chip-input" list="transactionTagOptions" placeholder="+ Add tag" ${addAttr}="${ref}">
+    </div>`;
+}
+
 // Unlike allLines(), which copies each line ({ ...line, ... }) to attach its
 // parent category's name/color, this returns the live line object itself so
 // callers can mutate it (e.g. setting .planned) and have it stick.
@@ -254,6 +276,19 @@ function makeTransaction({ date, payee, amount, lineId, memo, accountId = "", or
 // entry point, split/trimmed into the array the rest of the app works with.
 function parseTagsInput(value) {
   return String(value || "").split(",").map((tag) => tag.trim()).filter(Boolean);
+}
+
+// Used by the chip "+ Add tag" inputs: appends one or more comma-separated
+// tags to an existing list, skipping any that already match case/whitespace
+// insensitively (normalizeTag) - typing "florida trip" again when "Florida
+// trip" is already a chip shouldn't add a visually-duplicate second chip.
+function addTagsDeduped(existingTags, value) {
+  const tags = [...(existingTags || [])];
+  parseTagsInput(value).forEach((tag) => {
+    const key = normalizeTag(tag);
+    if (!tags.some((existing) => normalizeTag(existing) === key)) tags.push(tag);
+  });
+  return tags;
 }
 
 function snapshotTransactionsForLine(line) {
@@ -1414,8 +1449,8 @@ function ledgerEntryRow(transaction, index) {
       <input aria-label="Date" type="date" data-ledger-entry-date="${index}" value="${transaction.date}">
       <select class="income-recurrence-select" aria-label="Subcategory" data-ledger-entry-line="${index}">${lineOptions}</select>
       ${state.accounts.length ? `<select class="income-recurrence-select" aria-label="Account" data-ledger-entry-account="${index}"><option value="">Not linked</option>${accountOptions(transaction.accountId || "")}</select>` : ""}
-      <input aria-label="Tags" list="transactionTagOptions" placeholder="Florida trip" data-ledger-entry-tags="${index}" value="${escapeHtml((transaction.tags || []).join(", "))}">
       <button class="icon-button danger-button" data-delete-transaction="${index}" type="button" aria-label="Delete ${escapeHtml(transaction.payee)}">×</button>
+      ${tagChipsHtml(transaction.tags, "data-remove-ledger-tag", "data-add-ledger-tag", index)}
     </div>`;
 }
 
@@ -1541,7 +1576,6 @@ function renderTransactions() {
               <button type="button" data-sort-transactions="date">Date${transactionSortIndicator("date")}</button>
               <button type="button" data-sort-transactions="subcategory">Subcategory${transactionSortIndicator("subcategory")}</button>
               ${state.accounts.length ? `<button type="button" data-sort-transactions="account">Account${transactionSortIndicator("account")}</button>` : ""}
-              <span>Tags</span>
               <span></span>
             </div>
             <div class="ledger-entry-list">${sorted.map(({ transaction, index }) => ledgerEntryRow(transaction, index)).join("")}</div>`;
@@ -1594,9 +1628,9 @@ function renderTransactions() {
               <label class="row-field row-amount"><small>Amount</small><input class="money-input" type="number" step="0.01" data-bank-stream-amount="${transaction.id}" value="${transaction.amount}"></label>
               <label class="row-field row-select"><small>Subcategory</small><select data-bank-stream-line="${transaction.id}">${lineOptions(transaction.lineId)}</select></label>
               ${state.accounts.length ? `<label class="row-field row-select"><small>Account</small><select data-bank-stream-account="${transaction.id}"><option value="">Not linked</option>${accountOptions(transaction.accountId || "")}</select></label>` : ""}
-              <label class="row-field row-select"><small>Tags</small><input list="transactionTagOptions" placeholder="Florida trip" data-bank-stream-tags="${transaction.id}" value="${escapeHtml((transaction.tags || []).join(", "))}"></label>
               <button class="icon-button" data-accept-import="${transaction.id}" type="button" aria-label="Accept ${escapeHtml(transaction.payee)}">✓</button>
               <button class="icon-button danger-button" data-dismiss-import="${transaction.id}" type="button" aria-label="Dismiss ${escapeHtml(transaction.payee)}">×</button>
+              ${tagChipsHtml(transaction.tags, "data-remove-bank-stream-tag", "data-add-bank-stream-tag", transaction.id)}
             </div>
           `).join("") || `<div class="empty-inline">No bank stream items waiting</div>`}
         </section>
@@ -5670,14 +5704,30 @@ function bindViewEvents() {
     });
   });
 
-  document.querySelectorAll("[data-bank-stream-tags]").forEach((input) => {
-    input.addEventListener("change", () => {
-      const draft = (state.transactionInboxDrafts || []).find((item) => item.id === input.dataset.bankStreamTags);
-      if (!draft) return;
-      draft.tags = parseTagsInput(input.value);
+  document.querySelectorAll("[data-remove-bank-stream-tag]").forEach((button) => {
+    button.addEventListener("click", () => {
+      const draft = (state.transactionInboxDrafts || []).find((item) => item.id === button.dataset.removeBankStreamTag);
+      const tag = button.closest(".tag-chip")?.dataset.tag;
+      if (!draft || !tag) return;
+      draft.tags = (draft.tags || []).filter((existing) => existing !== tag);
       autosaveState();
       render();
     });
+  });
+
+  document.querySelectorAll("[data-add-bank-stream-tag]").forEach((input) => {
+    const commit = () => {
+      const draft = (state.transactionInboxDrafts || []).find((item) => item.id === input.dataset.addBankStreamTag);
+      if (!draft || !input.value.trim()) return;
+      draft.tags = addTagsDeduped(draft.tags, input.value);
+      input.value = "";
+      autosaveState();
+      render();
+    };
+    input.addEventListener("keydown", (event) => {
+      if (event.key === "Enter") { event.preventDefault(); commit(); }
+    });
+    input.addEventListener("blur", commit);
   });
 
   document.querySelectorAll("[data-bank-stream-account]").forEach((select) => {
@@ -5752,14 +5802,30 @@ function bindViewEvents() {
     });
   });
 
-  document.querySelectorAll("[data-ledger-entry-tags]").forEach((input) => {
-    input.addEventListener("change", () => {
-      const transaction = state.transactions[Number(input.dataset.ledgerEntryTags)];
-      if (!transaction) return;
-      transaction.tags = parseTagsInput(input.value);
+  document.querySelectorAll("[data-remove-ledger-tag]").forEach((button) => {
+    button.addEventListener("click", () => {
+      const transaction = state.transactions[Number(button.dataset.removeLedgerTag)];
+      const tag = button.closest(".tag-chip")?.dataset.tag;
+      if (!transaction || !tag) return;
+      transaction.tags = (transaction.tags || []).filter((existing) => existing !== tag);
       autosaveState();
       render();
     });
+  });
+
+  document.querySelectorAll("[data-add-ledger-tag]").forEach((input) => {
+    const commit = () => {
+      const transaction = state.transactions[Number(input.dataset.addLedgerTag)];
+      if (!transaction || !input.value.trim()) return;
+      transaction.tags = addTagsDeduped(transaction.tags, input.value);
+      input.value = "";
+      autosaveState();
+      render();
+    };
+    input.addEventListener("keydown", (event) => {
+      if (event.key === "Enter") { event.preventDefault(); commit(); }
+    });
+    input.addEventListener("blur", commit);
   });
 
   document.querySelectorAll("[data-recurring-payee]").forEach((input) => {

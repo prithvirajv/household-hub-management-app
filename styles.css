@@ -965,6 +965,70 @@ main {
   border-bottom: none;
 }
 
+/* A dedicated row of its own (below the main fields, not squeezed into one
+   more grid/flex column) so a transaction can carry several tags without
+   crowding out the payee, subcategory, or account next to it. */
+.tag-chip-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.35rem;
+  min-width: 0;
+  padding: 0.15rem 0 0.1rem;
+}
+
+.tag-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  padding: 0.15rem 0.3rem 0.15rem 0.55rem;
+  border-radius: 999px;
+  background: var(--soft-blue);
+  color: var(--blue);
+  font-size: 0.72rem;
+  font-weight: 800;
+  white-space: nowrap;
+}
+
+.tag-chip-remove {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  padding: 0;
+  border: none;
+  border-radius: 999px;
+  background: rgba(53, 105, 212, 0.16);
+  color: inherit;
+  font-size: 0.65rem;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.tag-chip-remove:hover {
+  background: rgba(53, 105, 212, 0.3);
+}
+
+.tag-chip-input {
+  flex: 1 1 120px;
+  min-width: 90px;
+  border: none;
+  background: transparent;
+  padding: 0.2rem 0.1rem;
+  font-size: 0.78rem;
+  color: var(--muted);
+}
+
+.tag-chip-input:focus {
+  outline: none;
+  color: var(--text);
+}
+
+.tag-chip-input::placeholder {
+  color: var(--muted);
+}
+
 .budget-table {
   display: grid;
   gap: 0.25rem;
@@ -1667,6 +1731,10 @@ main {
   min-width: 0;
 }
 
+.bank-stream-row .tag-chip-row {
+  flex-basis: 100%;
+}
+
 /* Collapses the End date field down to a single icon by default — clicking
    it reveals the actual date input, matching the icon-button sizing used
    everywhere else so it doesn't look out of place next to the delete
@@ -1709,7 +1777,7 @@ main {
    repeating Payee/Amount/Date/etc. labels on every row — is safe here. */
 .ledger-entry-head {
   display: grid;
-  grid-template-columns: minmax(120px, 1fr) minmax(80px, 100px) minmax(120px, 130px) minmax(140px, 1fr) minmax(120px, 1fr) 48px;
+  grid-template-columns: minmax(120px, 1fr) minmax(80px, 100px) minmax(120px, 130px) minmax(140px, 1fr) 48px;
   gap: 0.5rem;
   padding: 0.3rem 0.6rem 0.15rem;
   color: var(--muted);
@@ -1720,7 +1788,7 @@ main {
 }
 
 .ledger-entry-head.has-accounts {
-  grid-template-columns: minmax(120px, 1fr) minmax(80px, 100px) minmax(120px, 130px) minmax(140px, 1fr) minmax(120px, 140px) minmax(120px, 1fr) 48px;
+  grid-template-columns: minmax(120px, 1fr) minmax(80px, 100px) minmax(120px, 130px) minmax(140px, 1fr) minmax(120px, 140px) 48px;
 }
 
 .ledger-entry-head button {
@@ -1742,7 +1810,7 @@ main {
 
 .ledger-entry-row {
   display: grid;
-  grid-template-columns: minmax(120px, 1fr) minmax(80px, 100px) minmax(120px, 130px) minmax(140px, 1fr) minmax(120px, 1fr) 48px;
+  grid-template-columns: minmax(120px, 1fr) minmax(80px, 100px) minmax(120px, 130px) minmax(140px, 1fr) 48px;
   gap: 0.5rem;
   align-items: center;
   padding: 0.4rem 0.6rem;
@@ -1750,11 +1818,18 @@ main {
 }
 
 .ledger-entry-row.has-accounts {
-  grid-template-columns: minmax(120px, 1fr) minmax(80px, 100px) minmax(120px, 130px) minmax(140px, 1fr) minmax(120px, 140px) minmax(120px, 1fr) 48px;
+  grid-template-columns: minmax(120px, 1fr) minmax(80px, 100px) minmax(120px, 130px) minmax(140px, 1fr) minmax(120px, 140px) 48px;
 }
 
 .ledger-entry-row:last-of-type {
   border-bottom: none;
+}
+
+/* A tag-chip row spans the whole grid on its own line beneath a ledger row's
+   normal fields - tags need real room to show several chips plus an add
+   input, which a shared grid column with everything else never had. */
+.ledger-entry-row .tag-chip-row {
+  grid-column: 1 / -1;
 }
 
 .ledger-entry-list {
