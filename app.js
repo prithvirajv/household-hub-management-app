@@ -3543,7 +3543,7 @@ function currentReportsScope() {
 function renderReports() {
   const scope = currentReportsScope();
   const monthKeys = monthKeysForScope(scope);
-  const categories = reportCategories();
+  const categories = reportCategoriesForScope(monthKeys);
   const trend = netWorthTrend(monthKeys.length ? monthKeys : trailingMonthKeys(6));
   const currentNetWorth = trend[trend.length - 1]?.value || 0;
   const netWorthChange = currentNetWorth - (trend[0]?.value || 0);
@@ -3588,7 +3588,15 @@ function renderReports() {
           <div class="section-head"><div><span class="card-label">Trend</span><h3>Cash flow</h3></div><span>${money.format(totalIncome - totalExpenses)} net over ${months.length} months</span></div>
           ${cashFlowChart(months)}
         </section>` : ""}
-        ${showCard("category") ? `<section class="card"><div class="card-label">Spending</div><h3>Category report</h3>${categories.map((category) => `<div class="report-row"><strong>${category.name}</strong><div class="report-bar"><span style="width:${category.percent}%; background:${category.color}"></span></div><b>${money.format(category.value)}</b></div>`).join("")}</section>` : ""}
+        ${showCard("category") ? `<section class="card"><div class="card-label">Spending</div><h3>Category report</h3>${categories.map((category) => `
+          <div class="report-row-group">
+            <div class="report-row"><strong>${category.name}</strong><div class="report-bar"><span style="width:${category.percent}%; background:${category.color}"></span></div><b>${money.format(category.value)}</b></div>
+            ${category.lines.length ? `<details class="report-subcategory-details">
+              <summary>${category.lines.length} subcategor${category.lines.length === 1 ? "y" : "ies"}</summary>
+              ${category.lines.map((line) => `<div class="report-subcategory-row"><span>${escapeHtml(line.name)}</span><b>${money.format(line.value)}</b></div>`).join("")}
+            </details>` : ""}
+          </div>
+        `).join("")}</section>` : ""}
         ${showCard("budgetvsactual") ? `<section class="card">
           <div class="card-label">Insight</div><h3>Budget vs Expense</h3>
           <div class="budget-vs-actual-list">${budgetVsActual.map((row) => `
@@ -4468,6 +4476,29 @@ function reportCategories() {
     const value = category.lines.reduce((sum, line) => sum + spentByLine(line.id), 0);
     return { name: category.name, value, color: category.color, percent: Math.max(2, Math.round((value / max) * 100)) };
   });
+}
+
+// The Reports page's own scope-aware version of reportCategories() - that
+// one only ever reads the single currently-viewed budget month
+// (spentByLine -> spentByLineInMonth(..., state.budget.month)), so it
+// silently ignored whatever date range/year the Reports scope picker was
+// actually set to. This sums spentByLineInMonth across every month in the
+// selected range instead, and also breaks each category down into its
+// subcategory (line) totals for drilldown - zero-spend subcategories are
+// left out as noise, matching the same convention already used for the
+// Budget vs Expense card.
+function reportCategoriesForScope(monthKeys) {
+  const effectiveMonthKeys = monthKeys.length ? monthKeys : trailingMonthKeys(6);
+  const lineTotal = (lineId) => effectiveMonthKeys.reduce((sum, monthKey) => sum + spentByLineInMonth(state.transactions, lineId, monthKey), 0);
+  const withLines = state.budget.categories.map((category) => {
+    const lines = category.lines
+      .map((line) => ({ name: line.name, value: lineTotal(line.id) }))
+      .filter((line) => line.value !== 0);
+    const value = category.lines.reduce((sum, line) => sum + lineTotal(line.id), 0);
+    return { name: category.name, color: category.color, value, lines };
+  });
+  const max = Math.max(...withLines.map((category) => category.value), 1);
+  return withLines.map((category) => ({ ...category, percent: Math.max(2, Math.round((category.value / max) * 100)) }));
 }
 
 function trailingMonthKeys(count) {

@@ -2659,6 +2659,34 @@ main {
   gap: 0.75rem;
 }
 
+.report-row-group + .report-row-group {
+  margin-top: 0.6rem;
+}
+
+.report-subcategory-details {
+  margin: 0.3rem 0 0 0.5rem;
+}
+
+.report-subcategory-details summary {
+  cursor: pointer;
+  font-weight: 700;
+  color: var(--muted);
+  font-size: 0.78rem;
+}
+
+.report-subcategory-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.75rem;
+  padding: 0.3rem 0.5rem;
+  border-bottom: 1px solid var(--line);
+  font-size: 0.85rem;
+}
+
+.report-subcategory-row:last-of-type {
+  border-bottom: none;
+}
+
 .networth-chart-svg {
   width: 100%;
   height: 160px;
