@@ -14,7 +14,7 @@ const { Pool } = require("pg");
 const { OAuth2Client } = require("google-auth-library");
 const { countries } = require("countries-list");
 const { defaultState } = require("./default-state");
-const { validateJournalPayload, buildDocumentObjectPath, wouldCreateFolderCycle, SMS_CARRIERS, smsGatewayAddress, rollAnnualNotifyAtForward, choreNotifyAt, parseCreditCardStatementText } = require("../lib/shared-logic");
+const { validateJournalPayload, buildDocumentObjectPath, wouldCreateFolderCycle, SMS_CARRIERS, smsGatewayAddress, rollAnnualNotifyAtForward, choreNotifyAt, parseCreditCardStatementText, isValidEmail } = require("../lib/shared-logic");
 const pdfParse = require("pdf-parse");
 const ExcelJS = require("exceljs");
 
@@ -570,6 +570,23 @@ function sendHouseholdAccessRevokedEmail({ email, name, ownerName, householdName
     subject: `Your access to ${householdName} was removed`,
     text: `Hi ${name}, ${ownerName} removed your access to ${householdName} in FamilyLoop. Contact the household owner if you believe this was a mistake.`,
     html: `<h2>Household access removed</h2><p>Hi ${escapeHtml(name)},</p><p><strong>${escapeHtml(ownerName)}</strong> removed your access to <strong>${escapeHtml(householdName)}</strong> in FamilyLoop.</p><p>Contact the household owner if you believe this was a mistake.</p>`
+  });
+}
+
+// A generic top-of-funnel invite, not a household-join invite (no invite
+// code, no accept URL tied to a specific household/email pair) - sent the
+// first time a friend is added to an IOU/split. Deliberately no dollar
+// amount or reason: the recipient hasn't opted into FamilyLoop yet, so this
+// stays a plain "someone you know uses FamilyLoop" touch, not a disclosure
+// of financial specifics.
+function sendFriendInviteEmail({ email, name, inviterName }) {
+  const safeName = escapeHtml(name || "there");
+  const safeInviter = escapeHtml(inviterName || "A friend");
+  return sendTransactionalEmail({
+    to: email,
+    subject: `${inviterName || "A friend"} added you on FamilyLoop`,
+    text: `Hi ${name || "there"}, ${inviterName || "a friend"} added you on FamilyLoop to split a shared expense. FamilyLoop helps households track budgets, bills, and shared costs with friends and family. Join at ${APP_BASE_URL}.`,
+    html: `<h2>You were added on FamilyLoop</h2><p>Hi ${safeName},</p><p><strong>${safeInviter}</strong> added you on FamilyLoop to split a shared expense.</p><p>FamilyLoop helps households track budgets, bills, and shared costs with friends and family.</p><p><a href="${escapeHtml(APP_BASE_URL)}">Join FamilyLoop</a></p>`
   });
 }
 
@@ -1790,7 +1807,7 @@ app.post("/api/auth/invitations/accept", async (req, res, next) => {
     const inviteCode = String(req.body.inviteCode || "").trim().toUpperCase();
     const password = String(req.body.password || "");
     const requestedName = String(req.body.name || "").trim();
-    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) || !inviteCode) {
+    if (!isValidEmail(email) || !inviteCode) {
       return res.status(400).json({ error: "Enter the invited email address and invite code" });
     }
     if (email === DEMO_EMAIL) {
@@ -2323,7 +2340,7 @@ app.post("/api/households/invitations", requireSession, async (req, res, next) =
       ? req.body.scopes.map((scope) => String(scope).trim()).filter(Boolean).slice(0, 50)
       : [];
 
-    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+    if (!isValidEmail(email)) {
       return res.status(400).json({ error: "Enter a valid invitation email" });
     }
 
@@ -2504,7 +2521,7 @@ app.get("/api/calendar/members", requireSession, async (req, res, next) => {
 app.delete("/api/households/access", requireSession, async (req, res, next) => {
   try {
     const email = String(req.body.email || "").trim().toLowerCase();
-    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return res.status(400).json({ error: "Enter a valid email" });
+    if (!isValidEmail(email)) return res.status(400).json({ error: "Enter a valid email" });
     let removedName = "Household member";
     let householdName = "your household";
 
@@ -2585,6 +2602,23 @@ app.delete("/api/households/access", requireSession, async (req, res, next) => {
       ownerName: req.sessionUser.name,
       householdName
     });
+    res.json({ ok: true, email: emailDelivery });
+  } catch (error) {
+    next(error);
+  }
+});
+
+// Invites a friend added to an IOU/split for the first time. Purely a mail
+// send - the friend record itself lives client-side in state.friends (the
+// same generic, unvalidated state blob every other collection like ious
+// already persists through), so there's nothing to look up or store here.
+app.post("/api/friends/invite", requireSession, async (req, res, next) => {
+  try {
+    const email = String(req.body.email || "").trim().toLowerCase();
+    const name = String(req.body.name || "").trim();
+    const inviterName = String(req.body.inviterName || "").trim() || req.sessionUser.name;
+    if (!isValidEmail(email)) return res.status(400).json({ error: "Enter a valid email" });
+    const emailDelivery = await sendFriendInviteEmail({ email, name, inviterName });
     res.json({ ok: true, email: emailDelivery });
   } catch (error) {
     next(error);

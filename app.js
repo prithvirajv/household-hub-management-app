@@ -64,7 +64,7 @@ let pendingBudgetLineDeletion = null;
 // Holds { onConfirm, onCancel } between opening the account rename/delete
 // confirmation dialog and the user actually confirming/cancelling it.
 let pendingAccountAction = null;
-let pendingIouDraftId = null;
+let pendingIouSource = null;
 let profileNameFeedback = "";
 let profileNameFeedbackIsError = false;
 let profilePasswordFeedback = "";
@@ -1234,6 +1234,7 @@ function render() {
   ensurePaycheckRecurrenceData();
   ensurePaycheckOccurrencesGenerated();
   ensureIOUsData();
+  ensureFriendsData();
   state.budget.income = budgetIncomeFromPaychecks();
   syncHistoryToView();
   if (currentView === "wealth") { ensureDebtNetWorthSync(); ensureAccountsData(); ensureDebtPaymentsAppliedFromLedger(); }
@@ -1467,6 +1468,7 @@ function ledgerEntryRow(transaction, index) {
       <input aria-label="Date" type="date" data-ledger-entry-date="${index}" value="${transaction.date}">
       <select class="income-recurrence-select" aria-label="Subcategory" data-ledger-entry-line="${index}">${lineOptions}</select>
       ${state.accounts.length ? `<select class="income-recurrence-select" aria-label="Account" data-ledger-entry-account="${index}"><option value="">Not linked</option>${accountOptions(transaction.accountId || "")}</select>` : ""}
+      <button class="icon-button" data-assign-iou-ledger="${index}" type="button" aria-label="Split with a friend (IOU) ${escapeHtml(transaction.payee)}">👥</button>
       <button class="icon-button danger-button" data-delete-transaction="${index}" type="button" aria-label="Delete ${escapeHtml(transaction.payee)}">×</button>
       ${tagChipsHtml(transaction.tags, "data-remove-ledger-tag", "data-add-ledger-tag", index)}
     </div>`;
@@ -2962,6 +2964,104 @@ function ensureIOUsData() {
   });
 }
 
+// Friends are shared household-wide (not per-member) so any household
+// member's typeahead autocompletes the same person with the same email,
+// rather than each member re-inviting the same friend under slightly
+// different spellings.
+function ensureFriendsData() {
+  state.friends ||= [];
+  state.friends.forEach((friend) => {
+    friend.id ||= uniqueId("friend");
+    friend.invitedAt ||= "";
+  });
+}
+
+// A friend-picker combobox, generalized (not copy-pasted) from the existing
+// meal-recipe combobox pattern (see refreshMealRecipeMenu) so it can appear
+// an arbitrary number of times per form (Split-a-bill and the Assign IOU
+// dialog can each have several friend rows on screen at once, unlike the
+// single fixed recipe field). `rows` is whatever array holds this row's
+// data (a real dynamic-row array for split forms, or a one-element array
+// wrapping the single Add IOU form's fields) - `rows[index]` is mutated
+// in place as {person, email, friendId}.
+function friendRowFieldsHtml(index, row) {
+  return `
+    <div class="custom-combobox friend-name-combobox">
+      <input type="text" placeholder="Friend's name" value="${escapeHtml(row.person || "")}" data-friend-name="${index}" autocomplete="off" required>
+      <div class="combo-menu" data-friend-menu="${index}" hidden></div>
+    </div>
+    <input type="email" placeholder="Email (optional, invites new friends)" value="${escapeHtml(row.email || "")}" data-friend-email="${index}" ${row.friendId ? "readonly" : ""}>
+  `;
+}
+
+function wireFriendRow(container, index, rows) {
+  const nameInput = container.querySelector(`[data-friend-name="${index}"]`);
+  const emailInput = container.querySelector(`[data-friend-email="${index}"]`);
+  const menu = container.querySelector(`[data-friend-menu="${index}"]`);
+  if (!nameInput || !emailInput || !menu) return;
+
+  function refreshMenu() {
+    const query = nameInput.value.trim().toLowerCase();
+    const matches = query ? state.friends.filter((friend) => friend.name.toLowerCase().includes(query)) : state.friends;
+    menu.innerHTML = matches.length
+      ? matches.map((friend) => `<button type="button" data-friend-option="${friend.id}">${escapeHtml(friend.name)} · ${escapeHtml(friend.email)}</button>`).join("")
+      : `<div class="combo-empty">No matching friend yet - add an email below to invite someone new.</div>`;
+  }
+
+  nameInput.addEventListener("focus", () => { refreshMenu(); menu.hidden = false; });
+  nameInput.addEventListener("input", () => {
+    rows[index].person = nameInput.value;
+    if (rows[index].friendId) {
+      const stillMatches = state.friends.find((friend) => friend.id === rows[index].friendId && friend.name === nameInput.value);
+      if (!stillMatches) {
+        rows[index].friendId = "";
+        emailInput.readOnly = false;
+      }
+    }
+    refreshMenu();
+    menu.hidden = false;
+  });
+  menu.addEventListener("click", (event) => {
+    const option = event.target.closest("[data-friend-option]");
+    if (!option) return;
+    const friend = state.friends.find((item) => item.id === option.dataset.friendOption);
+    if (!friend) return;
+    nameInput.value = friend.name;
+    emailInput.value = friend.email;
+    emailInput.readOnly = true;
+    rows[index].person = friend.name;
+    rows[index].email = friend.email;
+    rows[index].friendId = friend.id;
+    menu.hidden = true;
+  });
+  emailInput.addEventListener("input", () => { rows[index].email = emailInput.value; });
+}
+
+// Invites a friend the first time they're added by email - skipped
+// entirely (no request, no error) when no email was given, since email is
+// optional on every friend field (existing free-text-only friend tracking
+// still works). Best-effort: if the invite request fails, the friend is
+// still kept on file and the caller's split/IOU still saves - only the
+// invite itself is skipped.
+async function inviteFriendIfNew(name, email) {
+  const trimmedEmail = String(email || "").trim();
+  if (!trimmedEmail) return null;
+  ensureFriendsData();
+  const normalizedEmail = trimmedEmail.toLowerCase();
+  const existing = state.friends.find((friend) => friend.email.toLowerCase() === normalizedEmail);
+  if (existing) return existing;
+  const friend = { id: uniqueId("friend"), name: String(name || "").trim() || trimmedEmail, email: trimmedEmail, invitedAt: "" };
+  state.friends.push(friend);
+  try {
+    await api("/api/friends/invite", { method: "POST", body: JSON.stringify({ name: friend.name, email: friend.email, inviterName: sessionUser?.name || "" }) });
+    friend.invitedAt = new Date().toISOString();
+  } catch (_error) {
+    // Invite email failed to send - the friend stays on file so the split/
+    // IOU still saves; just no invite was recorded this time.
+  }
+  return friend;
+}
+
 function iouRow(iou) {
   return `<div class="compact-row">
     <div><strong>${escapeHtml(iou.person)}</strong><small>${iou.reason ? `${escapeHtml(iou.reason)} · ` : ""}${formatShortDate(iou.date)}</small></div>
@@ -3026,16 +3126,14 @@ function renderSplitBillRows() {
   if (!container) return;
   container.innerHTML = splitBillRows.map((row, index) => `
     <div class="iou-split-row">
-      <input type="text" placeholder="Friend's name" value="${escapeHtml(row.person)}" data-split-bill-person="${index}" required>
+      ${friendRowFieldsHtml(index, row)}
       ${splitBillType === "percentage"
         ? `<input type="number" step="0.01" min="0" max="100" placeholder="%" value="${row.percent || ""}" data-split-bill-percent="${index}">`
         : `<input type="number" step="0.01" min="0.01" placeholder="Amount" value="${row.amount || ""}" data-split-bill-amount="${index}" ${splitBillType === "equal" ? "readonly" : ""}>`}
       <button type="button" class="icon-button ghost" data-remove-split-bill-row="${index}" aria-label="Remove person">×</button>
     </div>
   `).join("");
-  container.querySelectorAll("[data-split-bill-person]").forEach((input) => {
-    input.addEventListener("input", () => { splitBillRows[Number(input.dataset.splitBillPerson)].person = input.value; });
-  });
+  splitBillRows.forEach((row, index) => wireFriendRow(container, index, splitBillRows));
   container.querySelectorAll("[data-split-bill-amount]").forEach((input) => {
     input.addEventListener("input", () => {
       splitBillRows[Number(input.dataset.splitBillAmount)].amount = Number(input.value);
@@ -3068,7 +3166,13 @@ function renderIOUs() {
       <div class="card">
         <div class="card-label">Add</div><h3>Record an IOU</h3>
         <form id="iouForm" class="mini-form iou-form">
-          <label>Person<input name="person" placeholder="Sam" required></label>
+          <label>Person
+            <div class="custom-combobox friend-name-combobox">
+              <input type="text" name="person" placeholder="Sam" data-friend-name="0" autocomplete="off" required>
+              <div class="combo-menu" data-friend-menu="0" hidden></div>
+            </div>
+          </label>
+          <label>Email (optional, invites new friends)<input type="email" name="email" data-friend-email="0" placeholder="sam@example.com"></label>
           <label>Amount<input name="amount" type="number" step="0.01" min="0.01" placeholder="20" required></label>
           <label>Direction<select name="direction">
             <option value="i_owe">I owe them</option>
@@ -7735,12 +7839,13 @@ function bindViewEvents() {
     render();
   });
 
-  $("#iouForm")?.addEventListener("submit", (event) => {
+  $("#iouForm")?.addEventListener("submit", async (event) => {
     event.preventDefault();
     const data = Object.fromEntries(new FormData(event.currentTarget));
     const person = String(data.person || "").trim();
     const amount = Number(data.amount);
     if (!person || !(amount > 0)) return;
+    await inviteFriendIfNew(person, data.email);
     state.ious ||= [];
     state.ious.push({
       id: uniqueId("iou"),
@@ -7757,8 +7862,12 @@ function bindViewEvents() {
     render();
   });
 
+  if ($("#iouForm")) {
+    wireFriendRow($("#iouForm"), 0, [{ person: "", email: "", friendId: "" }]);
+  }
+
   if ($("#splitBillRows")) {
-    if (!splitBillRows.length) splitBillRows = [{ person: "", amount: 0, percent: 0 }];
+    if (!splitBillRows.length) splitBillRows = [{ person: "", amount: 0, percent: 0, email: "", friendId: "" }];
     renderSplitBillRows();
   }
 
@@ -7770,17 +7879,17 @@ function bindViewEvents() {
   });
 
   $("#addSplitBillRowButton")?.addEventListener("click", () => {
-    splitBillRows.push({ person: "", amount: 0, percent: 0 });
+    splitBillRows.push({ person: "", amount: 0, percent: 0, email: "", friendId: "" });
     renderSplitBillRows();
   });
 
-  $("#splitExpenseForm")?.addEventListener("submit", (event) => {
+  $("#splitExpenseForm")?.addEventListener("submit", async (event) => {
     event.preventDefault();
     const data = Object.fromEntries(new FormData(event.currentTarget));
     const reason = String(data.reason || "").trim();
     const totalAmount = Number(data.amount);
     const friends = splitBillRows
-      .map((row) => ({ person: String(row.person || "").trim(), amount: Number(row.amount), percent: Number(row.percent) }))
+      .map((row) => ({ person: String(row.person || "").trim(), amount: Number(row.amount), percent: Number(row.percent), email: String(row.email || "").trim() }))
       .filter((row) => row.person);
     if (!reason || !(totalAmount > 0) || !friends.length) {
       $("#splitBillMessage").textContent = "Enter what it was for, the total bill, and at least one friend.";
@@ -7792,6 +7901,9 @@ function bindViewEvents() {
       return;
     }
     const date = data.date || dateKey(new Date());
+    for (const friend of friends) {
+      await inviteFriendIfNew(friend.person, friend.email);
+    }
     state.ious ||= [];
     friends.forEach((friend, index) => {
       state.ious.push({
@@ -8309,7 +8421,13 @@ view.addEventListener("click", (event) => {
 
   const assignIouButton = event.target.closest("[data-assign-iou]");
   if (assignIouButton) {
-    openAssignIouDialog(assignIouButton.dataset.assignIou);
+    openAssignIouDialog({ type: "draft", id: assignIouButton.dataset.assignIou });
+    return;
+  }
+
+  const assignIouLedgerButton = event.target.closest("[data-assign-iou-ledger]");
+  if (assignIouLedgerButton) {
+    openAssignIouDialog({ type: "ledger", id: assignIouLedgerButton.dataset.assignIouLedger });
     return;
   }
 
@@ -8322,14 +8440,11 @@ view.addEventListener("click", (event) => {
   }
 
   if (!event.target.closest(".custom-combobox")) {
-    const subcategoryMenu = $("#transactionSubcategoryMenu");
-    const categoryMenu = $("#budgetCategoryMenu");
-    const recipeMenu = $("#mealRecipeMenu");
-    const assigneeMenu = $("#assigneeMenu");
-    if (subcategoryMenu) subcategoryMenu.hidden = true;
-    if (categoryMenu) categoryMenu.hidden = true;
-    if (recipeMenu) recipeMenu.hidden = true;
-    if (assigneeMenu) assigneeMenu.hidden = true;
+    // Generalized rather than listing each menu by id, since an arbitrary
+    // number of friend-picker combo-menus can exist at once (one per
+    // dynamic split row) - hiding every open .combo-menu covers those plus
+    // every existing fixed-id menu (subcategory, category, recipe, assignee).
+    document.querySelectorAll(".combo-menu").forEach((menu) => { menu.hidden = true; });
   }
 });
 
@@ -8784,16 +8899,14 @@ function renderIouSplitRows() {
   const container = $("#assignIouSplitRows");
   container.innerHTML = iouSplitRows.map((row, index) => `
     <div class="iou-split-row">
-      <input type="text" placeholder="Friend's name" value="${escapeHtml(row.person)}" data-iou-split-person="${index}" required>
+      ${friendRowFieldsHtml(index, row)}
       ${assignIouSplitType === "percentage"
         ? `<input type="number" step="0.01" min="0" max="100" placeholder="%" value="${row.percent || ""}" data-iou-split-percent="${index}">`
         : `<input type="number" step="0.01" min="0.01" placeholder="Amount" value="${row.amount || ""}" data-iou-split-amount="${index}" ${assignIouSplitType === "equal" ? "readonly" : ""}>`}
       <button type="button" class="icon-button ghost" data-remove-iou-split-row="${index}" aria-label="Remove person">×</button>
     </div>
   `).join("");
-  container.querySelectorAll("[data-iou-split-person]").forEach((input) => {
-    input.addEventListener("input", () => { iouSplitRows[Number(input.dataset.iouSplitPerson)].person = input.value; });
-  });
+  iouSplitRows.forEach((row, index) => wireFriendRow(container, index, iouSplitRows));
   container.querySelectorAll("[data-iou-split-amount]").forEach((input) => {
     input.addEventListener("input", () => {
       iouSplitRows[Number(input.dataset.iouSplitAmount)].amount = Number(input.value);
@@ -8815,21 +8928,37 @@ function renderIouSplitRows() {
   recomputeAssignIouSplits();
 }
 
-function openAssignIouDialog(draftId) {
-  const draft = transactionInboxItems().find((item) => item.id === draftId);
-  if (!draft) return;
-  pendingIouDraftId = draftId;
-  assignIouDraftTotal = Math.abs(Number(draft.amount || 0));
+// Assign-to-IOU works from two different sources: an unaccepted Bank Stream
+// draft, or a transaction already sitting in the Ledger - resolving by
+// source type here keeps the dialog/submit logic below written once,
+// against whichever record type it's actually holding.
+function resolveIouSource(source) {
+  if (!source) return null;
+  if (source.type === "ledger") {
+    // Ledger transactions have no id field (makeTransaction doesn't assign
+    // one - the whole Ledger UI already addresses them by array index, e.g.
+    // data-delete-transaction/data-ledger-entry-amount), so "id" here is
+    // really the index into state.transactions.
+    return state.transactions[Number(source.id)] || null;
+  }
+  return transactionInboxItems().find((item) => item.id === source.id) || null;
+}
+
+function openAssignIouDialog(source) {
+  const record = resolveIouSource(source);
+  if (!record) return;
+  pendingIouSource = source;
+  assignIouDraftTotal = Math.abs(Number(record.amount || 0));
   assignIouSplitType = "exact";
   const form = $("#assignIouForm");
   form.reset();
-  form.reason.value = draft.payee || "";
-  form.date.value = draft.date || dateKey(new Date());
+  form.reason.value = record.payee || "";
+  form.date.value = record.date || dateKey(new Date());
   $("#assignIouSplitType").value = "exact";
   $("#assignIouTotal").textContent = money.format(assignIouDraftTotal);
   // Default to an even 2-way split (you + one friend), like Splitwise's
   // default - the user can edit the amount or add more people from here.
-  iouSplitRows = [{ person: "", amount: Math.round((assignIouDraftTotal / 2) * 100) / 100, percent: 50 }];
+  iouSplitRows = [{ person: "", amount: Math.round((assignIouDraftTotal / 2) * 100) / 100, percent: 50, email: "", friendId: "" }];
   renderIouSplitRows();
   $("#assignIouMessage").textContent = "";
   $("#assignIouDialog").showModal();
@@ -8842,21 +8971,21 @@ $("#assignIouSplitType").addEventListener("change", (event) => {
   renderIouSplitRows();
 });
 $("#addIouSplitRowButton").addEventListener("click", () => {
-  iouSplitRows.push({ person: "", amount: 0, percent: 0 });
+  iouSplitRows.push({ person: "", amount: 0, percent: 0, email: "", friendId: "" });
   renderIouSplitRows();
 });
 
-$("#assignIouForm").addEventListener("submit", (event) => {
+$("#assignIouForm").addEventListener("submit", async (event) => {
   event.preventDefault();
-  const draftId = pendingIouDraftId;
-  const draft = transactionInboxItems().find((item) => item.id === draftId);
-  if (!draft) {
-    $("#assignIouMessage").textContent = "This item is no longer in Bank stream.";
+  const source = pendingIouSource;
+  const record = resolveIouSource(source);
+  if (!record) {
+    $("#assignIouMessage").textContent = source?.type === "ledger" ? "This transaction is no longer in the Ledger." : "This item is no longer in Bank stream.";
     return;
   }
   const data = Object.fromEntries(new FormData(event.currentTarget));
   const splits = iouSplitRows
-    .map((row) => ({ person: String(row.person || "").trim(), amount: Number(row.amount) }))
+    .map((row) => ({ person: String(row.person || "").trim(), amount: Number(row.amount), email: String(row.email || "").trim() }))
     .filter((row) => row.person && row.amount > 0);
   if (!splits.length) {
     $("#assignIouMessage").textContent = "Enter at least one friend's name and a positive amount.";
@@ -8869,24 +8998,37 @@ $("#assignIouForm").addEventListener("submit", (event) => {
     return;
   }
 
-  const draftAccountId = draft.accountId || "";
-  const originalAmount = Number(draft.amount);
+  const recordAccountId = record.accountId || "";
+  const originalAmount = Number(record.amount);
   const sign = originalAmount < 0 ? -1 : 1;
   const yourShare = Math.round((total - splitTotal) * 100) / 100;
-  // Only your remaining share (after everyone else's split) is accepted as
-  // your own expense - mutate the draft's amount in place before accepting
-  // so the real ledger transaction reflects just your portion of the bill.
-  draft.amount = sign * yourShare;
-  acceptImportTransaction({ dataset: { acceptImport: draftId } });
-  const stillPending = (state.transactionInboxDrafts || []).some((item) => item.id === draftId);
-  if (stillPending) {
-    // acceptImportTransaction bailed out (e.g. the linked account is closed
-    // as of this date) and already surfaced its own message above the
-    // Ledger - restore the original amount and don't create an orphan IOU
-    // for a transaction that was never actually accepted.
-    draft.amount = originalAmount;
-    $("#assignIouMessage").textContent = "Could not accept this item - see the message above the Ledger, then try again.";
-    return;
+
+  if (source.type === "draft") {
+    // Only your remaining share (after everyone else's split) is accepted as
+    // your own expense - mutate the draft's amount in place before accepting
+    // so the real ledger transaction reflects just your portion of the bill.
+    record.amount = sign * yourShare;
+    acceptImportTransaction({ dataset: { acceptImport: source.id } });
+    const stillPending = (state.transactionInboxDrafts || []).some((item) => item.id === source.id);
+    if (stillPending) {
+      // acceptImportTransaction bailed out (e.g. the linked account is closed
+      // as of this date) and already surfaced its own message above the
+      // Ledger - restore the original amount and don't create an orphan IOU
+      // for a transaction that was never actually accepted.
+      record.amount = originalAmount;
+      $("#assignIouMessage").textContent = "Could not accept this item - see the message above the Ledger, then try again.";
+      return;
+    }
+  } else {
+    // Already an accepted Ledger transaction - no accept step needed, just
+    // reduce it to your remaining share directly (the plain Ledger amount
+    // input already lets any accepted transaction's amount be edited freely,
+    // with no account/date gate, so this is consistent with that).
+    record.amount = sign * yourShare;
+  }
+
+  for (const split of splits) {
+    await inviteFriendIfNew(split.person, split.email);
   }
 
   state.ious ||= [];
@@ -8897,14 +9039,14 @@ $("#assignIouForm").addEventListener("submit", (event) => {
       amount: split.amount,
       direction: "owed_to_me",
       reason: String(data.reason || "").trim(),
-      date: data.date || draft.date,
-      accountId: draftAccountId,
+      date: data.date || record.date,
+      accountId: recordAccountId,
       settled: false,
       settledDate: ""
     });
   });
   autosaveState();
-  pendingIouDraftId = null;
+  pendingIouSource = null;
   $("#assignIouDialog").close();
   render();
 });

@@ -6,7 +6,7 @@ const {
   timeToMinutes, minutesToTime, snapMinutes, layoutTimelineBlocks, comparePlannedToActual,
   sanitizeFilename, buildDocumentObjectPath, wouldCreateFolderCycle, buildFolderTree,
   smsGatewayAddress, paycheckOccurrencesSince, paycheckOccurrencesInRange, paycheckAllOccurrenceDatesInRange, recurringExpenseOccurrenceDates, accountBalance, accountsWithBalances,
-  splitAmountEvenly, splitBillByPercentages, netBalancesByPerson, computeBillSplitAmounts, settleUpPersonIous,
+  splitAmountEvenly, splitBillByPercentages, netBalancesByPerson, computeBillSplitAmounts, settleUpPersonIous, isValidEmail,
   parseDelimitedText, parseBankCsvTransactions, normalizeForAccountMatch, matchAccountByFilename, isDuplicateTransaction,
   parseCreditCardStatementText, normalizeTag, groupTransactionsByTag, monthKeysInRange, spentByLineInMonth,
   recurringBudgetSetAside, nextRecurringBudgetDueDate, monthsUntilDueInclusive,
@@ -802,6 +802,21 @@ test("settleUpPersonIous regression: a partial settle-up split still reconciles 
   assert.equal(after, 112);
   const stillPending = accountBalance("checking", { accounts, transactions: [], paychecks: [], transfers: [], ious: result.ious }, "2026-07-10");
   assert.equal(stillPending, 100);
+});
+
+test("isValidEmail accepts a well-formed address", () => {
+  assert.equal(isValidEmail("friend@example.com"), true);
+});
+
+test("isValidEmail rejects a missing @ or missing domain dot", () => {
+  assert.equal(isValidEmail("friendexample.com"), false);
+  assert.equal(isValidEmail("friend@examplecom"), false);
+});
+
+test("isValidEmail rejects empty or whitespace-only input", () => {
+  assert.equal(isValidEmail(""), false);
+  assert.equal(isValidEmail("   "), false);
+  assert.equal(isValidEmail(undefined), false);
 });
 
 test("parseDelimitedText keeps a comma inside a properly quoted field as one cell", () => {
