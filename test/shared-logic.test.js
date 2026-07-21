@@ -6,7 +6,7 @@ const {
   timeToMinutes, minutesToTime, snapMinutes, layoutTimelineBlocks, comparePlannedToActual,
   sanitizeFilename, buildDocumentObjectPath, wouldCreateFolderCycle, buildFolderTree,
   smsGatewayAddress, paycheckOccurrencesSince, paycheckOccurrencesInRange, paycheckAllOccurrenceDatesInRange, recurringExpenseOccurrenceDates, accountBalance, accountsWithBalances,
-  splitAmountEvenly,
+  splitAmountEvenly, splitBillByPercentages, netBalancesByPerson, computeBillSplitAmounts, settleUpPersonIous,
   parseDelimitedText, parseBankCsvTransactions, normalizeForAccountMatch, matchAccountByFilename, isDuplicateTransaction,
   parseCreditCardStatementText, normalizeTag, groupTransactionsByTag, monthKeysInRange, spentByLineInMonth,
   recurringBudgetSetAside, nextRecurringBudgetDueDate, monthsUntilDueInclusive,
@@ -640,6 +640,170 @@ test("splitAmountEvenly returns an empty list for a zero or negative count", () 
   assert.deepEqual(splitAmountEvenly(50, -2), []);
 });
 
+test("splitBillByPercentages divides a clean percentage split exactly", () => {
+  assert.deepEqual(splitBillByPercentages(100, [70, 30]), [70, 30]);
+});
+
+test("splitBillByPercentages uses largest-remainder rounding instead of naive independent rounding", () => {
+  const shares = splitBillByPercentages(10, [33.33, 33.33, 33.34]);
+  assert.deepEqual(shares, [3.33, 3.33, 3.34]);
+  assert.equal(shares.reduce((sum, share) => sum + share, 0), 10);
+});
+
+test("splitBillByPercentages returns null when percentages don't sum to ~100", () => {
+  assert.equal(splitBillByPercentages(100, [40, 40]), null);
+  assert.equal(splitBillByPercentages(100, [60, 60]), null);
+});
+
+test("splitBillByPercentages accepts a small rounding tolerance around 100", () => {
+  assert.deepEqual(splitBillByPercentages(100, [33.33, 33.33, 33.34]), [33.33, 33.33, 33.34]);
+});
+
+test("netBalancesByPerson nets an i_owe record against an owed_to_me record for the same person", () => {
+  const ious = [
+    { id: "a", person: "Sam", amount: 20, direction: "i_owe", settled: false },
+    { id: "b", person: "Sam", amount: 32, direction: "owed_to_me", settled: false }
+  ];
+  const groups = netBalancesByPerson(ious);
+  assert.equal(groups.length, 1);
+  assert.equal(groups[0].net, 12);
+  assert.equal(groups[0].direction, "owed_to_me");
+  assert.equal(groups[0].records.length, 2);
+});
+
+test("netBalancesByPerson reports i_owe direction when the net balance is negative", () => {
+  const ious = [{ id: "a", person: "Priya", amount: 45, direction: "i_owe", settled: false }];
+  const groups = netBalancesByPerson(ious);
+  assert.equal(groups[0].net, -45);
+  assert.equal(groups[0].direction, "i_owe");
+});
+
+test("netBalancesByPerson excludes settled records from the net entirely", () => {
+  const ious = [
+    { id: "a", person: "Jordan", amount: 20, direction: "owed_to_me", settled: true },
+    { id: "b", person: "Jordan", amount: 15, direction: "owed_to_me", settled: false }
+  ];
+  const groups = netBalancesByPerson(ious);
+  assert.equal(groups.length, 1);
+  assert.equal(groups[0].net, 15);
+  assert.equal(groups[0].records.length, 1);
+});
+
+test("netBalancesByPerson collapses different casing/whitespace of the same name into one group", () => {
+  const ious = [
+    { id: "a", person: "Sam", amount: 10, direction: "owed_to_me", settled: false },
+    { id: "b", person: " sam ", amount: 5, direction: "owed_to_me", settled: false }
+  ];
+  const groups = netBalancesByPerson(ious);
+  assert.equal(groups.length, 1);
+  assert.equal(groups[0].net, 15);
+});
+
+test("netBalancesByPerson returns an empty array for no ious", () => {
+  assert.deepEqual(netBalancesByPerson([]), []);
+  assert.deepEqual(netBalancesByPerson(undefined), []);
+});
+
+test("computeBillSplitAmounts (equal): payerAmount always reconciles to the cent, including the leftover-cent case", () => {
+  const result = computeBillSplitAmounts("equal", 100, [{}, {}]);
+  assert.ok(result.ok);
+  assert.equal(result.friendAmounts.length, 2);
+  const total = result.friendAmounts.reduce((sum, amount) => sum + amount, 0) + result.payerAmount;
+  assert.equal(Math.round(total * 100) / 100, 100);
+});
+
+test("computeBillSplitAmounts (percentage): friend percentages convert to dollar amounts, payer gets the rest", () => {
+  const result = computeBillSplitAmounts("percentage", 100, [{ percent: 40 }, { percent: 30 }]);
+  assert.ok(result.ok);
+  assert.deepEqual(result.friendAmounts, [40, 30]);
+  assert.equal(result.payerAmount, 30);
+});
+
+test("computeBillSplitAmounts (percentage): rejects friend percentages over 100", () => {
+  const result = computeBillSplitAmounts("percentage", 100, [{ percent: 70 }, { percent: 40 }]);
+  assert.equal(result.ok, false);
+});
+
+test("computeBillSplitAmounts (exact): passes through typed amounts, absorbing rounding fuzz into payerAmount", () => {
+  const result = computeBillSplitAmounts("exact", 622.36, [{ amount: 150 }, { amount: 100 }]);
+  assert.ok(result.ok);
+  assert.deepEqual(result.friendAmounts, [150, 100]);
+  assert.equal(result.payerAmount, 372.36);
+});
+
+test("computeBillSplitAmounts (exact): rejects a split that adds up to more than the total", () => {
+  const result = computeBillSplitAmounts("exact", 100, [{ amount: 60 }, { amount: 60 }]);
+  assert.equal(result.ok, false);
+});
+
+test("settleUpPersonIous fully settles a single record", () => {
+  const ious = [{ id: "a", person: "Sam", amount: 20, direction: "owed_to_me", date: "2026-07-01", settled: false, settledDate: "" }];
+  const result = settleUpPersonIous(ious, "Sam", 20, "2026-07-15", () => "remainder");
+  assert.ok(result.ok);
+  assert.equal(result.ious.length, 1);
+  assert.equal(result.ious[0].settled, true);
+  assert.equal(result.ious[0].settledDate, "2026-07-15");
+  assert.deepEqual(result.settledIds, ["a"]);
+});
+
+test("settleUpPersonIous settles across two records, oldest first", () => {
+  const ious = [
+    { id: "a", person: "Sam", amount: 20, direction: "owed_to_me", date: "2026-07-05", settled: false, settledDate: "" },
+    { id: "b", person: "Sam", amount: 15, direction: "owed_to_me", date: "2026-07-01", settled: false, settledDate: "" }
+  ];
+  const result = settleUpPersonIous(ious, "Sam", 35, "2026-07-15", () => "remainder");
+  assert.ok(result.ok);
+  assert.ok(result.ious.every((iou) => iou.settled));
+  assert.deepEqual(result.settledIds.sort(), ["a", "b"]);
+});
+
+test("settleUpPersonIous splits the last touched record when the amount doesn't land on a whole-record boundary", () => {
+  const ious = [{ id: "a", person: "Sam", amount: 20, direction: "owed_to_me", date: "2026-07-01", accountId: "checking", settled: false, settledDate: "" }];
+  const result = settleUpPersonIous(ious, "Sam", 12, "2026-07-15", () => "a-remainder");
+  assert.ok(result.ok);
+  assert.equal(result.ious.length, 2);
+  const settledPortion = result.ious.find((iou) => iou.id === "a");
+  const remainder = result.ious.find((iou) => iou.id === "a-remainder");
+  assert.equal(settledPortion.amount, 12);
+  assert.equal(settledPortion.settled, true);
+  assert.equal(settledPortion.settledDate, "2026-07-15");
+  assert.equal(remainder.amount, 8);
+  assert.equal(remainder.settled, false);
+  assert.equal(remainder.accountId, "checking");
+  assert.equal(remainder.direction, "owed_to_me");
+  assert.equal(settledPortion.amount + remainder.amount, 20);
+});
+
+test("settleUpPersonIous only touches records in the person's net direction, leaving offsetting records alone", () => {
+  const ious = [
+    { id: "a", person: "Sam", amount: 32, direction: "owed_to_me", date: "2026-07-01", settled: false, settledDate: "" },
+    { id: "b", person: "Sam", amount: 20, direction: "i_owe", date: "2026-07-01", settled: false, settledDate: "" }
+  ];
+  const result = settleUpPersonIous(ious, "Sam", 12, "2026-07-15", () => "remainder");
+  assert.ok(result.ok);
+  const untouched = result.ious.find((iou) => iou.id === "b");
+  assert.equal(untouched.settled, false);
+});
+
+test("settleUpPersonIous rejects an amount exceeding the net balance and leaves ious untouched", () => {
+  const ious = [{ id: "a", person: "Sam", amount: 20, direction: "owed_to_me", date: "2026-07-01", settled: false, settledDate: "" }];
+  const result = settleUpPersonIous(ious, "Sam", 25, "2026-07-15", () => "remainder");
+  assert.equal(result.ok, false);
+  assert.equal(ious[0].settled, false);
+});
+
+test("settleUpPersonIous regression: a partial settle-up split still reconciles with accountBalance's per-record reads", () => {
+  const accounts = [{ id: "checking", type: "checking", openingBalance: 100 }];
+  const ious = [{ id: "a", person: "Sam", amount: 20, direction: "owed_to_me", date: "2026-07-05", accountId: "checking", settled: false, settledDate: "" }];
+  const before = accountBalance("checking", { accounts, transactions: [], paychecks: [], transfers: [], ious }, "2026-07-20");
+  assert.equal(before, 100);
+  const result = settleUpPersonIous(ious, "Sam", 12, "2026-07-15", () => "a-remainder");
+  const after = accountBalance("checking", { accounts, transactions: [], paychecks: [], transfers: [], ious: result.ious }, "2026-07-20");
+  assert.equal(after, 112);
+  const stillPending = accountBalance("checking", { accounts, transactions: [], paychecks: [], transfers: [], ious: result.ious }, "2026-07-10");
+  assert.equal(stillPending, 100);
+});
+
 test("parseDelimitedText keeps a comma inside a properly quoted field as one cell", () => {
   const rows = parseDelimitedText('a,"b, and c",d\n1,2,3\n');
   assert.deepEqual(rows, [["a", "b, and c", "d"], ["1", "2", "3"]]);
@@ -650,16 +814,17 @@ test("parseDelimitedText treats an unescaped quote as literal unless followed by
   assert.deepEqual(rows[0], ["07/03/2026", 'Zelle payment to X for "Niralya math"; Conf# abc', "-160.00", "484.30"]);
 });
 
-test("parseBankCsvTransactions: a Debit/Credit format imports only debit rows as positive expenses", () => {
+test("parseBankCsvTransactions: a Debit/Credit format imports debit rows as expenses, skips autopay credits, and keeps a genuine credit as a refund", () => {
   const csv = [
     "Status,Date,Description,Debit,Credit,Member Name",
-    'Cleared,07/13/2026,"REGAL MEDLOCK 18 0354 DULUTH GA",1.08,,PRITHVI RAJ VELUCHAMY',
-    'Cleared,07/10/2026,"AUTOPAY 220115055210464RAUTOPAY AUTO-PMT",,-1768.09,PRITHVI RAJ VELUCHAMY',
-    'Cleared,06/30/2026,"COSTCO WHSE #1175 CUMMING GA",,-26.74,PRITHVI RAJ VELUCHAMY',
-    'Cleared,06/30/2026,"COSTCO GAS #1175 CUMMING GA",50.52,,PRITHVI RAJ VELUCHAMY'
+    'Cleared,07/13/2026,"REGAL MEDLOCK 18 0354 DULUTH GA",1.08,,J DOE',
+    'Cleared,07/10/2026,"AUTOPAY 220115055210464RAUTOPAY AUTO-PMT",,-1768.09,J DOE',
+    'Cleared,06/30/2026,"COSTCO WHSE #1175 CUMMING GA",,-26.74,J DOE',
+    'Cleared,06/30/2026,"COSTCO GAS #1175 CUMMING GA",50.52,,J DOE'
   ].join("\n");
   assert.deepEqual(parseBankCsvTransactions(csv), [
     { date: "2026-07-13", payee: "REGAL MEDLOCK 18 0354 DULUTH GA", amount: 1.08 },
+    { date: "2026-06-30", payee: "COSTCO WHSE #1175 CUMMING GA", amount: -26.74 },
     { date: "2026-06-30", payee: "COSTCO GAS #1175 CUMMING GA", amount: 50.52 }
   ]);
 });

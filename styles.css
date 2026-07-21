@@ -1382,6 +1382,10 @@ main {
   color: var(--coral);
 }
 
+.positive {
+  color: var(--green);
+}
+
 .danger-button {
   background: #fff0f0;
   color: var(--coral);
@@ -3124,6 +3128,30 @@ main {
 .iou-split-row input[type="number"] {
   flex: 1 1 auto;
   min-width: 0;
+}
+
+.iou-person-card {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.iou-person-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.6rem;
+}
+
+.iou-person-records summary {
+  cursor: pointer;
+  font-weight: 700;
+  color: var(--muted);
+  font-size: 0.8rem;
+}
+
+.iou-person-records .compact-row {
+  margin-top: 0.5rem;
 }
 
 .delete-budget-line-impact-group + .delete-budget-line-impact-group {

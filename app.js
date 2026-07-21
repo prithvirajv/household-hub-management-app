@@ -48,6 +48,8 @@ let selectedTransactionTag = "";
 let reportsScope = null;
 let reportsCardFilter = "all";
 let reportsSelectedTag = "";
+let splitBillType = "equal";
+let splitBillRows = [];
 let calendarFeedback = "";
 // Kept out of state (like calendarFeedback) so a confirmation message never
 // gets saved into the shared household blob and replayed for every login.
@@ -2960,25 +2962,106 @@ function ensureIOUsData() {
   });
 }
 
-function iouRow(iou, index) {
+function iouRow(iou) {
   return `<div class="compact-row">
     <div><strong>${escapeHtml(iou.person)}</strong><small>${iou.reason ? `${escapeHtml(iou.reason)} · ` : ""}${formatShortDate(iou.date)}</small></div>
     <b>${exactMoney.format(iou.amount)}</b>
-    ${state.accounts.length ? `<select class="income-recurrence-select" data-iou-account="${index}" aria-label="Account for ${escapeHtml(iou.person)}"><option value="">Not linked</option>${accountOptions(iou.accountId || "", { excludeType: "credit_card" })}</select>` : ""}
+    ${state.accounts.length ? `<select class="income-recurrence-select" data-iou-account="${iou.id}" aria-label="Account for ${escapeHtml(iou.person)}"><option value="">Not linked</option>${accountOptions(iou.accountId || "", { excludeType: "credit_card" })}</select>` : ""}
     <div class="compact-row-actions">
-      ${iou.settled ? "" : `<button class="icon-button" data-settle-iou="${index}" type="button" aria-label="Mark settled with ${escapeHtml(iou.person)}">✓</button>`}
-      <button class="icon-button danger-button" data-delete-iou="${index}" type="button" aria-label="Delete IOU with ${escapeHtml(iou.person)}">×</button>
+      ${iou.settled ? "" : `<button class="icon-button" data-settle-iou="${iou.id}" type="button" aria-label="Mark settled with ${escapeHtml(iou.person)}">✓</button>`}
+      <button class="icon-button danger-button" data-delete-iou="${iou.id}" type="button" aria-label="Delete IOU with ${escapeHtml(iou.person)}">×</button>
     </div>
   </div>`;
+}
+
+function personBalanceCard(group) {
+  const isSettled = group.direction === "settled";
+  const headline = isSettled
+    ? "All settled up"
+    : group.direction === "owed_to_me"
+      ? `${escapeHtml(group.label)} owes you ${money.format(Math.abs(group.net))}`
+      : `You owe ${escapeHtml(group.label)} ${money.format(Math.abs(group.net))}`;
+  return `<div class="card iou-person-card">
+    <div class="iou-person-head">
+      <div><span class="card-label">${escapeHtml(group.label)}</span><h3 class="${isSettled ? "" : group.direction === "owed_to_me" ? "positive" : "danger"}">${headline}</h3></div>
+      ${isSettled ? "" : `<button class="ghost" type="button" data-settle-up-person="${escapeHtml(group.key)}">Settle up</button>`}
+    </div>
+    <details class="iou-person-records">
+      <summary>${group.records.length} record${group.records.length === 1 ? "" : "s"}</summary>
+      ${group.records.map((iou) => iouRow(iou)).join("")}
+    </details>
+  </div>`;
+}
+
+// The Split-a-bill form's dynamic friend rows, mirroring the Bank Stream
+// Assign IOU dialog's iouSplitRows/renderIouSplitRows pattern - the payer is
+// always the implicit extra participant (see computeBillSplitAmounts), never
+// one of these rows.
+function recomputeSplitBillRows() {
+  const totalAmount = Number($("#splitExpenseForm")?.amount?.value || 0);
+  const result = computeBillSplitAmounts(splitBillType, totalAmount, splitBillRows);
+  const messageEl = $("#splitBillMessage");
+  const remainderEl = $("#splitBillRemainder");
+  if (!result.ok) {
+    if (messageEl) messageEl.textContent = result.error;
+    if (remainderEl) remainderEl.textContent = money.format(0);
+    return;
+  }
+  if (messageEl) messageEl.textContent = "";
+  if (splitBillType !== "exact") {
+    splitBillRows.forEach((row, index) => {
+      row.amount = result.friendAmounts[index];
+      const input = document.querySelector(`#splitBillRows [data-split-bill-amount="${index}"]`);
+      if (input) input.value = row.amount;
+    });
+  }
+  if (remainderEl) {
+    remainderEl.textContent = money.format(result.payerAmount);
+    remainderEl.classList.toggle("danger", result.payerAmount < 0);
+  }
+}
+
+function renderSplitBillRows() {
+  const container = $("#splitBillRows");
+  if (!container) return;
+  container.innerHTML = splitBillRows.map((row, index) => `
+    <div class="iou-split-row">
+      <input type="text" placeholder="Friend's name" value="${escapeHtml(row.person)}" data-split-bill-person="${index}" required>
+      ${splitBillType === "percentage"
+        ? `<input type="number" step="0.01" min="0" max="100" placeholder="%" value="${row.percent || ""}" data-split-bill-percent="${index}">`
+        : `<input type="number" step="0.01" min="0.01" placeholder="Amount" value="${row.amount || ""}" data-split-bill-amount="${index}" ${splitBillType === "equal" ? "readonly" : ""}>`}
+      <button type="button" class="icon-button ghost" data-remove-split-bill-row="${index}" aria-label="Remove person">×</button>
+    </div>
+  `).join("");
+  container.querySelectorAll("[data-split-bill-person]").forEach((input) => {
+    input.addEventListener("input", () => { splitBillRows[Number(input.dataset.splitBillPerson)].person = input.value; });
+  });
+  container.querySelectorAll("[data-split-bill-amount]").forEach((input) => {
+    input.addEventListener("input", () => {
+      splitBillRows[Number(input.dataset.splitBillAmount)].amount = Number(input.value);
+      recomputeSplitBillRows();
+    });
+  });
+  container.querySelectorAll("[data-split-bill-percent]").forEach((input) => {
+    input.addEventListener("input", () => {
+      splitBillRows[Number(input.dataset.splitBillPercent)].percent = Number(input.value);
+      recomputeSplitBillRows();
+    });
+  });
+  container.querySelectorAll("[data-remove-split-bill-row]").forEach((button) => {
+    button.addEventListener("click", () => {
+      splitBillRows.splice(Number(button.dataset.removeSplitBillRow), 1);
+      renderSplitBillRows();
+    });
+  });
+  recomputeSplitBillRows();
 }
 
 function renderIOUs() {
   ensureIOUsData();
   const today = dateKey(new Date());
-  const withIndex = state.ious.map((iou, index) => ({ iou, index }));
-  const youOwe = withIndex.filter(({ iou }) => !iou.settled && iou.direction === "i_owe");
-  const owedToYou = withIndex.filter(({ iou }) => !iou.settled && iou.direction === "owed_to_me");
-  const settled = withIndex.filter(({ iou }) => iou.settled);
+  const balances = netBalancesByPerson(state.ious);
+  const settled = state.ious.filter((iou) => iou.settled);
   return `
     <section class="ious-layout">
       <p class="muted">Track money you've borrowed from people, and split a shared expense you already paid so friends can pay you back.</p>
@@ -2999,27 +3082,28 @@ function renderIOUs() {
       </div>
       <div class="card">
         <div class="card-label">Shared expense</div><h3>Split a bill with friends</h3>
-        <p class="muted">You already paid the full amount — this just adds an IOU for each friend's share.</p>
+        <p class="muted">Enter the total bill including your own share — only your friends' shares become IOUs.</p>
         <form id="splitExpenseForm" class="mini-form split-expense-form">
           <label>What for<input name="reason" placeholder="Dinner" required></label>
-          <label>Total amount<input name="amount" type="number" step="0.01" min="0.01" placeholder="90" required></label>
+          <label>Total bill (including your share)<input name="amount" type="number" step="0.01" min="0.01" placeholder="90" required></label>
           <label>Date<input name="date" type="date" value="${today}"></label>
-          <label class="form-row-full">Friends (comma-separated, not including you)<input name="people" placeholder="Sam, Priya, Jordan" required></label>
+          <label>Split type<select id="splitBillType">
+            <option value="equal" ${splitBillType === "equal" ? "selected" : ""}>Equal</option>
+            <option value="exact" ${splitBillType === "exact" ? "selected" : ""}>Exact amounts</option>
+            <option value="percentage" ${splitBillType === "percentage" ? "selected" : ""}>Percentage</option>
+          </select></label>
+          <div id="splitBillRows" class="iou-split-rows form-row-full"></div>
+          <button id="addSplitBillRowButton" class="ghost form-row-full" type="button">+ Add another person</button>
+          <div class="iou-split-total form-row-full"><span>Your remaining share</span><b id="splitBillRemainder">$0.00</b></div>
           ${state.accounts.length ? `<label>Account their repayment lands in (optional)<select name="accountId"><option value="">Not linked</option>${accountOptions("", { excludeType: "credit_card" })}</select></label>` : ""}
-          <button type="submit" class="form-row-full">Split evenly and add</button>
+          <p id="splitBillMessage" class="form-message form-row-full"></p>
+          <button type="submit" class="form-row-full">Split and add</button>
         </form>
       </div>
-      <div class="card">
-        <div class="card-label">You owe</div><h3>Money you need to pay back</h3>
-        ${youOwe.length ? youOwe.map(({ iou, index }) => iouRow(iou, index)).join("") : `<div class="empty-inline">Nothing you owe right now</div>`}
-      </div>
-      <div class="card">
-        <div class="card-label">Owed to you</div><h3>Money coming back to you</h3>
-        ${owedToYou.length ? owedToYou.map(({ iou, index }) => iouRow(iou, index)).join("") : `<div class="empty-inline">Nobody owes you right now</div>`}
-      </div>
+      ${balances.length ? balances.map(personBalanceCard).join("") : `<div class="card"><div class="empty-inline">No IOUs yet</div></div>`}
       ${settled.length ? `<details class="card ious-settled-details">
         <summary>Settled (${settled.length})</summary>
-        ${settled.map(({ iou, index }) => iouRow(iou, index)).join("")}
+        ${settled.map((iou) => iouRow(iou)).join("")}
       </details>` : ""}
     </section>
   `;
@@ -7673,21 +7757,47 @@ function bindViewEvents() {
     render();
   });
 
+  if ($("#splitBillRows")) {
+    if (!splitBillRows.length) splitBillRows = [{ person: "", amount: 0, percent: 0 }];
+    renderSplitBillRows();
+  }
+
+  $("#splitExpenseForm")?.amount?.addEventListener("input", recomputeSplitBillRows);
+
+  $("#splitBillType")?.addEventListener("change", (event) => {
+    splitBillType = event.currentTarget.value;
+    renderSplitBillRows();
+  });
+
+  $("#addSplitBillRowButton")?.addEventListener("click", () => {
+    splitBillRows.push({ person: "", amount: 0, percent: 0 });
+    renderSplitBillRows();
+  });
+
   $("#splitExpenseForm")?.addEventListener("submit", (event) => {
     event.preventDefault();
     const data = Object.fromEntries(new FormData(event.currentTarget));
     const reason = String(data.reason || "").trim();
     const totalAmount = Number(data.amount);
-    const people = String(data.people || "").split(",").map((name) => name.trim()).filter(Boolean);
-    if (!reason || !(totalAmount > 0) || !people.length) return;
+    const friends = splitBillRows
+      .map((row) => ({ person: String(row.person || "").trim(), amount: Number(row.amount), percent: Number(row.percent) }))
+      .filter((row) => row.person);
+    if (!reason || !(totalAmount > 0) || !friends.length) {
+      $("#splitBillMessage").textContent = "Enter what it was for, the total bill, and at least one friend.";
+      return;
+    }
+    const result = computeBillSplitAmounts(splitBillType, totalAmount, friends);
+    if (!result.ok) {
+      $("#splitBillMessage").textContent = result.error;
+      return;
+    }
     const date = data.date || dateKey(new Date());
-    const shares = splitAmountEvenly(totalAmount, people.length);
     state.ious ||= [];
-    people.forEach((person, index) => {
+    friends.forEach((friend, index) => {
       state.ious.push({
         id: uniqueId("iou"),
-        person,
-        amount: shares[index],
+        person: friend.person,
+        amount: result.friendAmounts[index],
         direction: "owed_to_me",
         reason,
         date,
@@ -7696,13 +7806,15 @@ function bindViewEvents() {
         settledDate: ""
       });
     });
+    splitBillRows = [];
+    splitBillType = "equal";
     autosaveState();
     render();
   });
 
   document.querySelectorAll("[data-iou-account]").forEach((select) => {
     select.addEventListener("change", () => {
-      const iou = state.ious[Number(select.dataset.iouAccount)];
+      const iou = state.ious.find((item) => item.id === select.dataset.iouAccount);
       if (iou) iou.accountId = select.value;
       autosaveState();
       render();
@@ -7711,7 +7823,7 @@ function bindViewEvents() {
 
   document.querySelectorAll("[data-settle-iou]").forEach((button) => {
     button.addEventListener("click", () => {
-      const iou = state.ious[Number(button.dataset.settleIou)];
+      const iou = state.ious.find((item) => item.id === button.dataset.settleIou);
       if (!iou) return;
       iou.settled = true;
       iou.settledDate = dateKey(new Date());
@@ -7722,9 +7834,17 @@ function bindViewEvents() {
 
   document.querySelectorAll("[data-delete-iou]").forEach((button) => {
     button.addEventListener("click", () => {
-      state.ious.splice(Number(button.dataset.deleteIou), 1);
+      const index = state.ious.findIndex((item) => item.id === button.dataset.deleteIou);
+      if (index === -1) return;
+      state.ious.splice(index, 1);
       autosaveState();
       render();
+    });
+  });
+
+  document.querySelectorAll("[data-settle-up-person]").forEach((button) => {
+    button.addEventListener("click", () => {
+      openSettleUpDialog(button.dataset.settleUpPerson);
     });
   });
 
@@ -8634,6 +8754,7 @@ $("#exportReportForm").addEventListener("submit", async (event) => {
 
 let assignIouDraftTotal = 0;
 let iouSplitRows = [];
+let assignIouSplitType = "exact";
 
 function updateIouRemainder() {
   const splitTotal = iouSplitRows.reduce((sum, row) => sum + (Number(row.amount) || 0), 0);
@@ -8643,12 +8764,30 @@ function updateIouRemainder() {
   remainderEl.classList.toggle("danger", remainder < 0);
 }
 
+// In equal/percentage mode the row amounts are derived, not typed - recompute
+// and write them back onto iouSplitRows before updateIouRemainder runs, so
+// the remainder always reflects computeBillSplitAmounts' own payerAmount
+// (the two are guaranteed to reconcile to the cent regardless of mode).
+function recomputeAssignIouSplits() {
+  const result = computeBillSplitAmounts(assignIouSplitType, assignIouDraftTotal, iouSplitRows);
+  if (result.ok && assignIouSplitType !== "exact") {
+    iouSplitRows.forEach((row, index) => {
+      row.amount = result.friendAmounts[index];
+      const input = document.querySelector(`#assignIouSplitRows [data-iou-split-amount="${index}"]`);
+      if (input) input.value = row.amount;
+    });
+  }
+  updateIouRemainder();
+}
+
 function renderIouSplitRows() {
   const container = $("#assignIouSplitRows");
   container.innerHTML = iouSplitRows.map((row, index) => `
     <div class="iou-split-row">
       <input type="text" placeholder="Friend's name" value="${escapeHtml(row.person)}" data-iou-split-person="${index}" required>
-      <input type="number" step="0.01" min="0.01" placeholder="Amount" value="${row.amount || ""}" data-iou-split-amount="${index}">
+      ${assignIouSplitType === "percentage"
+        ? `<input type="number" step="0.01" min="0" max="100" placeholder="%" value="${row.percent || ""}" data-iou-split-percent="${index}">`
+        : `<input type="number" step="0.01" min="0.01" placeholder="Amount" value="${row.amount || ""}" data-iou-split-amount="${index}" ${assignIouSplitType === "equal" ? "readonly" : ""}>`}
       <button type="button" class="icon-button ghost" data-remove-iou-split-row="${index}" aria-label="Remove person">×</button>
     </div>
   `).join("");
@@ -8661,13 +8800,19 @@ function renderIouSplitRows() {
       updateIouRemainder();
     });
   });
+  container.querySelectorAll("[data-iou-split-percent]").forEach((input) => {
+    input.addEventListener("input", () => {
+      iouSplitRows[Number(input.dataset.iouSplitPercent)].percent = Number(input.value);
+      recomputeAssignIouSplits();
+    });
+  });
   container.querySelectorAll("[data-remove-iou-split-row]").forEach((button) => {
     button.addEventListener("click", () => {
       iouSplitRows.splice(Number(button.dataset.removeIouSplitRow), 1);
       renderIouSplitRows();
     });
   });
-  updateIouRemainder();
+  recomputeAssignIouSplits();
 }
 
 function openAssignIouDialog(draftId) {
@@ -8675,14 +8820,16 @@ function openAssignIouDialog(draftId) {
   if (!draft) return;
   pendingIouDraftId = draftId;
   assignIouDraftTotal = Math.abs(Number(draft.amount || 0));
+  assignIouSplitType = "exact";
   const form = $("#assignIouForm");
   form.reset();
   form.reason.value = draft.payee || "";
   form.date.value = draft.date || dateKey(new Date());
+  $("#assignIouSplitType").value = "exact";
   $("#assignIouTotal").textContent = money.format(assignIouDraftTotal);
   // Default to an even 2-way split (you + one friend), like Splitwise's
   // default - the user can edit the amount or add more people from here.
-  iouSplitRows = [{ person: "", amount: Math.round((assignIouDraftTotal / 2) * 100) / 100 }];
+  iouSplitRows = [{ person: "", amount: Math.round((assignIouDraftTotal / 2) * 100) / 100, percent: 50 }];
   renderIouSplitRows();
   $("#assignIouMessage").textContent = "";
   $("#assignIouDialog").showModal();
@@ -8690,8 +8837,12 @@ function openAssignIouDialog(draftId) {
 
 $("#closeAssignIouDialogButton").addEventListener("click", () => $("#assignIouDialog").close());
 $("#cancelAssignIouButton").addEventListener("click", () => $("#assignIouDialog").close());
+$("#assignIouSplitType").addEventListener("change", (event) => {
+  assignIouSplitType = event.currentTarget.value;
+  renderIouSplitRows();
+});
 $("#addIouSplitRowButton").addEventListener("click", () => {
-  iouSplitRows.push({ person: "", amount: 0 });
+  iouSplitRows.push({ person: "", amount: 0, percent: 0 });
   renderIouSplitRows();
 });
 
@@ -8755,6 +8906,45 @@ $("#assignIouForm").addEventListener("submit", (event) => {
   autosaveState();
   pendingIouDraftId = null;
   $("#assignIouDialog").close();
+  render();
+});
+
+let pendingSettleUpPersonKey = "";
+
+function openSettleUpDialog(personKey) {
+  const group = netBalancesByPerson(state.ious).find((item) => item.key === personKey);
+  if (!group || group.direction === "settled") return;
+  pendingSettleUpPersonKey = personKey;
+  const net = Math.abs(group.net);
+  const form = $("#settleUpForm");
+  form.reset();
+  form.amount.value = net;
+  form.date.value = dateKey(new Date());
+  $("#settleUpPersonName").textContent = group.label;
+  $("#settleUpNetAmount").textContent = money.format(net);
+  $("#settleUpMessage").textContent = "";
+  $("#settleUpDialog").showModal();
+}
+
+$("#closeSettleUpDialogButton").addEventListener("click", () => $("#settleUpDialog").close());
+$("#cancelSettleUpButton").addEventListener("click", () => $("#settleUpDialog").close());
+$("#settleInFullButton").addEventListener("click", () => {
+  const group = netBalancesByPerson(state.ious).find((item) => item.key === pendingSettleUpPersonKey);
+  if (group) $("#settleUpForm").amount.value = Math.abs(group.net);
+});
+
+$("#settleUpForm").addEventListener("submit", (event) => {
+  event.preventDefault();
+  const data = Object.fromEntries(new FormData(event.currentTarget));
+  const result = settleUpPersonIous(state.ious, pendingSettleUpPersonKey, Number(data.amount), data.date || dateKey(new Date()), () => uniqueId("iou"));
+  if (!result.ok) {
+    $("#settleUpMessage").textContent = result.error;
+    return;
+  }
+  state.ious = result.ious;
+  autosaveState();
+  pendingSettleUpPersonKey = "";
+  $("#settleUpDialog").close();
   render();
 });
 

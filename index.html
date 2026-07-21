@@ -7,7 +7,7 @@
     <title>FamilyLoop</title>
     <link rel="icon" type="image/svg+xml" href="/assets/favicon.svg">
     <link rel="apple-touch-icon" href="/assets/apple-touch-icon.png">
-    <link rel="stylesheet" href="/styles.css?v=20260721-2">
+    <link rel="stylesheet" href="/styles.css?v=20260721-3">
     <script src="https://accounts.google.com/gsi/client" async defer></script>
   </head>
   <body>
@@ -232,6 +232,11 @@
         <p class="muted">Only your remaining share is accepted as your own expense - everyone else's share becomes a separate IOU you're owed.</p>
         <form id="assignIouForm">
           <div class="iou-split-total"><span>Total bill</span><b id="assignIouTotal">$0.00</b></div>
+          <label>Split type<select id="assignIouSplitType">
+            <option value="exact">Exact amounts</option>
+            <option value="equal">Equal</option>
+            <option value="percentage">Percentage</option>
+          </select></label>
           <div id="assignIouSplitRows" class="iou-split-rows"></div>
           <button id="addIouSplitRowButton" class="ghost" type="button">+ Add another person</button>
           <label>Reason<input name="reason"></label>
@@ -246,6 +251,26 @@
       </div>
     </dialog>
 
+    <dialog id="settleUpDialog" class="app-dialog">
+      <div class="delete-budget-line-dialog-content">
+        <div class="section-head">
+          <div><span class="card-label">IOUs</span><h2>Settle up</h2></div>
+          <button id="closeSettleUpDialogButton" class="icon-button ghost" type="button" aria-label="Close">×</button>
+        </div>
+        <div class="iou-split-total"><span id="settleUpPersonName"></span><b id="settleUpNetAmount">$0.00</b></div>
+        <form id="settleUpForm">
+          <label>Amount to settle<input name="amount" type="number" step="0.01" min="0.01" required></label>
+          <button id="settleInFullButton" class="ghost" type="button">Settle in full</button>
+          <label>Date<input name="date" type="date" required></label>
+          <p id="settleUpMessage" class="form-message"></p>
+          <div class="dialog-actions">
+            <button id="cancelSettleUpButton" class="ghost" type="button">Cancel</button>
+            <button type="submit">Mark settled</button>
+          </div>
+        </form>
+      </div>
+    </dialog>
+
     <template id="emptyTemplate">
       <div class="empty-state">
         <h3>No data yet</h3>
@@ -253,7 +278,7 @@
       </div>
     </template>
 
-    <script src="/lib/shared-logic.js?v=20260721-2"></script>
-    <script src="/app.js?v=20260721-2"></script>
+    <script src="/lib/shared-logic.js?v=20260721-3"></script>
+    <script src="/app.js?v=20260721-3"></script>
   </body>
 </html>
