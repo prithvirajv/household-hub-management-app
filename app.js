@@ -323,15 +323,19 @@ function snapshotTransactionsForLine(line) {
 
 // Everything that would be orphaned (or silently left pointing at a dead
 // id) by deleting the given subcategory/subcategories: real ledger
-// transactions, recurring bills, and anything linked from Wealth (a debt
-// tracked against this line). Used to decide whether a delete needs
-// confirmation at all, and what to show in that confirmation.
+// transactions, recurring bills, anything linked from Wealth (a debt
+// tracked against this line), unaccepted Bank Stream drafts already
+// assigned to it, and paychecks with money allocated to it.
+// Used to decide whether a delete needs confirmation at all, and what to
+// show in that confirmation.
 function budgetDeletionImpact(lineIds) {
   const lineIdSet = new Set(lineIds);
   return {
     transactions: state.transactions.filter((transaction) => lineIdSet.has(transaction.lineId)),
     recurringExpenses: state.recurringExpenses.filter((recurring) => lineIdSet.has(recurring.lineId)),
-    debts: state.goals.debts.filter((debt) => lineIdSet.has(debt.lineId))
+    debts: state.goals.debts.filter((debt) => lineIdSet.has(debt.lineId)),
+    drafts: (state.transactionInboxDrafts || []).filter((draft) => lineIdSet.has(draft.lineId)),
+    paychecks: state.paychecks.filter((paycheck) => (paycheck.assignedLineIds || []).some((id) => lineIdSet.has(id)))
   };
 }
 
@@ -341,7 +345,7 @@ function budgetDeletionImpact(lineIds) {
 // deferred until the user confirms (or is skipped straight through here).
 function openDeleteBudgetLineDialog({ title, lineIds, perform }) {
   const impact = budgetDeletionImpact(lineIds);
-  const totalImpacted = impact.transactions.length + impact.recurringExpenses.length + impact.debts.length;
+  const totalImpacted = impact.transactions.length + impact.recurringExpenses.length + impact.debts.length + impact.drafts.length + impact.paychecks.length;
   if (totalImpacted === 0) {
     perform();
     render();
@@ -350,8 +354,10 @@ function openDeleteBudgetLineDialog({ title, lineIds, perform }) {
   pendingBudgetLineDeletion = { lineIds, perform };
   const summaryParts = [];
   if (impact.transactions.length) summaryParts.push(`${impact.transactions.length} transaction${impact.transactions.length === 1 ? "" : "s"}`);
+  if (impact.drafts.length) summaryParts.push(`${impact.drafts.length} Bank Stream draft${impact.drafts.length === 1 ? "" : "s"}`);
   if (impact.recurringExpenses.length) summaryParts.push(`${impact.recurringExpenses.length} recurring bill${impact.recurringExpenses.length === 1 ? "" : "s"}`);
   if (impact.debts.length) summaryParts.push(`${impact.debts.length} item${impact.debts.length === 1 ? "" : "s"} in Wealth`);
+  if (impact.paychecks.length) summaryParts.push(`${impact.paychecks.length} paycheck${impact.paychecks.length === 1 ? "" : "s"}`);
   $("#deleteBudgetLineTitle").textContent = title;
   $("#deleteBudgetLineSummary").textContent = `${summaryParts.join(", ")} still linked to this. Reassign them below, or leave them unassigned.`;
   const listSections = [];
@@ -359,11 +365,18 @@ function openDeleteBudgetLineDialog({ title, lineIds, perform }) {
     const shown = impact.transactions.slice(0, 15);
     listSections.push(`<div class="delete-budget-line-impact-group"><h4>Transactions</h4><ul>${shown.map((transaction) => `<li>${escapeHtml(transaction.payee)} — ${exactMoney.format(transaction.amount)} on ${formatShortDate(transaction.date)}</li>`).join("")}${impact.transactions.length > shown.length ? `<li>+${impact.transactions.length - shown.length} more</li>` : ""}</ul></div>`);
   }
+  if (impact.drafts.length) {
+    const shown = impact.drafts.slice(0, 15);
+    listSections.push(`<div class="delete-budget-line-impact-group"><h4>Bank Stream</h4><ul>${shown.map((draft) => `<li>${escapeHtml(draft.payee)} — ${exactMoney.format(draft.amount)} on ${formatShortDate(draft.date)}</li>`).join("")}${impact.drafts.length > shown.length ? `<li>+${impact.drafts.length - shown.length} more</li>` : ""}</ul></div>`);
+  }
   if (impact.recurringExpenses.length) {
     listSections.push(`<div class="delete-budget-line-impact-group"><h4>Recurring bills</h4><ul>${impact.recurringExpenses.map((recurring) => `<li>${escapeHtml(recurring.payee)} — ${exactMoney.format(recurring.amount)}</li>`).join("")}</ul></div>`);
   }
   if (impact.debts.length) {
     listSections.push(`<div class="delete-budget-line-impact-group"><h4>Wealth</h4><ul>${impact.debts.map((debt) => `<li>${escapeHtml(debt.name)}</li>`).join("")}</ul></div>`);
+  }
+  if (impact.paychecks.length) {
+    listSections.push(`<div class="delete-budget-line-impact-group"><h4>Paycheck/Income</h4><ul>${impact.paychecks.map((paycheck) => `<li>${escapeHtml(paycheck.name)}</li>`).join("")}</ul></div>`);
   }
   $("#deleteBudgetLineImpactList").innerHTML = listSections.join("");
   const excludeSet = new Set(lineIds);
@@ -8879,6 +8892,12 @@ $("#confirmDeleteBudgetLineButton").addEventListener("click", () => {
     });
     impact.recurringExpenses.forEach((recurring) => { recurring.lineId = targetLineId; });
     impact.debts.forEach((debt) => { debt.lineId = targetLineId; });
+    impact.drafts.forEach((draft) => { draft.lineId = targetLineId; });
+    const lineIdSet = new Set(lineIds);
+    impact.paychecks.forEach((paycheck) => {
+      paycheck.assignedLineIds = paycheck.assignedLineIds.filter((id) => !lineIdSet.has(id));
+      if (!paycheck.assignedLineIds.includes(targetLineId)) paycheck.assignedLineIds.push(targetLineId);
+    });
   } else {
     lineIds.forEach((lineId) => {
       const line = allLines().find((item) => item.id === lineId);
