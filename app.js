@@ -9,7 +9,7 @@ const views = [
   ["plan", "Plan", "📋"],
   ["documents", "Documents", "📁"],
   ["decisions", "Decisions", "⚖️"],
-  ["ious", "IOUs", "💸"],
+  ["ious", "Shared Expenses", "💸"],
   ["meals", "Meals", "🍲"],
   ["recipes", "Recipes", "📖"],
   ["goals", "Goals", "🎯"],
@@ -1130,7 +1130,7 @@ function renderShell() {
                     : isDecisionsView
                       ? "Household decisions"
                       : isIousView
-                        ? "Borrowed & owed"
+                        ? "Shared expenses & IOUs"
                         : isProfileView
                           ? "Your profile"
                           : isHomeView
