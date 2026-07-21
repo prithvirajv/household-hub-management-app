@@ -1758,6 +1758,20 @@ main {
   flex-basis: 100%;
 }
 
+/* Groups a row's trailing icon buttons (accept/split/dismiss, or the
+   recurring row's end-date toggle + delete) into a single flex item so they
+   wrap to the next line together when the row runs out of room, instead of
+   the flex-wrap breaking them apart mid-group (e.g. the delete button
+   stranded alone on its own line while its neighbors stayed on the row
+   above). */
+.row-actions {
+  display: flex;
+  flex-wrap: nowrap;
+  align-items: center;
+  gap: 0.5rem;
+  flex: 0 0 auto;
+}
+
 /* Collapses the End date field down to a single icon by default — clicking
    it reveals the actual date input, matching the icon-button sizing used
    everywhere else so it doesn't look out of place next to the delete
@@ -1800,7 +1814,7 @@ main {
    repeating Payee/Amount/Date/etc. labels on every row — is safe here. */
 .ledger-entry-head {
   display: grid;
-  grid-template-columns: minmax(120px, 1fr) minmax(80px, 100px) minmax(120px, 130px) minmax(140px, 1fr) 48px;
+  grid-template-columns: minmax(120px, 1fr) minmax(80px, 100px) minmax(120px, 130px) minmax(140px, 1fr) 48px 48px;
   gap: 0.5rem;
   padding: 0.3rem 0.6rem 0.15rem;
   color: var(--muted);
@@ -1811,7 +1825,7 @@ main {
 }
 
 .ledger-entry-head.has-accounts {
-  grid-template-columns: minmax(120px, 1fr) minmax(80px, 100px) minmax(120px, 130px) minmax(140px, 1fr) minmax(120px, 140px) 48px;
+  grid-template-columns: minmax(120px, 1fr) minmax(80px, 100px) minmax(120px, 130px) minmax(140px, 1fr) minmax(120px, 140px) 48px 48px;
 }
 
 .ledger-entry-head button {
@@ -1833,7 +1847,7 @@ main {
 
 .ledger-entry-row {
   display: grid;
-  grid-template-columns: minmax(120px, 1fr) minmax(80px, 100px) minmax(120px, 130px) minmax(140px, 1fr) 48px;
+  grid-template-columns: minmax(120px, 1fr) minmax(80px, 100px) minmax(120px, 130px) minmax(140px, 1fr) 48px 48px;
   gap: 0.5rem;
   align-items: center;
   padding: 0.4rem 0.6rem;
@@ -1841,7 +1855,7 @@ main {
 }
 
 .ledger-entry-row.has-accounts {
-  grid-template-columns: minmax(120px, 1fr) minmax(80px, 100px) minmax(120px, 130px) minmax(140px, 1fr) minmax(120px, 140px) 48px;
+  grid-template-columns: minmax(120px, 1fr) minmax(80px, 100px) minmax(120px, 130px) minmax(140px, 1fr) minmax(120px, 140px) 48px 48px;
 }
 
 .ledger-entry-row:last-of-type {

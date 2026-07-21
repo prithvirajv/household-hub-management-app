@@ -1511,11 +1511,13 @@ function recurringExpenseRow(recurring, index) {
       </select></label>
       <label class="row-field row-select"><small>Subcategory</small><select data-recurring-line="${index}">${lineOptions}</select></label>
       ${state.accounts.length ? `<label class="row-field row-select"><small>Account</small><select data-recurring-account="${index}"><option value="">Not linked</option>${accountOptions(recurring.accountId || "")}</select></label>` : ""}
-      <details class="end-date-toggle">
-        <summary class="icon-button ${recurring.endDate ? "has-end-date" : ""}" aria-label="${recurring.endDate ? `End date set for ${escapeHtml(recurring.payee)}` : `Set an end date for ${escapeHtml(recurring.payee)}`}">↻</summary>
-        <label class="row-field row-date"><small>End date</small><input type="date" data-recurring-end-date="${index}" value="${recurring.endDate || ""}" aria-label="Stop ${escapeHtml(recurring.payee)} from repeating after this date"></label>
-      </details>
-      <button class="icon-button danger-button" data-delete-recurring="${index}" type="button" aria-label="Stop recurring ${escapeHtml(recurring.payee)}">×</button>
+      <div class="row-actions">
+        <details class="end-date-toggle">
+          <summary class="icon-button ${recurring.endDate ? "has-end-date" : ""}" aria-label="${recurring.endDate ? `End date set for ${escapeHtml(recurring.payee)}` : `Set an end date for ${escapeHtml(recurring.payee)}`}">↻</summary>
+          <label class="row-field row-date"><small>End date</small><input type="date" data-recurring-end-date="${index}" value="${recurring.endDate || ""}" aria-label="Stop ${escapeHtml(recurring.payee)} from repeating after this date"></label>
+        </details>
+        <button class="icon-button danger-button" data-delete-recurring="${index}" type="button" aria-label="Stop recurring ${escapeHtml(recurring.payee)}">×</button>
+      </div>
     </div>`;
 }
 
@@ -1620,7 +1622,7 @@ function renderTransactions() {
               <button type="button" data-sort-transactions="date">Date${transactionSortIndicator("date")}</button>
               <button type="button" data-sort-transactions="subcategory">Subcategory${transactionSortIndicator("subcategory")}</button>
               ${state.accounts.length ? `<button type="button" data-sort-transactions="account">Account${transactionSortIndicator("account")}</button>` : ""}
-              <span></span>
+              <span></span><span></span>
             </div>
             <div class="ledger-entry-list">${sorted.map(({ transaction, index }) => ledgerEntryRow(transaction, index)).join("")}</div>`;
           })()}
@@ -1672,9 +1674,11 @@ function renderTransactions() {
               <label class="row-field row-amount"><small>Amount</small><input class="money-input" type="number" step="0.01" data-bank-stream-amount="${transaction.id}" value="${transaction.amount}"></label>
               <label class="row-field row-select"><small>Subcategory</small><select data-bank-stream-line="${transaction.id}">${lineOptions(transaction.lineId)}</select></label>
               ${state.accounts.length ? `<label class="row-field row-select"><small>Account</small><select data-bank-stream-account="${transaction.id}"><option value="">Not linked</option>${accountOptions(transaction.accountId || "")}</select></label>` : ""}
-              <button class="icon-button" data-accept-import="${transaction.id}" type="button" aria-label="Accept ${escapeHtml(transaction.payee)}">✓</button>
-              <button class="icon-button" data-assign-iou="${transaction.id}" type="button" aria-label="Split with a friend ${escapeHtml(transaction.payee)}">👥</button>
-              <button class="icon-button danger-button" data-dismiss-import="${transaction.id}" type="button" aria-label="Dismiss ${escapeHtml(transaction.payee)}">×</button>
+              <div class="row-actions">
+                <button class="icon-button" data-accept-import="${transaction.id}" type="button" aria-label="Accept ${escapeHtml(transaction.payee)}">✓</button>
+                <button class="icon-button" data-assign-iou="${transaction.id}" type="button" aria-label="Split with a friend ${escapeHtml(transaction.payee)}">👥</button>
+                <button class="icon-button danger-button" data-dismiss-import="${transaction.id}" type="button" aria-label="Dismiss ${escapeHtml(transaction.payee)}">×</button>
+              </div>
               ${tagChipsHtml(transaction.tags, "data-remove-bank-stream-tag", "data-add-bank-stream-tag", transaction.id)}
             </div>
           `).join("") || `<div class="empty-inline">No bank stream items waiting</div>`}
