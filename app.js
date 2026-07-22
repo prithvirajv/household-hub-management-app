@@ -1683,6 +1683,7 @@ function renderTransactions() {
             <div class="bank-stream-row" data-bank-stream-row="${transaction.id}">
               ${transaction.recurringId ? `<span class="pill">Recurring</span>` : ""}
               ${transaction.isDeposit ? `<span class="pill" title="Detected as money coming in from this file's Debit/Credit or signed-Amount column">Deposit</span>` : ""}
+              ${transaction.isPayment ? `<span class="pill pill-info" title="Looks like a card payoff/autopay - probably belongs in Move to Transfers, not as a regular expense">Card payment</span>` : ""}
               ${transaction.possibleDuplicate ? `<span class="pill pill-warning" title="Matches an existing transaction with the same amount within 2 days">Possible duplicate</span>` : ""}
               ${transaction.refundMatch ? `<span class="pill pill-info" title="Refund for the ${money.format(transaction.refundMatch.amount)} purchase on ${formatShortDate(transaction.refundMatch.date)} (order ${escapeHtml(transaction.orderNumber)})">Refund match</span>` : ""}
               ${transaction.transferMatch ? `<span class="pill pill-info" title="Matches ${escapeHtml(accountName(transaction.transferMatch.accountId))}'s ${exactMoney.format(Math.abs(transaction.transferMatch.amount))} on ${formatShortDate(transaction.transferMatch.date)}">Possible transfer</span>` : ""}
@@ -6242,7 +6243,8 @@ function bindViewEvents() {
         accountId: matchedAccount?.id || "",
         date: row.date,
         orderNumber: row.orderNumber || "",
-        isDeposit: !!row.isDeposit
+        isDeposit: !!row.isDeposit,
+        isPayment: !!row.isPayment
       });
     });
     const duplicateNote = duplicateCount ? ` ${duplicateCount} look${duplicateCount === 1 ? "s" : ""} like a duplicate of a transaction you already have — check before accepting.` : "";

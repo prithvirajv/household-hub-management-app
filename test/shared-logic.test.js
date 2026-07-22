@@ -829,7 +829,7 @@ test("parseDelimitedText treats an unescaped quote as literal unless followed by
   assert.deepEqual(rows[0], ["07/03/2026", 'Zelle payment to X for "Niralya math"; Conf# abc', "-160.00", "484.30"]);
 });
 
-test("parseBankCsvTransactions: a Debit/Credit format imports debit rows as expenses, skips autopay credits, and keeps a genuine credit as a flagged deposit", () => {
+test("parseBankCsvTransactions: a Debit/Credit format imports debit rows as expenses, flags an autopay credit as a payment (not silently dropped), and keeps a genuine credit as a flagged deposit", () => {
   const csv = [
     "Status,Date,Description,Debit,Credit,Member Name",
     'Cleared,07/13/2026,"REGAL MEDLOCK 18 0354 DULUTH GA",1.08,,J DOE',
@@ -839,6 +839,7 @@ test("parseBankCsvTransactions: a Debit/Credit format imports debit rows as expe
   ].join("\n");
   assert.deepEqual(parseBankCsvTransactions(csv), [
     { date: "2026-07-13", payee: "REGAL MEDLOCK 18 0354 DULUTH GA", amount: 1.08 },
+    { date: "2026-07-10", payee: "AUTOPAY 220115055210464RAUTOPAY AUTO-PMT", amount: -1768.09, isPayment: true },
     { date: "2026-06-30", payee: "COSTCO WHSE #1175 CUMMING GA", amount: -26.74, isDeposit: true },
     { date: "2026-06-30", payee: "COSTCO GAS #1175 CUMMING GA", amount: 50.52 }
   ]);
@@ -875,7 +876,7 @@ test("parseBankCsvTransactions: skips a leading summary block and finds the real
   ]);
 });
 
-test("parseBankCsvTransactions: detects a credit-card-style export (mostly positive) and keeps purchases positive, skipping autopay rows", () => {
+test("parseBankCsvTransactions: detects a credit-card-style export (mostly positive), keeps purchases positive, and flags autopay rows as payments instead of dropping them", () => {
   const csv = [
     "Date,Description,Card Member,Account #,Amount,Reference,Category",
     "06/09/2026,AUTOPAY PAYMENT - THANK YOU,J DOE,-55004,-256.87,'1',",
@@ -885,13 +886,15 @@ test("parseBankCsvTransactions: detects a credit-card-style export (mostly posit
     "04/27/2026,BUDGET RENT A CAR LOS ANGELES CA,J DOE,-55004,97.06,'5',Travel"
   ].join("\n");
   assert.deepEqual(parseBankCsvTransactions(csv), [
+    { date: "2026-06-09", payee: "AUTOPAY PAYMENT - THANK YOU", amount: -256.87, isPayment: true },
     { date: "2026-05-24", payee: "DUNKIN #365203 CUMMING GA", amount: 1.70 },
     { date: "2026-05-24", payee: "KATE SPADE NEW YORK NY", amount: 133.16 },
+    { date: "2026-05-09", payee: "AUTOPAY PAYMENT - THANK YOU", amount: -10.05, isPayment: true },
     { date: "2026-04-27", payee: "BUDGET RENT A CAR LOS ANGELES CA", amount: 97.06 }
   ]);
 });
 
-test("parseBankCsvTransactions: keeps a genuine merchant refund on a credit-card-style export as a negative amount", () => {
+test("parseBankCsvTransactions: keeps a genuine merchant refund on a credit-card-style export as a negative amount, and flags a payoff row instead of dropping it", () => {
   const csv = [
     "Date,Description,Amount,Reference,Category",
     "07/01/2026,ONLINE PAYMENT - THANK YOU,-732.35,'1',",
@@ -902,6 +905,7 @@ test("parseBankCsvTransactions: keeps a genuine merchant refund on a credit-card
     "04/11/2026,HAMPTON INN COLUMBUS OH,115.52,'6',Travel-Lodging"
   ].join("\n");
   assert.deepEqual(parseBankCsvTransactions(csv), [
+    { date: "2026-07-01", payee: "ONLINE PAYMENT - THANK YOU", amount: -732.35, isPayment: true },
     { date: "2026-06-20", payee: "HOME2 SUITES INDIANAPOLIS IN", amount: 203.59 },
     { date: "2026-06-19", payee: "HILTON GLOBAL FND/TM REFUND", amount: -2.00 },
     { date: "2026-05-15", payee: "DOUBLETREE FORT LEE NJ", amount: 163.65 },
@@ -979,14 +983,15 @@ PURCHASE
 `;
   const rows = parseCreditCardStatementText(text);
   assert.deepEqual(rows, [
+    { date: "2026-05-17", payee: "AUTOMATIC PAYMENT - THANK YOU", amount: -551.36, orderNumber: "", isPayment: true },
     { date: "2026-05-20", payee: "AMAZON MKTPLACE PMTS Amzn.com/bill WA", amount: -74.40, orderNumber: "111-7373945-8473814" },
     { date: "2026-05-20", payee: "AMAZON MKTPLACE PMTS Amzn.com/bill WA", amount: -6.40, orderNumber: "113-6200057-6118623" },
     { date: "2026-04-29", payee: "AMAZON MKTPL*BJ4UW0ZI1 Amzn.com/bill WA", amount: 6.40, orderNumber: "113-6200057-6118623" },
     { date: "2026-04-30", payee: "AMAZON MKTPL*BS3VY1QQ0 Amzn.com/bill WA", amount: 151.92, orderNumber: "111-7373945-8473814" }
-  ], "AUTOMATIC PAYMENT is skipped; the full refund and the partial refund each keep their own signed amount and matching order number");
+  ], "AUTOMATIC PAYMENT is flagged isPayment rather than dropped; the full refund and the partial refund each keep their own signed amount and matching order number");
 });
 
-test("parseCreditCardStatementText: skips payoff/payment lines even without an Order Number", () => {
+test("parseCreditCardStatementText: flags payoff/payment lines (even without an Order Number) instead of dropping them", () => {
   const text = `
 Statement Date: 05/20/26
 
@@ -1000,6 +1005,8 @@ PURCHASE
 `;
   const rows = parseCreditCardStatementText(text);
   assert.deepEqual(rows, [
+    { date: "2026-05-17", payee: "AUTOMATIC PAYMENT - THANK YOU", amount: -551.36, orderNumber: "", isPayment: true },
+    { date: "2026-04-02", payee: "ONLINE PAYMENT, THANK YOU", amount: -200.00, orderNumber: "", isPayment: true },
     { date: "2026-04-21", payee: "Amazon.com*BJ9U93OB2 Amzn.com/bill WA", amount: 26.28, orderNumber: "111-6080014-1493051" }
   ]);
 });
