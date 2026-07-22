@@ -2794,6 +2794,39 @@ main {
   align-items: flex-end;
 }
 
+/* width/height attributes (not just viewBox) define the intrinsic aspect
+   ratio; height:auto lets the browser scale it uniformly with no text
+   distortion, unlike the line chart above which uses a fixed CSS height +
+   preserveAspectRatio="none" since it draws no text of its own. */
+.cashflow-sankey-svg {
+  width: 100%;
+  height: auto;
+  display: block;
+}
+
+.cashflow-sankey-node {
+  fill: var(--navy);
+}
+
+.cashflow-sankey-ribbon {
+  opacity: 0.35;
+}
+
+.cashflow-sankey-label {
+  fill: var(--text);
+  font-size: 11px;
+  font-weight: 700;
+  dominant-baseline: middle;
+}
+
+.cashflow-sankey-label-income {
+  fill: var(--muted);
+  font-size: 10px;
+  font-weight: 900;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
 .reports-toolbar-fields label {
   display: flex;
   flex-direction: column;

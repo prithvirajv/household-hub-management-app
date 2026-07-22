@@ -3696,6 +3696,7 @@ function renderReports() {
   const months = cashFlowByMonth(monthKeys.length ? monthKeys : trailingMonthKeys(6));
   const totalIncome = months.reduce((sum, month) => sum + month.income, 0);
   const totalExpenses = months.reduce((sum, month) => sum + month.expenses, 0);
+  const sankeySegments = sankeyFlowSegments(categories, totalIncome, totalExpenses);
   const budgetVsActual = budgetVsActualByCategory(monthKeys).filter((row) => row.planned !== 0 || row.actual !== 0);
   const rangeTransactions = state.transactions.filter((transaction) => (monthKeys.length ? monthKeys : trailingMonthKeys(6)).includes(transaction.date?.slice(0, 7)));
   const reportsTagGroups = groupTransactionsByTag(rangeTransactions).sort((a, b) => b.total - a.total);
@@ -3717,6 +3718,7 @@ function renderReports() {
           <option value="all" ${reportsCardFilter === "all" ? "selected" : ""}>All</option>
           <option value="networth" ${reportsCardFilter === "networth" ? "selected" : ""}>Net worth</option>
           <option value="cashflow" ${reportsCardFilter === "cashflow" ? "selected" : ""}>Cash flow</option>
+          <option value="cashflowbreakdown" ${reportsCardFilter === "cashflowbreakdown" ? "selected" : ""}>Cash flow breakdown</option>
           <option value="category" ${reportsCardFilter === "category" ? "selected" : ""}>Category spend</option>
           <option value="budgetvsactual" ${reportsCardFilter === "budgetvsactual" ? "selected" : ""}>Budget vs Expense</option>
           <option value="tags" ${reportsCardFilter === "tags" ? "selected" : ""}>Tags</option>
@@ -3733,6 +3735,10 @@ function renderReports() {
         ${showCard("cashflow") ? `<section class="card">
           <div class="section-head"><div><span class="card-label">Trend</span><h3>Cash flow</h3></div><span>${money.format(totalIncome - totalExpenses)} net over ${months.length} months</span></div>
           ${cashFlowChart(months)}
+        </section>` : ""}
+        ${showCard("cashflowbreakdown") ? `<section class="card">
+          <div class="section-head"><div><span class="card-label">Breakdown</span><h3>Cash flow breakdown</h3></div><span>${money.format(totalIncome)} income this period</span></div>
+          ${sankeySegments.length ? cashFlowSankeySvg(sankeySegments, totalIncome) : `<div class="empty-inline">No income or spend in this period</div>`}
         </section>` : ""}
         ${showCard("category") ? `<section class="card"><div class="card-label">Spending</div><h3>Category report</h3>${categories.map((category) => `
           <div class="report-row-group">
@@ -4756,6 +4762,66 @@ function cashFlowChart(months) {
       `).join("")}
     </div>
     <div class="cashflow-legend"><span class="cashflow-legend-income">Income</span><span class="cashflow-legend-expense">Expenses</span></div>`;
+}
+
+// Builds the ordered list of destinations a Sankey-style breakdown flows
+// income into: each category with real spend (largest first, matching how
+// Monarch orders its own bands), plus a trailing "Savings" segment for
+// whatever's left of income after expenses - omitted entirely (not shown as
+// zero/negative) once spend meets or exceeds income, since there's nothing
+// left to show.
+function sankeyFlowSegments(categories, totalIncome, totalExpenses) {
+  const segments = categories
+    .filter((category) => category.value > 0)
+    .map((category) => ({ label: category.name, value: category.value, color: category.color }))
+    .sort((a, b) => b.value - a.value);
+  const savings = totalIncome - totalExpenses;
+  if (savings > 0) segments.push({ label: "Savings", value: savings, color: "#13936d" });
+  return segments;
+}
+
+// Two-column flow diagram: a single "Income" node on the left splitting
+// into one stacked node per segment on the right, connected by a curved
+// filled ribbon per segment (a cubic bezier between the left bar's
+// proportional vertical slice and the right node - not a stroked line).
+// Height scales with segment count (unlike netWorthTrendSvg's fixed-height
+// line chart, a fixed height here would cram or waste space depending on
+// how many categories exist). Uses explicit width/height attributes (not
+// just viewBox) so height:auto in CSS scales it uniformly with no text
+// distortion - unlike the line chart, this one draws real <text> labels
+// inside the SVG, which preserveAspectRatio="none" would stretch.
+function cashFlowSankeySvg(segments, totalIncome) {
+  const width = 560;
+  const padding = 20;
+  const rowHeight = 34;
+  const gap = 6;
+  const height = segments.length ? padding * 2 + segments.length * rowHeight + (segments.length - 1) * gap : padding * 2 + rowHeight;
+  const leftX = padding;
+  const nodeWidth = 14;
+  const rightX = width - padding - 170;
+  const availableHeight = Math.max(0, height - padding * 2);
+  const totalGapHeight = Math.max(0, segments.length - 1) * gap;
+  const rightUsableHeight = Math.max(1, availableHeight - totalGapHeight);
+  let leftCursor = padding;
+  let rightCursor = padding;
+  const ribbons = segments.map((segment) => {
+    const share = totalIncome > 0 ? segment.value / totalIncome : 0;
+    const y0L = leftCursor;
+    const y1L = leftCursor + share * availableHeight;
+    const y0R = rightCursor;
+    const y1R = rightCursor + share * rightUsableHeight;
+    leftCursor = y1L;
+    rightCursor = y1R + gap;
+    return { segment, y0L, y1L, y0R, y1R };
+  });
+  const midX = (leftX + nodeWidth + rightX) / 2;
+  return `
+    <svg viewBox="0 0 ${width} ${height}" width="${width}" height="${height}" class="cashflow-sankey-svg" role="img" aria-label="Cash flow breakdown">
+      <rect x="${leftX}" y="${padding}" width="${nodeWidth}" height="${availableHeight.toFixed(1)}" class="cashflow-sankey-node cashflow-sankey-node-income"></rect>
+      <text x="${leftX}" y="${padding - 6}" class="cashflow-sankey-label cashflow-sankey-label-income">Income</text>
+      ${ribbons.map(({ segment, y0L, y1L, y0R, y1R }) => `<path d="M${(leftX + nodeWidth).toFixed(1)},${y0L.toFixed(1)} C${midX.toFixed(1)},${y0L.toFixed(1)} ${midX.toFixed(1)},${y0R.toFixed(1)} ${rightX.toFixed(1)},${y0R.toFixed(1)} L${rightX.toFixed(1)},${y1R.toFixed(1)} C${midX.toFixed(1)},${y1R.toFixed(1)} ${midX.toFixed(1)},${y1L.toFixed(1)} ${(leftX + nodeWidth).toFixed(1)},${y1L.toFixed(1)} Z" class="cashflow-sankey-ribbon" style="fill:${segment.color}"></path>`).join("")}
+      ${ribbons.map(({ segment, y0R, y1R }) => `<rect x="${rightX}" y="${y0R.toFixed(1)}" width="${nodeWidth}" height="${Math.max(0, y1R - y0R).toFixed(1)}" class="cashflow-sankey-node" style="fill:${segment.color}"></rect><text x="${rightX + nodeWidth + 8}" y="${((y0R + y1R) / 2 + 4).toFixed(1)}" class="cashflow-sankey-label">${escapeHtml(segment.label)} · ${money.format(segment.value)} (${totalIncome > 0 ? Math.round((segment.value / totalIncome) * 100) : 0}%)</text>`).join("")}
+    </svg>`;
 }
 
 // ---- Export-only chart renderers ----
