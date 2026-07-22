@@ -1445,6 +1445,26 @@ main {
   margin-left: auto;
 }
 
+/* Pairs a trailing input/select with its icon button(s) on one shared line,
+   its own full-width row like .compact-row > div:first-child above - the
+   global `input, select { width: 100% }` rule otherwise makes that field
+   claim the entire row width on its own, pushing the button(s) that follow
+   it onto a line of their own. Nesting them here means that 100% is
+   relative to this narrower wrapper instead of the whole row, leaving the
+   button(s) genuine room alongside it. */
+.compact-row-line {
+  flex: 1 1 100%;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.compact-row-line select,
+.compact-row-line input {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
 .calendar-manage-row-head {
   display: flex;
   align-items: center;

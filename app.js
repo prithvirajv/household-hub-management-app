@@ -1552,8 +1552,14 @@ function renderTransactions() {
     }));
   // Recent transactions is already filtered to the viewed month, so filter
   // Bank stream to match — otherwise a pending item from a different month
-  // sits next to a ledger list it can never be compared against.
-  const imported = allImported.filter((transaction) => transaction.date?.slice(0, 7) === state.budget.month);
+  // sits next to a ledger list it can never be compared against. Sorted
+  // newest-first to match Recent transactions' own default (transactionSort
+  // starts at date/desc) - Bank Stream drafts land in insertion order
+  // (whatever order the imported file's rows happened to be in), which
+  // rarely matches date order on its own.
+  const imported = allImported
+    .filter((transaction) => transaction.date?.slice(0, 7) === state.budget.month)
+    .sort((a, b) => (b.date || "").localeCompare(a.date || ""));
   const otherMonthCounts = {};
   allImported.forEach((transaction) => {
     const month = transaction.date?.slice(0, 7);
@@ -3190,8 +3196,10 @@ function friendListRow(friend, index) {
       ? "" : `<small>No email yet</small>`;
   return `<div class="compact-row">
     <div><strong>${escapeHtml(friend.name)}</strong>${statusNote}</div>
-    <input type="email" placeholder="Add email to invite" value="${escapeHtml(friend.email)}" data-friend-list-email="${index}">
-    ${friend.isVirtual ? "" : `<button class="icon-button danger-button" data-delete-friend="${friend.id}" type="button" aria-label="Remove ${escapeHtml(friend.name)}">×</button>`}
+    <div class="compact-row-line">
+      <input type="email" placeholder="Add email to invite" value="${escapeHtml(friend.email)}" data-friend-list-email="${index}">
+      ${friend.isVirtual ? "" : `<button class="icon-button danger-button" data-delete-friend="${friend.id}" type="button" aria-label="Remove ${escapeHtml(friend.name)}">×</button>`}
+    </div>
   </div>`;
 }
 
@@ -3199,10 +3207,12 @@ function iouRow(iou) {
   return `<div class="compact-row">
     <div><strong>${escapeHtml(iou.person)}</strong><small>${iou.reason ? `${escapeHtml(iou.reason)} · ` : ""}${formatShortDate(iou.date)}</small></div>
     <b>${exactMoney.format(iou.amount)}</b>
-    ${state.accounts.length ? `<select class="income-recurrence-select" data-iou-account="${iou.id}" aria-label="Account for ${escapeHtml(iou.person)}"><option value="">Not linked</option>${accountOptions(iou.accountId || "", { excludeType: "credit_card" })}</select>` : ""}
-    <div class="compact-row-actions">
-      ${iou.settled ? "" : `<button class="icon-button" data-settle-iou="${iou.id}" type="button" aria-label="Mark settled with ${escapeHtml(iou.person)}">✓</button>`}
-      <button class="icon-button danger-button" data-delete-iou="${iou.id}" type="button" aria-label="Delete IOU with ${escapeHtml(iou.person)}">×</button>
+    <div class="compact-row-line">
+      ${state.accounts.length ? `<select class="income-recurrence-select" data-iou-account="${iou.id}" aria-label="Account for ${escapeHtml(iou.person)}"><option value="">Not linked</option>${accountOptions(iou.accountId || "", { excludeType: "credit_card" })}</select>` : ""}
+      <div class="compact-row-actions">
+        ${iou.settled ? "" : `<button class="icon-button" data-settle-iou="${iou.id}" type="button" aria-label="Mark settled with ${escapeHtml(iou.person)}">✓</button>`}
+        <button class="icon-button danger-button" data-delete-iou="${iou.id}" type="button" aria-label="Delete IOU with ${escapeHtml(iou.person)}">×</button>
+      </div>
     </div>
   </div>`;
 }
@@ -3260,10 +3270,12 @@ function renderSplitBillRows() {
   container.innerHTML = splitBillRows.map((row, index) => `
     <div class="iou-split-row">
       ${friendRowFieldsHtml(index, row)}
-      ${splitBillType === "percentage"
-        ? `<input type="number" step="0.01" min="0" max="100" placeholder="%" value="${row.percent || ""}" data-split-bill-percent="${index}">`
-        : `<input type="number" step="0.01" min="0.01" placeholder="Amount" value="${row.amount || ""}" data-split-bill-amount="${index}" ${splitBillType === "equal" ? "readonly" : ""}>`}
-      <button type="button" class="icon-button ghost" data-remove-split-bill-row="${index}" aria-label="Remove person">×</button>
+      <div class="compact-row-line">
+        ${splitBillType === "percentage"
+          ? `<input type="number" step="0.01" min="0" max="100" placeholder="%" value="${row.percent || ""}" data-split-bill-percent="${index}">`
+          : `<input type="number" step="0.01" min="0.01" placeholder="Amount" value="${row.amount || ""}" data-split-bill-amount="${index}" ${splitBillType === "equal" ? "readonly" : ""}>`}
+        <button type="button" class="icon-button ghost" data-remove-split-bill-row="${index}" aria-label="Remove person">×</button>
+      </div>
     </div>
   `).join("");
   splitBillRows.forEach((row, index) => wireFriendRow(container, index, splitBillRows));
