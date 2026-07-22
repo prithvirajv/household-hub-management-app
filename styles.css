@@ -13,7 +13,8 @@
   --blue: #3569d4;
   --gold: #d99a24;
   --coral: #e05252;
-  --shadow: 0 12px 30px rgba(29, 41, 69, 0.12);
+  --shadow: 0 16px 40px rgba(29, 41, 69, 0.14);
+  --card-radius: 12px;
 }
 
 * {
@@ -377,7 +378,7 @@ main {
 .metric {
   background: var(--panel);
   border: 1px solid var(--line);
-  border-radius: 8px;
+  border-radius: var(--card-radius);
   box-shadow: var(--shadow);
 }
 
@@ -1072,7 +1073,7 @@ main {
   gap: 0.75rem;
   align-items: center;
   padding: 0.55rem 0;
-  border-bottom: 1px solid #1f8ee8;
+  border-bottom: 1px solid var(--line);
 }
 
 .budget-money-row.has-accounts {
@@ -1094,7 +1095,7 @@ main {
 }
 
 .income-recurrence-select:focus {
-  border-color: #1f8ee8;
+  border-color: var(--blue);
   background: white;
   outline: 0;
 }
@@ -1138,7 +1139,7 @@ main {
 
 .line-name-input:focus,
 .money-input:focus {
-  border-color: #1f8ee8;
+  border-color: var(--blue);
   background: white;
   outline: 0;
 }
@@ -1214,6 +1215,24 @@ main {
   font-size: 0.85rem;
 }
 
+/* Inline per-line progress bar - reuses .bar/.report-bar's shape but as its
+   own class since its fill color is conditional (green on track, coral once
+   spent exceeds planned) rather than either component's single fixed rule. */
+.budget-line-bar {
+  grid-column: 1 / -1;
+  height: 6px;
+  margin-top: -0.15rem;
+  overflow: hidden;
+  border-radius: 999px;
+  background: #e5eee9;
+}
+
+.budget-line-bar span {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+}
+
 .recurring-budget-panel {
   grid-column: 1 / -1;
   display: grid;
@@ -1250,15 +1269,18 @@ main {
 
 .category-title {
   display: grid;
-  grid-template-columns: 7px minmax(120px, 1fr) auto auto auto 28px;
+  grid-template-columns: 12px minmax(120px, 1fr) auto auto auto 28px;
   align-items: center;
   gap: 0.45rem;
 }
 
+/* A round color dot (the "icon" look) rather than a thin bar - each
+   category gets a distinct color via categoryColor()/ensureCategoryColors()
+   (app.js), reused here and in Reports' category list. */
 .category-title i {
-  width: 7px;
-  height: 22px;
-  border-radius: 999px;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
 }
 
 .category-title span {
@@ -2189,6 +2211,13 @@ main {
   min-width: 0;
 }
 
+.account-type-dot {
+  width: 12px;
+  height: 12px;
+  min-width: 12px;
+  border-radius: 50%;
+}
+
 .paycheck-card-header {
   display: flex;
   align-items: center;
@@ -2887,6 +2916,10 @@ main {
   border-radius: 8px;
   background: linear-gradient(90deg, #e9fff5, #f4f1ff);
   padding: 0.85rem;
+}
+
+.budget-left-strip {
+  margin-bottom: 0.6rem;
 }
 
 .net-worth-strip strong {

@@ -1348,6 +1348,7 @@ function renderHome() {
 function renderBudget() {
   ensurePaycheckRecurrenceData();
   ensureAccountsData();
+  ensureCategoryColors();
   const setupStarted = state.budget.setupStarted ?? (state.paychecks.length > 0 || state.budget.categories.length > 0);
   if (!setupStarted) {
     return `<section class="onboarding-empty budget-onboarding">
@@ -1365,8 +1366,12 @@ function renderBudget() {
     <section class="work-grid transactions-grid">
       <div class="main-stack">
         <section class="budget-ledger-card card">
+          <div class="net-worth-strip budget-left-strip">
+            <strong data-income-left>${money.format(state.budget.income - plannedTotal())}</strong>
+            <span>Left to budget</span>
+          </div>
           <div class="budget-ledger-head ${state.accounts.length ? "has-accounts" : ""}">
-            <div><h3>Income</h3><small data-income-left>${money.format(state.budget.income - plannedTotal())} left to budget</small></div>
+            <div><h3>Income</h3></div>
             <span>Planned</span>
             <span>Remaining</span>
             <span>Repeats</span>
@@ -1443,6 +1448,7 @@ function renderBudget() {
                     ${recurring ? "" : `<button class="icon-button recurring-budget-toggle" data-enable-recurring-budget="${categoryIndex}:${lineIndex}" type="button" title="Automatically set aside savings each month for bills like HOA, insurance, property tax, subscriptions, or memberships." aria-label="Make ${line.name} recurring">↻</button>`}
                     <button class="icon-button danger-button" data-delete-line="${categoryIndex}:${lineIndex}" type="button" aria-label="Remove ${line.name}">×</button>
                   </div>
+                  ${Number(line.planned) > 0 ? `<div class="budget-line-bar"><span style="width:${Math.min(100, Math.max(0, Math.round((spent / Number(line.planned)) * 100)))}%; background:${remaining < 0 ? "var(--coral)" : "var(--green)"}"></span></div>` : ""}
                   ${recurring ? `<div class="recurring-budget-panel">
                     <label class="row-field"><small>Amount due</small><input class="money-input" data-budget-recurring-amount="${categoryIndex}:${lineIndex}" type="number" step="0.01" min="0" value="${recurring.amountDue}"></label>
                     <label class="row-field"><small>Frequency</small><select data-budget-recurring-frequency="${categoryIndex}:${lineIndex}">${Object.entries(recurringBudgetFrequencyLabels).map(([value, label]) => `<option value="${value}" ${recurring.frequency === value ? "selected" : ""}>${label}</option>`).join("")}</select></label>
@@ -1857,6 +1863,26 @@ function memberColor(ownerKey) {
   let hash = 0;
   for (let i = 0; i < key.length; i += 1) hash = (hash * 31 + key.charCodeAt(i)) >>> 0;
   return memberColorPalette[hash % memberColorPalette.length];
+}
+
+const DEFAULT_CATEGORY_COLOR = "#13936d";
+const categoryColorPalette = ["#13936d", "#3569d4", "#d99a24", "#e05252", "#8a5cf6", "#0891b2", "#c2410c", "#be185d"];
+function categoryColor(index) {
+  return categoryColorPalette[index % categoryColorPalette.length];
+}
+
+// Every category has always been created with the exact same hardcoded
+// color (no color picker has ever existed), so any category still carrying
+// that literal default has never been intentionally customized - safe to
+// backfill it with a real, distinct color from the palette by its position.
+// A category already carrying something else (a future picker, or a
+// household's own edited data) is left untouched.
+function ensureCategoryColors() {
+  state.budget.categories.forEach((category, index) => {
+    if (!category.color || category.color === DEFAULT_CATEGORY_COLOR) {
+      category.color = categoryColor(index);
+    }
+  });
 }
 
 function renderCalendar() {
@@ -3503,6 +3529,8 @@ function renderWealth() {
     </section>`;
 }
 
+const accountTypeColors = { checking: "var(--blue)", savings: "var(--green)", cash: "var(--gold)", credit_card: "var(--coral)", other: "var(--muted)" };
+
 function accountItemRow(account, index) {
   const balance = currentAccountBalance(account.id);
   const isLiability = account.type === "credit_card";
@@ -3515,6 +3543,7 @@ function accountItemRow(account, index) {
       <label>Close date<input type="date" data-account-close-date="${index}" value="${account.closedAt}" aria-label="Close date for ${escapeHtml(account.name)}"></label>
     </div>
     <div class="account-balance-row">
+      <i class="account-type-dot" style="background:${accountTypeColors[account.type] || accountTypeColors.other}" title="${typeLabels[account.type] || account.type}"></i>
       <div class="split-stat"><span>${isLiability ? "Owed" : "Balance"}</span><b class="${isLiability && balance > 0 ? "danger" : ""}">${money.format(balance)}</b></div>
       ${account.closedAt ? `<span class="pill pill-warning" title="No new transactions can be added after ${formatShortDate(account.closedAt)}">Closed ${formatShortDate(account.closedAt)}</span>` : ""}
       <button class="icon-button danger-button" data-delete-account="${index}" type="button" aria-label="Remove ${escapeHtml(account.name)}">×</button>
@@ -4690,10 +4719,24 @@ function netWorthTrendSvg(trend) {
   };
   const coords = trend.map(toXY);
   const zeroY = height - padding - ((0 - min) / range) * (height - padding * 2);
+  // The filled area closes the line down to the zero baseline (not the
+  // chart's bottom edge), so a net worth trend that dips negative still
+  // fills correctly relative to zero rather than the arbitrary min value.
+  const areaPoints = coords.map(([x, y]) => `${x.toFixed(1)},${y.toFixed(1)}`).join(" ");
+  const firstX = coords[0]?.[0].toFixed(1) ?? padding;
+  const lastX = coords[coords.length - 1]?.[0].toFixed(1) ?? width - padding;
+  const areaPath = coords.length ? `M${firstX},${zeroY.toFixed(1)} L${areaPoints} L${lastX},${zeroY.toFixed(1)} Z` : "";
   return `
     <svg viewBox="0 0 ${width} ${height}" class="networth-chart-svg" preserveAspectRatio="none" role="img" aria-label="Net worth trend">
+      <defs>
+        <linearGradient id="networthAreaGradient" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0%" stop-color="#3569d4" stop-opacity="0.32"></stop>
+          <stop offset="100%" stop-color="#3569d4" stop-opacity="0"></stop>
+        </linearGradient>
+      </defs>
+      ${areaPath ? `<path d="${areaPath}" fill="url(#networthAreaGradient)"></path>` : ""}
       <line x1="${padding}" y1="${zeroY.toFixed(1)}" x2="${width - padding}" y2="${zeroY.toFixed(1)}" class="networth-chart-zero"></line>
-      <polyline points="${coords.map(([x, y]) => `${x.toFixed(1)},${y.toFixed(1)}`).join(" ")}" class="networth-chart-line"></polyline>
+      <polyline points="${areaPoints}" class="networth-chart-line"></polyline>
       ${coords.map(([x, y]) => `<circle cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="3" class="networth-chart-dot"></circle>`).join("")}
     </svg>`;
 }
@@ -4739,11 +4782,22 @@ function netWorthTrendSvgForExport(trend) {
   };
   const coords = trend.map(toXY);
   const zeroY = height - padding - ((0 - min) / range) * (height - padding * 2);
+  const areaPoints = coords.map(([x, y]) => `${x.toFixed(1)},${y.toFixed(1)}`).join(" ");
+  const firstX = coords[0]?.[0].toFixed(1) ?? padding;
+  const lastX = coords[coords.length - 1]?.[0].toFixed(1) ?? width - padding;
+  const areaPath = coords.length ? `M${firstX},${zeroY.toFixed(1)} L${areaPoints} L${lastX},${zeroY.toFixed(1)} Z` : "";
   return `
     <svg viewBox="0 0 ${width} ${height}" width="${width}" height="${height}" xmlns="http://www.w3.org/2000/svg">
       <rect x="0" y="0" width="${width}" height="${height}" fill="#ffffff"></rect>
+      <defs>
+        <linearGradient id="networthAreaGradientExport" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0%" stop-color="#3569d4" stop-opacity="0.32"></stop>
+          <stop offset="100%" stop-color="#3569d4" stop-opacity="0"></stop>
+        </linearGradient>
+      </defs>
+      ${areaPath ? `<path d="${areaPath}" fill="url(#networthAreaGradientExport)"></path>` : ""}
       <line x1="${padding}" y1="${zeroY.toFixed(1)}" x2="${width - padding}" y2="${zeroY.toFixed(1)}" stroke="#dfe7ef" stroke-width="1" stroke-dasharray="4 4"></line>
-      <polyline points="${coords.map(([x, y]) => `${x.toFixed(1)},${y.toFixed(1)}`).join(" ")}" fill="none" stroke="#3569d4" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"></polyline>
+      <polyline points="${areaPoints}" fill="none" stroke="#3569d4" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"></polyline>
       ${coords.map(([x, y]) => `<circle cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="3" fill="#3569d4"></circle>`).join("")}
     </svg>`;
 }
@@ -5972,7 +6026,7 @@ function bindViewEvents() {
     const name = ($("#newCategoryName")?.value || "New category").trim();
     if (!name) return;
     if (state.budget.categories.some((category) => category.name.toLowerCase() === name.toLowerCase())) return;
-    state.budget.categories.push({ name, color: "#13936d", lines: [{ id: uniqueId(name), name: "New subcategory", planned: 0, dueDay: 28 }] });
+    state.budget.categories.push({ name, color: categoryColor(state.budget.categories.length), lines: [{ id: uniqueId(name), name: "New subcategory", planned: 0, dueDay: 28 }] });
     autosaveState();
     render();
   });
@@ -8490,7 +8544,7 @@ function refreshIncomeTotals() {
 
   const left = state.budget.income - plannedTotal();
   const leftEl = document.querySelector("[data-income-left]");
-  if (leftEl) leftEl.textContent = `${money.format(left)} left to budget`;
+  if (leftEl) leftEl.textContent = money.format(left);
 
   const metrics = $("#metrics");
   if (metrics) {
