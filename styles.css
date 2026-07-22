@@ -1814,7 +1814,7 @@ main {
    repeating Payee/Amount/Date/etc. labels on every row — is safe here. */
 .ledger-entry-head {
   display: grid;
-  grid-template-columns: minmax(120px, 1fr) minmax(80px, 100px) minmax(120px, 130px) minmax(140px, 1fr) 48px 48px;
+  grid-template-columns: minmax(120px, 1fr) minmax(80px, 100px) minmax(120px, 130px) minmax(140px, 1fr) 48px 48px 48px;
   gap: 0.5rem;
   padding: 0.3rem 0.6rem 0.15rem;
   color: var(--muted);
@@ -1825,7 +1825,7 @@ main {
 }
 
 .ledger-entry-head.has-accounts {
-  grid-template-columns: minmax(120px, 1fr) minmax(80px, 100px) minmax(120px, 130px) minmax(140px, 1fr) minmax(120px, 140px) 48px 48px;
+  grid-template-columns: minmax(120px, 1fr) minmax(80px, 100px) minmax(120px, 130px) minmax(140px, 1fr) minmax(120px, 140px) 48px 48px 48px;
 }
 
 .ledger-entry-head button {
@@ -1847,7 +1847,7 @@ main {
 
 .ledger-entry-row {
   display: grid;
-  grid-template-columns: minmax(120px, 1fr) minmax(80px, 100px) minmax(120px, 130px) minmax(140px, 1fr) 48px 48px;
+  grid-template-columns: minmax(120px, 1fr) minmax(80px, 100px) minmax(120px, 130px) minmax(140px, 1fr) 48px 48px 48px;
   gap: 0.5rem;
   align-items: center;
   padding: 0.4rem 0.6rem;
@@ -1855,7 +1855,16 @@ main {
 }
 
 .ledger-entry-row.has-accounts {
-  grid-template-columns: minmax(120px, 1fr) minmax(80px, 100px) minmax(120px, 130px) minmax(140px, 1fr) minmax(120px, 140px) 48px 48px;
+  grid-template-columns: minmax(120px, 1fr) minmax(80px, 100px) minmax(120px, 130px) minmax(140px, 1fr) minmax(120px, 140px) 48px 48px 48px;
+}
+
+/* Flags a Bank stream or Ledger row whose amount/date/account combination
+   matches the opposite side of a likely transfer - same treatment as
+   end-date-toggle's has-end-date, a colored icon rather than a separate
+   pill since the Ledger's grid-based row has no room for one. */
+.icon-button.has-transfer-match {
+  background: var(--soft-blue);
+  color: var(--blue);
 }
 
 .ledger-entry-row:last-of-type {

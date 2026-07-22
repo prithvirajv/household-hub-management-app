@@ -7,7 +7,7 @@
     <title>FamilyLoop</title>
     <link rel="icon" type="image/svg+xml" href="/assets/favicon.svg">
     <link rel="apple-touch-icon" href="/assets/apple-touch-icon.png">
-    <link rel="stylesheet" href="/styles.css?v=20260721-12">
+    <link rel="stylesheet" href="/styles.css?v=20260722-1">
     <script src="https://accounts.google.com/gsi/client" async defer></script>
   </head>
   <body>
@@ -251,6 +251,26 @@
       </div>
     </dialog>
 
+    <dialog id="moveToTransferDialog" class="app-dialog">
+      <div class="delete-budget-line-dialog-content">
+        <div class="section-head">
+          <div><span class="card-label">Cash flow</span><h2>Move to Transfers</h2></div>
+          <button id="closeMoveToTransferDialogButton" class="icon-button ghost" type="button" aria-label="Close">×</button>
+        </div>
+        <p class="muted">For money moving between your own accounts, like paying a credit card from checking - this replaces it with a transfer on the Wealth page instead of an expense or income transaction.</p>
+        <form id="moveToTransferForm">
+          <div class="iou-split-total"><span id="moveToTransferPayee"></span><b id="moveToTransferAmount">$0.00</b></div>
+          <label><span id="moveToTransferCounterpartLabel">Other account</span><select name="counterpartAccountId"></select></label>
+          <label>Memo<input name="memo" placeholder="Credit card payment"></label>
+          <p id="moveToTransferMessage" class="form-message"></p>
+          <div class="dialog-actions">
+            <button id="cancelMoveToTransferButton" class="ghost" type="button">Cancel</button>
+            <button type="submit">Move to Transfer</button>
+          </div>
+        </form>
+      </div>
+    </dialog>
+
     <dialog id="settleUpDialog" class="app-dialog">
       <div class="delete-budget-line-dialog-content">
         <div class="section-head">
@@ -278,7 +298,7 @@
       </div>
     </template>
 
-    <script src="/lib/shared-logic.js?v=20260721-12"></script>
-    <script src="/app.js?v=20260721-12"></script>
+    <script src="/lib/shared-logic.js?v=20260722-1"></script>
+    <script src="/app.js?v=20260722-1"></script>
   </body>
 </html>

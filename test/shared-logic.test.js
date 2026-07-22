@@ -7,7 +7,7 @@ const {
   sanitizeFilename, buildDocumentObjectPath, wouldCreateFolderCycle, buildFolderTree,
   smsGatewayAddress, paycheckOccurrencesSince, paycheckOccurrencesInRange, paycheckAllOccurrenceDatesInRange, recurringExpenseOccurrenceDates, accountBalance, accountsWithBalances,
   splitAmountEvenly, splitBillByPercentages, netBalancesByPerson, computeBillSplitAmounts, settleUpPersonIous, isValidEmail,
-  parseDelimitedText, parseBankCsvTransactions, normalizeForAccountMatch, matchAccountByFilename, isDuplicateTransaction,
+  parseDelimitedText, parseBankCsvTransactions, normalizeForAccountMatch, matchAccountByFilename, isDuplicateTransaction, findTransferCandidate,
   parseCreditCardStatementText, normalizeTag, groupTransactionsByTag, monthKeysInRange, spentByLineInMonth,
   recurringBudgetSetAside, nextRecurringBudgetDueDate, monthsUntilDueInclusive,
   annualEventDate, nextAnnualEventDate, annualEventNotifyAt, rollAnnualNotifyAtForward,
@@ -945,6 +945,17 @@ test("isDuplicateTransaction matches on amount alone (payee is ignored) within a
   assert.equal(isDuplicateTransaction({ date: "2026-07-13", amount: 35, payee: "Anything" }, existing), false, "3 days later is outside the tolerance");
   assert.equal(isDuplicateTransaction({ date: "2026-07-10", amount: 36, payee: "RETURN CHECK FEE - 071026" }, existing), false, "amount must match exactly");
   assert.equal(isDuplicateTransaction({ date: "2026-07-10", amount: 35, payee: "RETURN CHECK FEE - 071026" }, []), false);
+});
+
+test("findTransferCandidate matches the opposite-sign entry on a different account within a 2-day tolerance", () => {
+  const candidate = { accountId: "checking", amount: 500, date: "2026-07-10" };
+  const onCard = { accountId: "card", amount: -500, date: "2026-07-11" };
+  assert.deepEqual(findTransferCandidate(candidate, [onCard]), onCard, "opposite sign, different account, within tolerance matches");
+  assert.equal(findTransferCandidate(candidate, [{ accountId: "card", amount: -500, date: "2026-07-07" }]), null, "outside the day tolerance does not match");
+  assert.equal(findTransferCandidate(candidate, [{ accountId: "checking", amount: -500, date: "2026-07-10" }]), null, "same account never matches, even opposite sign");
+  assert.equal(findTransferCandidate(candidate, [{ accountId: "card", amount: 500, date: "2026-07-10" }]), null, "same sign does not match");
+  assert.equal(findTransferCandidate({ accountId: "", amount: 500, date: "2026-07-10" }, [onCard]), null, "candidate with no accountId never matches");
+  assert.equal(findTransferCandidate(candidate, [{ amount: -500, date: "2026-07-10" }]), null, "other side with no accountId never matches");
 });
 
 test("parseCreditCardStatementText: purchases stay positive, refunds go negative, and Order Number lines attach to the row above them", () => {

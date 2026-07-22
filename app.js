@@ -65,6 +65,7 @@ let pendingBudgetLineDeletion = null;
 // confirmation dialog and the user actually confirming/cancelling it.
 let pendingAccountAction = null;
 let pendingIouSource = null;
+let pendingTransferMoveSource = null;
 let profileNameFeedback = "";
 let profileNameFeedbackIsError = false;
 let profilePasswordFeedback = "";
@@ -1483,7 +1484,7 @@ function renderBudget() {
   `;
 }
 
-function ledgerEntryRow(transaction, index) {
+function ledgerEntryRow(transaction, index, transferMatch) {
   const lineOptions = allLines().map((line) => `<option value="${line.id}" ${line.id === transaction.lineId ? "selected" : ""}>${line.category} - ${line.name}</option>`).join("");
   return `
     <div class="ledger-entry-row ${state.accounts.length ? "has-accounts" : ""}">
@@ -1493,6 +1494,7 @@ function ledgerEntryRow(transaction, index) {
       <select class="income-recurrence-select" aria-label="Subcategory" data-ledger-entry-line="${index}">${lineOptions}</select>
       ${state.accounts.length ? `<select class="income-recurrence-select" aria-label="Account" data-ledger-entry-account="${index}"><option value="">Not linked</option>${accountOptions(transaction.accountId || "")}</select>` : ""}
       <button class="icon-button" data-assign-iou-ledger="${index}" type="button" aria-label="Split with a friend ${escapeHtml(transaction.payee)}">👥</button>
+      <button class="icon-button ${transferMatch ? "has-transfer-match" : ""}" data-move-to-transfer-ledger="${index}" type="button" aria-label="Move ${escapeHtml(transaction.payee)} to Transfers" title="${transferMatch ? `Matches ${escapeHtml(accountName(transferMatch.accountId))}'s ${exactMoney.format(Math.abs(transferMatch.amount))} on ${formatShortDate(transferMatch.date)}` : "Move to Transfers (account-to-account movement)"}">⇄</button>
       <button class="icon-button danger-button" data-delete-transaction="${index}" type="button" aria-label="Delete ${escapeHtml(transaction.payee)}">×</button>
       ${tagChipsHtml(transaction.tags, "data-remove-ledger-tag", "data-add-ledger-tag", index)}
     </div>`;
@@ -1536,7 +1538,11 @@ function renderTransactions() {
         ...state.transactions,
         ...(state.transactionInboxDrafts || []).filter((other) => other.id !== transaction.id)
       ]),
-      refundMatch: orderRefundMatch(transaction)
+      refundMatch: orderRefundMatch(transaction),
+      transferMatch: findTransferCandidate(transaction, [
+        ...state.transactions,
+        ...(state.transactionInboxDrafts || []).filter((other) => other.id !== transaction.id)
+      ])
     }));
   // Recent transactions is already filtered to the viewed month, so filter
   // Bank stream to match — otherwise a pending item from a different month
@@ -1622,9 +1628,12 @@ function renderTransactions() {
               <button type="button" data-sort-transactions="date">Date${transactionSortIndicator("date")}</button>
               <button type="button" data-sort-transactions="subcategory">Subcategory${transactionSortIndicator("subcategory")}</button>
               ${state.accounts.length ? `<button type="button" data-sort-transactions="account">Account${transactionSortIndicator("account")}</button>` : ""}
-              <span></span><span></span>
+              <span></span><span></span><span></span>
             </div>
-            <div class="ledger-entry-list">${sorted.map(({ transaction, index }) => ledgerEntryRow(transaction, index)).join("")}</div>`;
+            <div class="ledger-entry-list">${sorted.map(({ transaction, index }) => ledgerEntryRow(transaction, index, findTransferCandidate(transaction, [
+              ...state.transactions.filter((other, otherIndex) => otherIndex !== index),
+              ...(state.transactionInboxDrafts || [])
+            ]))).join("")}</div>`;
           })()}
         </section>
       </div>
@@ -1669,6 +1678,7 @@ function renderTransactions() {
               ${transaction.recurringId ? `<span class="pill">Recurring</span>` : ""}
               ${transaction.possibleDuplicate ? `<span class="pill pill-warning" title="Matches an existing transaction with the same amount within 2 days">Possible duplicate</span>` : ""}
               ${transaction.refundMatch ? `<span class="pill pill-info" title="Refund for the ${money.format(transaction.refundMatch.amount)} purchase on ${formatShortDate(transaction.refundMatch.date)} (order ${escapeHtml(transaction.orderNumber)})">Refund match</span>` : ""}
+              ${transaction.transferMatch ? `<span class="pill pill-info" title="Matches ${escapeHtml(accountName(transaction.transferMatch.accountId))}'s ${exactMoney.format(Math.abs(transaction.transferMatch.amount))} on ${formatShortDate(transaction.transferMatch.date)}">Possible transfer</span>` : ""}
               <label class="row-field row-payee"><small>Payee</small><input data-bank-stream-payee="${transaction.id}" value="${escapeHtml(transaction.payee)}"></label>
               <label class="row-field row-date"><small>Date</small><input type="date" data-bank-stream-date="${transaction.id}" value="${transaction.date}"></label>
               <label class="row-field row-amount"><small>Amount</small><input class="money-input" type="number" step="0.01" data-bank-stream-amount="${transaction.id}" value="${transaction.amount}"></label>
@@ -1677,6 +1687,7 @@ function renderTransactions() {
               <div class="row-actions">
                 <button class="icon-button" data-accept-import="${transaction.id}" type="button" aria-label="Accept ${escapeHtml(transaction.payee)}">✓</button>
                 <button class="icon-button" data-assign-iou="${transaction.id}" type="button" aria-label="Split with a friend ${escapeHtml(transaction.payee)}">👥</button>
+                <button class="icon-button ${transaction.transferMatch ? "has-transfer-match" : ""}" data-move-to-transfer="${transaction.id}" type="button" aria-label="Move ${escapeHtml(transaction.payee)} to Transfers">⇄</button>
                 <button class="icon-button danger-button" data-dismiss-import="${transaction.id}" type="button" aria-label="Dismiss ${escapeHtml(transaction.payee)}">×</button>
               </div>
               ${tagChipsHtml(transaction.tags, "data-remove-bank-stream-tag", "data-add-bank-stream-tag", transaction.id)}
@@ -8597,6 +8608,18 @@ view.addEventListener("click", (event) => {
     return;
   }
 
+  const moveToTransferButton = event.target.closest("[data-move-to-transfer]");
+  if (moveToTransferButton) {
+    openMoveToTransferDialog({ type: "draft", id: moveToTransferButton.dataset.moveToTransfer });
+    return;
+  }
+
+  const moveToTransferLedgerButton = event.target.closest("[data-move-to-transfer-ledger]");
+  if (moveToTransferLedgerButton) {
+    openMoveToTransferDialog({ type: "ledger", id: moveToTransferLedgerButton.dataset.moveToTransferLedger });
+    return;
+  }
+
   const deleteTransactionButton = event.target.closest("[data-delete-transaction]");
   if (deleteTransactionButton) {
     state.transactions.splice(Number(deleteTransactionButton.dataset.deleteTransaction), 1);
@@ -9246,6 +9269,116 @@ $("#assignIouForm").addEventListener("submit", async (event) => {
   autosaveState();
   pendingIouSource = null;
   $("#assignIouDialog").close();
+  render();
+});
+
+// Move-to-Transfer works from the same two sources as Assign-to-IOU (an
+// unaccepted Bank Stream draft, or a transaction already sitting in the
+// Ledger) - same {type, id} shape, same resolution idiom as
+// resolveIouSource, kept as its own function since the two features are
+// unrelated and shouldn't share a resolver that later needs to special-case
+// one or the other.
+function resolveTransferMoveSource(source) {
+  if (!source) return null;
+  if (source.type === "ledger") return state.transactions[Number(source.id)] || null;
+  return transactionInboxItems().find((item) => item.id === source.id) || null;
+}
+
+function openMoveToTransferDialog(source) {
+  const record = resolveTransferMoveSource(source);
+  if (!record) return;
+  if (!record.accountId) {
+    transactionValidationFeedback = `Set an account on "${record.payee}" before moving it to Transfers - a transfer needs to know which account the money left or landed in.`;
+    render();
+    return;
+  }
+  transactionValidationFeedback = "";
+  pendingTransferMoveSource = source;
+  const otherRecords = [
+    ...state.transactions.filter((transaction) => transaction !== record),
+    ...(state.transactionInboxDrafts || []).filter((item) => item.id !== record.id)
+  ];
+  const match = findTransferCandidate(record, otherRecords);
+  const movingOut = Number(record.amount) > 0;
+  const form = $("#moveToTransferForm");
+  form.reset();
+  $("#moveToTransferCounterpartLabel").textContent = movingOut ? "Money went to" : "Money came from";
+  $("#moveToTransferPayee").textContent = record.payee || "";
+  $("#moveToTransferAmount").textContent = exactMoney.format(Math.abs(Number(record.amount || 0)));
+  form.counterpartAccountId.innerHTML = `<option value="">Choose an account</option>${accountOptions(match ? match.accountId : "")}`;
+  form.memo.value = record.payee || "";
+  $("#moveToTransferMessage").textContent = "";
+  $("#moveToTransferDialog").showModal();
+}
+
+$("#closeMoveToTransferDialogButton").addEventListener("click", () => $("#moveToTransferDialog").close());
+$("#cancelMoveToTransferButton").addEventListener("click", () => $("#moveToTransferDialog").close());
+
+$("#moveToTransferForm").addEventListener("submit", (event) => {
+  event.preventDefault();
+  const source = pendingTransferMoveSource;
+  const record = resolveTransferMoveSource(source);
+  if (!record) {
+    $("#moveToTransferMessage").textContent = source?.type === "ledger" ? "This transaction is no longer in the Ledger." : "This item is no longer in Bank stream.";
+    return;
+  }
+  const data = Object.fromEntries(new FormData(event.currentTarget));
+  const counterpartAccountId = data.counterpartAccountId;
+  if (!counterpartAccountId || counterpartAccountId === record.accountId) {
+    $("#moveToTransferMessage").textContent = "Pick a different account.";
+    return;
+  }
+
+  const amount = Math.abs(Number(record.amount));
+  const movingOut = Number(record.amount) > 0;
+  const fromAccountId = movingOut ? record.accountId : counterpartAccountId;
+  const toAccountId = movingOut ? counterpartAccountId : record.accountId;
+  state.transfers ||= [];
+  state.transfers.unshift({
+    id: uniqueId("transfer"),
+    date: record.date,
+    fromAccountId,
+    toAccountId,
+    amount,
+    memo: (data.memo || record.payee || "").trim()
+  });
+
+  // Only clear a second row if it's genuinely still the matching offsetting
+  // entry for the *chosen* counterpart account - the user may have picked a
+  // different account than the one auto-suggested, in which case whatever
+  // was auto-matched is unrelated and must be left alone.
+  const otherRecords = [
+    ...state.transactions.filter((transaction) => transaction !== record),
+    ...(state.transactionInboxDrafts || [])
+  ];
+  const counterpartMatch = findTransferCandidate(record, otherRecords);
+  const shouldClearCounterpart = counterpartMatch && counterpartMatch.accountId === counterpartAccountId;
+
+  if (source.type === "draft") {
+    state.transactionInboxDone ||= [];
+    if (!state.transactionInboxDone.includes(record.id)) state.transactionInboxDone.push(record.id);
+    state.transactionInboxDrafts = (state.transactionInboxDrafts || []).filter((item) => item.id !== record.id);
+  } else {
+    const index = state.transactions.indexOf(record);
+    if (index >= 0) state.transactions.splice(index, 1);
+  }
+
+  if (shouldClearCounterpart) {
+    const draftIndex = (state.transactionInboxDrafts || []).findIndex((item) => item.id === counterpartMatch.id);
+    if (draftIndex >= 0) {
+      state.transactionInboxDone ||= [];
+      if (!state.transactionInboxDone.includes(counterpartMatch.id)) state.transactionInboxDone.push(counterpartMatch.id);
+      state.transactionInboxDrafts.splice(draftIndex, 1);
+    } else {
+      const ledgerIndex = state.transactions.indexOf(counterpartMatch);
+      if (ledgerIndex >= 0) state.transactions.splice(ledgerIndex, 1);
+    }
+  }
+
+  state.household.activity.unshift(`Moved ${record.payee} to Transfers`);
+  autosaveState();
+  pendingTransferMoveSource = null;
+  $("#moveToTransferDialog").close();
   render();
 });
 
