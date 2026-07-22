@@ -1676,6 +1676,7 @@ function renderTransactions() {
           ${imported.map((transaction) => `
             <div class="bank-stream-row" data-bank-stream-row="${transaction.id}">
               ${transaction.recurringId ? `<span class="pill">Recurring</span>` : ""}
+              ${transaction.isDeposit ? `<span class="pill" title="Detected as money coming in from this file's Debit/Credit or signed-Amount column">Deposit</span>` : ""}
               ${transaction.possibleDuplicate ? `<span class="pill pill-warning" title="Matches an existing transaction with the same amount within 2 days">Possible duplicate</span>` : ""}
               ${transaction.refundMatch ? `<span class="pill pill-info" title="Refund for the ${money.format(transaction.refundMatch.amount)} purchase on ${formatShortDate(transaction.refundMatch.date)} (order ${escapeHtml(transaction.orderNumber)})">Refund match</span>` : ""}
               ${transaction.transferMatch ? `<span class="pill pill-info" title="Matches ${escapeHtml(accountName(transaction.transferMatch.accountId))}'s ${exactMoney.format(Math.abs(transaction.transferMatch.amount))} on ${formatShortDate(transaction.transferMatch.date)}">Possible transfer</span>` : ""}
@@ -1683,12 +1684,14 @@ function renderTransactions() {
               <label class="row-field row-date"><small>Date</small><input type="date" data-bank-stream-date="${transaction.id}" value="${transaction.date}"></label>
               <label class="row-field row-amount"><small>Amount</small><input class="money-input" type="number" step="0.01" data-bank-stream-amount="${transaction.id}" value="${transaction.amount}"></label>
               <label class="row-field row-select"><small>Subcategory</small><select data-bank-stream-line="${transaction.id}">${lineOptions(transaction.lineId)}</select></label>
-              ${state.accounts.length ? `<label class="row-field row-select"><small>Account</small><select data-bank-stream-account="${transaction.id}"><option value="">Not linked</option>${accountOptions(transaction.accountId || "")}</select></label>` : ""}
-              <div class="row-actions">
-                <button class="icon-button" data-accept-import="${transaction.id}" type="button" aria-label="Accept ${escapeHtml(transaction.payee)}">✓</button>
-                <button class="icon-button" data-assign-iou="${transaction.id}" type="button" aria-label="Split with a friend ${escapeHtml(transaction.payee)}">👥</button>
-                <button class="icon-button ${transaction.transferMatch ? "has-transfer-match" : ""}" data-move-to-transfer="${transaction.id}" type="button" aria-label="Move ${escapeHtml(transaction.payee)} to Transfers">⇄</button>
-                <button class="icon-button danger-button" data-dismiss-import="${transaction.id}" type="button" aria-label="Dismiss ${escapeHtml(transaction.payee)}">×</button>
+              <div class="row-account-actions">
+                ${state.accounts.length ? `<label class="row-field row-select"><small>Account</small><select data-bank-stream-account="${transaction.id}"><option value="">Not linked</option>${accountOptions(transaction.accountId || "")}</select></label>` : ""}
+                <div class="row-actions">
+                  <button class="icon-button" data-accept-import="${transaction.id}" type="button" aria-label="Accept ${escapeHtml(transaction.payee)}">✓</button>
+                  <button class="icon-button" data-assign-iou="${transaction.id}" type="button" aria-label="Split with a friend ${escapeHtml(transaction.payee)}">👥</button>
+                  <button class="icon-button ${transaction.transferMatch ? "has-transfer-match" : ""}" data-move-to-transfer="${transaction.id}" type="button" aria-label="Move ${escapeHtml(transaction.payee)} to Transfers">⇄</button>
+                  <button class="icon-button danger-button" data-dismiss-import="${transaction.id}" type="button" aria-label="Dismiss ${escapeHtml(transaction.payee)}">×</button>
+                </div>
               </div>
               ${tagChipsHtml(transaction.tags, "data-remove-bank-stream-tag", "data-add-bank-stream-tag", transaction.id)}
             </div>
@@ -6118,7 +6121,8 @@ function bindViewEvents() {
         lineId: refundMatch?.lineId || "",
         accountId: matchedAccount?.id || "",
         date: row.date,
-        orderNumber: row.orderNumber || ""
+        orderNumber: row.orderNumber || "",
+        isDeposit: !!row.isDeposit
       });
     });
     const duplicateNote = duplicateCount ? ` ${duplicateCount} look${duplicateCount === 1 ? "s" : ""} like a duplicate of a transaction you already have — check before accepting.` : "";

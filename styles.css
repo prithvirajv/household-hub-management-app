@@ -1758,6 +1758,22 @@ main {
   flex-basis: 100%;
 }
 
+/* Puts the Account field on the same line as its row's action icons, its own
+   full-width row (like .tag-chip-row above) rather than a shared item in the
+   outer flex-wrap - .row-select's flex-grow otherwise stretches Account to
+   fill an entire line on its own, leaving no room for row-actions to join it
+   and pushing the icons onto a 4th line of their own. */
+.row-account-actions {
+  flex-basis: 100%;
+  display: flex;
+  align-items: flex-end;
+  gap: 0.5rem;
+}
+
+.row-account-actions .row-select {
+  flex: 1 1 150px;
+}
+
 /* Groups a row's trailing icon buttons (accept/split/dismiss, or the
    recurring row's end-date toggle + delete) into a single flex item so they
    wrap to the next line together when the row runs out of room, instead of

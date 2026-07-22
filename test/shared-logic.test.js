@@ -829,7 +829,7 @@ test("parseDelimitedText treats an unescaped quote as literal unless followed by
   assert.deepEqual(rows[0], ["07/03/2026", 'Zelle payment to X for "Niralya math"; Conf# abc', "-160.00", "484.30"]);
 });
 
-test("parseBankCsvTransactions: a Debit/Credit format imports debit rows as expenses, skips autopay credits, and keeps a genuine credit as a refund", () => {
+test("parseBankCsvTransactions: a Debit/Credit format imports debit rows as expenses, skips autopay credits, and keeps a genuine credit as a flagged deposit", () => {
   const csv = [
     "Status,Date,Description,Debit,Credit,Member Name",
     'Cleared,07/13/2026,"REGAL MEDLOCK 18 0354 DULUTH GA",1.08,,J DOE',
@@ -839,12 +839,12 @@ test("parseBankCsvTransactions: a Debit/Credit format imports debit rows as expe
   ].join("\n");
   assert.deepEqual(parseBankCsvTransactions(csv), [
     { date: "2026-07-13", payee: "REGAL MEDLOCK 18 0354 DULUTH GA", amount: 1.08 },
-    { date: "2026-06-30", payee: "COSTCO WHSE #1175 CUMMING GA", amount: -26.74 },
+    { date: "2026-06-30", payee: "COSTCO WHSE #1175 CUMMING GA", amount: -26.74, isDeposit: true },
     { date: "2026-06-30", payee: "COSTCO GAS #1175 CUMMING GA", amount: 50.52 }
   ]);
 });
 
-test("parseBankCsvTransactions: a signed single-Amount format imports only negative (money-out) rows", () => {
+test("parseBankCsvTransactions: a signed single-Amount format imports both money-out rows and deposits (flagged isDeposit, not silently dropped)", () => {
   const csv = [
     "Date,Description,Amount,Running Bal.",
     '06/18/2026,"Zelle payment from SURENDRAN JAYABAL Conf# bc4nd92zb","63.75","1,291.97"',
@@ -852,6 +852,7 @@ test("parseBankCsvTransactions: a signed single-Amount format imports only negat
     '07/17/2026,"ROCKET MORTGAGE DES:LOAN ID:8698964","-2,258.90","1,040.86"'
   ].join("\n");
   assert.deepEqual(parseBankCsvTransactions(csv), [
+    { date: "2026-06-18", payee: "Zelle payment from SURENDRAN JAYABAL Conf# bc4nd92zb", amount: -63.75, isDeposit: true },
     { date: "2026-06-22", payee: "T-MOBILE DES:PCS SVC ID:9514047", amount: 215.59 },
     { date: "2026-07-17", payee: "ROCKET MORTGAGE DES:LOAN ID:8698964", amount: 2258.9 }
   ]);
@@ -909,7 +910,7 @@ test("parseBankCsvTransactions: keeps a genuine merchant refund on a credit-card
   ]);
 });
 
-test("parseBankCsvTransactions: a checking-style export (mostly negative) is unaffected by credit-card detection", () => {
+test("parseBankCsvTransactions: a checking-style export (mostly negative) is unaffected by credit-card detection, and its one deposit is kept (flagged), not dropped", () => {
   const csv = [
     "Date,Description,Amount",
     "07/01/2026,Paycheck deposit,2500.00",
@@ -918,6 +919,7 @@ test("parseBankCsvTransactions: a checking-style export (mostly negative) is una
     "07/05/2026,Electric bill,-120.50"
   ].join("\n");
   assert.deepEqual(parseBankCsvTransactions(csv), [
+    { date: "2026-07-01", payee: "Paycheck deposit", amount: -2500, isDeposit: true },
     { date: "2026-07-02", payee: "Grocery store", amount: 84.21 },
     { date: "2026-07-03", payee: "Gas station", amount: 45.00 },
     { date: "2026-07-05", payee: "Electric bill", amount: 120.50 }
