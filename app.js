@@ -1405,7 +1405,7 @@ function renderBudget() {
             <label class="custom-combobox">Category
               <input id="newCategoryName" autocomplete="off" placeholder="Type to search or add">
               <div id="budgetCategoryMenu" class="combo-menu" hidden>
-                ${state.budget.categories.map((category) => `<button type="button" data-category-option="${category.name}">${category.name}</button>`).join("")}
+                ${[...state.budget.categories].sort((a, b) => a.name.localeCompare(b.name)).map((category) => `<button type="button" data-category-option="${category.name}">${category.name}</button>`).join("")}
               </div>
             </label>
             <button id="addCategoryButton" class="ghost" type="button">Add category</button>
@@ -1575,7 +1575,7 @@ function renderTransactions() {
         <section class="card">
           <div class="section-head"><div><span class="card-label">Budget setup</span><h3>Manage subcategories from Transactions</h3></div></div>
           <div class="transaction-subcategory-adder">
-            <label>Category<select id="transactionParentCategory">${state.budget.categories.map((category, index) => `<option value="${index}">${category.name}</option>`).join("")}</select></label>
+            <label>Category<select id="transactionParentCategory">${state.budget.categories.map((category, index) => ({ category, index })).sort((a, b) => a.category.name.localeCompare(b.category.name)).map(({ category, index }) => `<option value="${index}">${category.name}</option>`).join("")}</select></label>
             <label class="custom-combobox">Subcategory
               <input id="transactionSubcategoryName" autocomplete="off" placeholder="Type to search or add">
               <div id="transactionSubcategoryMenu" class="combo-menu" hidden>
@@ -1634,18 +1634,20 @@ function renderTransactions() {
               .filter(({ transaction }) => transaction.date?.slice(0, 7) === state.budget.month);
             if (!monthTransactions.length) return `<div class="empty-inline">No transactions yet</div>`;
             const sorted = sortByTransactionField(monthTransactions, transactionSort.field, transactionSort.direction);
-            return `<div class="ledger-entry-head ${state.accounts.length ? "has-accounts" : ""}">
-              <button type="button" data-sort-transactions="payee">Payee${transactionSortIndicator("payee")}</button>
-              <button type="button" data-sort-transactions="amount">Amount${transactionSortIndicator("amount")}</button>
-              <button type="button" data-sort-transactions="date">Date${transactionSortIndicator("date")}</button>
-              <button type="button" data-sort-transactions="subcategory">Subcategory${transactionSortIndicator("subcategory")}</button>
-              ${state.accounts.length ? `<button type="button" data-sort-transactions="account">Account${transactionSortIndicator("account")}</button>` : ""}
-              <span></span><span></span><span></span>
-            </div>
-            <div class="ledger-entry-list">${sorted.map(({ transaction, index }) => ledgerEntryRow(transaction, index, findTransferCandidate(transaction, [
-              ...state.transactions.filter((other, otherIndex) => otherIndex !== index),
-              ...(state.transactionInboxDrafts || [])
-            ]))).join("")}</div>`;
+            return `<div class="ledger-entry-scroll">
+              <div class="ledger-entry-head ${state.accounts.length ? "has-accounts" : ""}">
+                <button type="button" data-sort-transactions="payee">Payee${transactionSortIndicator("payee")}</button>
+                <button type="button" data-sort-transactions="amount">Amount${transactionSortIndicator("amount")}</button>
+                <button type="button" data-sort-transactions="date">Date${transactionSortIndicator("date")}</button>
+                <button type="button" data-sort-transactions="subcategory">Subcategory${transactionSortIndicator("subcategory")}</button>
+                ${state.accounts.length ? `<button type="button" data-sort-transactions="account">Account${transactionSortIndicator("account")}</button>` : ""}
+                <span></span><span></span><span></span>
+              </div>
+              <div class="ledger-entry-list">${sorted.map(({ transaction, index }) => ledgerEntryRow(transaction, index, findTransferCandidate(transaction, [
+                ...state.transactions.filter((other, otherIndex) => otherIndex !== index),
+                ...(state.transactionInboxDrafts || [])
+              ]))).join("")}</div>
+            </div>`;
           })()}
         </section>
       </div>
@@ -8656,7 +8658,9 @@ function refreshBudgetCategoryMenu() {
   const input = $("#newCategoryName");
   if (!menu || !input) return;
   const query = input.value.trim().toLowerCase();
-  const matches = state.budget.categories.filter((category) => category.name.toLowerCase().includes(query));
+  const matches = state.budget.categories
+    .filter((category) => category.name.toLowerCase().includes(query))
+    .sort((a, b) => a.name.localeCompare(b.name));
   menu.innerHTML = matches.length
     ? matches.map((category) => `<button type="button" data-category-option="${category.name}">${category.name}</button>`).join("")
     : `<div class="combo-empty">No matching category</div>`;

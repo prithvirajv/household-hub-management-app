@@ -882,6 +882,7 @@ main {
 .meal-layout {
   min-width: 0;
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
   gap: 0.8rem;
 }
 
@@ -893,6 +894,7 @@ main {
   min-width: 0;
   padding: 0.85rem;
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
   gap: 0.75rem;
 }
 
@@ -1749,7 +1751,8 @@ main {
 .ledger-assign-row .pill,
 .ledger-assign-row select,
 .assign-row select,
-.transaction-entry-form select {
+.transaction-entry-form select,
+.transaction-entry-form input {
   min-width: 0;
   max-width: 100%;
 }
@@ -1934,6 +1937,16 @@ main {
    input, which a shared grid column with everything else never had. */
 .ledger-entry-row .tag-chip-row {
   grid-column: 1 / -1;
+}
+
+/* The head + row grids share fixed per-column minimums (e.g. 48px per
+   icon action) that can add up to more than a narrow main-stack column
+   actually has to offer - rather than letting that blow out the whole
+   page horizontally, contain it to a scrollbar on just this section, with
+   the header wrapped in the same scroller so its columns never drift out
+   of alignment with the rows under it. */
+.ledger-entry-scroll {
+  overflow-x: auto;
 }
 
 .ledger-entry-list {
