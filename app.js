@@ -40,6 +40,10 @@ let calendarFilterOwner = "";
 // calendarFilterOwner), not household data, so it isn't persisted to state
 // and resets to the date-desc default on reload.
 let transactionSort = { field: "date", direction: "desc" };
+// Bank stream's own sort state, separate from transactionSort above since the
+// two lists (Recent transactions vs Bank stream) sort independently - the
+// same field/direction pair for one shouldn't force a reorder of the other.
+let bankStreamSort = { field: "date", direction: "desc" };
 let selectedTransactionTag = "";
 // null until the Reports page is first opened, at which point it syncs to
 // the currently-viewed budget month - once the user picks a range/year
@@ -759,6 +763,21 @@ function sortByTransactionField(entries, field, direction) {
   });
 }
 
+// Bank stream drafts are flat objects (unlike Recent transactions' {transaction,
+// index} pairs, needed there only so edits can find their original array slot -
+// Bank stream rows are already keyed by .id), so this sorts them directly with
+// the same transactionSortValue used above.
+function sortTransactionsByField(entries, field, direction) {
+  const sign = direction === "asc" ? 1 : -1;
+  return [...entries].sort((a, b) => {
+    const valueA = transactionSortValue(a, field);
+    const valueB = transactionSortValue(b, field);
+    if (valueA < valueB) return -sign;
+    if (valueA > valueB) return sign;
+    return 0;
+  });
+}
+
 // The little ▲/▼ next to whichever Recent transactions column is currently
 // driving the sort, so it's clear both which field is active and which
 // direction — otherwise clicking a header and seeing the list reorder gives
@@ -766,6 +785,13 @@ function sortByTransactionField(entries, field, direction) {
 function transactionSortIndicator(field) {
   if (transactionSort.field !== field) return "";
   return transactionSort.direction === "asc" ? " ▲" : " ▼";
+}
+
+// Same as transactionSortIndicator above, but for Bank stream's independent
+// sort state.
+function bankStreamSortIndicator(field) {
+  if (bankStreamSort.field !== field) return "";
+  return bankStreamSort.direction === "asc" ? " ▲" : " ▼";
 }
 
 function isAccountLinked(type, id) {
@@ -1552,14 +1578,16 @@ function renderTransactions() {
     }));
   // Recent transactions is already filtered to the viewed month, so filter
   // Bank stream to match — otherwise a pending item from a different month
-  // sits next to a ledger list it can never be compared against. Sorted
-  // newest-first to match Recent transactions' own default (transactionSort
-  // starts at date/desc) - Bank Stream drafts land in insertion order
+  // sits next to a ledger list it can never be compared against. Sorted per
+  // bankStreamSort (Date/Amount/Payee, toggled via the header buttons below,
+  // defaulting to date/desc) - Bank Stream drafts land in insertion order
   // (whatever order the imported file's rows happened to be in), which
-  // rarely matches date order on its own.
-  const imported = allImported
-    .filter((transaction) => transaction.date?.slice(0, 7) === state.budget.month)
-    .sort((a, b) => (b.date || "").localeCompare(a.date || ""));
+  // rarely matches any useful order on its own.
+  const imported = sortTransactionsByField(
+    allImported.filter((transaction) => transaction.date?.slice(0, 7) === state.budget.month),
+    bankStreamSort.field,
+    bankStreamSort.direction
+  );
   const otherMonthCounts = {};
   allImported.forEach((transaction) => {
     const month = transaction.date?.slice(0, 7);
@@ -1686,6 +1714,12 @@ function renderTransactions() {
           ${otherMonthEntries.length ? `<div class="bank-stream-other-months">
             <small>Also pending in:</small>
             ${otherMonthEntries.map(([month, count]) => `<button type="button" class="pill-button" data-switch-budget-month="${month}">${formatMonth(month)} (${count})</button>`).join("")}
+          </div>` : ""}
+          ${imported.length ? `<div class="bank-stream-sort-row">
+            <span>Sort:</span>
+            <button type="button" data-sort-bank-stream="date">Date${bankStreamSortIndicator("date")}</button>
+            <button type="button" data-sort-bank-stream="amount">Amount${bankStreamSortIndicator("amount")}</button>
+            <button type="button" data-sort-bank-stream="payee">Payee${bankStreamSortIndicator("payee")}</button>
           </div>` : ""}
           ${imported.map((transaction) => `
             <div class="bank-stream-row" data-bank-stream-row="${transaction.id}">
@@ -6316,6 +6350,18 @@ function bindViewEvents() {
         transactionSort = { field, direction: transactionSort.direction === "asc" ? "desc" : "asc" };
       } else {
         transactionSort = { field, direction: field === "date" ? "desc" : "asc" };
+      }
+      render();
+    });
+  });
+
+  document.querySelectorAll("[data-sort-bank-stream]").forEach((button) => {
+    button.addEventListener("click", () => {
+      const field = button.dataset.sortBankStream;
+      if (bankStreamSort.field === field) {
+        bankStreamSort = { field, direction: bankStreamSort.direction === "asc" ? "desc" : "asc" };
+      } else {
+        bankStreamSort = { field, direction: field === "date" ? "desc" : "asc" };
       }
       render();
     });

@@ -1870,6 +1870,40 @@ main {
   margin-top: 0.4rem;
 }
 
+/* Bank stream lives in the narrow side-stack column, so unlike
+   .ledger-entry-head's grid (aligned to fixed row columns), this is a
+   plain wrapping flex row of toggle buttons - no per-row columns to line
+   up with, since each Bank stream row lays its own fields out with
+   visible labels rather than sharing a column grid with a header. */
+.bank-stream-sort-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.6rem;
+  padding: 0.1rem 0.1rem 0.3rem;
+  color: var(--muted);
+  font-size: 0.68rem;
+  font-weight: 900;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+}
+
+.bank-stream-sort-row button {
+  border: none;
+  background: transparent;
+  padding: 0;
+  margin: 0;
+  color: inherit;
+  font: inherit;
+  text-transform: inherit;
+  letter-spacing: inherit;
+  cursor: pointer;
+}
+
+.bank-stream-sort-row button:hover {
+  color: var(--text);
+}
+
 /* Recent transactions always lives in the wide main-stack column (unlike
    Bank stream above), so a grid with a header shown once — instead of
    repeating Payee/Amount/Date/etc. labels on every row — is safe here. */
