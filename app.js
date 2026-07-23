@@ -1981,7 +1981,7 @@ function renderCalendar() {
               </div>
             </div>
             <label data-location-field>Location (optional)<input name="location" placeholder="123 Main St or a place name"><span data-location-directions-preview></span></label>
-            <label data-chore-recurrence-field>Repeat<select name="recurrence"><option value="once">Once</option><option value="weekly" selected>Weekly</option><option value="biweekly">Every 2 weeks</option><option value="triweekly">Every 3 weeks</option><option value="monthly">Monthly</option></select></label>
+            <label data-chore-recurrence-field>Repeat<select name="recurrence"><option value="once">Once</option><option value="weekly" selected>Weekly</option><option value="biweekly">Every 2 weeks</option><option value="triweekly">Every 3 weeks</option><option value="monthly">Monthly</option><option value="every3months">Every 3 months</option><option value="every4months">Every 4 months</option><option value="every6months">Every 6 months</option><option value="yearly">Yearly</option></select></label>
             <label data-chore-end-date-field hidden>End date (optional)<input name="choreEndDate" type="date"></label>
             <label data-annual-reminder-field hidden>Remind before<select name="reminderDays"><option value="0">Same day</option><option value="1" selected>1 day</option><option value="3">3 days</option><option value="7">7 days</option><option value="14">14 days</option><option value="-1">Don't remind</option></select></label>
             <button data-calendar-submit type="submit">Add</button>
@@ -4245,7 +4245,11 @@ function choreCadenceLabel(chore) {
     weekly: "Weekly",
     biweekly: "Every 2 weeks",
     triweekly: "Every 3 weeks",
-    monthly: "Monthly"
+    monthly: "Monthly",
+    every3months: "Every 3 months",
+    every4months: "Every 4 months",
+    every6months: "Every 6 months",
+    yearly: "Yearly"
   }[recurrence] || "Once";
   return chore.endDate ? `${base} until ${chore.endDate}` : base;
 }
@@ -4268,7 +4272,8 @@ function choreOccurrencesForMonth(chore) {
     return key.startsWith(state.budget.month) && !isChoreOccurrenceComplete(chore, key) ? [{ date: key }] : [];
   }
 
-  if (chore.recurrence === "monthly") {
+  const monthStep = CHORE_MONTH_STEP_BY_RECURRENCE[chore.recurrence];
+  if (monthStep) {
     let cursor = new Date(start.getFullYear(), start.getMonth(), 1);
     while (cursor <= monthEnd) {
       const lastDay = new Date(cursor.getFullYear(), cursor.getMonth() + 1, 0).getDate();
@@ -4277,7 +4282,7 @@ function choreOccurrencesForMonth(chore) {
         const key = dateKey(occurrence);
         if (!isChoreOccurrenceComplete(chore, key)) dates.push({ date: key });
       }
-      cursor.setMonth(cursor.getMonth() + 1);
+      cursor.setMonth(cursor.getMonth() + monthStep);
     }
     return dates;
   }
@@ -4404,11 +4409,28 @@ function nextPendingAnnualEventOccurrence(event, referenceDate = new Date(), vie
 // client and server always agree on how a birthday/anniversary's next
 // occurrence and reminder due date are computed.
 
+// Whether an item belongs on THIS viewer's own Home dashboard at all - not
+// just whether it's still pending. isChoreOccurrencePendingFor/
+// isAnnualEventYearPendingFor fall back to a household-wide "has everyone
+// finished" check whenever the viewer isn't an assignee (so the Calendar
+// tab's shared rotation/side-panels can show every outstanding item to every
+// member); Home is a personal "what do I need to do" list, so an item
+// assigned only to OTHER people shouldn't appear there just because those
+// other people haven't finished it yet. Unassigned (household-wide) items,
+// and items the viewer IS assigned to, still show as usual.
+function isRelevantToViewer(assignees, viewerKey) {
+  if (!assignees || !assignees.length) return true;
+  if (!viewerKey) return true;
+  return assignees.some((assignee) => assignee.key === viewerKey);
+}
+
 // Everything on the Home dashboard that has an actual calendar date and is
 // either already overdue or due today — chores, birthdays/anniversaries, and
 // plain reminders. Personalized to the signed-in viewer the same way the
 // Calendar tab's own side panels are (see nextPendingChoreOccurrence),
-// so a jointly-assigned item drops off once the viewer has done their part.
+// so a jointly-assigned item drops off once the viewer has done their part,
+// and an item assigned only to someone else never shows up here at all
+// (see isRelevantToViewer).
 function homeActionItems() {
   ensureChoreRecurrenceData();
   ensureAnnualEventRecurrenceData();
@@ -4417,7 +4439,7 @@ function homeActionItems() {
 
   const choreItems = state.calendar.chores
     .map((chore, index) => ({ chore, index, occurrence: nextPendingChoreOccurrence(chore, viewerKey) }))
-    .filter((row) => row.occurrence && row.occurrence.date <= today)
+    .filter((row) => row.occurrence && row.occurrence.date <= today && isRelevantToViewer(row.chore.assignees, viewerKey))
     .map((row) => ({
       date: row.occurrence.date,
       overdue: row.occurrence.date < today,
@@ -4432,7 +4454,7 @@ function homeActionItems() {
   const annualItems = state.calendar.events
     .filter((event) => ANNUAL_EVENT_TYPES.includes(event.type))
     .map((event) => ({ event, occurrence: nextPendingAnnualEventOccurrence(event, new Date(), viewerKey) }))
-    .filter((row) => row.occurrence && row.occurrence.date <= today)
+    .filter((row) => row.occurrence && row.occurrence.date <= today && isRelevantToViewer(row.event.assignees, viewerKey))
     .map((row) => ({
       date: row.occurrence.date,
       overdue: row.occurrence.date < today,
@@ -4445,7 +4467,7 @@ function homeActionItems() {
     }));
 
   const reminderItems = state.calendar.events
-    .filter((event) => event.type === "reminder" && event.date && event.date <= today && !isReminderComplete(event))
+    .filter((event) => event.type === "reminder" && event.date && event.date <= today && !isReminderComplete(event) && isRelevantToViewer(event.assignees, viewerKey))
     .map((event) => ({
       date: event.date,
       overdue: event.date < today,

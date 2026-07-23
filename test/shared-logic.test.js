@@ -1226,6 +1226,20 @@ test("nextPendingChoreOccurrence never returns a date off the recurrence grid, e
   assert.equal(nextPendingChoreOccurrence(chore).date, "2026-07-26", "the next Sunday, never a Monday");
 });
 
+test("nextPendingChoreOccurrence advances by the right number of months for every3months/every4months/every6months/yearly", () => {
+  const quarterly = { startDate: "2026-01-15", recurrence: "every3months", completedBy: { "2026-01-15": ["household"], "2026-04-15": ["household"] } };
+  assert.equal(nextPendingChoreOccurrence(quarterly).date, "2026-07-15");
+
+  const every4 = { startDate: "2026-01-31", recurrence: "every4months", completedBy: { "2026-01-31": ["household"] } };
+  assert.equal(nextPendingChoreOccurrence(every4).date, "2026-05-31");
+
+  const semiannual = { startDate: "2026-01-15", recurrence: "every6months", completedBy: {} };
+  assert.equal(nextPendingChoreOccurrence(semiannual).date, "2026-01-15");
+
+  const yearly = { startDate: "2026-02-28", recurrence: "yearly", completedBy: { "2026-02-28": ["household"] } };
+  assert.equal(nextPendingChoreOccurrence(yearly).date, "2027-02-28");
+});
+
 test("choreNotifyAt re-derives from scratch instead of drifting when the stored anchor no longer matches the current recurrence grid", () => {
   const chore = {
     startDate: "2026-07-19",
