@@ -3321,6 +3321,20 @@ main {
   gap: 0.5rem;
 }
 
+/* The payer's own row - pinned above the friend rows, no name/email fields
+   or remove button (unlike a friend row, it's never deletable), just a
+   fixed label plus whichever share/amount field the active split type
+   needs. */
+.iou-split-you-row {
+  padding-bottom: 0.5rem;
+  border-bottom: 1px solid var(--line);
+}
+
+.iou-split-you-label {
+  flex: 2 1 auto;
+  font-weight: 700;
+}
+
 .iou-split-row input[type="text"] {
   flex: 2 1 auto;
   min-width: 0;

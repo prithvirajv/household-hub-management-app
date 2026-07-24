@@ -54,6 +54,13 @@ let reportsCardFilter = "all";
 let reportsSelectedTag = "";
 let splitBillType = "equal";
 let splitBillRows = [];
+// The payer's own row in the Split-a-bill card, shown alongside the friend
+// rows so the total isn't just "whatever's left over" - the user can type
+// their own percent/shares/amount directly, including 0 to fully exclude
+// themselves. Kept as one object (not three separate variables) so switching
+// splitBillType back and forth doesn't lose whatever was already typed for
+// the other types.
+let splitBillYou = { amount: 0, percent: 0, shares: 1 };
 let calendarFeedback = "";
 // Kept out of state (like calendarFeedback) so a confirmation message never
 // gets saved into the shared household blob and replayed for every login.
@@ -1967,9 +1974,9 @@ function renderCalendar() {
             <input name="editingId" type="hidden">
             <label>Type<select name="type"><option value="chore">Chore</option><option value="birthday">Birthday</option><option value="anniversary">Anniversary</option><option value="reminder">Reminder</option></select></label>
             <label>Title<input name="title" placeholder="Mom birthday reminder" required></label>
-            <label><span>Date<span data-date-label-suffix> and time</span></span><input name="date" type="datetime-local" value="${state.budget.month}-01T09:00" required></label>
-            <label data-annual-time-field hidden>Remind me at<input name="annualTime" type="time" value="09:00"></label>
-            <label data-plain-reminder-field hidden>Remind me on<input name="reminderAt" type="datetime-local"></label>
+            <label><span>Date<span data-date-label-suffix> and time</span></span><input name="date" type="datetime-local" lang="en-GB" value="${state.budget.month}-01T09:00" required></label>
+            <label data-annual-time-field hidden>Remind me at<input name="annualTime" type="time" lang="en-GB" value="09:00"></label>
+            <label data-plain-reminder-field hidden>Remind me on<input name="reminderAt" type="datetime-local" lang="en-GB"></label>
             <div class="assign-to-field custom-combobox">
               <span class="assign-to-label">Assign to</span>
               <button type="button" id="assigneeComboTrigger" class="assignee-combo-trigger"></button>
@@ -2166,7 +2173,7 @@ function renderNotes() {
           <div class="note-composer-row">
             <div class="note-label-picker-field"><span>Labels</span>${renderNoteLabelPicker()}</div>
             <label>Color<select name="color"><option value="#ffffff">White</option><option value="#fff7d6">Yellow</option><option value="#eef7ff">Blue</option><option value="#eaf8ef">Green</option><option value="#fff0ee">Coral</option></select></label>
-            ${state.notes.activeView === "reminders" ? `<label>Reminder date and time<input name="reminder" type="datetime-local" required></label>` : ""}
+            ${state.notes.activeView === "reminders" ? `<label>Reminder date and time<input name="reminder" type="datetime-local" lang="en-GB" required></label>` : ""}
             <input name="pinned" type="checkbox" hidden>
             <button class="note-pin-toggle" data-composer-pin type="button" aria-label="Pin note" aria-pressed="false" title="Pin note">⌖</button>
             <button id="closeNoteComposerButton" class="ghost" type="button">Close</button>
@@ -2256,7 +2263,7 @@ function renderNoteCard(note) {
     <div class="note-labels" data-note-label-list="${note.id}">${note.labels.map((label) => `<span>${escapeHtml(label)}</span>`).join("")}</div>
     ${note.trashed ? `<div class="note-card-actions"><button data-restore-note="${note.id}" type="button">Restore</button><button class="danger-button" data-delete-note-forever="${note.id}" type="button">Delete permanently</button></div>` : `<div class="note-card-toolbar">
       <label class="note-color-control" title="Change color"><span aria-hidden="true">◉</span><select data-note-color="${note.id}" aria-label="Change note color"><option value="#ffffff" ${note.color === "#ffffff" ? "selected" : ""}>White</option><option value="#fff7d6" ${note.color === "#fff7d6" ? "selected" : ""}>Yellow</option><option value="#eef7ff" ${note.color === "#eef7ff" ? "selected" : ""}>Blue</option><option value="#eaf8ef" ${note.color === "#eaf8ef" ? "selected" : ""}>Green</option><option value="#fff0ee" ${note.color === "#fff0ee" ? "selected" : ""}>Coral</option></select></label>
-      <details class="note-toolbar-popover"><summary title="Set reminder" aria-label="Set reminder">◷</summary><div class="note-toolbar-popover-panel"><label>Reminder date and time<input type="datetime-local" data-note-reminder="${note.id}" value="${escapeHtml(note.reminder || "")}"></label></div></details>
+      <details class="note-toolbar-popover"><summary title="Set reminder" aria-label="Set reminder">◷</summary><div class="note-toolbar-popover-panel"><label>Reminder date and time<input type="datetime-local" lang="en-GB" data-note-reminder="${note.id}" value="${escapeHtml(note.reminder || "")}"></label></div></details>
       <div class="note-toolbar-labels">${renderNoteLabelPicker(note, true)}</div>
       <button data-archive-note="${note.id}" type="button" title="${note.archived ? "Unarchive" : "Archive"}" aria-label="${note.archived ? "Unarchive note" : "Archive note"}">↓</button>
       <details class="note-more-menu"><summary title="More actions" aria-label="More actions">⋮</summary><div class="note-more-menu-panel">
@@ -2550,17 +2557,17 @@ function renderDailyPlan() {
       <div class="plan-form-row">
         <form id="planTaskForm" class="plan-task-form plan-task-form-daily card">
           <input name="title" placeholder="Add a task for this day" value="${escapeHtml(editingTask?.title || "")}" required>
-          <label>Start time (optional)<input name="startTime" type="time" value="${editingTask?.startTime || ""}"></label>
+          <label>Start time (optional)<input name="startTime" type="time" lang="en-GB" value="${editingTask?.startTime || ""}"></label>
           <label>Duration (min)<input name="durationMinutes" type="number" min="5" step="5" value="${formDuration}"></label>
-          <label>End time<input name="endTimeDisplay" type="time" value="${formEndTime}" readonly tabindex="-1"></label>
+          <label>End time<input name="endTimeDisplay" type="time" lang="en-GB" value="${formEndTime}" readonly tabindex="-1"></label>
           <label>Repeat<select name="recurrence">${Object.entries(planRecurrenceLabels).map(([value, label]) => `<option value="${value}" ${editingTask && editingTask.recurrence === value ? "selected" : ""}>${label}</option>`).join("")}</select></label>
           <button type="submit">${editingTask ? "Save changes" : "Add"}</button>
           ${editingTask ? `<button class="ghost" id="cancelPlanTaskEditButton" type="button">Cancel</button>` : ""}
         </form>
         <form id="actualLogForm" class="plan-task-form plan-task-form-daily card plan-actual-log-form">
           <span class="plan-form-col-label">${editingLog ? "Edit what actually happened" : "Log what actually happened"} (${dayLabel})</span>
-          <label>Start time<input name="logStartTime" type="time" value="${editingLog?.startTime || ""}" required></label>
-          <label>End time<input name="logEndTime" type="time" value="${editingLog?.endTime || ""}" required></label>
+          <label>Start time<input name="logStartTime" type="time" lang="en-GB" value="${editingLog?.startTime || ""}" required></label>
+          <label>End time<input name="logEndTime" type="time" lang="en-GB" value="${editingLog?.endTime || ""}" required></label>
           <input name="logNote" placeholder="What did you actually do?" value="${escapeHtml(editingLog?.note || "")}" required>
           ${dailyTasks.length ? `
             <details class="plan-log-link-tasks" ${editingLog?.linkedTaskIds?.length ? "open" : ""}>
@@ -3272,13 +3279,26 @@ function personBalanceCard(group) {
   </div>`;
 }
 
+// The value to pass as computeBillSplitAmounts' explicit yourShare - only
+// exact/percentage/shares have a real editable "You" field (equal is always
+// automatic, so there's nothing to pass and the implicit +1-participant path
+// still applies).
+function splitBillYourShareValue() {
+  if (splitBillType === "percentage") return splitBillYou.percent;
+  if (splitBillType === "shares") return splitBillYou.shares;
+  if (splitBillType === "exact") return splitBillYou.amount;
+  return undefined;
+}
+
 // The Split-a-bill form's dynamic friend rows, mirroring the Bank Stream
-// Assign IOU dialog's iouSplitRows/renderIouSplitRows pattern - the payer is
-// always the implicit extra participant (see computeBillSplitAmounts), never
-// one of these rows.
+// Assign IOU dialog's iouSplitRows/renderIouSplitRows pattern. The payer also
+// gets their own row (splitBillYou, rendered separately from splitBillRows
+// since it has no name/email fields and can't be removed) so their share is
+// something they can see and set directly - including to 0, to fully
+// exclude themselves - rather than only ever being whatever's left over.
 function recomputeSplitBillRows() {
   const totalAmount = Number($("#splitExpenseForm")?.amount?.value || 0);
-  const result = computeBillSplitAmounts(splitBillType, totalAmount, splitBillRows);
+  const result = computeBillSplitAmounts(splitBillType, totalAmount, splitBillRows, splitBillYourShareValue());
   const messageEl = $("#splitBillMessage");
   const remainderEl = $("#splitBillRemainder");
   if (!result.ok) {
@@ -3294,6 +3314,11 @@ function recomputeSplitBillRows() {
       if (input) input.value = row.amount;
     });
   }
+  if (splitBillType === "equal") {
+    splitBillYou.amount = result.payerAmount;
+    const youInput = document.querySelector(`#splitBillRows [data-split-bill-you-amount]`);
+    if (youInput) youInput.value = result.payerAmount;
+  }
   if (remainderEl) {
     remainderEl.textContent = exactMoney.format(result.payerAmount);
     remainderEl.classList.toggle("danger", result.payerAmount < 0);
@@ -3303,13 +3328,25 @@ function recomputeSplitBillRows() {
 function renderSplitBillRows() {
   const container = $("#splitBillRows");
   if (!container) return;
-  container.innerHTML = splitBillRows.map((row, index) => `
+  const youField = splitBillType === "percentage"
+    ? `<input type="number" step="0.01" min="0" max="100" placeholder="%" value="${splitBillYou.percent || ""}" data-split-bill-you-percent>`
+    : splitBillType === "shares"
+      ? `<input type="number" step="1" min="0" placeholder="Parts" value="${splitBillYou.shares || ""}" data-split-bill-you-shares>`
+      : `<input type="number" step="0.01" min="0" placeholder="Amount" value="${splitBillYou.amount || ""}" data-split-bill-you-amount ${splitBillType === "equal" ? "readonly" : ""}>`;
+  container.innerHTML = `
+    <div class="iou-split-row iou-split-you-row">
+      <div class="iou-split-you-label">You</div>
+      ${youField}
+    </div>
+  ` + splitBillRows.map((row, index) => `
     <div class="iou-split-row">
       ${friendRowFieldsHtml(index, row)}
       <div class="compact-row-line">
         ${splitBillType === "percentage"
           ? `<input type="number" step="0.01" min="0" max="100" placeholder="%" value="${row.percent || ""}" data-split-bill-percent="${index}">`
-          : `<input type="number" step="0.01" min="0.01" placeholder="Amount" value="${row.amount || ""}" data-split-bill-amount="${index}" ${splitBillType === "equal" ? "readonly" : ""}>`}
+          : splitBillType === "shares"
+            ? `<input type="number" step="1" min="0" placeholder="Parts" value="${row.shares || ""}" data-split-bill-shares="${index}">`
+            : `<input type="number" step="0.01" min="0.01" placeholder="Amount" value="${row.amount || ""}" data-split-bill-amount="${index}" ${splitBillType === "equal" ? "readonly" : ""}>`}
         <button type="button" class="icon-button ghost" data-remove-split-bill-row="${index}" aria-label="Remove person">×</button>
       </div>
     </div>
@@ -3326,6 +3363,24 @@ function renderSplitBillRows() {
       splitBillRows[Number(input.dataset.splitBillPercent)].percent = Number(input.value);
       recomputeSplitBillRows();
     });
+  });
+  container.querySelectorAll("[data-split-bill-shares]").forEach((input) => {
+    input.addEventListener("input", () => {
+      splitBillRows[Number(input.dataset.splitBillShares)].shares = Number(input.value);
+      recomputeSplitBillRows();
+    });
+  });
+  container.querySelector("[data-split-bill-you-amount]")?.addEventListener("input", (event) => {
+    splitBillYou.amount = Number(event.currentTarget.value);
+    recomputeSplitBillRows();
+  });
+  container.querySelector("[data-split-bill-you-percent]")?.addEventListener("input", (event) => {
+    splitBillYou.percent = Number(event.currentTarget.value);
+    recomputeSplitBillRows();
+  });
+  container.querySelector("[data-split-bill-you-shares]")?.addEventListener("input", (event) => {
+    splitBillYou.shares = Number(event.currentTarget.value);
+    recomputeSplitBillRows();
   });
   container.querySelectorAll("[data-remove-split-bill-row]").forEach((button) => {
     button.addEventListener("click", () => {
@@ -3387,10 +3442,11 @@ function renderIOUs() {
             <option value="equal" ${splitBillType === "equal" ? "selected" : ""}>Equal</option>
             <option value="exact" ${splitBillType === "exact" ? "selected" : ""}>Exact amounts</option>
             <option value="percentage" ${splitBillType === "percentage" ? "selected" : ""}>Percentage</option>
+            <option value="shares" ${splitBillType === "shares" ? "selected" : ""}>Shares (parts)</option>
           </select></label>
           <div id="splitBillRows" class="iou-split-rows form-row-full"></div>
           <button id="addSplitBillRowButton" class="ghost form-row-full" type="button">+ Add another person</button>
-          <div class="iou-split-total form-row-full"><span>Your remaining share</span><b id="splitBillRemainder">$0.00</b></div>
+          <div class="iou-split-total form-row-full"><span>Your share</span><b id="splitBillRemainder">$0.00</b></div>
           ${state.accounts.length ? `<label>Account their repayment lands in (optional)<select name="accountId"><option value="">Not linked</option>${accountOptions("", { excludeType: "credit_card" })}</select></label>` : ""}
           <p id="splitBillMessage" class="form-message form-row-full"></p>
           <button type="submit" class="form-row-full">Split and add</button>
@@ -8252,7 +8308,7 @@ function bindViewEvents() {
   }
 
   if ($("#splitBillRows")) {
-    if (!splitBillRows.length) splitBillRows = [{ person: "", amount: 0, percent: 0, email: "", friendId: "" }];
+    if (!splitBillRows.length) splitBillRows = [{ person: "", amount: 0, percent: 0, shares: 1, email: "", friendId: "" }];
     renderSplitBillRows();
   }
 
@@ -8264,7 +8320,7 @@ function bindViewEvents() {
   });
 
   $("#addSplitBillRowButton")?.addEventListener("click", () => {
-    splitBillRows.push({ person: "", amount: 0, percent: 0, email: "", friendId: "" });
+    splitBillRows.push({ person: "", amount: 0, percent: 0, shares: 1, email: "", friendId: "" });
     renderSplitBillRows();
   });
 
@@ -8274,13 +8330,13 @@ function bindViewEvents() {
     const reason = String(data.reason || "").trim();
     const totalAmount = Number(data.amount);
     const friends = splitBillRows
-      .map((row) => ({ person: String(row.person || "").trim(), amount: Number(row.amount), percent: Number(row.percent), email: String(row.email || "").trim() }))
+      .map((row) => ({ person: String(row.person || "").trim(), amount: Number(row.amount), percent: Number(row.percent), shares: Number(row.shares), email: String(row.email || "").trim() }))
       .filter((row) => row.person);
     if (!reason || !(totalAmount > 0) || !friends.length) {
       $("#splitBillMessage").textContent = "Enter what it was for, the total bill, and at least one friend.";
       return;
     }
-    const result = computeBillSplitAmounts(splitBillType, totalAmount, friends);
+    const result = computeBillSplitAmounts(splitBillType, totalAmount, friends, splitBillYourShareValue());
     if (!result.ok) {
       $("#splitBillMessage").textContent = result.error;
       return;
@@ -8305,6 +8361,7 @@ function bindViewEvents() {
     });
     splitBillRows = [];
     splitBillType = "equal";
+    splitBillYou = { amount: 0, percent: 0, shares: 1 };
     autosaveState();
     render();
   });
@@ -9282,39 +9339,71 @@ $("#exportReportForm").addEventListener("submit", async (event) => {
 let assignIouDraftTotal = 0;
 let iouSplitRows = [];
 let assignIouSplitType = "exact";
+// Same idea as splitBillYou (see recomputeSplitBillRows) - your own row in
+// this dialog, shown alongside the friend rows instead of only ever being
+// whatever's left over, so it can be set directly (including to 0, to fully
+// exclude yourself from the transaction).
+let assignIouYou = { amount: 0, percent: 0, shares: 1 };
 
-function updateIouRemainder() {
-  const splitTotal = iouSplitRows.reduce((sum, row) => sum + (Number(row.amount) || 0), 0);
-  const remainder = Math.round((assignIouDraftTotal - splitTotal) * 100) / 100;
-  const remainderEl = $("#assignIouRemainder");
-  remainderEl.textContent = exactMoney.format(remainder);
-  remainderEl.classList.toggle("danger", remainder < 0);
+function assignIouYourShareValue() {
+  if (assignIouSplitType === "percentage") return assignIouYou.percent;
+  if (assignIouSplitType === "shares") return assignIouYou.shares;
+  if (assignIouSplitType === "exact") return assignIouYou.amount;
+  return undefined;
 }
 
-// In equal/percentage mode the row amounts are derived, not typed - recompute
-// and write them back onto iouSplitRows before updateIouRemainder runs, so
-// the remainder always reflects computeBillSplitAmounts' own payerAmount
-// (the two are guaranteed to reconcile to the cent regardless of mode).
+// Recomputes friend row amounts (equal/percentage/shares modes derive them,
+// exact just reads what's typed) and the "Your share" display from
+// computeBillSplitAmounts' own payerAmount, so the two always reconcile to
+// the cent regardless of mode - never independently re-summed.
 function recomputeAssignIouSplits() {
-  const result = computeBillSplitAmounts(assignIouSplitType, assignIouDraftTotal, iouSplitRows);
-  if (result.ok && assignIouSplitType !== "exact") {
+  const result = computeBillSplitAmounts(assignIouSplitType, assignIouDraftTotal, iouSplitRows, assignIouYourShareValue());
+  const remainderEl = $("#assignIouRemainder");
+  const messageEl = $("#assignIouMessage");
+  if (!result.ok) {
+    if (messageEl) messageEl.textContent = result.error;
+    if (remainderEl) remainderEl.textContent = exactMoney.format(0);
+    return;
+  }
+  if (messageEl) messageEl.textContent = "";
+  if (assignIouSplitType !== "exact") {
     iouSplitRows.forEach((row, index) => {
       row.amount = result.friendAmounts[index];
       const input = document.querySelector(`#assignIouSplitRows [data-iou-split-amount="${index}"]`);
       if (input) input.value = row.amount;
     });
   }
-  updateIouRemainder();
+  if (assignIouSplitType === "equal") {
+    assignIouYou.amount = result.payerAmount;
+    const youInput = document.querySelector(`#assignIouSplitRows [data-iou-split-you-amount]`);
+    if (youInput) youInput.value = result.payerAmount;
+  }
+  if (remainderEl) {
+    remainderEl.textContent = exactMoney.format(result.payerAmount);
+    remainderEl.classList.toggle("danger", result.payerAmount < 0);
+  }
 }
 
 function renderIouSplitRows() {
   const container = $("#assignIouSplitRows");
-  container.innerHTML = iouSplitRows.map((row, index) => `
+  const youField = assignIouSplitType === "percentage"
+    ? `<input type="number" step="0.01" min="0" max="100" placeholder="%" value="${assignIouYou.percent || ""}" data-iou-split-you-percent>`
+    : assignIouSplitType === "shares"
+      ? `<input type="number" step="1" min="0" placeholder="Parts" value="${assignIouYou.shares || ""}" data-iou-split-you-shares>`
+      : `<input type="number" step="0.01" min="0" placeholder="Amount" value="${assignIouYou.amount || ""}" data-iou-split-you-amount ${assignIouSplitType === "equal" ? "readonly" : ""}>`;
+  container.innerHTML = `
+    <div class="iou-split-row iou-split-you-row">
+      <div class="iou-split-you-label">You</div>
+      ${youField}
+    </div>
+  ` + iouSplitRows.map((row, index) => `
     <div class="iou-split-row">
       ${friendRowFieldsHtml(index, row)}
       ${assignIouSplitType === "percentage"
         ? `<input type="number" step="0.01" min="0" max="100" placeholder="%" value="${row.percent || ""}" data-iou-split-percent="${index}">`
-        : `<input type="number" step="0.01" min="0.01" placeholder="Amount" value="${row.amount || ""}" data-iou-split-amount="${index}" ${assignIouSplitType === "equal" ? "readonly" : ""}>`}
+        : assignIouSplitType === "shares"
+          ? `<input type="number" step="1" min="0" placeholder="Parts" value="${row.shares || ""}" data-iou-split-shares="${index}">`
+          : `<input type="number" step="0.01" min="0.01" placeholder="Amount" value="${row.amount || ""}" data-iou-split-amount="${index}" ${assignIouSplitType === "equal" ? "readonly" : ""}>`}
       <button type="button" class="icon-button ghost" data-remove-iou-split-row="${index}" aria-label="Remove person">×</button>
     </div>
   `).join("");
@@ -9322,7 +9411,7 @@ function renderIouSplitRows() {
   container.querySelectorAll("[data-iou-split-amount]").forEach((input) => {
     input.addEventListener("input", () => {
       iouSplitRows[Number(input.dataset.iouSplitAmount)].amount = Number(input.value);
-      updateIouRemainder();
+      recomputeAssignIouSplits();
     });
   });
   container.querySelectorAll("[data-iou-split-percent]").forEach((input) => {
@@ -9330,6 +9419,24 @@ function renderIouSplitRows() {
       iouSplitRows[Number(input.dataset.iouSplitPercent)].percent = Number(input.value);
       recomputeAssignIouSplits();
     });
+  });
+  container.querySelectorAll("[data-iou-split-shares]").forEach((input) => {
+    input.addEventListener("input", () => {
+      iouSplitRows[Number(input.dataset.iouSplitShares)].shares = Number(input.value);
+      recomputeAssignIouSplits();
+    });
+  });
+  container.querySelector("[data-iou-split-you-amount]")?.addEventListener("input", (event) => {
+    assignIouYou.amount = Number(event.currentTarget.value);
+    recomputeAssignIouSplits();
+  });
+  container.querySelector("[data-iou-split-you-percent]")?.addEventListener("input", (event) => {
+    assignIouYou.percent = Number(event.currentTarget.value);
+    recomputeAssignIouSplits();
+  });
+  container.querySelector("[data-iou-split-you-shares]")?.addEventListener("input", (event) => {
+    assignIouYou.shares = Number(event.currentTarget.value);
+    recomputeAssignIouSplits();
   });
   container.querySelectorAll("[data-remove-iou-split-row]").forEach((button) => {
     button.addEventListener("click", () => {
@@ -9370,7 +9477,13 @@ function openAssignIouDialog(source) {
   $("#assignIouTotal").textContent = exactMoney.format(assignIouDraftTotal);
   // Default to an even 2-way split (you + one friend), like Splitwise's
   // default - the user can edit the amount or add more people from here.
-  iouSplitRows = [{ person: "", amount: Math.round((assignIouDraftTotal / 2) * 100) / 100, percent: 50, email: "", friendId: "" }];
+  // assignIouYou starts at the same 50/50 balance as the friend row below,
+  // so "exact" mode (the default split type here) opens already balanced
+  // instead of showing a "doesn't add up" error before anyone's typed
+  // anything.
+  const halfShare = Math.round((assignIouDraftTotal / 2) * 100) / 100;
+  iouSplitRows = [{ person: "", amount: halfShare, percent: 50, shares: 1, email: "", friendId: "" }];
+  assignIouYou = { amount: assignIouDraftTotal - halfShare, percent: 50, shares: 1 };
   renderIouSplitRows();
   $("#assignIouMessage").textContent = "";
   $("#assignIouDialog").showModal();
@@ -9383,7 +9496,7 @@ $("#assignIouSplitType").addEventListener("change", (event) => {
   renderIouSplitRows();
 });
 $("#addIouSplitRowButton").addEventListener("click", () => {
-  iouSplitRows.push({ person: "", amount: 0, percent: 0, email: "", friendId: "" });
+  iouSplitRows.push({ person: "", amount: 0, percent: 0, shares: 1, email: "", friendId: "" });
   renderIouSplitRows();
 });
 

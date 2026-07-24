@@ -6,7 +6,7 @@ const {
   timeToMinutes, minutesToTime, snapMinutes, layoutTimelineBlocks, comparePlannedToActual,
   sanitizeFilename, buildDocumentObjectPath, wouldCreateFolderCycle, buildFolderTree,
   smsGatewayAddress, paycheckOccurrencesSince, paycheckOccurrencesInRange, paycheckAllOccurrenceDatesInRange, recurringExpenseOccurrenceDates, accountBalance, accountsWithBalances,
-  splitAmountEvenly, splitBillByPercentages, netBalancesByPerson, computeBillSplitAmounts, settleUpPersonIous, isValidEmail,
+  splitAmountEvenly, splitBillByPercentages, splitBillByShares, netBalancesByPerson, computeBillSplitAmounts, settleUpPersonIous, isValidEmail,
   parseDelimitedText, parseBankCsvTransactions, normalizeForAccountMatch, matchAccountByFilename, isDuplicateTransaction, findTransferCandidate,
   parseCreditCardStatementText, normalizeTag, groupTransactionsByTag, monthKeysInRange, spentByLineInMonth,
   recurringBudgetSetAside, nextRecurringBudgetDueDate, monthsUntilDueInclusive,
@@ -734,6 +734,49 @@ test("computeBillSplitAmounts (exact): passes through typed amounts, absorbing r
 test("computeBillSplitAmounts (exact): rejects a split that adds up to more than the total", () => {
   const result = computeBillSplitAmounts("exact", 100, [{ amount: 60 }, { amount: 60 }]);
   assert.equal(result.ok, false);
+});
+
+test("splitBillByShares divides proportionally by raw share counts, not requiring them to sum to any particular total", () => {
+  const result = splitBillByShares(90, [1, 2]);
+  assert.deepEqual(result, [30, 60]);
+});
+
+test("splitBillByShares returns null with no shares or when every share is zero", () => {
+  assert.equal(splitBillByShares(100, []), null);
+  assert.equal(splitBillByShares(100, [0, 0]), null);
+});
+
+test("computeBillSplitAmounts (shares): splits proportionally, defaulting your own share to 1 part when not given", () => {
+  const result = computeBillSplitAmounts("shares", 90, [{ shares: 2 }]);
+  assert.ok(result.ok);
+  assert.deepEqual(result.friendAmounts, [60]);
+  assert.equal(result.payerAmount, 30);
+});
+
+test("computeBillSplitAmounts (shares): an explicit yourShare of 0 excludes the payer entirely", () => {
+  const result = computeBillSplitAmounts("shares", 90, [{ shares: 1 }, { shares: 2 }], 0);
+  assert.ok(result.ok);
+  assert.deepEqual(result.friendAmounts, [30, 60]);
+  assert.equal(result.payerAmount, 0);
+});
+
+test("computeBillSplitAmounts (percentage): an explicit yourShare of 0 requires friends to cover 100%", () => {
+  const full = computeBillSplitAmounts("percentage", 100, [{ percent: 60 }, { percent: 40 }], 0);
+  assert.ok(full.ok);
+  assert.deepEqual(full.friendAmounts, [60, 40]);
+  assert.equal(full.payerAmount, 0);
+
+  const short = computeBillSplitAmounts("percentage", 100, [{ percent: 60 }, { percent: 30 }], 0);
+  assert.equal(short.ok, false, "60 + 30 + your 0% doesn't reach 100%, so this must be rejected instead of silently leaving 10% unaccounted for");
+});
+
+test("computeBillSplitAmounts (exact): an explicit yourShare of 0 requires friends to cover the full total", () => {
+  const full = computeBillSplitAmounts("exact", 100, [{ amount: 100 }], 0);
+  assert.ok(full.ok);
+  assert.equal(full.payerAmount, 0);
+
+  const short = computeBillSplitAmounts("exact", 100, [{ amount: 60 }], 0);
+  assert.equal(short.ok, false, "friends only cover 60 of the 100 total while you explicitly claimed 0, so this must be rejected rather than silently pocketing the other 40");
 });
 
 test("settleUpPersonIous fully settles a single record", () => {

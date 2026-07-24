@@ -7,7 +7,7 @@
     <title>FamilyLoop</title>
     <link rel="icon" type="image/svg+xml" href="/assets/favicon.svg">
     <link rel="apple-touch-icon" href="/assets/apple-touch-icon.png">
-    <link rel="stylesheet" href="/styles.css?v=20260723-1">
+    <link rel="stylesheet" href="/styles.css?v=20260723-2">
     <script src="https://accounts.google.com/gsi/client" async defer></script>
   </head>
   <body>
@@ -236,12 +236,13 @@
             <option value="exact">Exact amounts</option>
             <option value="equal">Equal</option>
             <option value="percentage">Percentage</option>
+            <option value="shares">Shares (parts)</option>
           </select></label>
           <div id="assignIouSplitRows" class="iou-split-rows"></div>
           <button id="addIouSplitRowButton" class="ghost" type="button">+ Add another person</button>
           <label>Reason<input name="reason"></label>
           <label>Date<input name="date" type="date" required></label>
-          <div class="iou-split-total"><span>Your remaining share</span><b id="assignIouRemainder">$0.00</b></div>
+          <div class="iou-split-total"><span>Your share</span><b id="assignIouRemainder">$0.00</b></div>
           <p id="assignIouMessage" class="form-message"></p>
           <div class="dialog-actions">
             <button id="cancelAssignIouButton" class="ghost" type="button">Cancel</button>
@@ -298,7 +299,7 @@
       </div>
     </template>
 
-    <script src="/lib/shared-logic.js?v=20260723-1"></script>
-    <script src="/app.js?v=20260723-1"></script>
+    <script src="/lib/shared-logic.js?v=20260723-2"></script>
+    <script src="/app.js?v=20260723-2"></script>
   </body>
 </html>
