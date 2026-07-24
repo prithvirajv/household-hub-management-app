@@ -4196,6 +4196,20 @@ function ensurePaycheckOccurrencesGenerated() {
   state.paychecks.forEach((paycheck) => {
     paycheck.id ||= uniqueId("paycheck");
     const recurrence = paycheck.recurrence || "once";
+    // Occurrences already on file were materialized under whatever
+    // recurrence was active when they were generated (generatedRecurrence) -
+    // if the paycheck's recurrence has since changed (e.g. monthly ->
+    // biweekly), those rows no longer match the real schedule and need to be
+    // thrown out and regenerated from the anchor date, not left stale
+    // alongside a mismatched watermark. Checking this on every render
+    // (rather than only reactively in the Repeat dropdown's own change
+    // handler) also self-heals any paycheck already left in this broken
+    // state by an edit made before this check existed.
+    if (paycheck.generatedRecurrence !== recurrence) {
+      state.paycheckOccurrences = state.paycheckOccurrences.filter((occurrence) => occurrence.seriesId !== paycheck.id);
+      paycheck.generatedThroughDate = "";
+      paycheck.generatedRecurrence = recurrence;
+    }
     if (recurrence === "once" || recurrence === "bonus") return;
     if (paycheck.generatedThroughDate && paycheck.generatedThroughDate >= capKey) return;
     const generateFromKey = paycheck.generatedThroughDate
@@ -6791,16 +6805,12 @@ function bindViewEvents() {
   document.querySelectorAll("[data-paycheck-recurrence]").forEach((select) => {
     select.addEventListener("change", () => {
       const paycheck = state.paychecks[Number(select.dataset.paycheckRecurrence)];
-      if (paycheck) {
-        paycheck.recurrence = select.value;
-        if (["once", "bonus"].includes(select.value) && paycheck.id) {
-          // No longer recurring, so its previously generated occurrence rows
-          // would otherwise keep counting toward income alongside the
-          // paycheck's own single date, double-counting it.
-          state.paycheckOccurrences = (state.paycheckOccurrences || []).filter((occurrence) => occurrence.seriesId !== paycheck.id);
-          paycheck.generatedThroughDate = "";
-        }
-      }
+      // Regenerating stale occurrences after a recurrence change is handled
+      // centrally in ensurePaycheckOccurrencesGenerated (keyed off
+      // generatedRecurrence), which runs on every render - so no manual
+      // clearing is needed here, and a paycheck that was already left in a
+      // stale state before that existed self-heals the same way.
+      if (paycheck) paycheck.recurrence = select.value;
       state.budget.income = budgetIncomeFromPaychecks();
       autosaveState();
       render();
