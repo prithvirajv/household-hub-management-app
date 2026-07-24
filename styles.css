@@ -3379,6 +3379,21 @@ main {
   font-size: 0.8rem;
 }
 
+.due-date-paid-toggle {
+  margin-top: 0.5rem;
+}
+
+.due-date-paid-toggle summary {
+  cursor: pointer;
+  font-weight: 700;
+  color: var(--muted);
+  font-size: 0.8rem;
+}
+
+.due-date-paid-toggle .compact-row {
+  margin-top: 0.5rem;
+}
+
 .iou-person-records .compact-row {
   margin-top: 0.5rem;
 }

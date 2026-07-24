@@ -1498,7 +1498,10 @@ function renderBudget() {
         <section class="card">
           <div class="card-label">Next up</div>
           <h3>Due soon</h3>
-          ${dueDateRows().slice(0, 5).map((item) => compactRow(item.name, item.date, item.type)).join("")}
+          ${(() => {
+            const dueSoon = dueDateRows().due.slice(0, 5);
+            return dueSoon.length ? dueSoon.map((item) => compactRow(item.name, item.date, "Due")).join("") : `<div class="empty-inline">Nothing due right now</div>`;
+          })()}
         </section>
         <section class="card">
           <div class="card-label">Insights</div>
@@ -1820,7 +1823,10 @@ function renderPaychecks() {
         </section>
       </div>
       <aside class="side-stack">
-        <section class="card"><div class="card-label">Calendar</div><h3>Due-date flow</h3>${dueDateRows().map((item) => compactRow(item.name, item.date, item.type)).join("")}</section>
+        <section class="card"><div class="card-label">Calendar</div><h3>Due-date flow</h3>${(() => {
+          const { due, paid } = dueDateRows();
+          return `${due.length ? due.map((item) => compactRow(item.name, item.date, "Due")).join("") : `<div class="empty-inline">Nothing due right now</div>`}${paid.length ? `<details class="due-date-paid-toggle"><summary>Paid this month (${paid.length})</summary>${paid.map((item) => compactRow(item.name, item.date, "Paid")).join("")}</details>` : ""}`;
+        })()}</section>
         <section class="card"><div class="card-label">Reminders</div><h3>Bills and goals</h3>${
           billAndGoalReminders().length
             ? billAndGoalReminders().map((reminder) => `<div class="compact-row"><div><strong>${escapeHtml(reminder.title)}</strong><small>${escapeHtml(reminder.detail)}</small></div><button class="pill-button" data-dismiss-reminder="${escapeHtml(reminder.id)}" type="button">Done</button></div>`).join("")
@@ -4100,15 +4106,35 @@ function progressNumberBlock(label, value, target, unit) {
   return `<div class="progress-block"><div><span>${label}</span><b>${Number(value || 0).toLocaleString()}${unit ? ` ${unit}` : ""} / ${Number(target || 0).toLocaleString()}${unit ? ` ${unit}` : ""}</b></div><div class="bar"><span style="width:${pct}%"></span></div></div>`;
 }
 
+// Split into still-due and already-paid so the Paycheck page's Due-date flow
+// reads as "what needs my attention" rather than a flat wall of every
+// subcategory that has ever had a due day set. When viewing the current
+// real month, the due list is further ordered overdue-first (most urgent -
+// the due day already passed but it's still unpaid) then by soonest
+// upcoming due day, rather than raw ascending day-of-month (which buried a
+// bill due today under earlier-in-the-month ones that already got paid).
+// Viewing a past/future budget month has no meaningful "today" to measure
+// against, so it falls back to plain ascending day-of-month.
 function dueDateRows() {
-  return allLines()
+  const todayDay = new Date().getDate();
+  const isCurrentMonth = state.budget.month === dateKey(new Date()).slice(0, 7);
+  const rows = allLines()
     .filter((line) => line.dueDay)
-    .sort((a, b) => a.dueDay - b.dueDay)
     .map((line) => ({
       name: line.name,
+      dueDay: line.dueDay,
       date: `${String(line.dueDay).padStart(2, "0")} · Bill ${money.format(line.planned)}`,
-      type: spentByLine(line.id) >= Number(line.planned || 0) ? "Paid" : "Due"
+      paid: spentByLine(line.id) >= Number(line.planned || 0)
     }));
+  const paid = rows.filter((row) => row.paid).sort((a, b) => a.dueDay - b.dueDay);
+  const unpaid = rows.filter((row) => !row.paid);
+  const due = isCurrentMonth
+    ? [
+        ...unpaid.filter((row) => row.dueDay < todayDay).sort((a, b) => a.dueDay - b.dueDay),
+        ...unpaid.filter((row) => row.dueDay >= todayDay).sort((a, b) => a.dueDay - b.dueDay)
+      ]
+    : unpaid.sort((a, b) => a.dueDay - b.dueDay);
+  return { due, paid };
 }
 
 function scheduleItems() {
