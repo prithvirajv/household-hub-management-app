@@ -257,11 +257,40 @@ function notificationCandidates(appState, fallbackEmail) {
   return candidates.filter((item) => item.email && !Number.isNaN(new Date(item.dueAt).getTime()));
 }
 
+// A client autosave calls this on essentially every state change, so it runs
+// far more often than the scheduled worker's own claim/send cycle - if it
+// deleted every unsent row unconditionally, it could delete a row the worker
+// has ALREADY claimed and is mid-send on (claimed_at set, sent_at still
+// null). The send would then complete against a row that no longer exists,
+// silently losing the "mark sent" step, and the fresh row this function
+// reinserts for the same still-due candidate would look unclaimed again -
+// producing a genuine duplicate email on the worker's next tick. Only rows
+// NOT currently within an active claim lease are safe to delete/refresh here
+// (the same eligibility window the worker itself uses to decide a claim has
+// gone stale) - anything actively leased is left for the worker to resolve
+// normally (mark sent, or naturally reclaim once its lease expires).
 async function syncNotificationJobs({ householdId, appState, user }) {
   const candidates = notificationCandidates(appState, user.email);
   if (MEMORY_DB) {
-    memoryDb.notificationJobs = memoryDb.notificationJobs.filter((job) => job.household_id !== householdId || job.sent_at);
+    const now = Date.now();
+    memoryDb.notificationJobs = memoryDb.notificationJobs.filter((job) => {
+      if (job.household_id !== householdId || job.sent_at) return true;
+      return Boolean(job.claimed_at) && new Date(job.claimed_at).getTime() >= now - NOTIFICATION_LEASE_MS;
+    });
     for (const item of candidates) {
+      // A row surviving the filter above (still within its claim lease) must
+      // not get a second row inserted alongside it for the same candidate -
+      // the DB path gets this for free from its unique index + ON CONFLICT
+      // DO NOTHING; this mirrors that here since the in-memory table has no
+      // such constraint to enforce it automatically.
+      const alreadyLeased = memoryDb.notificationJobs.some((job) =>
+        job.household_id === householdId &&
+        job.source_type === item.sourceType &&
+        job.source_id === item.sourceId &&
+        job.recipient_email.toLowerCase() === item.email.toLowerCase() &&
+        job.due_at === item.dueAt
+      );
+      if (alreadyLeased) continue;
       const recipient = memoryDb.users.find((candidate) => candidate.email.toLowerCase() === item.email.toLowerCase());
       memoryDb.notificationJobs.push({ id: crypto.randomUUID(), household_id: householdId, user_id: recipient?.id || null, source_type: item.sourceType, source_id: item.sourceId, title: item.title, recipient_email: item.email, due_at: item.dueAt, time_zone: item.timeZone, sent_at: null, claimed_at: null, attempts: 0, last_error: null });
     }
@@ -270,7 +299,12 @@ async function syncNotificationJobs({ householdId, appState, user }) {
   const client = await pool.connect();
   try {
     await client.query("BEGIN");
-    await client.query("DELETE FROM notification_jobs WHERE household_id = $1 AND sent_at IS NULL", [householdId]);
+    await client.query(
+      `DELETE FROM notification_jobs
+       WHERE household_id = $1 AND sent_at IS NULL
+         AND (claimed_at IS NULL OR claimed_at < now() - ($2 || ' milliseconds')::interval)`,
+      [householdId, String(NOTIFICATION_LEASE_MS)]
+    );
     for (const item of candidates) {
       await client.query(
         `INSERT INTO notification_jobs (household_id, user_id, source_type, source_id, title, recipient_email, due_at, time_zone)

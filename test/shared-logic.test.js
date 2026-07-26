@@ -11,7 +11,7 @@ const {
   parseCreditCardStatementText, normalizeTag, groupTransactionsByTag, monthKeysInRange, spentByLineInMonth,
   recurringBudgetSetAside, nextRecurringBudgetDueDate, monthsUntilDueInclusive,
   annualEventDate, nextAnnualEventDate, annualEventNotifyAt, rollAnnualNotifyAtForward,
-  nextPendingChoreOccurrence, choreNotifyAt
+  nextPendingChoreOccurrence, currentChoreOccurrenceDate, choreNotifyAt
 } = require("../lib/shared-logic");
 
 test("layoutTimelineBlocks gives non-overlapping tasks full width", () => {
@@ -1296,7 +1296,9 @@ test("choreNotifyAt re-derives from scratch instead of drifting when the stored 
     notifyAtDateKey: "2026-07-13",
     notifyAtSourceTime: "13:50"
   };
-  const result = choreNotifyAt(chore);
+  // Referenced "today" sits between the 07-19 and 07-26 occurrences, so
+  // 07-19 is the current one regardless of completedBy.
+  const result = choreNotifyAt(chore, new Date("2026-07-21T12:00:00.000Z"));
   assert.equal(chore.notifyAtDateKey, "2026-07-19", "re-derives against the current grid instead of shifting the stale anchor");
   assert.equal(result.slice(0, 10), "2026-07-19");
 });
@@ -1306,13 +1308,33 @@ test("choreNotifyAt still uses the cheap day-shift path when the anchor is still
     startDate: "2026-07-19",
     recurrence: "weekly",
     time: "13:50",
-    completedBy: { "2026-07-19": ["household"] },
+    completedBy: {},
     notifyAt: "2026-07-19T17:50:00.000Z",
     notifyAtDateKey: "2026-07-19",
     notifyAtSourceTime: "13:50"
   };
-  const result = choreNotifyAt(chore);
+  // Referenced "today" has moved past the 07-26 occurrence, so that's now
+  // current - purely from elapsed time, with nothing ever marked done.
+  const result = choreNotifyAt(chore, new Date("2026-07-27T12:00:00.000Z"));
   assert.equal(chore.notifyAtDateKey, "2026-07-26");
   assert.equal(result.slice(0, 10), "2026-07-26");
   assert.equal(new Date(result).getUTCHours(), 17, "the original time-of-day is preserved by the shift, not re-derived");
+});
+
+test("currentChoreOccurrenceDate never depends on completedBy - it tracks elapsed time only", () => {
+  const chore = { startDate: "2026-07-19", recurrence: "weekly", completedBy: {} };
+  const reference = new Date("2026-07-27T00:00:00.000Z");
+  const untouched = currentChoreOccurrenceDate(chore, reference).date;
+  chore.completedBy = { "2026-07-19": ["household"], "2026-07-26": ["household"] };
+  const afterMarkingDone = currentChoreOccurrenceDate(chore, reference).date;
+  assert.equal(untouched, "2026-07-26");
+  assert.equal(afterMarkingDone, "2026-07-26", "marking prior occurrences done doesn't change which occurrence is current");
+});
+
+test("choreNotifyAt advances through real elapsed time even when no occurrence is ever marked done - no backlog to release as a burst", () => {
+  const chore = { startDate: "2026-07-19", recurrence: "weekly", time: "09:00", completedBy: {} };
+  const weekOne = choreNotifyAt(chore, new Date("2026-07-20T00:00:00.000Z"));
+  assert.equal(weekOne.slice(0, 10), "2026-07-19");
+  const weekThree = choreNotifyAt(chore, new Date("2026-08-03T00:00:00.000Z"));
+  assert.equal(weekThree.slice(0, 10), "2026-08-02", "keeps tracking the current occurrence instead of staying pinned to the first one nobody completed");
 });
