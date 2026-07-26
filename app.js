@@ -1580,7 +1580,10 @@ function renderTransactions() {
         ...state.transactions,
         ...(state.transactionInboxDrafts || []).filter((other) => other.id !== transaction.id)
       ]),
-      refundMatch: orderRefundMatch(transaction),
+      refundMatch: orderRefundMatch(transaction, [
+        ...state.transactions,
+        ...(state.transactionInboxDrafts || []).filter((other) => other.id !== transaction.id)
+      ]),
       transferMatch: findTransferCandidate(transaction, [
         ...state.transactions,
         ...(state.transactionInboxDrafts || []).filter((other) => other.id !== transaction.id)
@@ -1980,9 +1983,11 @@ function renderCalendar() {
             <input name="editingId" type="hidden">
             <label>Type<select name="type"><option value="chore">Chore</option><option value="birthday">Birthday</option><option value="anniversary">Anniversary</option><option value="reminder">Reminder</option></select></label>
             <label>Title<input name="title" placeholder="Mom birthday reminder" required></label>
-            <label><span>Date<span data-date-label-suffix> and time</span></span><input name="date" type="datetime-local" lang="en-GB" value="${state.budget.month}-01T09:00" required></label>
-            <label data-annual-time-field hidden>Remind me at<input name="annualTime" type="time" lang="en-GB" value="09:00"></label>
-            <label data-plain-reminder-field hidden>Remind me on<input name="reminderAt" type="datetime-local" lang="en-GB"></label>
+            <label>Date<input name="date" type="date" value="${state.budget.month}-01" required></label>
+            <label data-date-time-field>Time<input name="time" type="text" inputmode="numeric" class="time24-input" placeholder="HH:MM" maxlength="5" value="09:00"></label>
+            <label data-annual-time-field hidden>Remind me at<input name="annualTime" type="text" inputmode="numeric" class="time24-input" placeholder="HH:MM" maxlength="5" value="09:00"></label>
+            <label data-plain-reminder-field hidden>Remind me on<input name="reminderAtDate" type="date"></label>
+            <label data-plain-reminder-field hidden>at<input name="reminderAtTime" type="text" inputmode="numeric" class="time24-input" placeholder="HH:MM" maxlength="5"></label>
             <div class="assign-to-field custom-combobox">
               <span class="assign-to-label">Assign to</span>
               <button type="button" id="assigneeComboTrigger" class="assignee-combo-trigger"></button>
@@ -2179,7 +2184,7 @@ function renderNotes() {
           <div class="note-composer-row">
             <div class="note-label-picker-field"><span>Labels</span>${renderNoteLabelPicker()}</div>
             <label>Color<select name="color"><option value="#ffffff">White</option><option value="#fff7d6">Yellow</option><option value="#eef7ff">Blue</option><option value="#eaf8ef">Green</option><option value="#fff0ee">Coral</option></select></label>
-            ${state.notes.activeView === "reminders" ? `<label>Reminder date and time<input name="reminder" type="datetime-local" lang="en-GB" required></label>` : ""}
+            ${state.notes.activeView === "reminders" ? `<label>Reminder date<input name="reminderDate" type="date" required></label><label>at<input name="reminderTime" type="text" inputmode="numeric" class="time24-input" placeholder="HH:MM" maxlength="5" value="09:00" required></label>` : ""}
             <input name="pinned" type="checkbox" hidden>
             <button class="note-pin-toggle" data-composer-pin type="button" aria-label="Pin note" aria-pressed="false" title="Pin note">⌖</button>
             <button id="closeNoteComposerButton" class="ghost" type="button">Close</button>
@@ -2269,7 +2274,7 @@ function renderNoteCard(note) {
     <div class="note-labels" data-note-label-list="${note.id}">${note.labels.map((label) => `<span>${escapeHtml(label)}</span>`).join("")}</div>
     ${note.trashed ? `<div class="note-card-actions"><button data-restore-note="${note.id}" type="button">Restore</button><button class="danger-button" data-delete-note-forever="${note.id}" type="button">Delete permanently</button></div>` : `<div class="note-card-toolbar">
       <label class="note-color-control" title="Change color"><span aria-hidden="true">◉</span><select data-note-color="${note.id}" aria-label="Change note color"><option value="#ffffff" ${note.color === "#ffffff" ? "selected" : ""}>White</option><option value="#fff7d6" ${note.color === "#fff7d6" ? "selected" : ""}>Yellow</option><option value="#eef7ff" ${note.color === "#eef7ff" ? "selected" : ""}>Blue</option><option value="#eaf8ef" ${note.color === "#eaf8ef" ? "selected" : ""}>Green</option><option value="#fff0ee" ${note.color === "#fff0ee" ? "selected" : ""}>Coral</option></select></label>
-      <details class="note-toolbar-popover"><summary title="Set reminder" aria-label="Set reminder">◷</summary><div class="note-toolbar-popover-panel"><label>Reminder date and time<input type="datetime-local" lang="en-GB" data-note-reminder="${note.id}" value="${escapeHtml(note.reminder || "")}"></label></div></details>
+      <details class="note-toolbar-popover"><summary title="Set reminder" aria-label="Set reminder">◷</summary><div class="note-toolbar-popover-panel"><label>Reminder date<input type="date" data-note-reminder-date="${note.id}" value="${escapeHtml((note.reminder || "").slice(0, 10))}"></label><label>Time<input type="text" inputmode="numeric" class="time24-input" placeholder="HH:MM" maxlength="5" data-note-reminder-time="${note.id}" value="${escapeHtml((note.reminder || "").slice(11, 16))}"></label></div></details>
       <div class="note-toolbar-labels">${renderNoteLabelPicker(note, true)}</div>
       <button data-archive-note="${note.id}" type="button" title="${note.archived ? "Unarchive" : "Archive"}" aria-label="${note.archived ? "Unarchive note" : "Archive note"}">↓</button>
       <details class="note-more-menu"><summary title="More actions" aria-label="More actions">⋮</summary><div class="note-more-menu-panel">
@@ -2563,17 +2568,17 @@ function renderDailyPlan() {
       <div class="plan-form-row">
         <form id="planTaskForm" class="plan-task-form plan-task-form-daily card">
           <input name="title" placeholder="Add a task for this day" value="${escapeHtml(editingTask?.title || "")}" required>
-          <label>Start time (optional)<input name="startTime" type="time" lang="en-GB" value="${editingTask?.startTime || ""}"></label>
+          <label>Start time (optional)<input name="startTime" type="text" inputmode="numeric" class="time24-input" placeholder="HH:MM" maxlength="5" value="${escapeHtml(editingTask?.startTime || "")}"></label>
           <label>Duration (min)<input name="durationMinutes" type="number" min="5" step="5" value="${formDuration}"></label>
-          <label>End time<input name="endTimeDisplay" type="time" lang="en-GB" value="${formEndTime}" readonly tabindex="-1"></label>
+          <label>End time<input name="endTimeDisplay" type="text" class="time24-input" value="${escapeHtml(formEndTime)}" readonly tabindex="-1"></label>
           <label>Repeat<select name="recurrence">${Object.entries(planRecurrenceLabels).map(([value, label]) => `<option value="${value}" ${editingTask && editingTask.recurrence === value ? "selected" : ""}>${label}</option>`).join("")}</select></label>
           <button type="submit">${editingTask ? "Save changes" : "Add"}</button>
           ${editingTask ? `<button class="ghost" id="cancelPlanTaskEditButton" type="button">Cancel</button>` : ""}
         </form>
         <form id="actualLogForm" class="plan-task-form plan-task-form-daily card plan-actual-log-form">
           <span class="plan-form-col-label">${editingLog ? "Edit what actually happened" : "Log what actually happened"} (${dayLabel})</span>
-          <label>Start time<input name="logStartTime" type="time" lang="en-GB" value="${editingLog?.startTime || ""}" required></label>
-          <label>End time<input name="logEndTime" type="time" lang="en-GB" value="${editingLog?.endTime || ""}" required></label>
+          <label>Start time<input name="logStartTime" type="text" inputmode="numeric" class="time24-input" placeholder="HH:MM" maxlength="5" value="${escapeHtml(editingLog?.startTime || "")}" required></label>
+          <label>End time<input name="logEndTime" type="text" inputmode="numeric" class="time24-input" placeholder="HH:MM" maxlength="5" value="${escapeHtml(editingLog?.endTime || "")}" required></label>
           <input name="logNote" placeholder="What did you actually do?" value="${escapeHtml(editingLog?.note || "")}" required>
           ${dailyTasks.length ? `
             <details class="plan-log-link-tasks" ${editingLog?.linkedTaskIds?.length ? "open" : ""}>
@@ -5113,15 +5118,20 @@ function transactionInboxItems() {
 
 // A refund/return often lands in a separate statement import weeks after the
 // original purchase, so this checks against every real ledger transaction
-// (not just the current import batch) - the same orderNumber persisted on
-// the original purchase is how the two get reconnected across sessions.
+// by default (not just the current import batch) - the same orderNumber
+// persisted on the original purchase is how the two get reconnected across
+// sessions. Callers with a pending Bank Stream (transactions not yet
+// accepted into the ledger) should pass a wider pool - otherwise an order
+// and its return both still sitting in the inbox (e.g. a same-statement
+// purchase+return, or a return imported before its purchase was accepted)
+// never show as matched even though both are already sitting right there.
 // Recomputed live (never cached on the draft) for the same reason
 // possibleDuplicate is: a match that appears after the fact - because the
 // original purchase was accepted into the ledger later - must not stay
 // stuck showing "no match" forever.
-function orderRefundMatch(candidate) {
+function orderRefundMatch(candidate, pool = state.transactions) {
   if (!candidate.orderNumber || Number(candidate.amount) >= 0) return null;
-  return state.transactions.find((transaction) => transaction.orderNumber === candidate.orderNumber && Number(transaction.amount) > 0) || null;
+  return (pool || []).find((transaction) => transaction.orderNumber === candidate.orderNumber && Number(transaction.amount) > 0) || null;
 }
 
 function bindViewEvents() {
@@ -5311,8 +5321,8 @@ function bindViewEvents() {
       body: String(data.body || "").trim(),
       checklist: checklist.map((text) => ({ id: uniqueId("item"), text, done: false })),
       labels: formData.getAll("labels"),
-      reminder: data.reminder || "",
-      reminderAt: data.reminder ? new Date(data.reminder).toISOString() : "",
+      reminder: data.reminderDate && data.reminderTime ? `${data.reminderDate}T${data.reminderTime}` : "",
+      reminderAt: data.reminderDate && data.reminderTime ? new Date(`${data.reminderDate}T${data.reminderTime}`).toISOString() : "",
       color: data.color || "#ffffff",
       pinned: data.pinned === "on",
       archived: false,
@@ -5542,12 +5552,27 @@ function bindViewEvents() {
     });
   });
 
-  document.querySelectorAll("[data-note-reminder]").forEach((input) => {
+  document.querySelectorAll("[data-note-reminder-date]").forEach((input) => {
     input.addEventListener("change", () => {
-      const note = state.notes.entries.find((item) => item.id === input.dataset.noteReminder);
+      const note = state.notes.entries.find((item) => item.id === input.dataset.noteReminderDate);
       if (!note) return;
-      note.reminder = input.value;
-      note.reminderAt = input.value ? new Date(input.value).toISOString() : "";
+      const timeInput = document.querySelector(`[data-note-reminder-time="${note.id}"]`);
+      const combined = input.value && timeInput?.value ? `${input.value}T${timeInput.value}` : "";
+      note.reminder = combined;
+      note.reminderAt = combined ? new Date(combined).toISOString() : "";
+      autosaveState();
+      render();
+    });
+  });
+
+  document.querySelectorAll("[data-note-reminder-time]").forEach((input) => {
+    input.addEventListener("change", () => {
+      const note = state.notes.entries.find((item) => item.id === input.dataset.noteReminderTime);
+      if (!note) return;
+      const dateInput = document.querySelector(`[data-note-reminder-date="${note.id}"]`);
+      const combined = dateInput?.value && input.value ? `${dateInput.value}T${input.value}` : "";
+      note.reminder = combined;
+      note.reminderAt = combined ? new Date(combined).toISOString() : "";
       autosaveState();
       render();
     });
@@ -6392,14 +6417,20 @@ function bindViewEvents() {
   // existing ledger transaction, the draft is pre-assigned to that
   // transaction's subcategory so the refund nets against the same line the
   // original purchase was categorized under, instead of landing unassigned.
+  // The matching purchase isn't always already in the ledger - it can be a
+  // still-pending Bank Stream draft from an earlier import, or (an Amazon
+  // order returned within the same billing cycle) another row in this very
+  // batch - so the search pool covers all three instead of only the
+  // accepted ledger.
   function addBankStreamRows(rows, file, idPrefix) {
     const matchedAccount = matchAccountByFilename(file.name, state.accounts);
     state.transactionInboxDrafts ||= [];
     const alreadyKnown = [...state.transactions, ...state.transactionInboxDrafts];
     const duplicateCount = rows.filter((row) => isDuplicateTransaction(row, alreadyKnown)).length;
+    const refundMatchPool = [...alreadyKnown, ...rows];
     rows.forEach((row) => {
       const refundMatch = row.orderNumber && Number(row.amount) < 0
-        ? state.transactions.find((transaction) => transaction.orderNumber === row.orderNumber && Number(transaction.amount) > 0)
+        ? refundMatchPool.find((transaction) => transaction.orderNumber === row.orderNumber && Number(transaction.amount) > 0)
         : null;
       state.transactionInboxDrafts.unshift({
         id: uniqueId(idPrefix),
@@ -7645,8 +7676,9 @@ function bindViewEvents() {
     const assignees = selectedKeys.length
       ? resolveAssignees(selectedKeys)
       : resolveAssignees([sessionUser?.email || "Household owner"]);
-    const selectedDateTime = String(data.date || "");
-    const selectedDate = selectedDateTime.slice(0, 10);
+    const selectedDate = String(data.date || "");
+    const selectedTime = String(data.time || "09:00");
+    const selectedDateTime = selectedDate ? `${selectedDate}T${selectedTime}` : "";
     const editingKind = data.editingKind;
     const editingId = data.editingId;
     const wasEditing = Boolean(editingKind && editingId);
@@ -7671,7 +7703,7 @@ function bindViewEvents() {
         endDate,
         startDate: selectedDate,
         nextDue: selectedDate,
-        time: selectedDateTime.slice(11, 16) || "09:00",
+        time: selectedTime,
         notifyAt: selectedDateTime ? new Date(selectedDateTime).toISOString() : "",
         location: String(data.location || "").trim(),
         completedBy: existing?.completedBy || {}
@@ -7688,8 +7720,11 @@ function bindViewEvents() {
       const annualTime = String(data.annualTime || "09:00");
       // A plain reminder's notification time is fully independent of the
       // event's own date/time (e.g. "PickUp Robotics 12PM" but remind at
-      // 11AM) -- falls back to the event's own time if left blank.
-      const reminderAt = !isAnnual ? String(data.reminderAt || selectedDateTime) : "";
+      // 11AM) -- falls back to the event's own date/time if left blank.
+      const reminderAtDate = String(data.reminderAtDate || "");
+      const reminderAtTime = String(data.reminderAtTime || "09:00");
+      const reminderAtCombined = reminderAtDate ? `${reminderAtDate}T${reminderAtTime}` : "";
+      const reminderAt = !isAnnual ? String(reminderAtCombined || selectedDateTime) : "";
       const existing = editingKind === "event" ? state.calendar.events.find((item) => item.id === editingId) : null;
       const calendarEvent = {
         id: existing?.id || uniqueId("event"),
@@ -7835,12 +7870,11 @@ function bindViewEvents() {
       if (event.target.closest(".event")) return;
       const dateInput = $("#calendarQuickAdd [name='date']");
       if (!dateInput) return;
-      if (dateInput.type === "date") {
-        dateInput.value = cell.dataset.calendarDay;
-      } else {
-        const existingTime = dateInput.value.includes("T") ? dateInput.value.split("T")[1] : "09:00";
-        dateInput.value = `${cell.dataset.calendarDay}T${existingTime}`;
-      }
+      // The date and time are always separate fields now, so clicking a
+      // different day just updates the date - whatever time was already
+      // typed (or the "annual" case, where there's no time field at all)
+      // is untouched.
+      dateInput.value = cell.dataset.calendarDay;
       $("#calendarQuickAdd [name='title']")?.focus();
     };
     cell.addEventListener("click", applyDay);
@@ -8646,15 +8680,20 @@ function editCalendarItem(reference) {
   form.editingKind.value = kind;
   form.editingId.value = id;
   form.type.value = kind === "chore" ? "chore" : ANNUAL_EVENT_TYPES.includes(item.type) ? item.type : "reminder";
-  // Switch the date input's type (date-only vs datetime-local) before assigning
-  // its value below, so the value we set matches the format the input expects.
+  // Show/hide the right fields for this type before assigning values below,
+  // so e.g. the reminder date/time fields already exist and are visible by
+  // the time we populate them.
   updateCalendarQuickAddFields();
   form.title.value = item.title || "";
+  const isAnnualItem = kind === "event" && ANNUAL_EVENT_TYPES.includes(item.type);
   form.date.value = kind === "chore"
-    ? `${item.startDate || item.nextDue || `${state.budget.month}-01`}T${item.time || "09:00"}`
-    : ANNUAL_EVENT_TYPES.includes(item.type)
+    ? (item.startDate || item.nextDue || `${state.budget.month}-01`)
+    : isAnnualItem
       ? item.date || `${state.budget.month}-01`
-      : item.dateTime || `${item.date || `${state.budget.month}-01`}T09:00`;
+      : (item.dateTime ? item.dateTime.slice(0, 10) : (item.date || `${state.budget.month}-01`));
+  form.time.value = kind === "chore"
+    ? (item.time || "09:00")
+    : (!isAnnualItem && item.dateTime ? item.dateTime.slice(11, 16) : "09:00");
   const selectedAssigneeKeys = new Set((item.assignees || []).map((assignee) => assignee.key));
   form.querySelectorAll('input[name="assignees"]').forEach((checkbox) => {
     checkbox.checked = selectedAssigneeKeys.has(checkbox.value);
@@ -8663,8 +8702,12 @@ function editCalendarItem(reference) {
   form.recurrence.value = kind === "chore" ? item.recurrence || "once" : "once";
   form.choreEndDate.value = kind === "chore" ? item.endDate || "" : "";
   form.reminderDays.value = kind === "event" && ANNUAL_EVENT_TYPES.includes(item.type) ? String(item.reminderDays ?? 1) : "1";
-  form.annualTime.value = kind === "event" && ANNUAL_EVENT_TYPES.includes(item.type) ? (item.dateTime?.slice(11, 16) || "09:00") : "09:00";
-  form.reminderAt.value = kind === "event" && item.type === "reminder" ? (item.reminderAt || item.dateTime || form.date.value) : "";
+  form.annualTime.value = isAnnualItem ? (item.dateTime?.slice(11, 16) || "09:00") : "09:00";
+  const reminderAtValue = kind === "event" && item.type === "reminder"
+    ? (item.reminderAt || item.dateTime || `${form.date.value}T${form.time.value}`)
+    : "";
+  form.reminderAtDate.value = reminderAtValue ? reminderAtValue.slice(0, 10) : "";
+  form.reminderAtTime.value = reminderAtValue ? reminderAtValue.slice(11, 16) : "";
   form.location.value = item.location || "";
   updateLocationDirectionsPreview();
   form.querySelector("[data-calendar-submit]").textContent = "Save changes";
@@ -8684,7 +8727,8 @@ function resetCalendarEditor() {
   form.reset();
   form.editingKind.value = "";
   form.editingId.value = "";
-  form.date.value = `${state.budget.month}-01T09:00`;
+  form.date.value = `${state.budget.month}-01`;
+  form.time.value = "09:00";
   updateLocationDirectionsPreview();
   form.querySelector("[data-calendar-submit]").textContent = "Add";
   form.querySelector("[data-calendar-delete]").hidden = true;
@@ -8716,7 +8760,7 @@ function updateCalendarQuickAddFields() {
   const endDateField = form.querySelector("[data-chore-end-date-field]");
   const reminderField = form.querySelector("[data-annual-reminder-field]");
   const timeField = form.querySelector("[data-annual-time-field]");
-  const plainReminderField = form.querySelector("[data-plain-reminder-field]");
+  const plainReminderFields = form.querySelectorAll("[data-plain-reminder-field]");
   const locationField = form.querySelector("[data-location-field]");
   if (locationField) locationField.hidden = isAnnual;
   if (recurrenceField) recurrenceField.hidden = type !== "chore";
@@ -8725,28 +8769,22 @@ function updateCalendarQuickAddFields() {
   if (endDateField) endDateField.hidden = type !== "chore" || form.recurrence.value === "once";
   if (reminderField) reminderField.hidden = !isAnnual;
   if (timeField) timeField.hidden = !isAnnual;
-  if (plainReminderField) {
-    plainReminderField.hidden = type !== "reminder";
-    // Default the reminder time to match the event's own date/time the first
-    // time this field appears, so it's not empty — the user can then move it
-    // earlier (or later) independent of when the event itself happens.
-    if (type === "reminder" && !form.reminderAt.value) form.reminderAt.value = form.date.value;
+  plainReminderFields.forEach((field) => { field.hidden = type !== "reminder"; });
+  // Default the reminder date/time to match the event's own date/time the
+  // first time this field appears, so it's not empty — the user can then
+  // move it earlier (or later) independent of when the event itself happens.
+  if (type === "reminder" && !form.reminderAtDate.value) {
+    form.reminderAtDate.value = form.date.value;
+    form.reminderAtTime.value = form.time.value;
   }
-  // Birthdays/anniversaries only need a plain calendar date — asking for a
-  // year and time invites entering an actual birth year, which used to make
-  // the reminder look permanently overdue (see annualEventNotifyAt).
-  const dateInput = form.date;
-  const dateLabelSuffix = form.querySelector("[data-date-label-suffix]");
-  if (dateInput) {
-    if (isAnnual && dateInput.type !== "date") {
-      dateInput.type = "date";
-      dateInput.value = dateInput.value.slice(0, 10);
-    } else if (!isAnnual && dateInput.type !== "datetime-local") {
-      dateInput.type = "datetime-local";
-      dateInput.value = `${dateInput.value.slice(0, 10) || `${state.budget.month}-01`}T09:00`;
-    }
-  }
-  if (dateLabelSuffix) dateLabelSuffix.textContent = isAnnual ? "" : " and time";
+  // Birthdays/anniversaries only need a plain calendar date, never a time of
+  // day — asking for a year and time invites entering an actual birth year,
+  // which used to make the reminder look permanently overdue (see
+  // annualEventNotifyAt). The date field itself is always a plain
+  // type="date" now (chores/reminders get their time from the separate
+  // "time" field below it), so there's no more input-type switching here.
+  const dateTimeField = form.querySelector("[data-date-time-field]");
+  if (dateTimeField) dateTimeField.hidden = isAnnual;
   const deleteButton = form.querySelector("[data-calendar-delete]");
   if (deleteButton && !deleteButton.hidden) deleteButton.textContent = `Delete ${type === "chore" ? "chore" : annualEventLabels[type]?.toLowerCase() || "reminder"}`;
 }
@@ -10398,3 +10436,40 @@ window.addEventListener("popstate", (event) => {
   currentView = view;
   render();
 });
+
+// A 24-hour "HH:MM" text input used everywhere in place of a native
+// <input type="time"> or the time portion of a <input type="datetime-local">.
+// Modern Chrome derives those native controls' AM/PM-vs-24-hour display from
+// the browser's own language/OS region settings, ignoring the page's own
+// lang attribute entirely - there is no reliable way to force every user's
+// device into 24-hour mode with the native pickers. Wired once here (not
+// inside bindViewEvents, which reruns on every render) as a single delegated
+// listener on document, so it keeps working regardless of how the DOM
+// underneath it gets rebuilt.
+document.addEventListener("input", (event) => {
+  const input = event.target;
+  if (!input.classList?.contains("time24-input")) return;
+  // Digits accumulate as typed; once there are 3+, everything except the
+  // last two becomes the hour and the last two become the minute - so
+  // typing "930" (no leading zero) still lands on 9:30, not 93:0.
+  const digits = input.value.replace(/\D/g, "").slice(0, 4);
+  input.value = digits.length <= 2 ? digits : `${digits.slice(0, -2)}:${digits.slice(-2)}`;
+});
+
+// Normalizes/clamps to a valid zero-padded HH:MM on blur (capture phase,
+// since blur doesn't bubble) - e.g. "9:3" becomes "09:03", and an
+// out-of-range "25:99" clamps to "23:59" rather than being silently kept or
+// rejected outright.
+document.addEventListener("blur", (event) => {
+  const input = event.target;
+  if (!input.classList?.contains("time24-input")) return;
+  if (!input.value) return;
+  const match = input.value.match(/^(\d{1,2}):(\d{1,2})$/);
+  const normalized = match
+    ? `${String(Math.min(23, Number(match[1]))).padStart(2, "0")}:${String(Math.min(59, Number(match[2]))).padStart(2, "0")}`
+    : "";
+  if (normalized !== input.value) {
+    input.value = normalized;
+    input.dispatchEvent(new Event("change", { bubbles: true }));
+  }
+}, true);

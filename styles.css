@@ -3645,7 +3645,7 @@ main {
 
 .note-composer-row {
   display: grid;
-  grid-template-columns: repeat(3, minmax(120px, 1fr)) auto auto;
+  grid-template-columns: repeat(3, minmax(120px, 1fr)) minmax(90px, 0.6fr) auto auto;
   gap: 0.5rem;
   align-items: end;
   padding-top: 0.55rem;
@@ -3922,6 +3922,10 @@ main {
   color: var(--muted);
   font-size: 0.72rem;
   font-weight: 800;
+}
+
+.note-toolbar-popover-panel label + label {
+  margin-top: 0.5rem;
 }
 
 .note-more-menu {
@@ -5102,7 +5106,7 @@ main {
   flex: 0 0 auto;
 }
 
-.plan-task-form-daily label input[type="time"] {
+.plan-task-form-daily label input.time24-input {
   width: 130px;
 }
 
