@@ -3771,7 +3771,13 @@ main {
 
 .notes-board {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+  /* auto-fit (not auto-fill) so a handful of cards on a wide page share the
+     full width between themselves - auto-fill would keep reserving equal
+     space for the empty tracks it creates up to the container width,
+     leaving the real cards stuck at the 240px minimum with wasted gutter
+     space alongside them, which is exactly what made checklist item text
+     truncate on a normal desktop width with only 2-3 notes. */
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
   gap: 0.75rem;
   align-items: start;
 }

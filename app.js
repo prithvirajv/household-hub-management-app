@@ -9988,7 +9988,19 @@ async function loadApp() {
     api("/api/state"),
     api("/api/private-data")
   ]);
-  if (migrateInitialMonth()) autosaveState();
+  // A fresh login should always land on today's month - restoring whatever
+  // month was last viewed (Budget history browsing, etc.) is only useful
+  // within an already-open session, not as the starting point for a new
+  // one. reloadSelectedHousehold() (switching households mid-session) is
+  // deliberately left alone - only this true login entry point resets it.
+  const loginMonth = currentMonthKey();
+  const shouldForceCurrentMonth = state?.budget && state.budget.month !== loginMonth;
+  const migrated = migrateInitialMonth();
+  if (shouldForceCurrentMonth) {
+    state.budget.month = loginMonth;
+    state.budget.monthPreferenceSet = true;
+  }
+  if (migrated || shouldForceCurrentMonth) autosaveState();
   const hashView = location.hash.slice(1);
   if (hashView && renderers[hashView]) currentView = hashView;
   $("#authPanel").hidden = true;

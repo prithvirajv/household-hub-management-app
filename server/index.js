@@ -244,7 +244,7 @@ function notificationCandidates(appState, fallbackEmail) {
     // nobody opens the app between one occurrence firing and the next one
     // coming due — otherwise notification_jobs just never gets a row for
     // that next due date and it silently never fires.
-    const dueAt = choreNotifyAt(chore) || chore.notifyAt;
+    const dueAt = choreNotifyAt(chore, new Date(), timeZone) || chore.notifyAt;
     if (!dueAt) continue;
     for (const email of recipientEmails(chore, fallbackEmail)) {
       candidates.push({ sourceType: "calendar-chore", sourceId: chore.id, title: chore.title || "Chore reminder", email, dueAt, timeZone });

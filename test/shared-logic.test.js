@@ -11,7 +11,7 @@ const {
   parseCreditCardStatementText, normalizeTag, groupTransactionsByTag, monthKeysInRange, spentByLineInMonth,
   recurringBudgetSetAside, nextRecurringBudgetDueDate, monthsUntilDueInclusive,
   annualEventDate, nextAnnualEventDate, annualEventNotifyAt, rollAnnualNotifyAtForward,
-  nextPendingChoreOccurrence, currentChoreOccurrenceDate, choreNotifyAt
+  nextPendingChoreOccurrence, currentChoreOccurrenceDate, zonedTimeToUtcIso, choreNotifyAt
 } = require("../lib/shared-logic");
 
 test("layoutTimelineBlocks gives non-overlapping tasks full width", () => {
@@ -1319,6 +1319,26 @@ test("choreNotifyAt still uses the cheap day-shift path when the anchor is still
   assert.equal(chore.notifyAtDateKey, "2026-07-26");
   assert.equal(result.slice(0, 10), "2026-07-26");
   assert.equal(new Date(result).getUTCHours(), 17, "the original time-of-day is preserved by the shift, not re-derived");
+});
+
+test("zonedTimeToUtcIso anchors a wall-clock time to the household's real timezone, not the server process's own", () => {
+  // 1:50 PM Eastern in July is EDT (UTC-4), so it must land on 17:50 UTC -
+  // a naive `new Date(...).setHours(13, 50)` on a UTC server would instead
+  // produce 13:50 UTC, 4 hours early.
+  assert.equal(zonedTimeToUtcIso("2026-07-26", 13, 50, "America/New_York"), "2026-07-26T17:50:00.000Z");
+  // January is EST (UTC-5) - confirms this isn't a hardcoded offset.
+  assert.equal(zonedTimeToUtcIso("2026-01-26", 13, 50, "America/New_York"), "2026-01-26T18:50:00.000Z");
+  // No timeZone given falls back to treating the wall-clock as UTC already.
+  assert.equal(zonedTimeToUtcIso("2026-07-26", 13, 50, ""), "2026-07-26T13:50:00.000Z");
+});
+
+test("choreNotifyAt's from-scratch recompute uses the household's timeZone, not the server process's own", () => {
+  const chore = { startDate: "2026-07-19", recurrence: "weekly", time: "13:50", completedBy: {} };
+  // No stored notifyAt/notifyAtDateKey yet, so this always takes the
+  // from-scratch path - exactly what a server-side worker tick does for a
+  // chore no client has ever rendered/saved.
+  const result = choreNotifyAt(chore, new Date("2026-07-21T12:00:00.000Z"), "America/New_York");
+  assert.equal(result, "2026-07-19T17:50:00.000Z", "1:50 PM Eastern in July (EDT) is 17:50 UTC, not 13:50 UTC");
 });
 
 test("currentChoreOccurrenceDate never depends on completedBy - it tracks elapsed time only", () => {
