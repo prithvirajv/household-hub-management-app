@@ -1,7 +1,7 @@
 const assert = require("node:assert/strict");
 const test = require("node:test");
 const {
-  applyChecklistToggle, bucketChecklistItems, findChecklistDuplicate, mealWeeksForMonth, groupPlanTasksByBucket, validateJournalPayload,
+  applyChecklistToggle, bucketChecklistItems, findChecklistDuplicate, moveChecklistItem, mealWeeksForMonth, groupPlanTasksByBucket, validateJournalPayload,
   dailyTaskOccursOnDate, isDailyTaskDoneOnDate, toggleDailyTaskDoneOnDate,
   timeToMinutes, minutesToTime, snapMinutes, layoutTimelineBlocks, comparePlannedToActual,
   sanitizeFilename, buildDocumentObjectPath, wouldCreateFolderCycle, buildFolderTree,
@@ -178,6 +178,59 @@ test("findChecklistDuplicate ignores same-text items that belong to a different 
 test("findChecklistDuplicate matches case-insensitively and trims whitespace within the same scope", () => {
   const checklist = [{ id: "item-1", text: "Milk", done: false, parentId: "" }];
   assert.equal(findChecklistDuplicate(checklist, "  milk  ", "")?.id, "item-1");
+});
+
+test("moveChecklistItem moves a dragged item before the target when dropped on its top half", () => {
+  const checklist = [
+    { id: "a", text: "Splitwise adding", done: false, parentId: "" },
+    { id: "b", text: "Fold clothes", done: false, parentId: "" },
+    { id: "c", text: "Tax returns filing", done: false, parentId: "" }
+  ];
+  const result = moveChecklistItem(checklist, "b", "a", false);
+  assert.deepEqual(result.map((item) => item.id), ["b", "a", "c"]);
+});
+
+test("moveChecklistItem moves a dragged item after the target when dropped on its bottom half", () => {
+  const checklist = [
+    { id: "a", text: "Splitwise adding", done: false, parentId: "" },
+    { id: "b", text: "Fold clothes", done: false, parentId: "" },
+    { id: "c", text: "Tax returns filing", done: false, parentId: "" }
+  ];
+  // Moving "Splitwise adding" to the third row, as in the user's example.
+  const result = moveChecklistItem(checklist, "a", "c", true);
+  assert.deepEqual(result.map((item) => item.id), ["b", "c", "a"]);
+});
+
+test("moveChecklistItem carries a parent's children along as one contiguous block", () => {
+  const checklist = [
+    { id: "parent-1", text: "Kanampalayam land", done: false, parentId: "" },
+    { id: "child-1", text: "Check", done: false, parentId: "parent-1" },
+    { id: "child-2", text: "Fencing", done: false, parentId: "parent-1" },
+    { id: "parent-2", text: "IOB plot", done: false, parentId: "" }
+  ];
+  const result = moveChecklistItem(checklist, "parent-1", "parent-2", true);
+  assert.deepEqual(result.map((item) => item.id), ["parent-2", "parent-1", "child-1", "child-2"], "the parent and both children move together, in their original relative order");
+});
+
+test("moveChecklistItem moves a single child without disturbing its siblings", () => {
+  const checklist = [
+    { id: "parent-1", text: "Kanampalayam land", done: false, parentId: "" },
+    { id: "child-1", text: "Check", done: false, parentId: "parent-1" },
+    { id: "child-2", text: "Fencing", done: false, parentId: "parent-1" }
+  ];
+  const result = moveChecklistItem(checklist, "child-2", "child-1", false);
+  assert.deepEqual(result.map((item) => item.id), ["parent-1", "child-2", "child-1"]);
+  assert.equal(result.find((item) => item.id === "child-2").parentId, "parent-1", "moving a child doesn't change who its parent is");
+});
+
+test("moveChecklistItem is a no-op when dropped on itself, a missing id, or its own child", () => {
+  const checklist = [
+    { id: "parent-1", text: "Kanampalayam land", done: false, parentId: "" },
+    { id: "child-1", text: "Check", done: false, parentId: "parent-1" }
+  ];
+  assert.equal(moveChecklistItem(checklist, "parent-1", "parent-1", false), checklist);
+  assert.equal(moveChecklistItem(checklist, "missing", "parent-1", false), checklist);
+  assert.equal(moveChecklistItem(checklist, "parent-1", "child-1", false), checklist, "dragging a parent onto its own child isn't a valid drop");
 });
 
 test("checking a child marks the parent done once every sibling is done", () => {

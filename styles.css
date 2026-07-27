@@ -4092,16 +4092,59 @@ main {
 
 .note-check-row {
   display: grid;
-  grid-template-columns: 22px minmax(0, 1fr) 30px 30px 30px;
+  grid-template-columns: 16px 22px minmax(0, 1fr) 30px 30px 30px;
   gap: 0.55rem;
   align-items: center;
   min-height: 34px;
+  position: relative;
 }
 
 .note-check-row.child-item {
   margin-left: 1.75rem;
   padding-left: 0.65rem;
   border-left: 2px solid var(--border);
+}
+
+.note-check-drag-handle {
+  min-height: 30px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--muted);
+  cursor: grab;
+  opacity: 0;
+  transition: opacity 0.1s;
+}
+
+.note-check-row:hover .note-check-drag-handle,
+.note-check-row:focus-within .note-check-drag-handle {
+  opacity: 1;
+}
+
+.note-check-row.dragging {
+  opacity: 0.4;
+}
+
+/* A thin highlight on the edge the dragged item would land on, rather than
+   swapping backgrounds - reads clearly even with a note's own background
+   color (yellow/blue/green/coral) behind it. */
+.note-check-row.note-check-row-drag-over-top::before,
+.note-check-row.note-check-row-drag-over-bottom::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  height: 2px;
+  background: var(--blue);
+  border-radius: 1px;
+}
+
+.note-check-row.note-check-row-drag-over-top::before {
+  top: -3px;
+}
+
+.note-check-row.note-check-row-drag-over-bottom::after {
+  bottom: -3px;
 }
 
 .note-check-level {

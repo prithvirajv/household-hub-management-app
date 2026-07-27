@@ -2246,7 +2246,8 @@ function renderNoteLabelPicker(note = null, compact = false) {
 
 function renderNoteCard(note) {
   const { open, completed } = bucketChecklistItems(note.checklist);
-  const checklistRow = (item) => `<div class="note-check-row ${item.done ? "done" : ""} ${item.parentId ? "child-item" : ""}">
+  const checklistRow = (item) => `<div class="note-check-row ${item.done ? "done" : ""} ${item.parentId ? "child-item" : ""}" draggable="true" data-drag-checklist-item="${note.id}:${item.id}">
+    <span class="note-check-drag-handle" aria-hidden="true" title="Drag to reorder">⠿</span>
     <input data-note-check="${note.id}:${item.id}" type="checkbox" aria-label="Complete ${escapeHtml(item.text)}" ${item.done ? "checked" : ""}>
     <div class="note-check-combobox">
       <input class="note-check-text" data-note-check-text="${note.id}:${item.id}" value="${escapeHtml(item.text)}" placeholder="Checklist item" aria-label="Checklist item" aria-autocomplete="list" aria-expanded="false" autocomplete="off">
@@ -5525,6 +5526,56 @@ function bindViewEvents() {
         if (!parent) return;
         item.parentId = parent.id;
       }
+      autosaveState();
+      render();
+    });
+  });
+
+  // Drag-to-reorder for note checklist items. draggedChecklistItem is local
+  // to this one bindViewEvents pass (rebound fresh on every render, like
+  // every other delegated listener here) - dragstart on one row and drop on
+  // another both close over the same variable, so it only needs to survive
+  // for the duration of a single drag gesture.
+  let draggedChecklistItem = null;
+  const clearChecklistDragOverClasses = () => {
+    document.querySelectorAll(".note-check-row-drag-over-top, .note-check-row-drag-over-bottom").forEach((row) => {
+      row.classList.remove("note-check-row-drag-over-top", "note-check-row-drag-over-bottom");
+    });
+  };
+  document.querySelectorAll("[data-drag-checklist-item]").forEach((row) => {
+    row.addEventListener("dragstart", (event) => {
+      const [noteId, itemId] = row.dataset.dragChecklistItem.split(":");
+      draggedChecklistItem = { noteId, itemId };
+      event.dataTransfer.effectAllowed = "move";
+      event.dataTransfer.setData("text/plain", itemId);
+      row.classList.add("dragging");
+    });
+    row.addEventListener("dragend", () => {
+      row.classList.remove("dragging");
+      clearChecklistDragOverClasses();
+      draggedChecklistItem = null;
+    });
+    row.addEventListener("dragover", (event) => {
+      if (!draggedChecklistItem || row.dataset.dragChecklistItem.split(":")[0] !== draggedChecklistItem.noteId) return;
+      event.preventDefault();
+      event.dataTransfer.dropEffect = "move";
+      const isAfter = event.clientY - row.getBoundingClientRect().top > row.getBoundingClientRect().height / 2;
+      row.classList.toggle("note-check-row-drag-over-bottom", isAfter);
+      row.classList.toggle("note-check-row-drag-over-top", !isAfter);
+    });
+    row.addEventListener("dragleave", () => {
+      row.classList.remove("note-check-row-drag-over-top", "note-check-row-drag-over-bottom");
+    });
+    row.addEventListener("drop", (event) => {
+      event.preventDefault();
+      clearChecklistDragOverClasses();
+      if (!draggedChecklistItem) return;
+      const [noteId, targetItemId] = row.dataset.dragChecklistItem.split(":");
+      if (noteId !== draggedChecklistItem.noteId || targetItemId === draggedChecklistItem.itemId) return;
+      const note = state.notes.entries.find((item) => item.id === noteId);
+      if (!note) return;
+      const insertAfter = event.clientY - row.getBoundingClientRect().top > row.getBoundingClientRect().height / 2;
+      note.checklist = moveChecklistItem(note.checklist, draggedChecklistItem.itemId, targetItemId, insertAfter);
       autosaveState();
       render();
     });
