@@ -4325,6 +4325,20 @@ function isReminderComplete(event) {
   return assigneeKeys.every((key) => completedKeys.includes(key));
 }
 
+// Whether a reminder still belongs on viewerKey's own past-due/due-today
+// list - same personalization as isChoreOccurrencePendingFor: once a
+// specific assignee has marked their own part done, it drops off THEIR view
+// even if other assignees haven't finished theirs yet, instead of staying
+// stuck showing "Past due" until every last person clicks done.
+function isReminderPendingFor(event, viewerKey) {
+  const assigneeKeys = (event.assignees || []).map((assignee) => assignee.key);
+  if (viewerKey && assigneeKeys.includes(viewerKey)) {
+    const completedKeys = event.completedBy || [];
+    return !completedKeys.includes(viewerKey);
+  }
+  return !isReminderComplete(event);
+}
+
 // Same single-button-tied-to-the-signed-in-user pattern as choreCompletionButtons.
 function reminderCompletionControl(event) {
   const completedKeys = event.completedBy || [];
@@ -4356,6 +4370,15 @@ function choreCadenceLabel(chore) {
   return chore.endDate ? `${base} until ${chore.endDate}` : base;
 }
 
+// Every occurrence of a chore that falls within the viewed month, regardless
+// of completion - this feeds the literal calendar grid (and the "Upcoming
+// schedule" side panel), which both need to keep showing a date's chore
+// once it's happened, the same way a birthday or a past calendar event
+// doesn't vanish from the grid once its day has passed. This is
+// deliberately different from the "Chore rotation" panel (which uses
+// nextPendingChoreOccurrence instead, precisely so completing one occurrence
+// there reveals the next) - marking a chore done should drop it from that
+// to-do list without also erasing it from the calendar's own record.
 function choreOccurrencesForMonth(chore) {
   ensureChoreRecurrenceData();
   const start = new Date(`${chore.startDate}T00:00:00`);
@@ -4371,7 +4394,7 @@ function choreOccurrencesForMonth(chore) {
 
   if (chore.recurrence === "once") {
     const key = dateKey(start);
-    return key.startsWith(state.budget.month) && !isChoreOccurrenceComplete(chore, key) ? [{ date: key }] : [];
+    return key.startsWith(state.budget.month) ? [{ date: key }] : [];
   }
 
   const monthStep = CHORE_MONTH_STEP_BY_RECURRENCE[chore.recurrence];
@@ -4381,8 +4404,7 @@ function choreOccurrencesForMonth(chore) {
       const lastDay = new Date(cursor.getFullYear(), cursor.getMonth() + 1, 0).getDate();
       const occurrence = new Date(cursor.getFullYear(), cursor.getMonth(), Math.min(start.getDate(), lastDay));
       if (occurrence >= start && occurrence >= monthStart && occurrence <= monthEnd) {
-        const key = dateKey(occurrence);
-        if (!isChoreOccurrenceComplete(chore, key)) dates.push({ date: key });
+        dates.push({ date: dateKey(occurrence) });
       }
       cursor.setMonth(cursor.getMonth() + monthStep);
     }
@@ -4397,8 +4419,7 @@ function choreOccurrencesForMonth(chore) {
     while (cursor < monthStart) cursor.setDate(cursor.getDate() + intervalDays);
   }
   while (cursor <= monthEnd) {
-    const key = dateKey(cursor);
-    if (!isChoreOccurrenceComplete(chore, key)) dates.push({ date: key });
+    dates.push({ date: dateKey(cursor) });
     cursor.setDate(cursor.getDate() + intervalDays);
   }
   return dates;
@@ -4569,7 +4590,7 @@ function homeActionItems() {
     }));
 
   const reminderItems = state.calendar.events
-    .filter((event) => event.type === "reminder" && event.date && event.date <= today && !isReminderComplete(event) && isRelevantToViewer(event.assignees, viewerKey))
+    .filter((event) => event.type === "reminder" && event.date && event.date <= today && isReminderPendingFor(event, viewerKey) && isRelevantToViewer(event.assignees, viewerKey))
     .map((event) => ({
       date: event.date,
       overdue: event.date < today,
