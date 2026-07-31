@@ -4477,12 +4477,14 @@ function isAnnualEventYearComplete(event, year) {
   return assigneeKeys.every((key) => completedKeys.includes(key));
 }
 
-// Whether a given year still belongs on viewerKey's own pending list — mirrors
-// isChoreOccurrencePendingFor. Once a specific assignee has marked their own
-// button wished, it drops off THEIR view even if other assignees haven't yet.
+// Whether a given year still belongs on viewerKey's own pending list —
+// mirrors isChoreOccurrencePendingFor, but keyed purely on the viewer's own
+// confirmation rather than assignee-list membership: an assignee on a
+// birthday/anniversary means "whose family member this is," not "who's
+// allowed to wish them," so anyone's own mark counts for their own view
+// regardless of whether they're formally listed.
 function isAnnualEventYearPendingFor(event, year, viewerKey) {
-  const assigneeKeys = (event.assignees || []).map((assignee) => assignee.key);
-  if (viewerKey && assigneeKeys.includes(viewerKey)) {
+  if (viewerKey) {
     const completedKeys = (event.wishedBy || {})[String(year)] || [];
     return !completedKeys.includes(viewerKey);
   }
@@ -4490,25 +4492,25 @@ function isAnnualEventYearPendingFor(event, year, viewerKey) {
 }
 
 // A single button tied to whoever is actually signed in — never a menu of
-// every assignee's own checkbox, which would let one person mark it wished on
-// someone else's behalf. A jointly-assigned birthday/anniversary only counts
-// as fully wished for a given year once every assignee has marked their own
-// button (see isAnnualEventYearComplete), but each person can only ever
-// toggle their own.
+// every assignee's own checkbox, which would let one person mark it wished
+// on someone else's behalf. Unlike a chore (where the assignee is literally
+// "whose job it is"), a birthday/anniversary's assignee list just marks
+// whose family member it is - wishing them happy birthday isn't limited to
+// that one person, so every signed-in household member gets their own
+// button here regardless of whether they're formally listed. A jointly-
+// assigned birthday/anniversary only counts as fully wished for a given year
+// once every assignee has marked their own button (see
+// isAnnualEventYearComplete), but each person can only ever toggle their own.
 function annualEventCompletionButtons(event, year) {
   const completedKeys = (event.wishedBy || {})[String(year)] || [];
   const assignees = event.assignees || [];
-  const viewerKey = sessionUser?.email || "";
-  const viewerIsAssignee = assignees.some((assignee) => assignee.key === viewerKey);
   // A handful of legacy birthdays/anniversaries predate the assignee system
-  // and have nobody assigned at all — fall back to a single shared button
-  // rather than rendering nothing and leaving them impossible to mark wished.
-  const effectiveKey = (assignees.length && viewerIsAssignee) ? viewerKey : "household";
+  // and have nobody assigned at all, and a signed-out edge case has no
+  // viewer either - "household" is the shared fallback button for both.
+  const effectiveKey = sessionUser?.email || "household";
   const done = completedKeys.includes(effectiveKey);
-  if (assignees.length && !viewerIsAssignee) {
-    return `<span class="chore-complete-status">${completedKeys.length}/${assignees.length} wished</span>`;
-  }
-  const suffix = assignees.length > 1 ? ` (${completedKeys.length}/${assignees.length})` : "";
+  const total = Math.max(assignees.length, completedKeys.length);
+  const suffix = total > 1 ? ` (${completedKeys.length}/${total})` : "";
   return `<button class="ghost chore-complete-button ${done ? "is-done" : ""}" data-mark-wished-assignee="${event.id}:${year}:${escapeHtml(effectiveKey)}" type="button" aria-pressed="${done}">${done ? "✓ Wished" : "Mark wished"}${suffix}</button>`;
 }
 
