@@ -1959,6 +1959,11 @@ function renderCalendar() {
     .slice(0, UPCOMING_LIST_LIMIT);
   const annualRows = state.calendar.events
     .filter((event) => ANNUAL_EVENT_TYPES.includes(event.type))
+    // Unlike the calendar grid (which shows every birthday/anniversary to
+    // every member, so a household can see all of them at a glance), this
+    // side panel is a personal to-do list - a birthday assigned only to
+    // someone else shouldn't nag a viewer who has no part in wishing it.
+    .filter((event) => isRelevantToViewer(event.assignees, viewerKey))
     .map((event) => ({ event, occurrence: nextPendingAnnualEventOccurrence(event, new Date(), viewerKey) }))
     .filter((row) => row.occurrence)
     .sort((a, b) => a.occurrence.date.localeCompare(b.occurrence.date))
