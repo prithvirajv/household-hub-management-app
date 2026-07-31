@@ -3843,6 +3843,7 @@ function renderReports() {
           <option value="cashflowbreakdown" ${reportsCardFilter === "cashflowbreakdown" ? "selected" : ""}>Cash flow breakdown</option>
           <option value="category" ${reportsCardFilter === "category" ? "selected" : ""}>Category spend</option>
           <option value="budgetvsactual" ${reportsCardFilter === "budgetvsactual" ? "selected" : ""}>Budget vs Expense</option>
+          <option value="transactions" ${reportsCardFilter === "transactions" ? "selected" : ""}>Transactions</option>
           <option value="tags" ${reportsCardFilter === "tags" ? "selected" : ""}>Tags</option>
         </select></label>
       </div>
@@ -3881,6 +3882,17 @@ function renderReports() {
               <b class="${row.variance < 0 ? "danger" : ""}">${row.variance >= 0 ? "+" : ""}${money.format(row.variance)}${row.variancePercent === null ? "" : ` (${row.variancePercent}%)`}</b>
             </div>
           `).join("") || `<div class="empty-inline">No categories to compare yet.</div>`}</div>
+        </section>` : ""}
+        ${showCard("transactions") ? `<section class="card">
+          <div class="section-head"><div><span class="card-label">Detail</span><h3>Transactions</h3></div><span>${rangeTransactions.length} in this period</span></div>
+          <div class="tag-transaction-list">${[...rangeTransactions].sort((a, b) => (b.date || "").localeCompare(a.date || "")).map((transaction) => `
+            <div class="tag-transaction-row">
+              <small>${formatShortDate(transaction.date)}</small>
+              <span>${escapeHtml(transaction.payee)}</span>
+              <small>${escapeHtml(transactionAssignmentLabel(transaction))}</small>
+              <b>${money.format(transaction.amount)}</b>
+            </div>
+          `).join("") || `<div class="empty-inline">No transactions in this period.</div>`}</div>
         </section>` : ""}
       </div>
       <aside class="side-stack">
@@ -4991,26 +5003,41 @@ function sankeyFlowSegments(categories, totalIncome, totalExpenses) {
 // just viewBox) so height:auto in CSS scales it uniformly with no text
 // distortion - unlike the line chart, this one draws real <text> labels
 // inside the SVG, which preserveAspectRatio="none" would stretch.
+//
+// Right-side node heights are floored at minNodeHeight rather than pure
+// value-proportional: a household with several tiny categories (a few
+// percent of income each) would otherwise get near-zero-height nodes whose
+// labels all land at nearly the same y and overlap illegibly. Segments at
+// or above the floor keep their exact proportional height/order; only the
+// small ones get boosted, and the total SVG height grows to fit - the left
+// "Income" bar stays purely proportional throughout since it carries no
+// per-segment label, only the shared ribbon attachment points.
 function cashFlowSankeySvg(segments, totalIncome) {
   const width = 560;
   const padding = 20;
   const rowHeight = 34;
   const gap = 6;
-  const height = segments.length ? padding * 2 + segments.length * rowHeight + (segments.length - 1) * gap : padding * 2 + rowHeight;
+  const minNodeHeight = 20;
+  const baselineHeight = segments.length * rowHeight;
+  const nodeHeights = segments.map((segment) => {
+    const share = totalIncome > 0 ? segment.value / totalIncome : 0;
+    return Math.max(minNodeHeight, share * baselineHeight);
+  });
+  const totalGapHeight = Math.max(0, segments.length - 1) * gap;
+  const rightUsableHeight = nodeHeights.reduce((sum, nodeHeight) => sum + nodeHeight, 0);
+  const availableHeight = rightUsableHeight;
+  const height = segments.length ? padding * 2 + availableHeight + totalGapHeight : padding * 2 + rowHeight;
   const leftX = padding;
   const nodeWidth = 14;
   const rightX = width - padding - 170;
-  const availableHeight = Math.max(0, height - padding * 2);
-  const totalGapHeight = Math.max(0, segments.length - 1) * gap;
-  const rightUsableHeight = Math.max(1, availableHeight - totalGapHeight);
   let leftCursor = padding;
   let rightCursor = padding;
-  const ribbons = segments.map((segment) => {
+  const ribbons = segments.map((segment, index) => {
     const share = totalIncome > 0 ? segment.value / totalIncome : 0;
     const y0L = leftCursor;
     const y1L = leftCursor + share * availableHeight;
     const y0R = rightCursor;
-    const y1R = rightCursor + share * rightUsableHeight;
+    const y1R = rightCursor + nodeHeights[index];
     leftCursor = y1L;
     rightCursor = y1R + gap;
     return { segment, y0L, y1L, y0R, y1R };
