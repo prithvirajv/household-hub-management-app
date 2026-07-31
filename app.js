@@ -3894,9 +3894,6 @@ function renderReports() {
             </div>
           `).join("") || `<div class="empty-inline">No transactions in this period.</div>`}</div>
         </section>` : ""}
-      </div>
-      <aside class="side-stack">
-        <section class="card"><div class="card-label">Budget health</div><h3>Snapshot</h3><div class="snapshot-grid"><span>Planned <b>${money.format(plannedTotal())}</b></span><span>Spent <b>${money.format(spentTotal())}</b></span><span>Cash left <b>${money.format(remainingTotal())}</b></span><span>Net worth <b>${money.format(currentNetWorth)}</b></span></div>${categories.slice(0, 3).map((category) => compactRow(`${category.name} - ${money.format(category.value)}`, "", "")).join("")}</section>
         ${showCard("tags") ? `<section class="card">
           <div class="card-label">Insight</div><h3>Tags</h3>
           ${reportsTagGroups.length ? `<label>Group by tag<select id="reportsTagFilter">
@@ -3914,6 +3911,9 @@ function renderReports() {
             `).join("")}</div>
           ` : ""}
         </section>` : ""}
+      </div>
+      <aside class="side-stack">
+        <section class="card"><div class="card-label">Budget health</div><h3>Snapshot</h3><div class="snapshot-grid"><span>Planned <b>${money.format(plannedTotal())}</b></span><span>Spent <b>${money.format(spentTotal())}</b></span><span>Cash left <b>${money.format(remainingTotal())}</b></span><span>Net worth <b>${money.format(currentNetWorth)}</b></span></div>${categories.slice(0, 3).map((category) => compactRow(`${category.name} - ${money.format(category.value)}`, "", "")).join("")}</section>
       </aside>
     </section>`;
 }
