@@ -2397,6 +2397,7 @@ function renderJournal() {
           <div class="mood-picker">${moodPickerChips({ selected: "", namePrefix: "composer" })}</div>
           <input type="hidden" name="mood" id="journalComposerMoodValue" value="">
         </div>
+        <label>🙏 Grateful for<input name="gratitude" placeholder="One thing you're grateful for today"></label>
         <label>Tags<input name="tags" placeholder="travel, family, work"></label>
         <textarea name="body" rows="4" placeholder="What happened today? How are you feeling?"></textarea>
         <div class="journal-composer-actions">
@@ -2425,6 +2426,7 @@ function renderJournalEntry(entry) {
       <button class="icon-button danger-button" data-delete-journal-entry="${entry.id}" type="button" aria-label="Delete entry">×</button>
     </div>
     <div class="mood-picker mood-picker-compact" data-journal-mood-entry="${entry.id}">${moodPickerChips({ selected: entry.mood || "", namePrefix: entry.id, compact: true })}</div>
+    <input class="journal-gratitude-input" data-journal-gratitude="${entry.id}" value="${escapeHtml(entry.gratitude || "")}" placeholder="🙏 Grateful for..." aria-label="Grateful for">
     <textarea class="journal-body-input" data-journal-body="${entry.id}" rows="3" placeholder="Write here..." aria-label="Entry body">${escapeHtml(entry.body || "")}</textarea>
     <input class="journal-tags-input" data-journal-tags="${entry.id}" value="${escapeHtml((entry.tags || []).join(", "))}" placeholder="Tags (comma separated)" aria-label="Tags">
     ${entry.tags?.length ? `<div class="journal-tags">${entry.tags.map((tag) => `<span>#${escapeHtml(tag)}</span>`).join("")}</div>` : ""}
@@ -3960,7 +3962,7 @@ function renderHelp() {
     ["☑", "Paycheck/Income", "Add each paycheck with an amount and how often it repeats (one-time, bonus, weekly, biweekly, or monthly), then use the assign form to route pieces of it to specific budget lines. Set a paycheck's Deposit to account (under Wealth) so that account's balance reflects the deposit automatically instead of needing a matching manual transaction."],
     ["⌂", "Calendar", "Chores repeat on a schedule (weekly, every 2 or 3 weeks, or monthly) and rotate through the Chore rotation panel — mark one Complete to reveal its next occurrence, and anything overdue turns red as \"Past due.\" Birthdays and anniversaries recur every year automatically; set Remind before (or Don't remind) and Remind me at to control when the reminder email fires, and Mark wished once you've reached out. Plain Reminders have their own independent Remind me on time, fully separate from the event's own date/time — so an event at noon can remind you an hour earlier. Filter the whole calendar by household member using the chips above the grid."],
     ["✎", "Notes", "Create notes with labels, colors, and checklists — checklist items can be nested and will suggest matches from ones you've typed before. Pin the notes you check often, archive the ones you're done with but might need later, and anything trashed is permanently removed after 7 days."],
-    ["✒", "Journal", "A private day-by-day journal for mood, tags, photos, and free text. It is never shared with other household members, even ones with full access to everything else."],
+    ["✒", "Journal", "A private day-by-day journal for mood, gratitude, tags, photos, and free text. It is never shared with other household members, even ones with full access to everything else."],
     ["◫", "Plan", "A private daily/weekly/monthly task planner with its own timeline view — schedule tasks with a start time and duration, then log what actually happened afterward to compare planned versus actual. Like Journal, this is yours alone; nobody else in the household can see it."],
     ["▢", "Documents", "Upload and organize household files into folders. Link a folder or an individual document to a specific asset or liability in Wealth (for example, a mortgage folder linked to your home) so the paperwork behind a number is easy to find later."],
     ["♨", "Meals and recipes", "Save reusable recipes with ingredients and nutrition info in Recipes, then drop them into the weekly Meals planner by day and slot. Planned ingredients automatically build your grocery list, and you can post it straight to a budget line."],
@@ -5763,6 +5765,7 @@ function bindViewEvents() {
       title: data.title || "",
       body: data.body || "",
       mood: data.mood || "",
+      gratitude: data.gratitude || "",
       tags: String(data.tags || "").split(",").map((tag) => tag.trim()).filter(Boolean),
       photos,
       createdAt: now,
@@ -5796,6 +5799,15 @@ function bindViewEvents() {
       const entry = privateData.journal.entries.find((item) => item.id === input.dataset.journalBody);
       if (!entry) return;
       entry.body = input.value;
+      autosaveJournal();
+    });
+  });
+
+  document.querySelectorAll("[data-journal-gratitude]").forEach((input) => {
+    input.addEventListener("input", () => {
+      const entry = privateData.journal.entries.find((item) => item.id === input.dataset.journalGratitude);
+      if (!entry) return;
+      entry.gratitude = input.value;
       autosaveJournal();
     });
   });
