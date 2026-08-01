@@ -70,9 +70,13 @@ const NOTIFICATION_MAX_ATTEMPTS = Math.max(1, Number(process.env.NOTIFICATION_MA
 const EXPO_PUSH_URL = String(process.env.NOTIFICATION_TEST_EXPO_URL || "").trim() || "https://exp.host/--/api/v2/push/send";
 const FINNHUB_API_KEY = String(process.env.FINNHUB_API_KEY || "").trim();
 const FINNHUB_QUOTE_URL = String(process.env.FINNHUB_QUOTE_URL || "").trim() || "https://finnhub.io/api/v1/quote";
-const ANTHROPIC_API_KEY = String(process.env.ANTHROPIC_API_KEY || "").trim();
-const ANTHROPIC_API_BASE_URL = String(process.env.ANTHROPIC_API_BASE_URL || "").trim() || "https://api.anthropic.com";
-const ANTHROPIC_MESSAGES_MODEL = String(process.env.ANTHROPIC_MESSAGES_MODEL || "").trim() || "claude-haiku-4-5";
+const GEMINI_API_KEY = String(process.env.GEMINI_API_KEY || "").trim();
+const GEMINI_API_BASE_URL = String(process.env.GEMINI_API_BASE_URL || "").trim() || "https://generativelanguage.googleapis.com";
+// gemini-2.5-flash-lite is listed by the Models API but returns 404 "no
+// longer available to new users" on generateContent for a freshly created
+// key - confirmed against the real API, not assumed. gemini-3.1-flash-lite
+// is the cheapest tier that's actually reachable.
+const GEMINI_MODEL = String(process.env.GEMINI_MODEL || "").trim() || "gemini-3.1-flash-lite";
 const SESSION_IDLE_MS = Math.max(
   1000,
   Number(process.env.SESSION_IDLE_MS || "") || Number(process.env.SESSION_IDLE_MINUTES || 30) * 60 * 1000
@@ -1255,35 +1259,30 @@ app.get("/api/countries", (_req, res) => {
 // The client sends a short plain-text summary it already assembled from its
 // own state (today's completed chores, notes, calendar items) - the server
 // never reconstructs household data itself, it's just a thin proxy that adds
-// the API key and forwards to Claude. Capped well under what a legitimate
+// the API key and forwards to Gemini. Capped well under what a legitimate
 // daily-activity summary would ever reach, so a client bug can't run up an
 // unbounded bill on this endpoint.
 const JOURNAL_REFLECTION_MAX_CONTEXT_CHARS = 4000;
 
 app.post("/api/journal/reflection", requireSession, async (req, res, next) => {
   try {
-    if (!ANTHROPIC_API_KEY) return res.status(503).json({ error: "AI reflections are not configured for this deployment" });
+    if (!GEMINI_API_KEY) return res.status(503).json({ error: "AI reflections are not configured for this deployment" });
     const context = String(req.body?.context || "").trim();
     if (!context) return res.status(400).json({ error: "Nothing to reflect on yet - do something today first" });
     if (context.length > JOURNAL_REFLECTION_MAX_CONTEXT_CHARS) return res.status(400).json({ error: "That summary is too long" });
 
-    const response = await fetch(`${ANTHROPIC_API_BASE_URL}/v1/messages`, {
+    const response = await fetch(`${GEMINI_API_BASE_URL}/v1beta/models/${encodeURIComponent(GEMINI_MODEL)}:generateContent?key=${encodeURIComponent(GEMINI_API_KEY)}`, {
       method: "POST",
-      headers: {
-        "content-type": "application/json",
-        "x-api-key": ANTHROPIC_API_KEY,
-        "anthropic-version": "2023-06-01"
-      },
+      headers: { "content-type": "application/json" },
       body: JSON.stringify({
-        model: ANTHROPIC_MESSAGES_MODEL,
-        max_tokens: 150,
-        system: "You are a gentle, warm journaling companion for a household app. Given a short factual summary of what someone did today, write one or two short encouraging sentences reflecting on it - specific to what's listed, never generic. Warm but not saccharine, no exclamation-point overload, no emoji. Only reference facts given to you; never invent details.",
-        messages: [{ role: "user", content: context }]
+        contents: [{ role: "user", parts: [{ text: context }] }],
+        systemInstruction: { parts: [{ text: "You are a gentle, warm journaling companion for a household app. Given a short factual summary of what someone did today, write one or two short encouraging sentences reflecting on it - specific to what's listed, never generic. Warm but not saccharine, no exclamation-point overload, no emoji. Only reference facts given to you; never invent details." }] },
+        generationConfig: { maxOutputTokens: 150 }
       })
     });
     const body = await response.json().catch(() => ({}));
     if (!response.ok) return res.status(502).json({ error: body?.error?.message || "The reflection service is unavailable right now" });
-    const text = (body.content || []).find((block) => block.type === "text")?.text?.trim();
+    const text = body.candidates?.[0]?.content?.parts?.[0]?.text?.trim();
     if (!text) return res.status(502).json({ error: "The reflection service returned nothing usable" });
     res.json({ message: text });
   } catch (error) {

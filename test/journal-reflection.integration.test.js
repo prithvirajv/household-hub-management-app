@@ -3,7 +3,7 @@ const http = require("node:http");
 const test = require("node:test");
 const { startTestServer } = require("./helpers");
 
-async function startAnthropicStub(reply) {
+async function startGeminiStub(reply) {
   const stub = http.createServer((req, res) => {
     let body = "";
     req.on("data", (chunk) => { body += chunk; });
@@ -20,8 +20,8 @@ async function startAnthropicStub(reply) {
 }
 
 test("journal reflection endpoint returns a message for a signed-in user and requires a session", async () => {
-  const stub = await startAnthropicStub({ body: { content: [{ type: "text", text: "You showed up for your family today - that counts." }] } });
-  const server = await startTestServer({ ANTHROPIC_API_KEY: "test-key", ANTHROPIC_API_BASE_URL: stub.url });
+  const stub = await startGeminiStub({ body: { candidates: [{ content: { parts: [{ text: "You showed up for your family today - that counts." }] } }] } });
+  const server = await startTestServer({ GEMINI_API_KEY: "test-key", GEMINI_API_BASE_URL: stub.url });
   try {
     const anonymous = await server.request("/api/journal/reflection", { method: "POST", body: JSON.stringify({ context: "Completed chores today: Dishes." }) });
     assert.equal(anonymous.status, 401);
@@ -48,7 +48,7 @@ test("journal reflection endpoint returns a message for a signed-in user and req
 });
 
 test("journal reflection endpoint is disabled when no API key is configured", async () => {
-  const server = await startTestServer({ ANTHROPIC_API_KEY: "" });
+  const server = await startTestServer({ GEMINI_API_KEY: "" });
   try {
     const signup = await server.request("/api/auth/signup", {
       method: "POST",
@@ -64,8 +64,8 @@ test("journal reflection endpoint is disabled when no API key is configured", as
 });
 
 test("journal reflection endpoint surfaces an upstream error as a 502", async () => {
-  const stub = await startAnthropicStub({ status: 500, body: { error: { message: "overloaded" } } });
-  const server = await startTestServer({ ANTHROPIC_API_KEY: "test-key", ANTHROPIC_API_BASE_URL: stub.url });
+  const stub = await startGeminiStub({ status: 500, body: { error: { message: "overloaded" } } });
+  const server = await startTestServer({ GEMINI_API_KEY: "test-key", GEMINI_API_BASE_URL: stub.url });
   try {
     const signup = await server.request("/api/auth/signup", {
       method: "POST",
