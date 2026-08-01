@@ -91,6 +91,16 @@ let stockPriceFeedback = {};
 let privateData = null;
 let journalTimer = null;
 let planTimer = null;
+// Holds { text, isError, loading } for the composer's on-demand AI
+// reflection - never persisted, and never auto-inserted into the entry;
+// the user has to click "Use this" to actually put it in the body.
+let journalReflection = null;
+// The composer form has no value= attributes (nothing needed them before -
+// no other action ever called render() while it was mid-edit). The
+// reflection feature does call render() mid-edit, so whatever's currently
+// typed has to be captured into here first or it gets wiped by the fresh
+// template. Cleared once the entry is actually saved.
+let journalComposerDraft = null;
 // documentsData is household-shared (like Notes/Calendar), backed by real Postgres
 // rows and Google Cloud Storage, not part of `state`/autosaveState().
 let documentsData = null;
@@ -2376,10 +2386,46 @@ function moodPickerChips({ selected, namePrefix, compact }) {
     </button>`).join("");
 }
 
+// Builds the plain-text summary sent to the server for the Journal's
+// on-demand "gentle reflection" feature. Deliberately scoped to the current
+// viewer's own day only (their own completed chores/reminders, not other
+// household members'), matching Journal's own privacy boundary even though
+// this data technically comes from shared household state - titles only,
+// never note bodies or journal content itself. Returns "" when there's
+// nothing to reflect on, so the caller can skip the request entirely.
+function todaysJournalContext() {
+  const today = dateKey(new Date());
+  const viewerKey = sessionUser?.email || "";
+  const lines = [];
+
+  const completedChores = state.calendar.chores
+    .filter((chore) => (chore.completedBy?.[today] || []).includes(viewerKey))
+    .map((chore) => chore.title);
+  if (completedChores.length) lines.push(`Completed chores today: ${completedChores.join(", ")}.`);
+
+  const completedReminders = state.calendar.events
+    .filter((event) => event.type === "reminder" && event.date === today && (event.completedBy || []).includes(viewerKey))
+    .map((event) => event.title);
+  if (completedReminders.length) lines.push(`Completed reminders today: ${completedReminders.join(", ")}.`);
+
+  const wishedToday = state.calendar.events
+    .filter((event) => ANNUAL_EVENT_TYPES.includes(event.type) && ((event.wishedBy || {})[String(new Date().getFullYear())] || []).includes(viewerKey) && dateKey(annualEventDate(event, new Date().getFullYear())) === today)
+    .map((event) => annualEventDisplayTitle(event));
+  if (wishedToday.length) lines.push(`Wished today: ${wishedToday.join(", ")}.`);
+
+  const notesToday = (state.notes?.entries || [])
+    .filter((note) => !note.trashed && (note.updatedAt || "").slice(0, 10) === today)
+    .map((note) => note.title || "an untitled note");
+  if (notesToday.length) lines.push(`Notes worked on today: ${notesToday.join(", ")}.`);
+
+  return lines.join(" ");
+}
+
 function renderJournal() {
   if (!privateData) return "";
   ensureJournalData();
   const entries = sortedJournalEntries();
+  const draft = journalComposerDraft || {};
   return `
     <section class="journal-layout">
       <div class="section-head"><div><span class="card-label">Journal</span><h3>Your private journal</h3><p class="private-note">Private to you — never shared with other household members.</p></div></div>
@@ -2389,21 +2435,29 @@ function renderJournal() {
           <div><span class="card-label">New entry</span><h3>Capture today</h3></div>
         </div>
         <div class="journal-composer-row">
-          <label>Date<input name="entryDate" type="date" value="${dateKey(new Date())}" required></label>
-          <label class="journal-title-field">Title<input name="title" placeholder="Give today a title"></label>
+          <label>Date<input name="entryDate" type="date" value="${draft.entryDate || dateKey(new Date())}" required></label>
+          <label class="journal-title-field">Title<input name="title" placeholder="Give today a title" value="${escapeHtml(draft.title || "")}"></label>
         </div>
         <div class="journal-field-group">
           <span class="journal-field-label">Mood</span>
-          <div class="mood-picker">${moodPickerChips({ selected: "", namePrefix: "composer" })}</div>
-          <input type="hidden" name="mood" id="journalComposerMoodValue" value="">
+          <div class="mood-picker">${moodPickerChips({ selected: draft.mood || "", namePrefix: "composer" })}</div>
+          <input type="hidden" name="mood" id="journalComposerMoodValue" value="${escapeHtml(draft.mood || "")}">
         </div>
-        <label>🙏 Grateful for<input name="gratitude" placeholder="One thing you're grateful for today"></label>
-        <label>Tags<input name="tags" placeholder="travel, family, work"></label>
-        <textarea name="body" rows="4" placeholder="What happened today? How are you feeling?"></textarea>
+        <label>🙏 Grateful for<input name="gratitude" placeholder="One thing you're grateful for today" value="${escapeHtml(draft.gratitude || "")}"></label>
+        <label>Tags<input name="tags" placeholder="travel, family, work" value="${escapeHtml(draft.tags || "")}"></label>
+        <textarea name="body" rows="4" placeholder="What happened today? How are you feeling?">${escapeHtml(draft.body || "")}</textarea>
         <div class="journal-composer-actions">
           <label class="journal-photo-picker">📷 Add photos<input name="photos" type="file" accept="image/*" multiple></label>
+          <button type="button" id="journalReflectionButton" class="ghost" ${journalReflection?.loading ? "disabled" : ""}>${journalReflection?.loading ? "Thinking…" : "✨ Get a gentle reflection"}</button>
           <button type="submit">Save entry</button>
         </div>
+        ${journalReflection && !journalReflection.loading ? `
+          <div class="journal-reflection-preview ${journalReflection.isError ? "is-error" : ""}">
+            <p>${escapeHtml(journalReflection.text)}</p>
+            ${!journalReflection.isError ? `<button type="button" id="journalReflectionInsertButton" class="ghost">Use this</button>` : ""}
+            <button type="button" id="journalReflectionDismissButton" class="icon-button" aria-label="Dismiss">×</button>
+          </div>
+        ` : ""}
       </form>
       <div class="journal-entries">
         ${entries.length ? entries.map(renderJournalEntry).join("") : `<div class="empty-inline journal-empty">📔 No journal entries yet — write your first one above.</div>`}
@@ -5771,7 +5825,48 @@ function bindViewEvents() {
       createdAt: now,
       updatedAt: now
     });
+    journalComposerDraft = null;
     autosaveJournal();
+    render();
+  });
+
+  function captureJournalComposerDraft() {
+    const composerForm = document.getElementById("journalComposer");
+    if (composerForm) journalComposerDraft = Object.fromEntries(new FormData(composerForm));
+  }
+
+  $("#journalReflectionButton")?.addEventListener("click", async () => {
+    captureJournalComposerDraft();
+    const context = todaysJournalContext();
+    if (!context) {
+      journalReflection = { text: "Nothing logged yet today to reflect on - complete a chore, wish someone happy birthday, or jot a note first.", isError: true, loading: false };
+      render();
+      return;
+    }
+    journalReflection = { loading: true };
+    render();
+    try {
+      const result = await api("/api/journal/reflection", { method: "POST", body: JSON.stringify({ context }) });
+      captureJournalComposerDraft();
+      journalReflection = { text: result.message, isError: false, loading: false };
+    } catch (error) {
+      captureJournalComposerDraft();
+      journalReflection = { text: error.message, isError: true, loading: false };
+    }
+    render();
+  });
+
+  $("#journalReflectionInsertButton")?.addEventListener("click", () => {
+    captureJournalComposerDraft();
+    const existingBody = journalComposerDraft.body || "";
+    journalComposerDraft.body = existingBody ? `${existingBody}\n\n${journalReflection.text}` : journalReflection.text;
+    journalReflection = null;
+    render();
+  });
+
+  $("#journalReflectionDismissButton")?.addEventListener("click", () => {
+    captureJournalComposerDraft();
+    journalReflection = null;
     render();
   });
 

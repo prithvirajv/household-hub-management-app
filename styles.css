@@ -5008,6 +5008,31 @@ main {
   font-weight: 800;
 }
 
+.journal-reflection-preview {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.6rem;
+  margin-top: 0.4rem;
+  padding: 0.65rem 0.8rem;
+  border-radius: 10px;
+  background: var(--soft-blue);
+}
+
+.journal-reflection-preview p {
+  flex: 1 1 auto;
+  margin: 0;
+  font-size: 0.9rem;
+}
+
+.journal-reflection-preview.is-error {
+  background: var(--panel);
+  border: 1px solid var(--coral);
+}
+
+.journal-reflection-preview.is-error p {
+  color: var(--coral);
+}
+
 .journal-photos {
   display: flex;
   flex-wrap: wrap;

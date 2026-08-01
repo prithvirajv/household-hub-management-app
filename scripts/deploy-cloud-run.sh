@@ -46,6 +46,7 @@ GCS_BUCKET="${GCS_BUCKET:-}"
 GOOGLE_CLIENT_ID="${GOOGLE_CLIENT_ID:-}"
 FINNHUB_API_KEY="${FINNHUB_API_KEY:-}"
 GOOGLE_MAPS_API_KEY="${GOOGLE_MAPS_API_KEY:-}"
+ANTHROPIC_API_KEY="${ANTHROPIC_API_KEY:-}"
 
 # Every credential above is stored in Secret Manager, not passed to Cloud Run
 # as a plaintext env var — this script only reads them from the environment
@@ -56,6 +57,7 @@ ADMIN_PASSWORD_SECRET="${ADMIN_PASSWORD_SECRET:-familyloop-admin-password}"
 SMTP_PASS_SECRET="${SMTP_PASS_SECRET:-familyloop-smtp-pass}"
 NOTIFICATION_SECRET_NAME="${NOTIFICATION_SECRET_NAME:-familyloop-notification-secret}"
 FINNHUB_API_KEY_SECRET="${FINNHUB_API_KEY_SECRET:-familyloop-finnhub-api-key}"
+ANTHROPIC_API_KEY_SECRET="${ANTHROPIC_API_KEY_SECRET:-familyloop-anthropic-api-key}"
 
 if [[ -z "${DB_PASSWORD}" ]]; then
   echo "Set DB_PASSWORD or POSTGRES_PASSWORD for Cloud SQL" >&2
@@ -164,6 +166,9 @@ fi
 if [[ -n "${FINNHUB_API_KEY}" ]]; then
   put_secret "${FINNHUB_API_KEY_SECRET}" "${FINNHUB_API_KEY}"
 fi
+if [[ -n "${ANTHROPIC_API_KEY}" ]]; then
+  put_secret "${ANTHROPIC_API_KEY_SECRET}" "${ANTHROPIC_API_KEY}"
+fi
 
 gcloud builds submit --tag "${IMAGE}" --project "${PROJECT_ID}" .
 
@@ -173,6 +178,9 @@ if [[ -n "${SMTP_PASS}" ]]; then
 fi
 if [[ -n "${FINNHUB_API_KEY}" ]]; then
   SECRET_REFS="${SECRET_REFS},FINNHUB_API_KEY=${FINNHUB_API_KEY_SECRET}:latest"
+fi
+if [[ -n "${ANTHROPIC_API_KEY}" ]]; then
+  SECRET_REFS="${SECRET_REFS},ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY_SECRET}:latest"
 fi
 
 gcloud run deploy "${SERVICE_NAME}" \
