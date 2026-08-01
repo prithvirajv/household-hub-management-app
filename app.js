@@ -1580,7 +1580,7 @@ function renderTransactions() {
         ...state.transactions,
         ...(state.transactionInboxDrafts || []).filter((other) => other.id !== transaction.id)
       ]),
-      refundMatch: orderRefundMatch(transaction, [
+      refundMatch: refundMatch(transaction, [
         ...state.transactions,
         ...(state.transactionInboxDrafts || []).filter((other) => other.id !== transaction.id)
       ]),
@@ -1740,7 +1740,7 @@ function renderTransactions() {
               ${transaction.isDeposit ? `<span class="pill" title="Detected as money coming in from this file's Debit/Credit or signed-Amount column">Deposit</span>` : ""}
               ${transaction.isPayment ? `<span class="pill pill-info" title="Looks like a card payoff/autopay - probably belongs in Move to Transfers, not as a regular expense">Card payment</span>` : ""}
               ${transaction.possibleDuplicate ? `<span class="pill pill-warning" title="Matches an existing transaction with the same amount within 2 days">Possible duplicate</span>` : ""}
-              ${transaction.refundMatch ? `<span class="pill pill-info" title="Refund for the ${money.format(transaction.refundMatch.amount)} purchase on ${formatShortDate(transaction.refundMatch.date)} (order ${escapeHtml(transaction.orderNumber)})">Refund match</span>` : ""}
+              ${transaction.refundMatch ? `<span class="pill pill-info" title="Refund for the ${money.format(transaction.refundMatch.amount)} purchase on ${formatShortDate(transaction.refundMatch.date)}${transaction.orderNumber ? ` (order ${escapeHtml(transaction.orderNumber)})` : ""}">Refund match</span>` : ""}
               ${transaction.transferMatch ? `<span class="pill pill-info" title="Matches ${escapeHtml(accountName(transaction.transferMatch.accountId))}'s ${exactMoney.format(Math.abs(transaction.transferMatch.amount))} on ${formatShortDate(transaction.transferMatch.date)}">Possible transfer</span>` : ""}
               <label class="row-field row-payee"><small>Payee</small><input data-bank-stream-payee="${transaction.id}" value="${escapeHtml(transaction.payee)}"></label>
               <label class="row-field row-date"><small>Date</small><input type="date" data-bank-stream-date="${transaction.id}" value="${transaction.date}"></label>
@@ -5172,23 +5172,11 @@ function transactionInboxItems() {
   return [...(state.transactionInboxDrafts || [])];
 }
 
-// A refund/return often lands in a separate statement import weeks after the
-// original purchase, so this checks against every real ledger transaction
-// by default (not just the current import batch) - the same orderNumber
-// persisted on the original purchase is how the two get reconnected across
-// sessions. Callers with a pending Bank Stream (transactions not yet
-// accepted into the ledger) should pass a wider pool - otherwise an order
-// and its return both still sitting in the inbox (e.g. a same-statement
-// purchase+return, or a return imported before its purchase was accepted)
-// never show as matched even though both are already sitting right there.
-// Recomputed live (never cached on the draft) for the same reason
-// possibleDuplicate is: a match that appears after the fact - because the
-// original purchase was accepted into the ledger later - must not stay
-// stuck showing "no match" forever.
-function orderRefundMatch(candidate, pool = state.transactions) {
-  if (!candidate.orderNumber || Number(candidate.amount) >= 0) return null;
-  return (pool || []).find((transaction) => transaction.orderNumber === candidate.orderNumber && Number(transaction.amount) > 0) || null;
-}
+// orderRefundMatch/refundMatch (order-number match, falling back to a fuzzy
+// same-payee/opposite-amount/date-window match when there's no order number)
+// come from lib/shared-logic.js, loaded as a global script alongside this
+// file - so the client and any future server-side use agree on the exact
+// same matching rules.
 
 function bindViewEvents() {
   if (googleMapsApiKey) attachLocationAutocomplete();
@@ -6519,30 +6507,29 @@ function bindViewEvents() {
   // Shared by both CSV and PDF imports: builds bank stream drafts from
   // parsed rows, matching the target account by filename and flagging
   // likely duplicates - a PDF row additionally carries an orderNumber, and
-  // when it's a refund (negative amount) with an orderNumber that matches an
-  // existing ledger transaction, the draft is pre-assigned to that
-  // transaction's subcategory so the refund nets against the same line the
-  // original purchase was categorized under, instead of landing unassigned.
-  // The matching purchase isn't always already in the ledger - it can be a
-  // still-pending Bank Stream draft from an earlier import, or (an Amazon
-  // order returned within the same billing cycle) another row in this very
-  // batch - so the search pool covers all three instead of only the
-  // accepted ledger.
+  // when a row is a refund (negative amount), refundMatch (lib/shared-logic.js)
+  // pre-assigns the draft to the matched original purchase's subcategory so
+  // the refund nets against the same line, instead of landing unassigned -
+  // preferring an exact orderNumber match, falling back to a fuzzy
+  // same-payee/opposite-amount/date-window match when there's no order
+  // number to go on (most in-store or non-itemized returns). The matching
+  // purchase isn't always already in the ledger - it can be a still-pending
+  // Bank Stream draft from an earlier import, or (a return within the same
+  // billing cycle) another row in this very batch - so the search pool
+  // covers all three instead of only the accepted ledger.
   function addBankStreamRows(rows, file, idPrefix) {
     const matchedAccount = matchAccountByFilename(file.name, state.accounts);
     state.transactionInboxDrafts ||= [];
     const alreadyKnown = [...state.transactions, ...state.transactionInboxDrafts];
     const duplicateCount = rows.filter((row) => isDuplicateTransaction(row, alreadyKnown)).length;
-    const refundMatchPool = [...alreadyKnown, ...rows];
+    const rowRefundMatchPool = [...alreadyKnown, ...rows];
     rows.forEach((row) => {
-      const refundMatch = row.orderNumber && Number(row.amount) < 0
-        ? refundMatchPool.find((transaction) => transaction.orderNumber === row.orderNumber && Number(transaction.amount) > 0)
-        : null;
+      const rowRefundMatch = refundMatch(row, rowRefundMatchPool);
       state.transactionInboxDrafts.unshift({
         id: uniqueId(idPrefix),
         payee: row.payee,
         amount: row.amount,
-        lineId: refundMatch?.lineId || "",
+        lineId: rowRefundMatch?.lineId || "",
         accountId: matchedAccount?.id || "",
         date: row.date,
         orderNumber: row.orderNumber || "",
