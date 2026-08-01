@@ -107,6 +107,7 @@ let documentsData = null;
 let documentsCurrentFolderId = null;
 let documentsUploading = false;
 let documentsDragPayload = null;
+let documentsUploadProgress = null;
 let wealthDocsExpandedKey = null;
 
 function currentMonthKey() {
@@ -2858,6 +2859,110 @@ function documentsLinkedToWealthItem(wealthItemType, wealthItemId) {
   );
 }
 
+async function uploadDocumentFile(file, folderId) {
+  const { documentId, uploadUrl } = await api("/api/documents/upload-url", {
+    method: "POST",
+    body: JSON.stringify({
+      name: file.name,
+      contentType: file.type || "application/octet-stream",
+      sizeBytes: file.size,
+      folderId: folderId || null
+    })
+  });
+  // In MEMORY_DB (test/preview) mode the server returns a placeholder URL
+  // rather than a real signed GCS URL, since there is no bucket to upload
+  // to - only real deployments with GCS_BUCKET configured issue an
+  // http(s) signed URL that this PUT actually reaches.
+  if (/^https?:\/\//.test(uploadUrl)) {
+    const uploadResponse = await fetch(uploadUrl, { method: "PUT", body: file, headers: { "Content-Type": file.type || "application/octet-stream" } });
+    if (!uploadResponse.ok) throw new Error("Upload to storage failed");
+  }
+  await api(`/api/documents/${documentId}/confirm`, { method: "POST" });
+}
+
+function readAllDirectoryEntries(directoryReader) {
+  return new Promise((resolve, reject) => {
+    const entries = [];
+    function readBatch() {
+      // Chrome's directory reader only returns a batch at a time, even
+      // for small folders - it must be called repeatedly until it
+      // returns an empty array to get the full listing.
+      directoryReader.readEntries((batch) => {
+        if (!batch.length) { resolve(entries); return; }
+        entries.push(...batch);
+        readBatch();
+      }, reject);
+    }
+    readBatch();
+  });
+}
+
+async function readEntryTree(entry, path, out) {
+  if (entry.isFile) {
+    const file = await new Promise((resolve, reject) => entry.file(resolve, reject));
+    out.push({ file, relativePath: `${path}${entry.name}` });
+  } else if (entry.isDirectory) {
+    const entries = await readAllDirectoryEntries(entry.createReader());
+    for (const child of entries) {
+      await readEntryTree(child, `${path}${entry.name}/`, out);
+    }
+  }
+}
+
+async function collectFilesFromDataTransferItems(items) {
+  const out = [];
+  const entries = Array.from(items).map((item) => item.webkitGetAsEntry?.()).filter(Boolean);
+  for (const entry of entries) {
+    await readEntryTree(entry, "", out);
+  }
+  return out;
+}
+
+function buildTreeFromRelativePaths(fileList) {
+  return Array.from(fileList).map((file) => ({ file, relativePath: file.webkitRelativePath || file.name }));
+}
+
+async function runBulkDocumentUpload(fileEntries) {
+  if (!fileEntries.length) return;
+  documentsUploading = true;
+  // Cache of already-created-or-existing folders for this run, keyed by
+  // "parentId::name" - avoids creating duplicate subfolders when several
+  // files in the same drop share a folder, without needing a server
+  // round-trip reload between every file.
+  const folderCache = new Map();
+  documentsData.folders.forEach((folder) => {
+    folderCache.set(`${folder.parentId || ""}::${folder.name}`, folder.id);
+  });
+  let failures = 0;
+  for (let index = 0; index < fileEntries.length; index += 1) {
+    const { file, relativePath } = fileEntries[index];
+    documentsUploadProgress = { done: index, total: fileEntries.length, currentName: file.name };
+    render();
+    try {
+      const segments = relativePath.split("/").slice(0, -1).filter(Boolean);
+      let folderId = documentsCurrentFolderId || null;
+      for (const segment of segments) {
+        const key = `${folderId || ""}::${segment}`;
+        if (folderCache.has(key)) {
+          folderId = folderCache.get(key);
+        } else {
+          const created = await api("/api/documents/folders", { method: "POST", body: JSON.stringify({ name: segment, parentId: folderId || null }) });
+          folderCache.set(key, created.id);
+          folderId = created.id;
+        }
+      }
+      await uploadDocumentFile(file, folderId);
+    } catch (error) {
+      failures += 1;
+    }
+  }
+  documentsUploading = false;
+  documentsUploadProgress = null;
+  await loadDocumentsData(false);
+  render();
+  if (failures) window.alert(`${failures} of ${fileEntries.length} file${fileEntries.length === 1 ? "" : "s"} failed to upload.`);
+}
+
 function formatFileSize(sizeBytes) {
   const size = Number(sizeBytes) || 0;
   if (size <= 0) return "";
@@ -2980,8 +3085,8 @@ function renderDocuments() {
   const subfolders = folders.filter((folder) => (folder.parentId || null) === currentFolderId);
   const currentDocuments = documents.filter((item) => (item.folderId || null) === currentFolderId);
   const breadcrumb = documentsFolderPath(currentFolderId);
-  return `<section class="documents-layout">
-    <p class="muted">Shared with your whole household — deeds, patta, tax receipts and other property documents.</p>
+  return `<section class="documents-layout" data-documents-os-drop-zone>
+    <p class="muted">Shared with your whole household — deeds, patta, tax receipts and other property documents. Drag and drop files or whole folders in to upload.</p>
     <div class="documents-toolbar">
       <div class="documents-breadcrumb">
         <button type="button" data-documents-open-folder="" data-documents-drop-target="" class="${!currentFolderId ? "active" : ""}">All documents</button>
@@ -2991,10 +3096,15 @@ function renderDocuments() {
         <button type="button" data-documents-new-folder>+ New folder</button>
         <label class="documents-upload-button ${documentsUploading ? "disabled" : ""}">
           ${documentsUploading ? "Uploading…" : "+ Upload"}
-          <input type="file" data-documents-file-input ${documentsUploading ? "disabled" : ""}>
+          <input type="file" multiple data-documents-file-input ${documentsUploading ? "disabled" : ""}>
+        </label>
+        <label class="documents-upload-button ${documentsUploading ? "disabled" : ""}">
+          + Upload folder
+          <input type="file" webkitdirectory multiple data-documents-folder-input ${documentsUploading ? "disabled" : ""}>
         </label>
       </div>
     </div>
+    ${documentsUploadProgress ? `<p class="documents-upload-progress">Uploading ${documentsUploadProgress.done + 1} of ${documentsUploadProgress.total}: ${escapeHtml(documentsUploadProgress.currentName)}</p>` : ""}
     ${subfolders.length ? `<div class="documents-folder-grid">
       ${subfolders.map((folder) => `<div class="documents-folder-card" draggable="true" data-drag-type="folder" data-drag-id="${folder.id}" data-documents-drop-target="${folder.id}">
         <div class="documents-folder-card-row">
@@ -3006,7 +3116,7 @@ function renderDocuments() {
         ${folder.wealthItemId ? `<small class="documents-linked-note">Tagged to ${escapeHtml(wealthItemLabel(folder.wealthItemType, folder.wealthItemId) || "")}</small>` : ""}
       </div>`).join("")}
     </div>` : ""}
-    ${currentDocuments.length ? `<div class="documents-file-list">${currentDocuments.map(renderDocumentRow).join("")}</div>` : `<p class="muted">No documents in this folder yet.</p>`}
+    ${currentDocuments.length ? `<div class="documents-file-list">${currentDocuments.map(renderDocumentRow).join("")}</div>` : `<p class="muted">No documents in this folder yet. Drag and drop files or folders here to upload.</p>`}
   </section>`;
 }
 
@@ -8327,36 +8437,41 @@ function bindViewEvents() {
 
   document.querySelectorAll("[data-documents-file-input]").forEach((input) => {
     input.addEventListener("change", async () => {
-      const file = input.files?.[0];
-      if (!file) return;
-      documentsUploading = true;
-      render();
-      try {
-        const { documentId, uploadUrl } = await api("/api/documents/upload-url", {
-          method: "POST",
-          body: JSON.stringify({
-            name: file.name,
-            contentType: file.type || "application/octet-stream",
-            sizeBytes: file.size,
-            folderId: documentsCurrentFolderId || null
-          })
-        });
-        // In MEMORY_DB (test/preview) mode the server returns a placeholder
-        // URL rather than a real signed GCS URL, since there is no bucket to
-        // upload to — only real deployments with GCS_BUCKET configured issue
-        // an http(s) signed URL that this PUT actually reaches.
-        if (/^https?:\/\//.test(uploadUrl)) {
-          const uploadResponse = await fetch(uploadUrl, { method: "PUT", body: file, headers: { "Content-Type": file.type || "application/octet-stream" } });
-          if (!uploadResponse.ok) throw new Error("Upload to storage failed");
-        }
-        await api(`/api/documents/${documentId}/confirm`, { method: "POST" });
-        await loadDocumentsData(false);
-      } catch (error) {
-        window.alert(error.message || "Upload failed");
-      } finally {
-        documentsUploading = false;
-        render();
-      }
+      const files = buildTreeFromRelativePaths(input.files || []);
+      input.value = "";
+      await runBulkDocumentUpload(files);
+    });
+  });
+
+  document.querySelectorAll("[data-documents-folder-input]").forEach((input) => {
+    input.addEventListener("change", async () => {
+      const files = buildTreeFromRelativePaths(input.files || []);
+      input.value = "";
+      await runBulkDocumentUpload(files);
+    });
+  });
+
+  document.querySelectorAll("[data-documents-os-drop-zone]").forEach((zone) => {
+    zone.addEventListener("dragover", (event) => {
+      if (!event.dataTransfer?.types?.includes("Files")) return;
+      event.preventDefault();
+      event.dataTransfer.dropEffect = "copy";
+    });
+    zone.addEventListener("dragenter", (event) => {
+      if (!event.dataTransfer?.types?.includes("Files")) return;
+      event.preventDefault();
+      zone.classList.add("documents-os-drop-active");
+    });
+    zone.addEventListener("dragleave", (event) => {
+      if (event.target !== zone) return;
+      zone.classList.remove("documents-os-drop-active");
+    });
+    zone.addEventListener("drop", async (event) => {
+      if (!event.dataTransfer?.types?.includes("Files")) return;
+      event.preventDefault();
+      zone.classList.remove("documents-os-drop-active");
+      const files = await collectFilesFromDataTransferItems(event.dataTransfer.items);
+      await runBulkDocumentUpload(files);
     });
   });
 

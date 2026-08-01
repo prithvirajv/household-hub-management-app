@@ -5583,6 +5583,23 @@ main {
   cursor: pointer;
 }
 
+.documents-layout.documents-os-drop-active {
+  outline: 2px dashed var(--blue);
+  outline-offset: 6px;
+  background: var(--soft-blue);
+  border-radius: 10px;
+}
+
+.documents-upload-progress {
+  margin: 0;
+  padding: 0.5rem 0.75rem;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--soft-blue);
+  font-size: 0.85rem;
+  font-weight: 700;
+}
+
 .documents-folder-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
