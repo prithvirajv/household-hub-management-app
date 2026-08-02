@@ -2894,6 +2894,22 @@ main {
   letter-spacing: 0.03em;
 }
 
+.cashflow-sankey-clickable {
+  cursor: pointer;
+}
+
+.cashflow-sankey-ribbon.cashflow-sankey-clickable:hover {
+  opacity: 0.55;
+}
+
+rect.cashflow-sankey-clickable:hover {
+  filter: brightness(1.12);
+}
+
+text.cashflow-sankey-clickable:hover {
+  text-decoration: underline;
+}
+
 .reports-toolbar-fields label {
   display: flex;
   flex-direction: column;

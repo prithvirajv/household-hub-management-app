@@ -52,6 +52,8 @@ let selectedTransactionTag = "";
 let reportsScope = null;
 let reportsCardFilter = "all";
 let reportsSelectedTag = "";
+let reportsExpandedSankeyLineKey = null;
+let reportsSelectedCategoryLine = "";
 let splitBillType = "equal";
 let splitBillRows = [];
 // The payer's own row in the Split-a-bill card, shown alongside the friend
@@ -4143,6 +4145,34 @@ function renderReports() {
   const rangeTransactions = state.transactions.filter((transaction) => (monthKeys.length ? monthKeys : trailingMonthKeys(6)).includes(transaction.date?.slice(0, 7)));
   const reportsTagGroups = groupTransactionsByTag(rangeTransactions).sort((a, b) => b.total - a.total);
   const selectedReportsTagGroup = reportsTagGroups.find((group) => group.key === reportsSelectedTag) || null;
+  const expandedSankeySegment = reportsExpandedSankeyLineKey ? sankeySegments.find((segment) => segment.lineIds.length && segment.lineIds.join(",") === reportsExpandedSankeyLineKey) || null : null;
+  const expandedSankeyTransactions = expandedSankeySegment ? rangeTransactions.filter((transaction) => expandedSankeySegment.lineIds.includes(transaction.lineId)) : [];
+  // reportsSelectedCategoryLine is "cat:<lineId>,<lineId>,..." (every
+  // subcategory under that category, joined - categories have no id of their
+  // own) or "line:<lineId>" (one specific subcategory).
+  let categoryLineLabel = "";
+  let categoryLineTotal = 0;
+  let categoryLineTransactions = [];
+  if (reportsSelectedCategoryLine) {
+    const [kind, targetId] = reportsSelectedCategoryLine.split(":");
+    if (kind === "cat") {
+      const category = categories.find((item) => item.lines.map((line) => line.id).join(",") === targetId);
+      if (category) {
+        const lineIds = category.lines.map((line) => line.id);
+        categoryLineLabel = category.name;
+        categoryLineTotal = category.value;
+        categoryLineTransactions = rangeTransactions.filter((transaction) => lineIds.includes(transaction.lineId));
+      }
+    } else if (kind === "line") {
+      const category = categories.find((item) => item.lines.some((line) => line.id === targetId));
+      const line = category?.lines.find((item) => item.id === targetId);
+      if (category && line) {
+        categoryLineLabel = `${category.name} · ${line.name}`;
+        categoryLineTotal = line.value;
+        categoryLineTransactions = rangeTransactions.filter((transaction) => transaction.lineId === targetId);
+      }
+    }
+  }
   const showCard = (key) => reportsCardFilter === "all" || reportsCardFilter === key;
   return `
     <section class="card reports-toolbar">
@@ -4164,6 +4194,7 @@ function renderReports() {
           <option value="category" ${reportsCardFilter === "category" ? "selected" : ""}>Category spend</option>
           <option value="budgetvsactual" ${reportsCardFilter === "budgetvsactual" ? "selected" : ""}>Budget vs Expense</option>
           <option value="transactions" ${reportsCardFilter === "transactions" ? "selected" : ""}>Transactions</option>
+          <option value="categorysubcategory" ${reportsCardFilter === "categorysubcategory" ? "selected" : ""}>Category / Subcategory</option>
           <option value="tags" ${reportsCardFilter === "tags" ? "selected" : ""}>Tags</option>
         </select></label>
       </div>
@@ -4182,6 +4213,17 @@ function renderReports() {
         ${showCard("cashflowbreakdown") ? `<section class="card">
           <div class="section-head"><div><span class="card-label">Breakdown</span><h3>Cash flow breakdown</h3></div><span>${money.format(totalIncome)} income this period</span></div>
           ${sankeySegments.length ? cashFlowSankeySvg(sankeySegments, totalIncome) : `<div class="empty-inline">No income or spend in this period</div>`}
+          ${sankeySegments.some((segment) => segment.lineIds.length) ? `<small class="muted">Click a category band for its transactions.</small>` : ""}
+          ${expandedSankeySegment ? `
+            <div class="tag-summary-total"><span>${escapeHtml(expandedSankeySegment.label)} total</span><b>${money.format(expandedSankeySegment.value)}</b></div>
+            <div class="tag-transaction-list">${expandedSankeyTransactions.length ? [...expandedSankeyTransactions].sort((a, b) => (b.date || "").localeCompare(a.date || "")).map((transaction) => `
+              <div class="tag-transaction-row">
+                <span>${escapeHtml(transaction.payee)}</span>
+                <small>${formatShortDate(transaction.date)}</small>
+                <b>${money.format(transaction.amount)}</b>
+              </div>
+            `).join("") : `<div class="empty-inline">No transactions found for this category.</div>`}</div>
+          ` : ""}
         </section>` : ""}
         ${showCard("category") ? `<section class="card"><div class="card-label">Spending</div><h3>Category report</h3>${categories.map((category) => `
           <div class="report-row-group">
@@ -4213,6 +4255,29 @@ function renderReports() {
               <b>${money.format(transaction.amount)}</b>
             </div>
           `).join("") || `<div class="empty-inline">No transactions in this period.</div>`}</div>
+        </section>` : ""}
+        ${showCard("categorysubcategory") ? `<section class="card">
+          <div class="card-label">Insight</div><h3>Category / Subcategory</h3>
+          ${categories.some((category) => category.lines.length) ? `<label>Filter by category or subcategory<select id="reportsCategoryLineFilter">
+            <option value="">All categories</option>
+            ${categories.filter((category) => category.lines.length).map((category) => {
+              const categoryKey = `cat:${category.lines.map((line) => line.id).join(",")}`;
+              return `<optgroup label="${escapeHtml(category.name)}">
+                <option value="${categoryKey}" ${reportsSelectedCategoryLine === categoryKey ? "selected" : ""}>All of ${escapeHtml(category.name)} (${money.format(category.value)})</option>
+                ${category.lines.map((line) => `<option value="line:${line.id}" ${reportsSelectedCategoryLine === `line:${line.id}` ? "selected" : ""}>${escapeHtml(line.name)} (${money.format(line.value)})</option>`).join("")}
+              </optgroup>`;
+            }).join("")}
+          </select></label>` : `<div class="empty-inline">No category spend in this range yet.</div>`}
+          ${reportsSelectedCategoryLine && categoryLineLabel ? `
+            <div class="tag-summary-total"><span>${escapeHtml(categoryLineLabel)} total</span><b>${money.format(categoryLineTotal)}</b></div>
+            <div class="tag-transaction-list">${categoryLineTransactions.length ? [...categoryLineTransactions].sort((a, b) => (b.date || "").localeCompare(a.date || "")).map((transaction) => `
+              <div class="tag-transaction-row">
+                <span>${escapeHtml(transaction.payee)}</span>
+                <small>${formatShortDate(transaction.date)}</small>
+                <b>${money.format(transaction.amount)}</b>
+              </div>
+            `).join("") : `<div class="empty-inline">No transactions found.</div>`}</div>
+          ` : ""}
         </section>` : ""}
         ${showCard("tags") ? `<section class="card">
           <div class="card-label">Insight</div><h3>Tags</h3>
@@ -5177,7 +5242,7 @@ function reportCategoriesForScope(monthKeys) {
   const lineTotal = (lineId) => effectiveMonthKeys.reduce((sum, monthKey) => sum + spentByLineInMonth(state.transactions, lineId, monthKey), 0);
   const withLines = state.budget.categories.map((category) => {
     const lines = category.lines
-      .map((line) => ({ name: line.name, value: lineTotal(line.id) }))
+      .map((line) => ({ id: line.id, name: line.name, value: lineTotal(line.id) }))
       .filter((line) => line.value !== 0);
     const value = category.lines.reduce((sum, line) => sum + lineTotal(line.id), 0);
     return { name: category.name, color: category.color, value, lines };
@@ -5303,13 +5368,20 @@ function cashFlowChart(months) {
 // whatever's left of income after expenses - omitted entirely (not shown as
 // zero/negative) once spend meets or exceeds income, since there's nothing
 // left to show.
+// Budget categories have no id of their own (only their lines do), and
+// category names aren't guaranteed unique, so a segment's own set of line
+// ids doubles as its drill-down key - naturally unique per segment and
+// exactly the set needed to filter matching transactions anyway.
 function sankeyFlowSegments(categories, totalIncome, totalExpenses) {
   const segments = categories
     .filter((category) => category.value > 0)
-    .map((category) => ({ label: category.name, value: category.value, color: category.color }))
+    .map((category) => ({ label: category.name, value: category.value, color: category.color, lineIds: category.lines.map((line) => line.id) }))
     .sort((a, b) => b.value - a.value);
   const savings = totalIncome - totalExpenses;
-  if (savings > 0) segments.push({ label: "Savings", value: savings, color: "#13936d" });
+  // Savings has no backing category/lines - it's whatever's left of income
+  // after expenses, not a real spending bucket - so it's shown but not
+  // drill-down-able like the real category segments above it.
+  if (savings > 0) segments.push({ label: "Savings", value: savings, color: "#13936d", lineIds: [] });
   return segments;
 }
 
@@ -5367,8 +5439,17 @@ function cashFlowSankeySvg(segments, totalIncome) {
     <svg viewBox="0 0 ${width} ${height}" width="${width}" height="${height}" class="cashflow-sankey-svg" role="img" aria-label="Cash flow breakdown">
       <rect x="${leftX}" y="${padding}" width="${nodeWidth}" height="${availableHeight.toFixed(1)}" class="cashflow-sankey-node cashflow-sankey-node-income"></rect>
       <text x="${leftX}" y="${padding - 6}" class="cashflow-sankey-label cashflow-sankey-label-income">Income</text>
-      ${ribbons.map(({ segment, y0L, y1L, y0R, y1R }) => `<path d="M${(leftX + nodeWidth).toFixed(1)},${y0L.toFixed(1)} C${midX.toFixed(1)},${y0L.toFixed(1)} ${midX.toFixed(1)},${y0R.toFixed(1)} ${rightX.toFixed(1)},${y0R.toFixed(1)} L${rightX.toFixed(1)},${y1R.toFixed(1)} C${midX.toFixed(1)},${y1R.toFixed(1)} ${midX.toFixed(1)},${y1L.toFixed(1)} ${(leftX + nodeWidth).toFixed(1)},${y1L.toFixed(1)} Z" class="cashflow-sankey-ribbon" style="fill:${segment.color}"></path>`).join("")}
-      ${ribbons.map(({ segment, y0R, y1R }) => `<rect x="${rightX}" y="${y0R.toFixed(1)}" width="${nodeWidth}" height="${Math.max(0, y1R - y0R).toFixed(1)}" class="cashflow-sankey-node" style="fill:${segment.color}"></rect><text x="${rightX + nodeWidth + 8}" y="${((y0R + y1R) / 2 + 4).toFixed(1)}" class="cashflow-sankey-label">${escapeHtml(segment.label)} · ${money.format(segment.value)} (${totalIncome > 0 ? Math.round((segment.value / totalIncome) * 100) : 0}%)</text>`).join("")}
+      ${ribbons.map(({ segment, y0L, y1L, y0R, y1R }) => {
+        const key = segment.lineIds.length ? segment.lineIds.join(",") : "";
+        const clickable = key ? ` data-sankey-lines="${escapeHtml(key)}"` : "";
+        return `<path d="M${(leftX + nodeWidth).toFixed(1)},${y0L.toFixed(1)} C${midX.toFixed(1)},${y0L.toFixed(1)} ${midX.toFixed(1)},${y0R.toFixed(1)} ${rightX.toFixed(1)},${y0R.toFixed(1)} L${rightX.toFixed(1)},${y1R.toFixed(1)} C${midX.toFixed(1)},${y1R.toFixed(1)} ${midX.toFixed(1)},${y1L.toFixed(1)} ${(leftX + nodeWidth).toFixed(1)},${y1L.toFixed(1)} Z" class="cashflow-sankey-ribbon ${key ? "cashflow-sankey-clickable" : ""}" style="fill:${segment.color}"${clickable}></path>`;
+      }).join("")}
+      ${ribbons.map(({ segment, y0R, y1R }) => {
+        const key = segment.lineIds.length ? segment.lineIds.join(",") : "";
+        const clickable = key ? ` data-sankey-lines="${escapeHtml(key)}"` : "";
+        const clickableClass = key ? "cashflow-sankey-clickable" : "";
+        return `<rect x="${rightX}" y="${y0R.toFixed(1)}" width="${nodeWidth}" height="${Math.max(0, y1R - y0R).toFixed(1)}" class="cashflow-sankey-node ${clickableClass}" style="fill:${segment.color}"${clickable}></rect><text x="${rightX + nodeWidth + 8}" y="${((y0R + y1R) / 2 + 4).toFixed(1)}" class="cashflow-sankey-label ${clickableClass}"${clickable}>${escapeHtml(segment.label)} · ${money.format(segment.value)} (${totalIncome > 0 ? Math.round((segment.value / totalIncome) * 100) : 0}%)</text>`;
+      }).join("")}
     </svg>`;
 }
 
@@ -6996,6 +7077,22 @@ function bindViewEvents() {
   $("#reportsTagFilter")?.addEventListener("change", (event) => {
     reportsSelectedTag = event.currentTarget.value;
     render();
+  });
+
+  $("#reportsCategoryLineFilter")?.addEventListener("change", (event) => {
+    reportsSelectedCategoryLine = event.currentTarget.value;
+    render();
+  });
+
+  // Ribbon, node rect, and label text each carry the same data-sankey-lines
+  // (that segment's comma-joined line ids) so any part of a segment is
+  // clickable, not just the thin node bar.
+  document.querySelectorAll("[data-sankey-lines]").forEach((el) => {
+    el.addEventListener("click", () => {
+      const key = el.dataset.sankeyLines;
+      reportsExpandedSankeyLineKey = reportsExpandedSankeyLineKey === key ? null : key;
+      render();
+    });
   });
 
   $("#reportsScopeType")?.addEventListener("change", (event) => {
