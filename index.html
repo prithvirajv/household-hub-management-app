@@ -7,7 +7,7 @@
     <title>FamilyLoop</title>
     <link rel="icon" type="image/svg+xml" href="/assets/favicon.svg">
     <link rel="apple-touch-icon" href="/assets/apple-touch-icon.png">
-    <link rel="stylesheet" href="/styles.css?v=20260802-1">
+    <link rel="stylesheet" href="/styles.css?v=20260802-2">
     <script src="https://accounts.google.com/gsi/client" async defer></script>
   </head>
   <body>
@@ -292,6 +292,21 @@
       </div>
     </dialog>
 
+    <dialog id="confirmDialog" class="app-dialog confirm-dialog">
+      <div class="delete-budget-line-dialog-content">
+        <div class="section-head">
+          <div><h2 id="confirmDialogTitle">Confirm</h2></div>
+        </div>
+        <p id="confirmDialogMessage" class="form-message"></p>
+        <div class="dialog-actions">
+          <button id="confirmDialogCancelButton" class="ghost" type="button">Cancel</button>
+          <button id="confirmDialogOkButton" class="danger-button" type="button">Confirm</button>
+        </div>
+      </div>
+    </dialog>
+
+    <div id="toastContainer" class="toast-container" aria-live="polite" aria-atomic="true"></div>
+
     <template id="emptyTemplate">
       <div class="empty-state">
         <h3>No data yet</h3>
@@ -301,7 +316,7 @@
 
     <script src="https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/build/pdf.min.js"></script>
     <script>if (window.pdfjsLib) pdfjsLib.GlobalWorkerOptions.workerSrc = "https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/build/pdf.worker.min.js";</script>
-    <script src="/lib/shared-logic.js?v=20260731-6"></script>
-    <script src="/app.js?v=20260802-1"></script>
+    <script src="/lib/shared-logic.js?v=20260802-1"></script>
+    <script src="/app.js?v=20260802-2"></script>
   </body>
 </html>

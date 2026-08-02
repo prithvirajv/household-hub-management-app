@@ -216,6 +216,47 @@ async function saveStateNow() {
   await api("/api/state", { method: "PUT", body: JSON.stringify(state) });
 }
 
+function showToast(message, { type = "error" } = {}) {
+  const container = $("#toastContainer");
+  if (!container) return;
+  const toast = document.createElement("div");
+  toast.className = `toast toast-${type}`;
+  toast.setAttribute("role", "status");
+  toast.textContent = message;
+  const dismiss = () => {
+    toast.classList.remove("toast-visible");
+    toast.addEventListener("transitionend", () => toast.remove(), { once: true });
+  };
+  toast.addEventListener("click", dismiss);
+  container.appendChild(toast);
+  requestAnimationFrame(() => toast.classList.add("toast-visible"));
+  setTimeout(dismiss, 6000);
+}
+
+// Promise-based replacement for window.confirm() using the shared
+// #confirmDialog - the dialog's returnValue is set by the OK/Cancel button
+// handlers before .close() is called (wired once, near the other static
+// dialog wiring), so a single "close" listener here covers both buttons and
+// the native Escape-to-cancel behavior for free.
+function showConfirm(message, { title = "Confirm", confirmLabel = "Confirm", cancelLabel = "Cancel", danger = true } = {}) {
+  const dialog = $("#confirmDialog");
+  $("#confirmDialogTitle").textContent = title;
+  $("#confirmDialogMessage").textContent = message;
+  const okButton = $("#confirmDialogOkButton");
+  okButton.textContent = confirmLabel;
+  okButton.className = danger ? "danger-button" : "";
+  $("#confirmDialogCancelButton").textContent = cancelLabel;
+  return new Promise((resolve) => {
+    const onClose = () => {
+      dialog.removeEventListener("close", onClose);
+      resolve(dialog.returnValue === "confirmed");
+    };
+    dialog.addEventListener("close", onClose);
+    dialog.returnValue = "";
+    dialog.showModal();
+  });
+}
+
 function autosaveJournal() {
   if (!privateData) return;
   clearTimeout(journalTimer);
@@ -2967,7 +3008,7 @@ async function runBulkDocumentUpload(fileEntries) {
   documentsUploadProgress = null;
   await loadDocumentsData(false);
   render();
-  if (failures) window.alert(`${failures} of ${fileEntries.length} file${fileEntries.length === 1 ? "" : "s"} failed to upload.`);
+  if (failures) showToast(`${failures} of ${fileEntries.length} file${fileEntries.length === 1 ? "" : "s"} failed to upload.`);
 }
 
 const DOCUMENT_TYPE_BADGES = {
@@ -3313,7 +3354,7 @@ async function filesToDecisionAttachments(fileList, existingCount) {
   const attachments = [];
   for (const file of files) {
     if (file.size > DECISION_ATTACHMENT_MAX_BYTES) {
-      window.alert(`${file.name} is larger than 5MB and was skipped.`);
+      showToast(`${file.name} is larger than 5MB and was skipped.`);
       continue;
     }
     try {
@@ -6755,10 +6796,10 @@ function bindViewEvents() {
     });
   });
 
-  $("#copyBudgetSelect")?.addEventListener("change", (event) => {
+  $("#copyBudgetSelect")?.addEventListener("change", async (event) => {
     const month = event.currentTarget.value;
     if (!month) return;
-    const confirmed = window.confirm(`Replace ${monthLabel()}'s categories and amounts with ${formatMonth(month)}'s budget? This cannot be undone.`);
+    const confirmed = await showConfirm(`Replace ${monthLabel()}'s categories and amounts with ${formatMonth(month)}'s budget? This cannot be undone.`, { confirmLabel: "Replace" });
     if (!confirmed) {
       event.currentTarget.value = "";
       return;
@@ -8555,7 +8596,7 @@ function bindViewEvents() {
   document.querySelectorAll("[data-revoke-household-access]").forEach((button) => {
     button.addEventListener("click", async () => {
       const email = button.dataset.revokeHouseholdAccess;
-      if (!window.confirm(`Revoke household access for ${email}?`)) return;
+      if (!(await showConfirm(`Revoke household access for ${email}?`, { confirmLabel: "Revoke" }))) return;
       button.disabled = true;
       try {
         const result = await api("/api/households/access", {
@@ -8653,19 +8694,19 @@ function bindViewEvents() {
       await loadDocumentsData(false);
       render();
     } catch (error) {
-      window.alert(error.message);
+      showToast(error.message);
     }
   });
 
   document.querySelectorAll("[data-documents-delete-folder]").forEach((button) => {
     button.addEventListener("click", async () => {
-      if (!window.confirm("Delete this folder? It must be empty.")) return;
+      if (!(await showConfirm("Delete this folder? It must be empty.", { confirmLabel: "Delete" }))) return;
       try {
         await api(`/api/documents/folders/${button.dataset.documentsDeleteFolder}`, { method: "DELETE" });
         await loadDocumentsData(false);
         render();
       } catch (error) {
-        window.alert(error.message);
+        showToast(error.message);
       }
     });
   });
@@ -8681,7 +8722,7 @@ function bindViewEvents() {
         await loadDocumentsData(false);
         render();
       } catch (error) {
-        window.alert(error.message);
+        showToast(error.message);
       }
     });
   });
@@ -8733,7 +8774,7 @@ function bindViewEvents() {
         await loadDocumentsData(false);
         render();
       } catch (error) {
-        window.alert(error.message);
+        showToast(error.message);
       }
     });
   });
@@ -8745,7 +8786,7 @@ function bindViewEvents() {
         await loadDocumentsData(false);
         render();
       } catch (error) {
-        window.alert(error.message);
+        showToast(error.message);
       }
     });
   });
@@ -8758,7 +8799,7 @@ function bindViewEvents() {
         await loadDocumentsData(false);
         render();
       } catch (error) {
-        window.alert(error.message);
+        showToast(error.message);
       }
     });
   });
@@ -8771,7 +8812,7 @@ function bindViewEvents() {
         await loadDocumentsData(false);
         render();
       } catch (error) {
-        window.alert(error.message);
+        showToast(error.message);
       }
     });
   });
@@ -8782,7 +8823,7 @@ function bindViewEvents() {
       try {
         await openDocumentFile(documentId);
       } catch (error) {
-        window.alert(error.message);
+        showToast(error.message);
       }
     });
   });
@@ -8797,7 +8838,7 @@ function bindViewEvents() {
         await loadDocumentsData(false);
         render();
       } catch (error) {
-        window.alert(error.message);
+        showToast(error.message);
       }
     });
   });
@@ -8809,7 +8850,7 @@ function bindViewEvents() {
         await loadDocumentsData(false);
         render();
       } catch (error) {
-        window.alert(error.message);
+        showToast(error.message);
       }
     });
   });
@@ -8832,13 +8873,13 @@ function bindViewEvents() {
 
   document.querySelectorAll("[data-documents-delete]").forEach((button) => {
     button.addEventListener("click", async () => {
-      if (!window.confirm("Delete this document? This cannot be undone.")) return;
+      if (!(await showConfirm("Delete this document? This cannot be undone.", { confirmLabel: "Delete" }))) return;
       try {
         await api(`/api/documents/${button.dataset.documentsDelete}`, { method: "DELETE" });
         await loadDocumentsData(false);
         render();
       } catch (error) {
-        window.alert(error.message);
+        showToast(error.message);
       }
     });
   });
@@ -8883,7 +8924,7 @@ function bindViewEvents() {
           if (payload.id === targetFolderId) return;
           const cycleCandidates = documentsData.folders.map((folder) => ({ id: folder.id, parentId: folder.parentId }));
           if (wouldCreateFolderCycle(cycleCandidates, payload.id, targetFolderId)) {
-            window.alert("Can't move a folder into itself or one of its own subfolders.");
+            showToast("Can't move a folder into itself or one of its own subfolders.");
             return;
           }
           await api(`/api/documents/folders/${payload.id}`, { method: "PATCH", body: JSON.stringify({ parentId: targetFolderId }) });
@@ -8893,7 +8934,7 @@ function bindViewEvents() {
         await loadDocumentsData(false);
         render();
       } catch (error) {
-        window.alert(error.message);
+        showToast(error.message);
       }
     });
   });
@@ -9515,7 +9556,7 @@ nav.addEventListener("click", async (event) => {
       sessionUser = { ...sessionUser, isAdmin: false };
       currentView = "home";
       render();
-      window.alert(error.message);
+      showToast(error.message);
       return;
     } finally {
       button.disabled = false;
@@ -9851,6 +9892,17 @@ $("#closeHouseholdDialogButton").addEventListener("click", () => $("#householdDi
 $("#cancelHouseholdButton").addEventListener("click", () => $("#householdDialog").close());
 $("#closeRemoveHouseholdDialogButton").addEventListener("click", () => $("#removeHouseholdDialog").close());
 $("#cancelRemoveHouseholdButton").addEventListener("click", () => $("#removeHouseholdDialog").close());
+
+$("#confirmDialogOkButton").addEventListener("click", () => {
+  const dialog = $("#confirmDialog");
+  dialog.returnValue = "confirmed";
+  dialog.close();
+});
+$("#confirmDialogCancelButton").addEventListener("click", () => {
+  const dialog = $("#confirmDialog");
+  dialog.returnValue = "cancelled";
+  dialog.close();
+});
 
 function closeDeleteBudgetLineDialog() {
   pendingBudgetLineDeletion = null;
@@ -10685,7 +10737,7 @@ async function loadAdminData() {
     adminData = null;
     currentView = "home";
     render();
-    window.alert(error.message);
+    showToast(error.message);
   }
 }
 

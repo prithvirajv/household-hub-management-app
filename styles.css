@@ -6262,3 +6262,126 @@ text.cashflow-sankey-clickable:hover {
   padding-top: 0.65rem;
   border-top: 1px solid var(--line);
 }
+
+/* --- Toasts (replacing window.alert) --- */
+
+.toast-container {
+  position: fixed;
+  right: 1rem;
+  bottom: 1rem;
+  z-index: 1000;
+  display: flex;
+  flex-direction: column-reverse;
+  gap: 0.5rem;
+  max-width: min(360px, calc(100vw - 2rem));
+  pointer-events: none;
+}
+
+.toast {
+  pointer-events: auto;
+  cursor: pointer;
+  padding: 0.75rem 1rem;
+  border-radius: 8px;
+  background: var(--navy);
+  color: #fff;
+  font-weight: 600;
+  font-size: 0.85rem;
+  box-shadow: var(--shadow);
+  opacity: 0;
+  transform: translateY(8px);
+  transition: opacity 0.18s ease, transform 0.18s ease;
+}
+
+.toast-visible {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+.toast-error {
+  background: var(--coral);
+}
+
+.toast-success {
+  background: var(--green);
+}
+
+/* --- Confirm dialog (replacing window.confirm) --- */
+
+.confirm-dialog .delete-budget-line-dialog-content {
+  padding: 1.1rem;
+  display: grid;
+  gap: 0.9rem;
+}
+
+/* --- Card hover lift --- */
+
+.card {
+  transition: transform 0.15s ease, box-shadow 0.15s ease;
+}
+
+.card:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 20px 48px rgba(29, 41, 69, 0.18);
+}
+
+/* --- Expand/collapse animate-in for drill-down panels (Sankey segment,
+   Category/Subcategory, Tags, Transactions cards all share
+   .tag-transaction-list; Documents "File information" uses its own panel
+   class) --- */
+
+@keyframes panel-expand-in {
+  from {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.tag-transaction-list,
+.documents-file-info-panel {
+  animation: panel-expand-in 0.18s ease;
+}
+
+/* --- Chart draw-in animations --- */
+
+@keyframes chart-line-draw-in {
+  from {
+    stroke-dashoffset: 2000;
+  }
+  to {
+    stroke-dashoffset: 0;
+  }
+}
+
+.networth-chart-line {
+  stroke-dasharray: 2000;
+  animation: chart-line-draw-in 0.9s ease-out forwards;
+}
+
+@keyframes ribbon-draw-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 0.35;
+  }
+}
+
+.cashflow-sankey-ribbon {
+  animation: ribbon-draw-in 0.5s ease-out forwards;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .card,
+  .toast,
+  .tag-transaction-list,
+  .documents-file-info-panel,
+  .networth-chart-line,
+  .cashflow-sankey-ribbon {
+    animation: none;
+    transition: none;
+  }
+}
