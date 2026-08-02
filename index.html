@@ -13,13 +13,13 @@
   <body>
     <div class="app-shell">
       <aside class="sidebar">
-        <div class="brand">
+        <button id="brandHomeButton" class="brand" type="button" aria-label="Go to Home">
           <img class="brand-mark" src="/assets/favicon.svg" alt="FamilyLoop logo">
           <div>
             <h1>FamilyLoop</h1>
             <p>Your household, working together</p>
           </div>
-        </div>
+        </button>
         <section id="householdWorkspaceControl" class="sidebar-household" hidden>
           <label class="household-control">Current household<select id="householdPicker"></select></label>
           <div class="sidebar-household-actions">
@@ -59,6 +59,7 @@
             <button type="submit">Open household</button>
             <button id="forgotPasswordButton" class="text-button" type="button">Forgot password?</button>
             <button id="showInvitationButton" class="text-button" type="button">Accept invitation</button>
+            <button id="showPublicHelpButton" class="text-button" type="button">Help</button>
             <div id="googleSigninDivider" class="auth-divider" hidden><span>or</span></div>
             <div id="googleSigninButton" class="google-signin-button"></div>
             <div class="demo-access">
@@ -110,6 +111,8 @@
             <button type="submit">Create account</button>
           </form>
         </section>
+
+        <section id="publicHelpPanel" class="public-help-panel" hidden></section>
 
         <section id="workspace" class="workspace" hidden>
           <section class="metrics-grid" id="metrics"></section>
@@ -317,6 +320,6 @@
     <script src="https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/build/pdf.min.js"></script>
     <script>if (window.pdfjsLib) pdfjsLib.GlobalWorkerOptions.workerSrc = "https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/build/pdf.worker.min.js";</script>
     <script src="/lib/shared-logic.js?v=20260802-1"></script>
-    <script src="/app.js?v=20260802-3"></script>
+    <script src="/app.js?v=20260802-4"></script>
   </body>
 </html>

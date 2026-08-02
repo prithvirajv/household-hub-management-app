@@ -3,7 +3,9 @@
 FamilyLoop brings household budgets, transactions, calendars, chores, meals,
 goals, shared expenses, and family planning into one workspace. This guide
 mirrors the step-by-step **Help** page inside the app (select **Help** in the
-sidebar) — use whichever is more convenient.
+sidebar once signed in, or select **Help** on the sign-in screen itself if
+you're not signed in yet — no account needed to read it) — use whichever is
+more convenient.
 
 ## Contents
 
@@ -15,7 +17,8 @@ sidebar) — use whichever is more convenient.
 [Shared Expenses](#shared-expenses) · [Meals and Recipes](#meals-and-recipes) ·
 [Goals](#goals) · [Wealth](#wealth) · [Sharing](#sharing) ·
 [Reports and Export](#reports-and-export) ·
-[Invitations](#invitations) · [Password Recovery](#password-recovery)
+[Invitations](#invitations) · [Password Recovery](#password-recovery) ·
+[FAQ](#faq)
 
 ## Getting Started
 
@@ -309,3 +312,62 @@ Invitation codes become invalid after acceptance.
 Select **Forgot password?** on the sign-in screen. FamilyLoop sends a
 one-time reset link that expires after 30 minutes. Check Spam and All Mail
 if the message does not appear in the inbox.
+
+## FAQ
+
+**Will I lose data if I remove a household?**
+Yes — removing a household deletes all of its budget, transaction,
+calendar, meal, goal, debt, and asset data, and it's blocked if it's your
+only household. Documents and Decisions are unaffected either way, since
+those belong to you personally, not to any one household.
+
+**Why do I see the same Documents and Decisions in every household I own?**
+Those two features are deliberately shared across every household you own,
+not tied to one household — so your paperwork and family decisions don't
+disappear or split apart when you switch households. Everything else
+(budget, calendar, transactions, meals, and so on) stays separate per
+household.
+
+**Can other household members read my Journal or Plan?**
+No. Both are private to you specifically, even for household members who
+otherwise have full access to everything else.
+
+**Why didn't my refund automatically match its purchase?**
+Automatic matching needs an exact opposite amount, a similar payee name,
+and a purchase dated within 180 days before the refund. If any of those
+don't line up — a different amount, very different payee wording, or more
+than 180 days apart — it won't auto-match. Pick the correct Subcategory
+yourself on that Bank Stream row before accepting it.
+
+**My budget category still shows money spent that I got refunded — why?**
+A refund only offsets a category's spending once it's assigned to the same
+budget line as the original purchase. An unmatched refund sitting
+unassigned doesn't cancel anything out in that category's total, even
+though your overall Cash flow total nets out correctly either way. Check
+the Subcategory on that transaction.
+
+**Why is my linked account's balance different from what I expected?**
+A linked account's balance is always computed live from its real linked
+transactions, paychecks, and transfers — never typed in by hand after the
+opening balance. If it looks off, something real (a transaction, paycheck,
+or transfer) probably isn't linked to that account yet.
+
+**I lost my invitation email or code — what do I do?**
+Ask the household owner to resend it from Sharing. A code is single-use,
+and resending automatically replaces the old one.
+
+**How long do I have to recover a deleted note?**
+7 days in Trash — after that it's permanently removed.
+
+**Can I run households in different currencies?**
+Yes — FamilyLoop allows one household per currency. Switch between them
+any time from Current household in the sidebar.
+
+**Does a successful email mean the recipient definitely got it?**
+Not quite — a successful send just means the email provider accepted the
+message for delivery, not that it landed in the inbox. Check Spam and All
+Mail if an expected email doesn't show up.
+
+**What does Try demo actually give me access to?**
+A temporary account with no reusable credentials and no administrator
+access — safe to explore the whole app without setting anything up first.
