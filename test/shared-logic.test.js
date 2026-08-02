@@ -1078,8 +1078,9 @@ test("normalizeForPayeeMatch lowercases and strips punctuation/spaces the same w
 
 test("payeesFuzzyMatch catches both full containment and a shared merchant-name prefix", () => {
   assert.equal(payeesFuzzyMatch("AMAZON.COM*A1B2C3", "AMAZON.COM"), true, "the longer statement line contains the shorter one outright");
-  assert.equal(payeesFuzzyMatch("TARGET.COM", "TARGET STORE 1147"), true, "neither contains the other, but they share a 6+ char merchant prefix");
-  assert.equal(payeesFuzzyMatch("Walmart", "Walgreens"), false, "a short shared prefix under the threshold is not enough");
+  assert.equal(payeesFuzzyMatch("TARGET.COM", "TARGET STORE 1147"), true, "neither contains the other, but they share a 4+ char merchant prefix");
+  assert.equal(payeesFuzzyMatch("Costco Whse #442", "Costcutters Store"), true, "a shorter 4-char prefix pair now matches too (would not have at the old 6-char threshold)");
+  assert.equal(payeesFuzzyMatch("Walmart", "Walgreens"), false, "a shared prefix under the 4-char threshold is not enough");
   assert.equal(payeesFuzzyMatch("Amazon", ""), false, "an empty side never matches");
 });
 
@@ -1090,17 +1091,17 @@ test("refundFuzzyMatch pairs a same-payee, opposite-amount return with its purch
   assert.equal(refundFuzzyMatch({ ...refund, amount: -10 }, [purchase]), null, "amount must be the exact opposite");
   assert.equal(refundFuzzyMatch({ ...refund, payee: "Completely Different Store" }, [purchase]), null, "unrelated payee never matches");
   assert.equal(refundFuzzyMatch({ ...refund, date: "2026-04-20" }, [purchase]), null, "a refund dated before its purchase never matches");
-  assert.equal(refundFuzzyMatch({ ...refund, date: "2026-09-15" }, [purchase]), null, "beyond the fuzzy match window (120 days) does not match");
-  assert.deepEqual(refundFuzzyMatch({ ...refund, date: "2026-08-29" }, [purchase]), purchase, "120 days later is still inside the window");
+  assert.equal(refundFuzzyMatch({ ...refund, date: "2026-11-15" }, [purchase]), null, "beyond the fuzzy match window (180 days) does not match");
+  assert.deepEqual(refundFuzzyMatch({ ...refund, date: "2026-10-28" }, [purchase]), purchase, "180 days later is still inside the window");
   assert.equal(refundFuzzyMatch({ ...purchase, amount: 42.5 }, [purchase]), null, "a positive-amount candidate is never treated as a refund");
 });
 
-test("refundMatch prefers an exact orderNumber match, falling back to fuzzy matching only when the candidate has no orderNumber", () => {
+test("refundMatch prefers an exact orderNumber match, falling back to fuzzy matching whenever the order match comes up empty", () => {
   const orderedPurchase = { orderNumber: "A-1", payee: "Amazon", amount: 30, date: "2026-06-01", lineId: "line-a" };
   const fuzzyPurchase = { payee: "COSTCO WHSE #442", amount: 30, date: "2026-06-01", lineId: "line-b" };
   assert.deepEqual(refundMatch({ orderNumber: "A-1", payee: "Amazon", amount: -30, date: "2026-06-10" }, [orderedPurchase, fuzzyPurchase]), orderedPurchase, "orderNumber match wins even when a fuzzy candidate also exists");
   assert.deepEqual(refundMatch({ payee: "COSTCO.COM", amount: -30, date: "2026-06-10" }, [orderedPurchase, fuzzyPurchase]), fuzzyPurchase, "falls back to fuzzy matching when the candidate has no orderNumber");
-  assert.equal(refundMatch({ orderNumber: "no-such-order", payee: "COSTCO.COM", amount: -30, date: "2026-06-10" }, [orderedPurchase, fuzzyPurchase]), null, "a candidate that DOES carry an orderNumber never falls back to fuzzy matching, even if its order id doesn't match anything");
+  assert.deepEqual(refundMatch({ orderNumber: "no-such-order", payee: "COSTCO.COM", amount: -30, date: "2026-06-10" }, [orderedPurchase, fuzzyPurchase]), fuzzyPurchase, "a candidate whose orderNumber doesn't match anything still falls back to fuzzy matching, since the two sides of a real pair don't always carry the same order id");
 });
 
 test("parseCreditCardStatementText: purchases stay positive, refunds go negative, and Order Number lines attach to the row above them", () => {

@@ -1,15 +1,25 @@
 # FamilyLoop
 
-FamilyLoop is a deployable household management SaaS: zero-based budgeting, shared notes and checklists, chores, birthdays, meals, groceries, goals, debt, net worth, and reports.
+FamilyLoop is a deployable household management SaaS: zero-based budgeting, shared notes and checklists, chores, birthdays, meals, groceries, goals, debt, net worth, documents, shared expenses/IOUs, and reports.
+
+**Live**: [familyloop.net](https://familyloop.net) / [famelo.net](https://famelo.net), running on Cloud Run (GCP project `solid-coder-212120`, region `us-central1`) against a Neon serverless Postgres database.
+
+## Documentation
+
+- [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) — system context, tech stack, deployment topology, how data flows through the app (HLD)
+- [docs/LLD.md](docs/LLD.md) — full database schema, every server route, client render/state conventions, the shared pure-function catalog, and the trickier algorithms explained
+- [docs/SOPS.md](docs/SOPS.md) — the operational runbook: local dev, the change→ship workflow, deploying, rotating secrets, DB backup/restore, and incident playbooks for issues that have actually happened in production
+- [docs/consumer-guide.md](docs/consumer-guide.md) — end-user-facing help content (also shown in-app under **Help**)
 
 ## Stack
 
-- Frontend: plain HTML, CSS, and JavaScript
+- Frontend: plain HTML, CSS, and JavaScript — no framework, no build step
 - Backend: Node.js and Express
-- Database: PostgreSQL
-- Auth: bcrypt password hashing and signed HttpOnly session cookies
+- Database: PostgreSQL (production: [Neon](https://neon.tech), serverless/autosuspending)
+- Object storage: Google Cloud Storage (Documents feature, signed URLs)
+- Auth: bcrypt password hashing + signed HttpOnly session cookies, or Google OAuth
 - Local runtime: Docker Compose
-- Deployment target: GKE on GCP
+- **Current deployment target: Cloud Run on GCP** (scale-to-zero, `min-instances=0`/`max-instances=1`). GKE was the original deployment target; that path is retired but its scripts/manifests remain in the repo for reference — see [Legacy: GKE deployment](#legacy-gke-deployment) below and [docs/ARCHITECTURE.md §3](docs/ARCHITECTURE.md#3-deployment-topology--current-vs-legacy) for the full migration history.
 
 ## Consumer Demo
 
@@ -51,15 +61,19 @@ The Compose database uses:
 
 ## API
 
-- `GET /healthz`
+The app is a hybrid of one whole-state sync pair plus per-feature REST
+endpoints — see [docs/ARCHITECTURE.md §4](docs/ARCHITECTURE.md#4-request-lifecycle--hybrid-sync-model)
+for why, and [docs/LLD.md §3](docs/LLD.md#3-server-routes) for the full
+route table (~45 endpoints: auth, households, documents, private data, push
+devices, reports export, bank-statement import, admin, notifications). The
+core ones to know first:
+
+- `GET /healthz` — liveness (no DB check)
+- `GET /readyz` — DB-aware readiness; this is what deploy health checks poll
 - `GET /api/session`
-- `POST /api/auth/signup`
-- `POST /api/auth/signin`
-- `POST /api/auth/demo`
-- `POST /api/auth/signout`
+- `POST /api/auth/signup` / `signin` / `demo` / `signout`
 - `POST /api/households/invitations`
-- `GET /api/state`
-- `PUT /api/state`
+- `GET /api/state` / `PUT /api/state` — the whole per-household JSON blob
 
 ## Transactional Email
 
@@ -96,7 +110,13 @@ EMAIL_FROM="FamilyLoop <your-verified-sender@example.com>"
 
 The SMTP key is a secret. Keep it in local environment variables or the Kubernetes Secret and never commit it.
 
-## GKE Deployment
+## Legacy: GKE Deployment
+
+> **This section describes a retired deployment path.** Production no
+> longer runs on GKE or Cloud SQL — see the [Stack](#stack) section above
+> and [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the current setup.
+> Kept here because `scripts/deploy-gke.sh` and `k8s/*.yaml` are still in
+> the repo and this explains what they were for.
 
 The deployment script creates a small one-node zonal GKE cluster when the named cluster does not exist. It deploys one FamilyLoop pod and, by default, one PostgreSQL StatefulSet with a 10 Gi persistent volume. This is suitable for an initial MVP; migrate PostgreSQL to Cloud SQL before relying on multi-zone availability.
 
@@ -140,11 +160,20 @@ The deploy script enables required Google APIs, creates the one-node cluster and
 
 Set `USE_IN_CLUSTER_POSTGRES=false` and provide `DATABASE_URL` plus `DATABASE_SSL=true` to use Cloud SQL or another managed PostgreSQL service. Set `CLUSTER_MODE=autopilot` to use a regional Autopilot cluster instead of the default zonal Standard cluster.
 
-## Lower-Cost Cloud Run Deployment
+## Cloud Run Deployment (current — see docs/SOPS.md for the actual production command)
 
-For very low traffic, Cloud Run is cheaper than keeping a GKE node and GKE load balancer online. The Cloud Run script deploys the same container with `min-instances=0` and `max-instances=1`, and connects it to Cloud SQL for persistent PostgreSQL storage.
+For very low traffic, Cloud Run is cheaper than keeping a GKE node and GKE load balancer online. The Cloud Run script deploys the same container with `min-instances=0` and `max-instances=1`.
 
-Recommended migration order from the current GKE deployment:
+**Production today** sets `DATABASE_URL`/`DATABASE_SSL` to an external Neon
+Postgres instance, which skips Cloud SQL provisioning entirely (see
+`scripts/deploy-cloud-run.sh`'s `USE_CLOUD_SQL` branch) — this is cheaper
+still than Cloud SQL, since Neon autosuspends when idle instead of running
+24/7. The actual deploy command in current use is in
+[docs/SOPS.md — Deploying](docs/SOPS.md#deploying).
+
+The steps below (Cloud SQL rather than Neon) are kept for reference — they
+were the original migration path off GKE, one step before the later Neon
+cutover:
 
 ```bash
 # 1. Create/prepare the small Cloud SQL PostgreSQL instance only.
@@ -167,6 +196,12 @@ Important notes:
 - After Cloud Run is verified, point `familyloop.net` and `www.familyloop.net` to Cloud Run with a Cloud Run domain mapping or a small external HTTPS load balancer, then remove the old GKE ingress, static IP, and cluster.
 
 ### Production DNS and HTTPS
+
+> **Historical.** This describes the one-time GKE→branded-domain cutover,
+> already completed. `familyloop.net` and `famelo.net` now map directly to
+> the Cloud Run service via Cloud Run domain mapping — there is no GKE
+> ingress, static IP, or `ManagedCertificate` in the current setup. Kept
+> here as a record of how the original cutover was done.
 
 The transition deployment keeps the existing reserved global IP and hostname available:
 
