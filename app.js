@@ -3262,7 +3262,7 @@ function renderDocuments() {
     ${subfolders.length ? `<div class="documents-folder-grid">
       ${subfolders.map((folder) => `<div class="documents-folder-card" draggable="true" data-drag-type="folder" data-drag-id="${folder.id}" data-documents-drop-target="${folder.id}">
         <div class="documents-folder-card-row">
-          <button type="button" class="documents-folder-open" data-documents-open-folder="${folder.id}">▢ ${escapeHtml(folder.name)}</button>
+          <button type="button" class="documents-folder-open" data-documents-open-folder="${folder.id}" title="${escapeHtml(folder.name)}">▢ ${escapeHtml(folder.name)}</button>
           <button type="button" class="documents-icon-btn" data-documents-rename-folder="${folder.id}" title="Rename folder" aria-label="Rename ${escapeHtml(folder.name)} folder">✎</button>
           ${renderFolderWealthLinkPicker(folder)}
           <button type="button" class="documents-icon-btn danger-button" data-documents-delete-folder="${folder.id}" title="Delete folder" aria-label="Delete ${escapeHtml(folder.name)} folder">×</button>

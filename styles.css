@@ -5626,6 +5626,10 @@ main {
 
 .documents-folder-open {
   flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
   text-align: left;
   font-weight: 700;
 }
