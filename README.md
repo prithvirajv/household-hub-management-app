@@ -21,6 +21,15 @@ FamilyLoop is a deployable household management SaaS: zero-based budgeting, shar
 - Local runtime: Docker Compose
 - **Current deployment target: Cloud Run on GCP** (scale-to-zero, `min-instances=0`/`max-instances=1`). GKE was the original deployment target; that path is retired but its scripts/manifests remain in the repo for reference — see [Legacy: GKE deployment](#legacy-gke-deployment) below and [docs/ARCHITECTURE.md §3](docs/ARCHITECTURE.md#3-deployment-topology--current-vs-legacy) for the full migration history.
 
+## Marketing Page
+
+A standalone landing page lives at [welcome.html](welcome.html) (served at
+`/welcome.html` — static, no build step, no server route changes). It is
+**not** wired up as the root-domain homepage yet; `familyloop.net/` still
+goes straight to sign-in as it always has. Treat `/welcome.html` as a page
+to review and iterate on before deciding whether to route the bare domain
+to it.
+
 ## Consumer Demo
 
 Select **Try demo** on the sign-in screen. Demo access does not expose reusable credentials and never receives application administrator access.

@@ -1,0 +1,581 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="description" content="FamilyLoop is a household management app for budgeting, chores, meals, shared expenses, and family planning in one place.">
+    <title>FamilyLoop — Your household, working together</title>
+    <link rel="icon" type="image/svg+xml" href="/assets/favicon.svg">
+    <link rel="apple-touch-icon" href="/assets/apple-touch-icon.png">
+    <style>
+      :root {
+        --navy: #1d2945;
+        --navy-2: #2b3758;
+        --bg: #eef3f7;
+        --panel: #ffffff;
+        --soft-blue: #eef3fb;
+        --line: #dfe7ef;
+        --text: #111827;
+        --muted: #6b7280;
+        --green: #13936d;
+        --green-soft: #e6f6ef;
+        --blue: #3569d4;
+        --gold: #d99a24;
+        --coral: #e05252;
+        --shadow: 0 16px 40px rgba(29, 41, 69, 0.14);
+      }
+
+      * { box-sizing: border-box; }
+
+      body {
+        margin: 0;
+        background: var(--bg);
+        color: var(--text);
+        font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+        line-height: 1.5;
+      }
+
+      a { color: inherit; }
+
+      .wrap {
+        max-width: 1180px;
+        margin: 0 auto;
+        padding: 0 1.5rem;
+      }
+
+      /* Nav */
+      header.site-nav {
+        position: sticky;
+        top: 0;
+        z-index: 10;
+        background: rgba(255, 255, 255, 0.92);
+        backdrop-filter: blur(6px);
+        border-bottom: 1px solid var(--line);
+      }
+
+      .site-nav .wrap {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 1rem;
+        min-height: 68px;
+      }
+
+      .site-brand {
+        display: flex;
+        align-items: center;
+        gap: 0.6rem;
+        font-weight: 900;
+        font-size: 1.1rem;
+        text-decoration: none;
+        color: var(--navy);
+      }
+
+      .site-brand img {
+        width: 32px;
+        height: 32px;
+        border-radius: 8px;
+      }
+
+      .site-nav-links {
+        display: flex;
+        align-items: center;
+        gap: 1.75rem;
+        font-weight: 700;
+        font-size: 0.92rem;
+      }
+
+      .site-nav-links a {
+        text-decoration: none;
+        color: var(--navy-2);
+      }
+
+      .site-nav-links a:hover {
+        color: var(--green);
+      }
+
+      .site-nav-cta {
+        display: flex;
+        gap: 0.6rem;
+      }
+
+      .btn {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        gap: 0.4rem;
+        padding: 0.65rem 1.15rem;
+        border-radius: 999px;
+        font-weight: 800;
+        font-size: 0.92rem;
+        text-decoration: none;
+        border: 1px solid transparent;
+        cursor: pointer;
+      }
+
+      .btn-primary {
+        background: var(--green);
+        color: #fff;
+      }
+
+      .btn-primary:hover {
+        background: #0f7d5c;
+      }
+
+      .btn-ghost {
+        background: transparent;
+        border-color: var(--line);
+        color: var(--navy-2);
+      }
+
+      .btn-ghost:hover {
+        border-color: var(--green);
+        color: var(--green);
+      }
+
+      /* Hero */
+      .hero {
+        padding: 4rem 0 3rem;
+      }
+
+      .hero .wrap {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+        gap: 2.5rem;
+        align-items: center;
+      }
+
+      .hero-eyebrow {
+        display: inline-block;
+        margin-bottom: 0.9rem;
+        padding: 0.3rem 0.75rem;
+        border-radius: 999px;
+        background: var(--green-soft);
+        color: var(--green);
+        font-weight: 900;
+        font-size: 0.72rem;
+        text-transform: uppercase;
+        letter-spacing: 0.06em;
+      }
+
+      .hero h1 {
+        margin: 0 0 1rem;
+        font-size: clamp(2.1rem, 4vw, 3.1rem);
+        line-height: 1.12;
+        letter-spacing: -0.01em;
+        color: var(--navy);
+      }
+
+      .hero p.lede {
+        margin: 0 0 1.75rem;
+        max-width: 46ch;
+        color: var(--muted);
+        font-size: 1.08rem;
+      }
+
+      .hero-actions {
+        display: flex;
+        gap: 0.85rem;
+        flex-wrap: wrap;
+      }
+
+      .hero-actions .btn {
+        padding: 0.85rem 1.5rem;
+        font-size: 1rem;
+      }
+
+      .hero-note {
+        margin-top: 0.9rem;
+        color: var(--muted);
+        font-size: 0.85rem;
+      }
+
+      .hero-image {
+        border-radius: 16px;
+        overflow: hidden;
+        box-shadow: var(--shadow);
+      }
+
+      .hero-image img {
+        display: block;
+        width: 100%;
+        height: 100%;
+        object-fit: cover;
+      }
+
+      /* Pillars strip */
+      .pillars-strip {
+        border-top: 1px solid var(--line);
+        border-bottom: 1px solid var(--line);
+        background: var(--panel);
+        padding: 1.6rem 0;
+      }
+
+      .pillars-strip .wrap {
+        display: flex;
+        justify-content: space-between;
+        flex-wrap: wrap;
+        gap: 1rem;
+        color: var(--muted);
+        font-weight: 800;
+        font-size: 0.85rem;
+        text-align: center;
+      }
+
+      /* Feature sections */
+      .features {
+        padding: 4rem 0;
+      }
+
+      .features-head {
+        max-width: 640px;
+        margin: 0 0 2.5rem;
+      }
+
+      .features-head span {
+        display: block;
+        margin-bottom: 0.5rem;
+        color: var(--green);
+        font-weight: 900;
+        font-size: 0.78rem;
+        text-transform: uppercase;
+        letter-spacing: 0.06em;
+      }
+
+      .features-head h2 {
+        margin: 0 0 0.6rem;
+        font-size: clamp(1.6rem, 3vw, 2.1rem);
+        color: var(--navy);
+      }
+
+      .features-head p {
+        margin: 0;
+        color: var(--muted);
+      }
+
+      .feature-grid {
+        display: grid;
+        grid-template-columns: repeat(4, minmax(0, 1fr));
+        gap: 1.25rem;
+      }
+
+      .feature-card {
+        background: var(--panel);
+        border: 1px solid var(--line);
+        border-radius: 14px;
+        padding: 1.5rem;
+        box-shadow: var(--shadow);
+      }
+
+      .feature-icon {
+        width: 46px;
+        height: 46px;
+        display: grid;
+        place-items: center;
+        border-radius: 12px;
+        background: var(--green);
+        color: #fff;
+        font-size: 1.3rem;
+        margin-bottom: 1rem;
+      }
+
+      .feature-card h3 {
+        margin: 0 0 0.4rem;
+        font-size: 1.05rem;
+        color: var(--navy);
+      }
+
+      .feature-card > p {
+        margin: 0 0 1rem;
+        color: var(--muted);
+        font-size: 0.92rem;
+      }
+
+      .feature-card .feature-label {
+        display: block;
+        margin-bottom: 0.5rem;
+        color: var(--muted);
+        font-weight: 900;
+        font-size: 0.68rem;
+        text-transform: uppercase;
+        letter-spacing: 0.06em;
+      }
+
+      .feature-card ul {
+        margin: 0;
+        padding-left: 1.1rem;
+        color: var(--text);
+        font-size: 0.88rem;
+      }
+
+      .feature-card li + li {
+        margin-top: 0.3rem;
+      }
+
+      /* Privacy callout */
+      .privacy-callout {
+        padding: 3.5rem 0;
+      }
+
+      .privacy-callout .card {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+        gap: 2rem;
+        align-items: center;
+        background: var(--navy);
+        color: #fff;
+        border-radius: 18px;
+        padding: 2.5rem;
+      }
+
+      .privacy-callout h2 {
+        margin: 0 0 0.75rem;
+        font-size: clamp(1.5rem, 3vw, 2rem);
+      }
+
+      .privacy-callout p {
+        margin: 0;
+        color: #c7cfe0;
+        font-size: 1rem;
+      }
+
+      .privacy-callout ul {
+        margin: 1.25rem 0 0;
+        padding: 0;
+        list-style: none;
+        display: grid;
+        gap: 0.65rem;
+      }
+
+      .privacy-callout li {
+        display: flex;
+        gap: 0.6rem;
+        align-items: flex-start;
+        font-weight: 700;
+      }
+
+      .privacy-callout li::before {
+        content: "✓";
+        color: #6ee7b7;
+        font-weight: 900;
+      }
+
+      /* Final CTA */
+      .final-cta {
+        padding: 4rem 0 5rem;
+        text-align: center;
+      }
+
+      .final-cta h2 {
+        margin: 0 0 0.75rem;
+        font-size: clamp(1.6rem, 3vw, 2.3rem);
+        color: var(--navy);
+      }
+
+      .final-cta p {
+        margin: 0 auto 1.75rem;
+        max-width: 46ch;
+        color: var(--muted);
+      }
+
+      .final-cta .hero-actions {
+        justify-content: center;
+      }
+
+      footer.site-footer {
+        border-top: 1px solid var(--line);
+        padding: 2.5rem 0;
+      }
+
+      .site-footer .wrap {
+        display: flex;
+        justify-content: space-between;
+        flex-wrap: wrap;
+        gap: 1rem;
+        color: var(--muted);
+        font-size: 0.85rem;
+      }
+
+      .site-footer a {
+        text-decoration: none;
+        color: var(--navy-2);
+        font-weight: 700;
+      }
+
+      .site-footer a:hover {
+        color: var(--green);
+      }
+
+      .footer-links {
+        display: flex;
+        gap: 1.5rem;
+      }
+
+      @media (max-width: 860px) {
+        .site-nav-links { display: none; }
+        .site-nav-cta .btn-ghost { display: none; }
+        .hero .wrap { grid-template-columns: 1fr; }
+        .hero-image { order: -1; }
+        .feature-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+        .privacy-callout .card { grid-template-columns: 1fr; }
+      }
+
+      @media (max-width: 480px) {
+        .site-nav .wrap { min-height: 56px; }
+        .site-nav-cta .btn { padding: 0.55rem 0.9rem; font-size: 0.85rem; white-space: nowrap; }
+        .feature-grid { grid-template-columns: 1fr; }
+      }
+
+      @media (max-width: 540px) {
+        .feature-grid { grid-template-columns: 1fr; }
+        .pillars-strip .wrap { justify-content: center; }
+      }
+    </style>
+  </head>
+  <body>
+    <header class="site-nav">
+      <div class="wrap">
+        <a class="site-brand" href="/welcome.html">
+          <img src="/assets/favicon.svg" alt="">
+          FamilyLoop
+        </a>
+        <nav class="site-nav-links">
+          <a href="#features">Features</a>
+          <a href="#privacy">Privacy</a>
+          <a href="/index.html#help">Help</a>
+        </nav>
+        <div class="site-nav-cta">
+          <a class="btn btn-ghost" href="/index.html">Sign in</a>
+          <a class="btn btn-primary" href="/index.html">Try the demo</a>
+        </div>
+      </div>
+    </header>
+
+    <section class="hero">
+      <div class="wrap">
+        <div>
+          <span class="hero-eyebrow">Household management, together</span>
+          <h1>Your household, working together.</h1>
+          <p class="lede">Zero-based budgeting, shared calendars, meal planning, documents, and shared expenses — all in one place your whole family can actually use.</p>
+          <div class="hero-actions">
+            <a class="btn btn-primary" href="/index.html">Try the demo</a>
+            <a class="btn btn-ghost" href="/index.html">Create your household</a>
+          </div>
+          <p class="hero-note">No credit card. The demo never gets administrator access, and nothing you type in it is kept.</p>
+        </div>
+        <div class="hero-image">
+          <img src="/assets/familyloop-help-household-planning.jpg" alt="A couple reviewing their household plan together in the kitchen">
+        </div>
+      </div>
+    </section>
+
+    <section class="pillars-strip">
+      <div class="wrap">
+        <span>Zero-based budgeting</span>
+        <span>Shared calendar &amp; chores</span>
+        <span>Meal planning</span>
+        <span>Shared expenses</span>
+        <span>Documents</span>
+        <span>Reports</span>
+      </div>
+    </section>
+
+    <section class="features" id="features">
+      <div class="wrap">
+        <div class="features-head">
+          <span>Features</span>
+          <h2>Everything a household actually needs</h2>
+          <p>Four areas, one workspace — built for running a home, not just tracking it.</p>
+        </div>
+        <div class="feature-grid">
+          <article class="feature-card">
+            <div class="feature-icon">💰</div>
+            <h3>Money</h3>
+            <p>Zero-based budgeting that actually balances.</p>
+            <span class="feature-label">Features</span>
+            <ul>
+              <li>Categories &amp; subcategories with planned vs. spent</li>
+              <li>Bank statement import with automatic refund matching</li>
+              <li>Cash flow, net worth, and category spending reports</li>
+              <li>Accounts, debt payoff tracking, and transfers</li>
+            </ul>
+          </article>
+          <article class="feature-card">
+            <div class="feature-icon">🏠</div>
+            <h3>Household</h3>
+            <p>The everyday logistics, shared by everyone.</p>
+            <span class="feature-label">Features</span>
+            <ul>
+              <li>Shared calendar with recurring chores and rotation</li>
+              <li>Birthday and anniversary reminders that repeat themselves</li>
+              <li>Meal planning, recipes, and an auto-built grocery list</li>
+              <li>Notes with checklists, labels, and pinning</li>
+            </ul>
+          </article>
+          <article class="feature-card">
+            <div class="feature-icon">🤝</div>
+            <h3>Together</h3>
+            <p>Money and decisions shared without the awkwardness.</p>
+            <span class="feature-label">Features</span>
+            <ul>
+              <li>Split a bill or track an IOU with friends</li>
+              <li>Settle up partially or in full, any time</li>
+              <li>Weigh a family decision with pros, cons, and an outcome</li>
+              <li>Fine-grained sharing — invite by exact area, not all-or-nothing</li>
+            </ul>
+          </article>
+          <article class="feature-card">
+            <div class="feature-icon">📁</div>
+            <h3>Documents</h3>
+            <p>The paperwork behind every number, always findable.</p>
+            <span class="feature-label">Features</span>
+            <ul>
+              <li>Upload and organize files into folders</li>
+              <li>Link a document straight to an account or a note</li>
+              <li>Available across every household you own</li>
+              <li>Photo and PDF previews, right in the browser</li>
+            </ul>
+          </article>
+        </div>
+      </div>
+    </section>
+
+    <section class="privacy-callout" id="privacy">
+      <div class="wrap">
+        <div class="card">
+          <div>
+            <h2>Some of it is just yours.</h2>
+            <p>Not everything in a shared household should be shared. Journal and Plan stay private to you — even household members with full access to everything else never see them.</p>
+          </div>
+          <ul>
+            <li>A private day-by-day Journal for mood, gratitude, and photos</li>
+            <li>A personal daily/weekly Plan with its own timeline</li>
+            <li>Never merged into the shared household data</li>
+            <li>Yours alone, on every device you sign into</li>
+          </ul>
+        </div>
+      </div>
+    </section>
+
+    <section class="final-cta">
+      <div class="wrap">
+        <h2>Bring your household into one place.</h2>
+        <p>Start with the demo, or create your own household in a couple of minutes.</p>
+        <div class="hero-actions">
+          <a class="btn btn-primary" href="/index.html">Try the demo</a>
+          <a class="btn btn-ghost" href="/index.html">Create your household</a>
+        </div>
+      </div>
+    </section>
+
+    <footer class="site-footer">
+      <div class="wrap">
+        <span>© 2026 FamilyLoop</span>
+        <div class="footer-links">
+          <a href="/index.html#help">Help</a>
+          <a href="/index.html">Sign in</a>
+        </div>
+      </div>
+    </footer>
+  </body>
+</html>
