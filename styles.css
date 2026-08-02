@@ -5617,15 +5617,18 @@ main {
   background: white;
 }
 
-.documents-folder-card-row {
+/* Name and action icons stack as two rows rather than sharing one - three
+   36px icon buttons left almost no width for the name in a single row at
+   this card's ~180px min-width, truncating even short names to a letter or
+   two. A full card-width row gives the name room regardless of icon count. */
+.documents-folder-card-actions {
   display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
+  align-items: center;
   gap: 0.4rem;
 }
 
 .documents-folder-open {
-  flex: 1;
+  width: 100%;
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
