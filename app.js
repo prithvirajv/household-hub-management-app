@@ -588,11 +588,6 @@ function remainingTotal() {
   return state.budget.income - spentTotal();
 }
 
-function assetValue(item) {
-  if (item.assetClass === "stock") return Math.max(0, Number(item.shares || 0)) * Math.max(0, Number(item.price || 0));
-  return Math.max(0, Number(item.value || 0));
-}
-
 function netWorth() {
   const assets = state.goals.netWorth.assets.reduce((sum, item) => sum + assetValue(item), 0);
   const liabilities = state.goals.netWorth.liabilities.reduce((sum, item) => sum + Number(item.value || 0), 0);
@@ -5500,83 +5495,32 @@ function reportCategories() {
   });
 }
 
-// The Reports page's own scope-aware version of reportCategories() - that
-// one only ever reads the single currently-viewed budget month
-// (spentByLine -> spentByLineInMonth(..., state.budget.month)), so it
-// silently ignored whatever date range/year the Reports scope picker was
-// actually set to. This sums spentByLineInMonth across every month in the
-// selected range instead, and also breaks each category down into its
-// subcategory (line) totals for drilldown - zero-spend subcategories are
-// left out as noise, matching the same convention already used for the
-// Budget vs Expense card.
+// Thin wrappers around lib/shared-logic.js's compute* counterparts - kept
+// under their original names/signatures so every existing call site here in
+// app.js is untouched, while the real (now unit-tested) implementation lives
+// in shared-logic.js. Named "computeX" there specifically to avoid colliding
+// with these same-named functions: app.js and shared-logic.js are separate
+// <script> tags sharing one global scope, so two top-level functions with the
+// identical name would silently shadow each other depending on script load
+// order instead of throwing.
 function reportCategoriesForScope(monthKeys) {
-  const effectiveMonthKeys = monthKeys.length ? monthKeys : trailingMonthKeys(6);
-  const lineTotal = (lineId) => effectiveMonthKeys.reduce((sum, monthKey) => sum + spentByLineInMonth(state.transactions, lineId, monthKey), 0);
-  const withLines = state.budget.categories.map((category) => {
-    const lines = category.lines
-      .map((line) => ({ id: line.id, name: line.name, value: lineTotal(line.id) }))
-      .filter((line) => line.value !== 0);
-    const value = category.lines.reduce((sum, line) => sum + lineTotal(line.id), 0);
-    return { name: category.name, color: category.color, value, lines };
-  });
-  const max = Math.max(...withLines.map((category) => category.value), 1);
-  return withLines.map((category) => ({ ...category, percent: Math.max(2, Math.round((category.value / max) * 100)) }));
+  return computeReportCategoriesForScope(state, monthKeys);
 }
 
 function trailingMonthKeys(count) {
-  const [year, month] = state.budget.month.split("-").map(Number);
-  const keys = [];
-  for (let i = count - 1; i >= 0; i -= 1) {
-    const date = new Date(year, month - 1 - i, 1);
-    keys.push(`${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}`);
-  }
-  return keys;
+  return computeTrailingMonthKeys(state.budget.month, count);
 }
 
-function monthEndDateKey(monthKey) {
-  const [year, month] = monthKey.split("-").map(Number);
-  const lastDay = new Date(year, month, 0).getDate();
-  return `${monthKey}-${String(lastDay).padStart(2, "0")}`;
-}
-
-// Net worth "as of" a past date, reconstructed rather than stored: a linked
-// account's historical balance comes straight from accountBalance (real
-// transaction/paycheck/transfer history), while an unlinked net-worth item
-// (e.g. property, no transaction history behind it) has no way to know what
-// it was worth in the past, so its current value is carried flat across the
-// whole trend — an honest approximation given what data actually exists.
 function netWorthAtDate(referenceDateKey) {
-  const context = { accounts: state.accounts, transactions: state.transactions, paychecks: state.paychecks, paycheckOccurrences: state.paycheckOccurrences, transfers: state.transfers, ious: state.ious || [] };
-  const assetTotal = state.goals.netWorth.assets.reduce((sum, asset) => {
-    const linkedAccount = state.accounts.find((account) => account.netWorthAssetId === asset.id);
-    return sum + (linkedAccount ? accountBalance(linkedAccount.id, context, referenceDateKey) : assetValue(asset));
-  }, 0);
-  const liabilityTotal = state.goals.netWorth.liabilities.reduce((sum, liability) => {
-    const linkedAccount = state.accounts.find((account) => account.netWorthLiabilityId === liability.id);
-    return sum + (linkedAccount ? accountBalance(linkedAccount.id, context, referenceDateKey) : Number(liability.value || 0));
-  }, 0);
-  return assetTotal - liabilityTotal;
+  return computeNetWorthAtDate(state, referenceDateKey);
 }
 
 function netWorthTrend(monthKeys) {
-  return monthKeys.map((monthKey) => ({ month: monthKey, value: netWorthAtDate(monthEndDateKey(monthKey)) }));
+  return computeNetWorthTrend(state, monthKeys);
 }
 
 function cashFlowByMonth(monthKeys) {
-  return monthKeys.map((monthKey) => {
-    const monthStart = `${monthKey}-01`;
-    const monthEnd = monthEndDateKey(monthKey);
-    const expenses = state.transactions
-      .filter((transaction) => transaction.date >= monthStart && transaction.date <= monthEnd)
-      .reduce((sum, transaction) => sum + Number(transaction.amount || 0), 0);
-    const oneTimeIncome = state.paychecks
-      .filter((paycheck) => ["once", "bonus"].includes(paycheck.recurrence || "once"))
-      .reduce((sum, paycheck) => sum + Number(paycheck.amount || 0) * paycheckOccurrencesInRange(paycheck, monthStart, monthEnd), 0);
-    const recurringIncome = (state.paycheckOccurrences || [])
-      .filter((occurrence) => occurrence.date >= monthStart && occurrence.date <= monthEnd)
-      .reduce((sum, occurrence) => sum + Number(occurrence.amount || 0), 0);
-    return { month: monthKey, income: oneTimeIncome + recurringIncome, expenses };
-  });
+  return computeCashFlowByMonth(state, monthKeys);
 }
 
 function netWorthTrendSvg(trend) {
@@ -5632,29 +5576,6 @@ function cashFlowChart(months) {
       `).join("")}
     </div>
     <div class="cashflow-legend"><span class="cashflow-legend-income">Income</span><span class="cashflow-legend-expense">Expenses</span></div>`;
-}
-
-// Builds the ordered list of destinations a Sankey-style breakdown flows
-// income into: each category with real spend (largest first, matching how
-// Monarch orders its own bands), plus a trailing "Savings" segment for
-// whatever's left of income after expenses - omitted entirely (not shown as
-// zero/negative) once spend meets or exceeds income, since there's nothing
-// left to show.
-// Budget categories have no id of their own (only their lines do), and
-// category names aren't guaranteed unique, so a segment's own set of line
-// ids doubles as its drill-down key - naturally unique per segment and
-// exactly the set needed to filter matching transactions anyway.
-function sankeyFlowSegments(categories, totalIncome, totalExpenses) {
-  const segments = categories
-    .filter((category) => category.value > 0)
-    .map((category) => ({ label: category.name, value: category.value, color: category.color, lineIds: category.lines.map((line) => line.id) }))
-    .sort((a, b) => b.value - a.value);
-  const savings = totalIncome - totalExpenses;
-  // Savings has no backing category/lines - it's whatever's left of income
-  // after expenses, not a real spending bucket - so it's shown but not
-  // drill-down-able like the real category segments above it.
-  if (savings > 0) segments.push({ label: "Savings", value: savings, color: "#13936d", lineIds: [] });
-  return segments;
 }
 
 // Two-column flow diagram: a single "Income" node on the left splitting

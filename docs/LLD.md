@@ -172,7 +172,35 @@ byte-for-byte between the browser, the server, and the test suite.
 - **Tags**: `normalizeTag`, `groupTransactionsByTag`.
 - **Budgeting/reports math**: `monthKeysInRange`, `spentByLineInMonth`,
   `recurringBudgetSetAside`, `nextRecurringBudgetDueDate`,
-  `monthsUntilDueInclusive`.
+  `monthsUntilDueInclusive`, `monthEndDateKey`, `assetValue`,
+  `computeTrailingMonthKeys`, `computeReportCategoriesForScope`,
+  `computeNetWorthAtDate`, `computeNetWorthTrend`, `computeCashFlowByMonth`,
+  `sankeyFlowSegments` (the last seven were extracted from app.js
+  specifically to get them under unit test — see the note below).
+
+**Extraction note**: app.js has zero measured test coverage of its own — it
+only ever runs in the browser, never under `node --test` — so pure
+calculation logic that used to live there (reading `state` implicitly) is
+being moved into shared-logic.js as parameterized functions and unit
+tested, following the same pattern already established for everything else
+in this file. `reportCategoriesForScope`, `trailingMonthKeys`,
+`netWorthAtDate`, `netWorthTrend`, and `cashFlowByMonth` still exist in
+app.js as one-line wrappers under their original names/signatures (so every
+existing render-function call site is untouched) that just delegate to the
+new `compute*`-prefixed shared-logic.js implementations. The `compute`
+prefix is required, not stylistic: app.js and shared-logic.js are separate
+`<script>` tags sharing one global scope, so a shared-logic.js function
+with the *same* name as an app.js function would silently shadow it
+depending on script load order instead of throwing (a real bug class in
+this codebase — a duplicate top-level name breaks the app and
+`node --check` won't catch it, since each file is syntactically valid on
+its own). `monthEndDateKey`, `assetValue`,
+and `sankeyFlowSegments` had no such collision (identical signature, or
+call sites already used the bare name with no local app.js definition left
+behind) and were moved outright with no wrapper. Continuing this pattern
+for the rest of app.js's calculation functions (budget-vs-actual, home
+dashboard reminders, etc.) is the natural next step for closing the
+coverage gap further.
 
 ## 6. Key algorithms
 

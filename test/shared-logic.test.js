@@ -6,6 +6,7 @@ const {
   timeToMinutes, minutesToTime, snapMinutes, layoutTimelineBlocks, comparePlannedToActual,
   sanitizeFilename, buildDocumentObjectPath, wouldCreateFolderCycle, buildFolderTree,
   smsGatewayAddress, paycheckOccurrencesSince, paycheckOccurrencesInRange, paycheckAllOccurrenceDatesInRange, recurringExpenseOccurrenceDates, accountBalance, accountsWithBalances,
+  monthEndDateKey, assetValue, computeTrailingMonthKeys, computeReportCategoriesForScope, computeNetWorthAtDate, computeNetWorthTrend, computeCashFlowByMonth, sankeyFlowSegments,
   splitAmountEvenly, splitBillByPercentages, splitBillByShares, netBalancesByPerson, computeBillSplitAmounts, settleUpPersonIous, isValidEmail,
   parseDelimitedText, parseBankCsvTransactions, normalizeForAccountMatch, matchAccountByFilename, isDuplicateTransaction, findTransferCandidate,
   orderRefundMatch, normalizeForPayeeMatch, payeesFuzzyMatch, refundFuzzyMatch, refundMatch,
@@ -1454,4 +1455,105 @@ test("choreNotifyAt advances through real elapsed time even when no occurrence i
   assert.equal(weekOne.slice(0, 10), "2026-07-19");
   const weekThree = choreNotifyAt(chore, new Date("2026-08-03T00:00:00.000Z"));
   assert.equal(weekThree.slice(0, 10), "2026-08-02", "keeps tracking the current occurrence instead of staying pinned to the first one nobody completed");
+});
+
+test("monthEndDateKey returns the real last day of the month, including February in a leap year", () => {
+  assert.equal(monthEndDateKey("2026-04"), "2026-04-30");
+  assert.equal(monthEndDateKey("2026-02"), "2026-02-28", "2026 is not a leap year");
+  assert.equal(monthEndDateKey("2028-02"), "2028-02-29", "2028 is a leap year");
+});
+
+test("assetValue computes a stock holding from shares * price, or reads .value directly otherwise, clamping negatives to 0", () => {
+  assert.equal(assetValue({ assetClass: "stock", shares: 10, price: 25.5 }), 255);
+  assert.equal(assetValue({ value: 400 }), 400);
+  assert.equal(assetValue({ value: -50 }), 0, "a negative plain value clamps to 0, not a negative asset");
+  assert.equal(assetValue({ assetClass: "stock", shares: -5, price: 10 }), 0, "negative shares clamp to 0 before multiplying");
+});
+
+test("computeTrailingMonthKeys lists the N months ending at the given month, inclusive, rolling back across a year boundary", () => {
+  assert.deepEqual(computeTrailingMonthKeys("2026-03", 3), ["2026-01", "2026-02", "2026-03"]);
+  assert.deepEqual(computeTrailingMonthKeys("2026-02", 4), ["2025-11", "2025-12", "2026-01", "2026-02"]);
+});
+
+test("computeReportCategoriesForScope sums spend per category/subcategory across every month in scope, falling back to a trailing 6 months when the scope is empty", () => {
+  const state = {
+    budget: {
+      month: "2026-06",
+      categories: [
+        { name: "Food", color: "#111", lines: [{ id: "groceries", name: "Groceries", planned: 0 }, { id: "dining", name: "Dining", planned: 0 }] },
+        { name: "Empty Category", color: "#222", lines: [{ id: "unused", name: "Unused", planned: 0 }] }
+      ]
+    },
+    transactions: [
+      { lineId: "groceries", amount: 100, date: "2026-05-15" },
+      { lineId: "groceries", amount: 50, date: "2026-06-10" },
+      { lineId: "dining", amount: 30, date: "2026-06-12" }
+    ]
+  };
+  const result = computeReportCategoriesForScope(state, ["2026-05", "2026-06"]);
+  const food = result.find((category) => category.name === "Food");
+  assert.equal(food.value, 180, "sums across both months in scope");
+  assert.deepEqual(food.lines.map((line) => line.name), ["Groceries", "Dining"]);
+  const empty = result.find((category) => category.name === "Empty Category");
+  assert.equal(empty.lines.length, 0, "a zero-spend subcategory is left out as noise");
+  const fallback = computeReportCategoriesForScope(state, []);
+  assert.ok(fallback.find((category) => category.name === "Food").value >= 180, "an empty scope falls back to the trailing 6 months, which still covers May+June");
+});
+
+test("computeNetWorthAtDate sums unlinked assets/liabilities directly and linked ones via accountBalance instead of their own stored value", () => {
+  const state = {
+    accounts: [{ id: "savings", type: "checking", openingBalance: 5000, netWorthAssetId: "investments" }],
+    transactions: [],
+    paychecks: [],
+    paycheckOccurrences: [],
+    transfers: [],
+    ious: [],
+    goals: {
+      netWorth: {
+        // "investments" is linked to the savings account, so its own .value
+        // (999999) must be ignored in favor of the account's real balance.
+        assets: [{ id: "house", value: 300000 }, { id: "investments", value: 999999 }],
+        liabilities: [{ id: "car-loan", value: 20000 }]
+      }
+    }
+  };
+  assert.equal(computeNetWorthAtDate(state, "2026-06-30"), 300000 + 5000 - 20000);
+});
+
+test("computeNetWorthTrend maps each month key to its net worth at that month's end date", () => {
+  const state = {
+    accounts: [],
+    transactions: [],
+    paychecks: [],
+    paycheckOccurrences: [],
+    transfers: [],
+    ious: [],
+    goals: { netWorth: { assets: [{ id: "cash", value: 5000 }], liabilities: [] } }
+  };
+  const trend = computeNetWorthTrend(state, ["2026-01", "2026-02"]);
+  assert.deepEqual(trend, [{ month: "2026-01", value: 5000 }, { month: "2026-02", value: 5000 }]);
+});
+
+test("computeCashFlowByMonth sums expenses and both one-time and recurring-occurrence income within each month", () => {
+  const state = {
+    transactions: [{ date: "2026-06-05", amount: 200 }, { date: "2026-06-20", amount: -40 }],
+    paychecks: [{ amount: 1000, recurrence: "once", date: "2026-06-10" }],
+    paycheckOccurrences: [{ date: "2026-06-15", amount: 2500 }]
+  };
+  const [june] = computeCashFlowByMonth(state, ["2026-06"]);
+  assert.equal(june.expenses, 160);
+  assert.equal(june.income, 3500, "one-time paycheck (1000) + recurring occurrence (2500)");
+});
+
+test("sankeyFlowSegments sorts categories by value descending, drops zero-spend categories, and appends Savings only when income exceeds expenses", () => {
+  const categories = [
+    { name: "Rent", color: "#a", value: 1500, lines: [{ id: "rent" }] },
+    { name: "Groceries", color: "#b", value: 3000, lines: [{ id: "groceries" }] },
+    { name: "Unused", color: "#c", value: 0, lines: [] }
+  ];
+  const withSavings = sankeyFlowSegments(categories, 6000, 4500);
+  assert.deepEqual(withSavings.map((segment) => segment.label), ["Groceries", "Rent", "Savings"], "largest category first, Savings last");
+  assert.equal(withSavings.find((segment) => segment.label === "Savings").value, 1500);
+  const noSavings = sankeyFlowSegments(categories, 4000, 4500);
+  assert.equal(noSavings.find((segment) => segment.label === "Savings"), undefined, "no Savings segment once spend meets or exceeds income");
 });
