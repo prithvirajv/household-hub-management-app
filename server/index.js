@@ -19,7 +19,7 @@ const pdfParse = require("pdf-parse");
 const ExcelJS = require("exceljs");
 
 const ANNUAL_EVENT_TYPES = ["birthday", "anniversary"];
-const { createSignedUploadUrl, createSignedDownloadUrl, deleteObject } = require("./gcs");
+const { createSignedUploadUrl, createSignedDownloadUrl, deleteObject, copyObject } = require("./gcs");
 
 const PORT = Number(process.env.PORT || 8080);
 const SESSION_COOKIE = "hh_session";
@@ -2963,12 +2963,36 @@ async function loadOwnerFolders(ownerId) {
   return result.rows;
 }
 
-async function loadOwnerDocuments(ownerId) {
+// Documents only store uploaded_by/last_opened_by as user ids; this attaches
+// the display names the client needs (e.g. "You opened" / "Priya opened")
+// without every route that touches a document having to repeat the lookup.
+// Mutates each row in place (rather than returning copies) since the
+// MEMORY_DB routes hold onto the exact object references returned here and
+// mutate them directly to persist changes (e.g. document.status = "ready") -
+// a spread copy would silently break that.
+async function attachDocumentNames(rows) {
+  if (!rows.length) return rows;
+  const ids = [...new Set(rows.flatMap((row) => [row.uploaded_by, row.last_opened_by]).filter(Boolean))];
+  if (!ids.length) return rows;
+  let byId;
   if (MEMORY_DB) {
-    return memoryDb.documents.filter((item) => item.owner_user_id === ownerId);
+    byId = new Map(memoryDb.users.map((user) => [user.id, user.name]));
+  } else {
+    const result = await pool.query("SELECT id, name FROM users WHERE id = ANY($1)", [ids]);
+    byId = new Map(result.rows.map((user) => [user.id, user.name]));
   }
-  const result = await pool.query("SELECT * FROM documents WHERE owner_user_id = $1", [ownerId]);
-  return result.rows;
+  rows.forEach((row) => {
+    row.uploaded_by_name = byId.get(row.uploaded_by) || null;
+    row.last_opened_by_name = byId.get(row.last_opened_by) || null;
+  });
+  return rows;
+}
+
+async function loadOwnerDocuments(ownerId) {
+  const rows = MEMORY_DB
+    ? memoryDb.documents.filter((item) => item.owner_user_id === ownerId)
+    : (await pool.query("SELECT * FROM documents WHERE owner_user_id = $1", [ownerId])).rows;
+  return attachDocumentNames(rows);
 }
 
 function toClientFolder(folder) {
@@ -2988,6 +3012,7 @@ function toClientDocument(document) {
     id: document.id,
     householdId: document.household_id,
     uploadedBy: document.uploaded_by,
+    uploadedByName: document.uploaded_by_name || null,
     folderId: document.folder_id,
     noteId: document.note_id,
     wealthItemType: document.wealth_item_type,
@@ -2997,6 +3022,9 @@ function toClientDocument(document) {
     contentType: document.content_type,
     sizeBytes: document.size_bytes,
     status: document.status,
+    lastOpenedBy: document.last_opened_by || null,
+    lastOpenedByName: document.last_opened_by_name || null,
+    lastOpenedAt: document.last_opened_at || null,
     createdAt: document.created_at,
     updatedAt: document.updated_at
   };
@@ -3213,6 +3241,74 @@ app.get("/api/documents/:id/download-url", requireSession, async (req, res, next
 
     const { url, expiresAt } = await createSignedDownloadUrl(document.storage_object);
     res.json({ url, expiresAt });
+  } catch (error) {
+    next(error);
+  }
+});
+
+// Separate from download-url on purpose: download-url is also fetched in the
+// background to rasterize thumbnails, which shouldn't count as the user
+// having opened the file. This is only called from an explicit Open/Download
+// click, matching Google Drive's "You opened" semantics.
+app.post("/api/documents/:id/open", requireSession, async (req, res, next) => {
+  try {
+    const ownerId = await resolveOwnerId(req);
+    const documents = await loadOwnerDocuments(ownerId);
+    const document = documents.find((item) => item.id === req.params.id);
+    if (!document) return res.status(404).json({ error: "Document not found" });
+
+    if (MEMORY_DB) {
+      document.last_opened_by = req.sessionUser.id;
+      document.last_opened_at = new Date().toISOString();
+      document.last_opened_by_name = req.sessionUser.name;
+      return res.json(toClientDocument(document));
+    }
+
+    const result = await pool.query(
+      `UPDATE documents SET last_opened_by = $1, last_opened_at = now() WHERE id = $2 AND owner_user_id = $3 RETURNING *`,
+      [req.sessionUser.id, document.id, ownerId]
+    );
+    const [updated] = await attachDocumentNames(result.rows);
+    res.json(toClientDocument(updated));
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.post("/api/documents/:id/copy", requireSession, async (req, res, next) => {
+  try {
+    const ownerId = await resolveOwnerId(req);
+    const documents = await loadOwnerDocuments(ownerId);
+    const source = documents.find((item) => item.id === req.params.id);
+    if (!source) return res.status(404).json({ error: "Document not found" });
+    if (source.status !== "ready") return res.status(400).json({ error: "Document is still uploading" });
+
+    const newId = crypto.randomUUID();
+    const copyName = `Copy of ${source.name}`;
+    const storageObject = buildDocumentObjectPath(req.sessionUser.household_id, newId, copyName);
+    await copyObject(source.storage_object, storageObject);
+
+    if (MEMORY_DB) {
+      const copy = {
+        id: newId, household_id: req.sessionUser.household_id, owner_user_id: ownerId, uploaded_by: req.sessionUser.id,
+        folder_id: source.folder_id, note_id: null, wealth_item_type: null, wealth_item_id: null,
+        name: copyName, description: source.description || "", content_type: source.content_type,
+        size_bytes: source.size_bytes, storage_object: storageObject, status: "ready",
+        last_opened_by: null, last_opened_at: null,
+        created_at: new Date().toISOString(), updated_at: new Date().toISOString()
+      };
+      memoryDb.documents.push(copy);
+      const [withNames] = await attachDocumentNames([copy]);
+      return res.json(toClientDocument(withNames));
+    }
+
+    const result = await pool.query(
+      `INSERT INTO documents (id, household_id, owner_user_id, uploaded_by, folder_id, name, content_type, size_bytes, storage_object, status)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, 'ready') RETURNING *`,
+      [newId, req.sessionUser.household_id, ownerId, req.sessionUser.id, source.folder_id, copyName, source.content_type, source.size_bytes, storageObject]
+    );
+    const [withNames] = await attachDocumentNames(result.rows);
+    res.json(toClientDocument(withNames));
   } catch (error) {
     next(error);
   }

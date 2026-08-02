@@ -252,3 +252,7 @@ ALTER TABLE documents DROP CONSTRAINT IF EXISTS documents_household_id_fkey;
 ALTER TABLE documents ALTER COLUMN household_id DROP NOT NULL;
 ALTER TABLE documents ADD CONSTRAINT documents_household_id_fkey
   FOREIGN KEY (household_id) REFERENCES households(id) ON DELETE SET NULL;
+
+ALTER TABLE documents
+  ADD COLUMN IF NOT EXISTS last_opened_by UUID REFERENCES users(id) ON DELETE SET NULL,
+  ADD COLUMN IF NOT EXISTS last_opened_at TIMESTAMPTZ;

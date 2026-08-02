@@ -108,6 +108,11 @@ let documentsCurrentFolderId = null;
 let documentsUploading = false;
 let documentsDragPayload = null;
 let documentsUploadProgress = null;
+// documentId -> { kind: "image"|"badge", src?, label?, color? }. Rasterized
+// once per session (not persisted - regenerating on reload is cheap and
+// avoids storing derived thumbnail bytes anywhere).
+const documentsThumbnailCache = new Map();
+let documentsInfoExpandedId = null;
 let wealthDocsExpandedKey = null;
 
 function currentMonthKey() {
@@ -2963,6 +2968,125 @@ async function runBulkDocumentUpload(fileEntries) {
   if (failures) window.alert(`${failures} of ${fileEntries.length} file${fileEntries.length === 1 ? "" : "s"} failed to upload.`);
 }
 
+const DOCUMENT_TYPE_BADGES = {
+  "application/pdf": { label: "PDF", color: "#d64545" },
+  "application/msword": { label: "DOC", color: "#2f6fdb" },
+  "application/vnd.openxmlformats-officedocument.wordprocessingml.document": { label: "DOC", color: "#2f6fdb" },
+  "application/vnd.ms-excel": { label: "XLS", color: "#1f9d55" },
+  "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": { label: "XLS", color: "#1f9d55" },
+  "text/csv": { label: "CSV", color: "#1f9d55" },
+  "application/zip": { label: "ZIP", color: "#6b7280" },
+  "text/plain": { label: "TXT", color: "#6b7280" }
+};
+
+function documentTypeBadge(item) {
+  const known = DOCUMENT_TYPE_BADGES[item.contentType];
+  if (known) return known;
+  const ext = (item.name.split(".").pop() || "").toUpperCase().slice(0, 4);
+  return { label: ext || "FILE", color: "#6b7280" };
+}
+
+// Draws onto a fixed-width canvas so every thumbnail is a similarly small,
+// cheap-to-hold data URL regardless of the source image's real resolution.
+async function rasterizeImageThumbnail(url) {
+  const img = new Image();
+  img.crossOrigin = "anonymous";
+  await new Promise((resolve, reject) => {
+    img.onload = resolve;
+    img.onerror = () => reject(new Error("Could not load image"));
+    img.src = url;
+  });
+  const canvas = window.document.createElement("canvas");
+  const scale = 200 / img.naturalWidth;
+  canvas.width = 200;
+  canvas.height = Math.max(1, Math.round(img.naturalHeight * scale));
+  canvas.getContext("2d").drawImage(img, 0, 0, canvas.width, canvas.height);
+  return canvas.toDataURL("image/jpeg", 0.85);
+}
+
+// Renders just the PDF's first page via pdf.js (loaded from a CDN in
+// index.html, like the existing Google Sign-In script tag) rather than
+// parsing/rendering the whole document - this mirrors why bank-statement PDF
+// parsing was kept server-side elsewhere (see the pdf-parse endpoint comment):
+// a full client-side PDF library is only worth it for this one narrow,
+// bounded job (one page, small canvas), not for arbitrary PDF processing.
+async function rasterizePdfThumbnail(url) {
+  const pdf = await pdfjsLib.getDocument(url).promise;
+  const page = await pdf.getPage(1);
+  const baseViewport = page.getViewport({ scale: 1 });
+  const viewport = page.getViewport({ scale: 200 / baseViewport.width });
+  const canvas = window.document.createElement("canvas");
+  canvas.width = viewport.width;
+  canvas.height = viewport.height;
+  await page.render({ canvasContext: canvas.getContext("2d"), viewport }).promise;
+  return canvas.toDataURL("image/jpeg", 0.85);
+}
+
+// Fire-and-forget: called from the render path, resolves later and triggers
+// its own render() once the thumbnail is ready. The pending-state guard means
+// re-entering this mid-flight (render() runs again before it resolves) is a
+// harmless no-op rather than a duplicate fetch.
+async function queueDocumentThumbnail(item) {
+  if (documentsThumbnailCache.has(item.id)) return;
+  documentsThumbnailCache.set(item.id, { kind: "pending" });
+  try {
+    let src = null;
+    if (item.contentType?.startsWith("image/")) {
+      const { url } = await api(`/api/documents/${item.id}/download-url`);
+      if (/^https?:\/\//.test(url)) src = await rasterizeImageThumbnail(url);
+    } else if (item.contentType === "application/pdf" && window.pdfjsLib) {
+      const { url } = await api(`/api/documents/${item.id}/download-url`);
+      if (/^https?:\/\//.test(url)) src = await rasterizePdfThumbnail(url);
+    }
+    documentsThumbnailCache.set(item.id, src ? { kind: "image", src } : { kind: "badge", ...documentTypeBadge(item) });
+  } catch (error) {
+    documentsThumbnailCache.set(item.id, { kind: "badge", ...documentTypeBadge(item) });
+  }
+  render();
+}
+
+// Shared by the thumbnail click, the menu's "Open" action, and the existing
+// "Download" action - in a plain web app with no in-app viewer, opening and
+// downloading a file are the same browser action, so they should also share
+// the same "you opened this" tracking rather than only counting one of them.
+async function openDocumentFile(documentId) {
+  const { url } = await api(`/api/documents/${documentId}/download-url`);
+  window.open(url, "_blank", "noopener");
+  try {
+    await api(`/api/documents/${documentId}/open`, { method: "POST" });
+  } catch (error) {
+    console.warn("Could not record document open", error);
+  }
+  await loadDocumentsData(false);
+  render();
+}
+
+function formatDocumentOpenedDate(iso) {
+  if (!iso) return "";
+  return new Date(iso).toLocaleDateString(undefined, { month: "short", day: "numeric" });
+}
+
+function documentOpenedLine(item) {
+  if (!item.lastOpenedAt) return `<small class="documents-opened-meta muted">Not opened yet</small>`;
+  const isYou = item.lastOpenedByName && item.lastOpenedByName === sessionUser?.name;
+  const who = isYou ? "You" : escapeHtml(item.lastOpenedByName || "Someone");
+  return `<small class="documents-opened-meta">${who} opened · ${formatDocumentOpenedDate(item.lastOpenedAt)}</small>`;
+}
+
+function documentThumbnailHtml(item) {
+  if (item.status === "pending") {
+    return `<span class="documents-thumb-badge" style="background:#9aa5b1">…</span>`;
+  }
+  const cached = documentsThumbnailCache.get(item.id);
+  if (!cached || cached.kind === "pending") {
+    queueDocumentThumbnail(item);
+    const badge = documentTypeBadge(item);
+    return `<span class="documents-thumb-badge" style="background:${badge.color}">${escapeHtml(badge.label)}</span>`;
+  }
+  if (cached.kind === "image") return `<img class="documents-thumb-img" src="${cached.src}" alt="">`;
+  return `<span class="documents-thumb-badge" style="background:${cached.color}">${escapeHtml(cached.label)}</span>`;
+}
+
 function formatFileSize(sizeBytes) {
   const size = Number(sizeBytes) || 0;
   if (size <= 0) return "";
@@ -3053,26 +3177,56 @@ function renderFolderWealthLinkPicker(folder) {
   </details>`;
 }
 
-function renderDocumentRow(document) {
-  const linkedNote = document.noteId ? state.notes.entries.find((note) => note.id === document.noteId) : null;
-  const wealthLabel = documentsWealthItemLabel(document);
-  return `<div class="documents-file-row" data-document-id="${document.id}" draggable="true" data-drag-type="document" data-drag-id="${document.id}">
-    <div class="documents-file-info">
-      <strong>${escapeHtml(document.name)}</strong>
-      <small>${[formatFileSize(document.sizeBytes), document.status === "pending" ? "Uploading…" : document.contentType].filter(Boolean).join(" · ")}</small>
+function documentInfoPanelHtml(item) {
+  if (documentsInfoExpandedId !== item.id) return "";
+  const rows = [
+    ["Type", item.contentType || "Unknown"],
+    ["Size", formatFileSize(item.sizeBytes) || "Unknown"],
+    ["Uploaded by", item.uploadedByName || "Unknown"],
+    ["Uploaded", item.createdAt ? new Date(item.createdAt).toLocaleString() : "Unknown"],
+    ["Last opened", item.lastOpenedAt ? `${item.lastOpenedByName || "Someone"} · ${new Date(item.lastOpenedAt).toLocaleString()}` : "Not opened yet"]
+  ];
+  return `<div class="documents-file-info-panel">
+    ${rows.map(([label, value]) => `<div class="documents-file-info-row"><span>${escapeHtml(label)}</span><strong>${escapeHtml(String(value))}</strong></div>`).join("")}
+  </div>`;
+}
+
+function renderDocumentCard(item) {
+  const linkedNote = item.noteId ? state.notes.entries.find((note) => note.id === item.noteId) : null;
+  const wealthLabel = documentsWealthItemLabel(item);
+  return `<div class="documents-file-card" data-document-id="${item.id}" draggable="true" data-drag-type="document" data-drag-id="${item.id}">
+    <div class="documents-file-card-header">
+      <strong class="documents-file-name" title="${escapeHtml(item.name)}">${escapeHtml(item.name)}</strong>
+      <details class="documents-item-menu">
+        <summary class="documents-icon-btn" aria-label="More actions for ${escapeHtml(item.name)}">⋮</summary>
+        <div class="documents-item-menu-options">
+          <button type="button" data-documents-open-file="${item.id}">Open</button>
+          <button type="button" data-documents-download="${item.id}">Download</button>
+          <button type="button" data-documents-rename="${item.id}">Rename</button>
+          <button type="button" data-documents-copy="${item.id}">Make a copy</button>
+          <button type="button" data-documents-info="${item.id}">File information</button>
+          <label class="documents-item-menu-move">Move to
+            <select class="documents-move-select" data-documents-move="${item.id}" aria-label="Move to folder">
+              <option value="">All documents (root)</option>
+              ${documentsData.folders.map((folder) => `<option value="${folder.id}" ${item.folderId === folder.id ? "selected" : ""}>${escapeHtml(documentsFolderFullPath(folder.id))}</option>`).join("")}
+            </select>
+          </label>
+          ${renderDocumentNoteLinkPicker(item)}
+          ${renderDocumentWealthLinkPicker(item)}
+          <button type="button" class="danger-button" data-documents-delete="${item.id}">Delete</button>
+        </div>
+      </details>
+    </div>
+    <button type="button" class="documents-file-thumb" data-documents-open-file="${item.id}" aria-label="Open ${escapeHtml(item.name)}">
+      ${documentThumbnailHtml(item)}
+    </button>
+    <div class="documents-file-meta">
+      <small>${[formatFileSize(item.sizeBytes), item.status === "pending" ? "Uploading…" : item.contentType].filter(Boolean).join(" · ")}</small>
+      ${documentOpenedLine(item)}
       ${linkedNote ? `<small class="documents-linked-note">Linked to “${escapeHtml(linkedNote.title || "Untitled note")}”</small>` : ""}
       ${wealthLabel ? `<small class="documents-linked-note">Tagged to ${escapeHtml(wealthLabel)}</small>` : ""}
     </div>
-    <div class="documents-file-actions">
-      <select class="documents-move-select" data-documents-move="${document.id}" aria-label="Move to folder">
-        <option value="">All documents (root)</option>
-        ${documentsData.folders.map((folder) => `<option value="${folder.id}" ${document.folderId === folder.id ? "selected" : ""}>${escapeHtml(documentsFolderFullPath(folder.id))}</option>`).join("")}
-      </select>
-      ${renderDocumentNoteLinkPicker(document)}
-      ${renderDocumentWealthLinkPicker(document)}
-      <button type="button" class="documents-icon-btn" data-documents-download="${document.id}" title="Download" aria-label="Download ${escapeHtml(document.name)}">⇩</button>
-      <button type="button" class="documents-icon-btn danger-button" data-documents-delete="${document.id}" title="Delete" aria-label="Delete ${escapeHtml(document.name)}">×</button>
-    </div>
+    ${documentInfoPanelHtml(item)}
   </div>`;
 }
 
@@ -3116,7 +3270,7 @@ function renderDocuments() {
         ${folder.wealthItemId ? `<small class="documents-linked-note">Tagged to ${escapeHtml(wealthItemLabel(folder.wealthItemType, folder.wealthItemId) || "")}</small>` : ""}
       </div>`).join("")}
     </div>` : ""}
-    ${currentDocuments.length ? `<div class="documents-file-list">${currentDocuments.map(renderDocumentRow).join("")}</div>` : `<p class="muted">No documents in this folder yet. Drag and drop files or folders here to upload.</p>`}
+    ${currentDocuments.length ? `<div class="documents-file-grid">${currentDocuments.map(renderDocumentCard).join("")}</div>` : `<p class="muted">No documents in this folder yet. Drag and drop files or folders here to upload.</p>`}
   </section>`;
 }
 
@@ -8525,14 +8679,49 @@ function bindViewEvents() {
     });
   });
 
-  document.querySelectorAll("[data-documents-download]").forEach((button) => {
+  document.querySelectorAll("[data-documents-download], [data-documents-open-file]").forEach((button) => {
     button.addEventListener("click", async () => {
+      const documentId = button.dataset.documentsDownload || button.dataset.documentsOpenFile;
       try {
-        const { url } = await api(`/api/documents/${button.dataset.documentsDownload}/download-url`);
-        window.open(url, "_blank", "noopener");
+        await openDocumentFile(documentId);
       } catch (error) {
         window.alert(error.message);
       }
+    });
+  });
+
+  document.querySelectorAll("[data-documents-rename]").forEach((button) => {
+    button.addEventListener("click", async () => {
+      const item = documentsData.documents.find((doc) => doc.id === button.dataset.documentsRename);
+      const name = window.prompt("Rename document", item?.name || "");
+      if (!name || !name.trim()) return;
+      try {
+        await api(`/api/documents/${button.dataset.documentsRename}`, { method: "PATCH", body: JSON.stringify({ name: name.trim() }) });
+        await loadDocumentsData(false);
+        render();
+      } catch (error) {
+        window.alert(error.message);
+      }
+    });
+  });
+
+  document.querySelectorAll("[data-documents-copy]").forEach((button) => {
+    button.addEventListener("click", async () => {
+      try {
+        await api(`/api/documents/${button.dataset.documentsCopy}/copy`, { method: "POST" });
+        await loadDocumentsData(false);
+        render();
+      } catch (error) {
+        window.alert(error.message);
+      }
+    });
+  });
+
+  document.querySelectorAll("[data-documents-info]").forEach((button) => {
+    button.addEventListener("click", () => {
+      const id = button.dataset.documentsInfo;
+      documentsInfoExpandedId = documentsInfoExpandedId === id ? null : id;
+      render();
     });
   });
 

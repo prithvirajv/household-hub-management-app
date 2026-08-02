@@ -5563,9 +5563,10 @@ main {
   justify-content: center;
   min-height: 38px;
   padding: 0 0.75rem;
-  border: 1px solid var(--line);
+  border: 0;
   border-radius: 7px;
-  color: var(--text);
+  background: var(--green);
+  color: white;
   font-size: 0.8rem;
   font-weight: 800;
   cursor: pointer;
@@ -5618,7 +5619,7 @@ main {
 
 .documents-folder-card-row {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   justify-content: space-between;
   gap: 0.4rem;
 }
@@ -5670,41 +5671,202 @@ main {
   display: none;
 }
 
-.documents-file-list {
+.documents-file-grid {
   display: grid;
-  gap: 0.6rem;
+  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+  gap: 0.7rem;
 }
 
-.documents-file-row {
+.documents-file-card {
   display: flex;
-  flex-wrap: wrap;
-  align-items: center;
+  flex-direction: column;
+  gap: 0.4rem;
+  padding: 0.6rem;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: white;
+  min-width: 0;
+}
+
+.documents-file-card-header {
+  display: flex;
+  align-items: flex-start;
   justify-content: space-between;
-  gap: 0.6rem;
-  padding: 0.65rem 0.85rem;
+  gap: 0.4rem;
+}
+
+.documents-file-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 0.85rem;
+}
+
+.documents-file-thumb {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 130px;
+  padding: 0;
   border: 1px solid var(--line);
   border-radius: 8px;
-  background: white;
+  background: var(--soft-blue);
+  overflow: hidden;
+  cursor: pointer;
 }
 
-.documents-file-info {
+.documents-thumb-img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.documents-thumb-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 64px;
+  height: 64px;
+  border-radius: 8px;
+  color: white;
+  font-weight: 800;
+  font-size: 0.85rem;
+  letter-spacing: 0.02em;
+}
+
+.documents-file-meta {
   display: grid;
   gap: 0.15rem;
   min-width: 0;
 }
 
-.documents-file-info small {
+.documents-file-meta small {
   color: var(--muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.documents-opened-meta {
+  color: var(--text) !important;
+  font-weight: 700;
+}
+
+.documents-opened-meta.muted {
+  color: var(--muted) !important;
+  font-weight: 400;
 }
 
 .documents-linked-note {
   color: var(--blue);
 }
 
-.documents-file-actions {
+.documents-file-info-panel {
+  display: grid;
+  gap: 0.2rem;
+  padding: 0.5rem 0.6rem;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--soft-blue);
+}
+
+.documents-file-info-row {
   display: flex;
-  align-items: center;
-  gap: 0.4rem;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.5rem;
+  font-size: 0.78rem;
+}
+
+.documents-file-info-row span {
+  color: var(--muted);
+}
+
+.documents-file-info-row strong {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* A three-dot overflow menu, same <details> pattern as the note/wealth link
+   pickers - .documents-icon-btn sizes the closed summary. The dropdown is
+   anchored to the header row (which already spans the full card width, not
+   just the small summary button) so it can never be wider than the card and
+   overflow past it in a narrow grid column - a fixed pixel width anchored to
+   the icon button would overflow the left edge on any card narrower than
+   that width. */
+.documents-file-card-header {
+  position: relative;
+}
+
+.documents-item-menu {
+  flex-shrink: 0;
+}
+
+.documents-item-menu summary::-webkit-details-marker {
+  display: none;
+}
+
+.documents-item-menu-options {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  right: 0;
+  z-index: 5;
+  display: grid;
+  gap: 0.15rem;
+  padding: 0.4rem;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: white;
+  box-shadow: 0 8px 24px rgba(15, 23, 42, 0.12);
+}
+
+.documents-item-menu-options button,
+.documents-item-menu-options .documents-item-menu-move {
+  width: 100%;
+  border: 0;
+  background: transparent;
+  color: var(--text);
+  text-align: left;
+  font-weight: 600;
+  font-size: 0.82rem;
+  padding: 0.4rem 0.5rem;
+  border-radius: 6px;
+}
+
+.documents-item-menu-options button:hover {
+  background: var(--soft-blue);
+}
+
+.documents-item-menu-options button.danger-button {
+  color: var(--coral);
+}
+
+.documents-item-menu-move {
+  display: grid;
+  gap: 0.2rem;
+  color: var(--muted);
+}
+
+.documents-item-menu-move .documents-move-select {
+  width: 100%;
+  max-width: none;
+}
+
+.documents-item-menu-options .document-note-link-picker,
+.documents-item-menu-options .document-wealth-link-picker {
+  width: 100%;
+}
+
+.documents-item-menu-options .document-note-link-picker summary,
+.documents-item-menu-options .document-wealth-link-picker summary {
+  width: 100%;
+  justify-content: flex-start;
+  padding: 0.4rem 0.5rem;
+  border: 0;
 }
 
 .documents-move-select {
@@ -5767,12 +5929,12 @@ main {
 }
 
 .documents-folder-card[draggable="true"],
-.documents-file-row[draggable="true"] {
+.documents-file-card[draggable="true"] {
   cursor: grab;
 }
 
 .documents-folder-card.dragging,
-.documents-file-row.dragging {
+.documents-file-card.dragging {
   opacity: 0.5;
 }
 

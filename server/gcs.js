@@ -51,4 +51,9 @@ async function deleteObject(objectPath) {
   await getBucket().file(objectPath).delete({ ignoreNotFound: true });
 }
 
-module.exports = { createSignedUploadUrl, createSignedDownloadUrl, deleteObject };
+async function copyObject(sourcePath, destPath) {
+  if (MEMORY_DB) return;
+  await getBucket().file(sourcePath).copy(getBucket().file(destPath));
+}
+
+module.exports = { createSignedUploadUrl, createSignedDownloadUrl, deleteObject, copyObject };
