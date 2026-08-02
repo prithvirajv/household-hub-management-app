@@ -4267,9 +4267,14 @@ function renderReports() {
             `).join("") : `<div class="empty-inline">No transactions found for this category.</div>`}</div>
           ` : ""}
         </section>` : ""}
-        ${showCard("category") ? `<section class="card"><div class="card-label">Spending</div><h3>Category report</h3>${categories.map((category) => `
+        ${showCard("category") ? `<section class="card"><div class="card-label">Spending</div><h3>Category report</h3>${[...categories].sort((a, b) => b.value - a.value).map((category) => `
           <div class="report-row-group">
-            <div class="report-row"><strong>${category.name}</strong><div class="report-bar"><span style="width:${category.percent}%; background:${category.color}"></span></div><b>${money.format(category.value)}</b></div>
+            <div class="category-spend-row">
+              <span class="category-spend-icon" aria-hidden="true">${categoryIcon(category.name)}</span>
+              <strong class="category-spend-name">${escapeHtml(category.name)}</strong>
+              <div class="category-spend-bar-track"><span class="category-spend-bar-fill" style="width:${category.percent}%; background:${category.color}"></span></div>
+              <b class="category-spend-amount">${money.format(category.value)}</b>
+            </div>
             ${category.lines.length ? `<details class="report-subcategory-details">
               <summary>${category.lines.length} subcategor${category.lines.length === 1 ? "y" : "ies"}</summary>
               ${category.lines.map((line) => `<div class="report-subcategory-row"><span>${escapeHtml(line.name)}</span><b>${money.format(line.value)}</b></div>`).join("")}
@@ -5448,6 +5453,43 @@ function recipeById(recipeId) {
 
 function recipeIngredients(recipeId) {
   return recipeById(recipeId)?.ingredients || [];
+}
+
+// Best-effort icon for a household's own free-typed category name (there's
+// no icon field in the data model) - matched by keyword rather than exact
+// name so household-specific variations ("Auto Insurance" vs "Car
+// Insurance") still land on something sensible. Falls back to a generic
+// wallet for anything that matches nothing, rather than leaving a blank.
+const CATEGORY_ICON_KEYWORDS = [
+  [/mortgage|rent|housing/i, "🏠"],
+  [/insurance/i, "🛡️"],
+  [/auto|car\b|vehicle|transport/i, "🚗"],
+  [/fuel|\bgas\b/i, "⛽"],
+  [/grocer|\bfood\b/i, "🛒"],
+  [/electric/i, "⚡"],
+  [/water/i, "💧"],
+  [/util/i, "💡"],
+  [/internet|cable|wifi/i, "🌐"],
+  [/phone|mobile/i, "📱"],
+  [/medical|health|pharmac|doctor/i, "💊"],
+  [/restaurant|dining|bar\b/i, "🍽️"],
+  [/coffee/i, "☕"],
+  [/entertainment|streaming|movie/i, "🎬"],
+  [/travel|flight|hotel/i, "✈️"],
+  [/taxi|ride|uber|lyft|transit/i, "🚕"],
+  [/cloth|shopping/i, "🛍️"],
+  [/pet/i, "🐾"],
+  [/gift|charity|giving|church/i, "🎁"],
+  [/debt|credit card|loan|payoff/i, "💳"],
+  [/saving|goal|fund|emergency/i, "🎯"],
+  [/education|school|tuition|student/i, "🎓"],
+  [/childcare|daycare|kid/i, "🧸"],
+  [/subscription/i, "🔁"]
+];
+
+function categoryIcon(name) {
+  const match = CATEGORY_ICON_KEYWORDS.find(([pattern]) => pattern.test(name || ""));
+  return match ? match[1] : "💰";
 }
 
 function reportCategories() {

@@ -282,7 +282,8 @@ more convenient.
 1. Choose a scope — month, date range, or whole year — from the toolbar at
    the top.
 2. Review the cards: Budget vs Expense, Cash flow trend, Cash flow
-   breakdown (the Sankey chart), Category/Subcategory, and Tags.
+   breakdown (the Sankey chart), Category report (an icon and bar per
+   category, largest first), Category/Subcategory, and Tags.
 3. Select any Sankey segment, category, subcategory, or tag to drill down
    into the exact transactions behind that number.
 4. Use the header's download control to export whatever you're currently

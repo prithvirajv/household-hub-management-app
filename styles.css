@@ -2910,6 +2910,44 @@ main {
   gap: 0.75rem;
 }
 
+.category-spend-row {
+  display: grid;
+  grid-template-columns: 26px 140px minmax(0, 1fr) 90px;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.category-spend-icon {
+  font-size: 1.15rem;
+  text-align: center;
+}
+
+.category-spend-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.category-spend-bar-track {
+  height: 18px;
+  border-radius: 999px;
+  background: #e5eee9;
+  overflow: hidden;
+}
+
+.category-spend-bar-fill {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+}
+
+.category-spend-amount {
+  text-align: right;
+  white-space: nowrap;
+  font-size: 0.95rem;
+}
+
 .report-row-group + .report-row-group {
   margin-top: 0.6rem;
 }
@@ -4676,7 +4714,8 @@ text.cashflow-sankey-clickable:hover {
   .budget-money-row.has-accounts,
   .assign-row,
   .ledger-assign-row,
-  .report-row {
+  .report-row,
+  .category-spend-row {
     grid-template-columns: 1fr;
   }
 
