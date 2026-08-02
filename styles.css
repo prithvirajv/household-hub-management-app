@@ -684,6 +684,74 @@ main {
   font-size: 1rem;
 }
 
+.help-toc {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  padding: 0.85rem;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--panel);
+  box-shadow: var(--shadow);
+}
+
+.help-toc-link {
+  padding: 0.35rem 0.65rem;
+  border: 0;
+  border-radius: 999px;
+  background: var(--soft-blue);
+  color: var(--navy);
+  font-size: 0.78rem;
+  font-weight: 700;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.help-toc-link:hover {
+  background: var(--green-soft);
+  color: var(--green);
+}
+
+.help-steps {
+  display: grid;
+  gap: 0.4rem;
+  margin: 0.5rem 0;
+  padding-left: 1.15rem;
+  color: var(--text);
+}
+
+.help-steps li {
+  line-height: 1.4;
+}
+
+.help-tips {
+  margin-top: 0.65rem;
+  padding: 0.65rem 0.75rem;
+  border-radius: 7px;
+  background: var(--green-soft);
+}
+
+.help-tips strong {
+  display: block;
+  margin-bottom: 0.3rem;
+  color: var(--green);
+  font-size: 0.72rem;
+  font-weight: 900;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+.help-tips ul {
+  display: grid;
+  gap: 0.35rem;
+  margin: 0;
+  padding-left: 1.1rem;
+}
+
+.help-tips li {
+  line-height: 1.4;
+}
+
 .onboarding-empty {
   min-height: 360px;
   display: grid;

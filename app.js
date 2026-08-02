@@ -1701,6 +1701,7 @@ function renderTransactions() {
             </select></label>
             <label data-transaction-end-date-field hidden>End date (optional)<input name="endDate" type="date"></label>
             <label class="form-row-full">Subcategory<select name="lineId">${allLines().map((line) => `<option value="${line.id}">${line.category} - ${line.name}</option>`).join("")}</select></label>
+            <p class="muted form-row-full" data-transaction-refund-hint hidden></p>
             ${state.accounts.length ? `<label class="form-row-full">Account<select name="accountId"><option value="">Not linked</option>${accountOptions("")}</select></label>` : ""}
             <label class="form-row-full">Tags (optional)<input name="tags" list="transactionTagOptions" placeholder="Florida trip"></label>
             <datalist id="transactionTagOptions">${allTransactionTagLabels().map((tag) => `<option value="${escapeHtml(tag)}">`).join("")}</datalist>
@@ -4380,20 +4381,153 @@ function renderProfile() {
 
 function renderHelp() {
   const guides = [
-    ["◈", "Households", "Switch households from the Current household dropdown in the sidebar — each one keeps entirely separate budgets, calendars, notes, and records. + Add creates another (one household per currency; you'll be blocked if you already have one in that currency). Set as default marks which household loads automatically the next time you sign in — it's a preference for you personally, not something that changes what other members see. Remove deletes a household outright and is blocked if it's your only one."],
-    ["▦", "Budget", "Set your month's income, then create categories and the subcategories (budget lines) under them, each with a planned amount and an optional due day. Spent and Remaining update automatically as you assign transactions to a line. Use the copy-previous-budget option to reuse last month's categories instead of starting from scratch, and switch months from the picker in the header."],
-    ["☰", "Transactions", "Add a transaction by payee and amount, then assign it to a budget line so Spent updates in Budget. If you've linked a bank account under Wealth, also link the transaction to that account so its running balance stays accurate. Transactions from a connected bank stream land in a review queue — accept or dismiss each one before it counts."],
-    ["☑", "Paycheck/Income", "Add each paycheck with an amount and how often it repeats (one-time, bonus, weekly, biweekly, or monthly), then use the assign form to route pieces of it to specific budget lines. Set a paycheck's Deposit to account (under Wealth) so that account's balance reflects the deposit automatically instead of needing a matching manual transaction."],
-    ["⌂", "Calendar", "Chores repeat on a schedule (weekly, every 2 or 3 weeks, or monthly) and rotate through the Chore rotation panel — mark one Complete to reveal its next occurrence, and anything overdue turns red as \"Past due.\" Birthdays and anniversaries recur every year automatically; set Remind before (or Don't remind) and Remind me at to control when the reminder email fires, and Mark wished once you've reached out. Plain Reminders have their own independent Remind me on time, fully separate from the event's own date/time — so an event at noon can remind you an hour earlier. Filter the whole calendar by household member using the chips above the grid."],
-    ["✎", "Notes", "Create notes with labels, colors, and checklists — checklist items can be nested and will suggest matches from ones you've typed before. Pin the notes you check often, archive the ones you're done with but might need later, and anything trashed is permanently removed after 7 days."],
-    ["✒", "Journal", "A private day-by-day journal for mood, gratitude, tags, photos, and free text. It is never shared with other household members, even ones with full access to everything else."],
-    ["◫", "Plan", "A private daily/weekly/monthly task planner with its own timeline view — schedule tasks with a start time and duration, then log what actually happened afterward to compare planned versus actual. Like Journal, this is yours alone; nobody else in the household can see it."],
-    ["▢", "Documents", "Upload and organize household files into folders. Link a folder or an individual document to a specific asset or liability in Wealth (for example, a mortgage folder linked to your home) so the paperwork behind a number is easy to find later."],
-    ["♨", "Meals and recipes", "Save reusable recipes with ingredients and nutrition info in Recipes, then drop them into the weekly Meals planner by day and slot. Planned ingredients automatically build your grocery list, and you can post it straight to a budget line."],
-    ["◎", "Goals", "Track sinking funds — savings goals with a target amount and, optionally, a target date. Update Saved so far as you contribute, and the progress bar and remaining balance recalculate automatically."],
-    ["▥", "Wealth", "Add real bank or credit-card Accounts with an opening balance; their balance is always computed live from linked transactions, paychecks, and transfers between accounts, never entered by hand. Link an account to a Net worth asset or liability and that entry updates with it automatically. The Debt payoff tracker estimates a payoff date and suggested payment from balance, rate, and term."],
-    ["♙", "Sharing", "Generate a one-time invite code for someone to join your household, choosing a preset role (co-owner, adult, viewer, or meals/chores-only) or picking exact areas to share instead. Codes are single-use — resend a new one if theirs lapsed or was already used. Revoke access for any member from the member list at any time."],
-    ["◷", "Reports and export", "Review spending by category and overall budget health for the selected month. Use the download button in the header to export whatever you're currently viewing — Budget, Transactions, Calendar, Wealth, and more — as a CSV file."]
+    { icon: "◈", title: "Households", id: "households",
+      steps: [
+        "Open <strong>Current household</strong> in the sidebar to switch between homes — each one keeps entirely separate budgets, calendars, notes, and records.",
+        "Select <strong>+ Add</strong> to create another household (one per currency — you'll be blocked if you already have one in that currency).",
+        "Select <strong>Set as default</strong> to choose which household loads automatically the next time you sign in.",
+        "Select <strong>Remove</strong> to delete a household outright — blocked if it's your only one."
+      ],
+      tips: [
+        "Set as default is personal to you — it doesn't change what other members see when they sign in.",
+        "Running two currencies (e.g. a home country and an overseas one)? That's exactly what a second household is for."
+      ] },
+    { icon: "▦", title: "Budget", id: "budget",
+      steps: [
+        "First time in a month? Select <strong>Start planning</strong>, then add each paycheck under <strong>Add income</strong>.",
+        "Select <strong>Add category</strong> and type a name (e.g. Housing, Food, Debt).",
+        "Inside a category, select <strong>+ Add subcategory</strong> for each budget line (e.g. Rent, Groceries) and give it a planned amount.",
+        "Optionally set a due day on a bill-like line to get it reminders on the Calendar and its own sinking-fund set-aside math.",
+        "As you assign transactions to a line (see Transactions below), <strong>Spent</strong> and <strong>Remaining</strong> update automatically — nothing to recalculate by hand.",
+        "Starting a new month? Use <strong>Use previous budget</strong> at the top of Categories and subcategories to copy last month's categories and amounts instead of rebuilding from scratch."
+      ],
+      tips: [
+        "Build out every category before you start assigning transactions — an unassigned transaction can't tell you if you're over or under budget in that area.",
+        "\"Left to budget\" at the top should reach $0 once every dollar of income has a job — that's zero-based budgeting.",
+        "Recurring bills (HOA, insurance, property tax, subscriptions) are worth marking as recurring so FamilyLoop sets aside savings for them every month instead of one big hit when the bill lands."
+      ] },
+    { icon: "☰", title: "Transactions", id: "transactions",
+      steps: [
+        "Use <strong>+ Add transaction</strong> for something you're entering by hand, or <strong>+ Import CSV/PDF</strong> to bring in a bank or credit-card statement.",
+        "Imported rows land in the <strong>Bank Stream</strong> review queue first — nothing counts until you accept or dismiss each one.",
+        "Pick the <strong>Subcategory</strong> (budget line) for each transaction so it counts toward that line's Spent total in Budget.",
+        "If you've linked a bank account under Wealth, also link the transaction to that account so its running balance stays accurate.",
+        "Select the ✓ to accept a Bank Stream row into the ledger, or × to dismiss it."
+      ],
+      tips: [
+        "A refund or return is auto-matched to its original purchase by payee, amount, and date, and pre-filled with that purchase's budget line — always double-check the suggested line before accepting, especially if it wasn't a confident match.",
+        "\"Possible duplicate\" and \"Possible transfer\" pills flag likely re-imports and account-to-account movements (like a credit card payment from checking) before you accept them — use the ⇄ icon to move a transfer instead of counting it as an expense.",
+        "Tag transactions (e.g. \"Florida trip\") to see them grouped together later in Reports."
+      ] },
+    { icon: "☑", title: "Paycheck/Income", id: "paycheck",
+      steps: [
+        "In Budget, select <strong>Add income</strong> and name the paycheck (e.g. \"Jordan's salary\").",
+        "Set the amount and how often it repeats — one-time, bonus, weekly, biweekly, or monthly.",
+        "Use the assign form to route pieces of that paycheck to specific budget lines until it's fully assigned.",
+        "Optionally set <strong>Deposit to account</strong> (under Wealth) so that account's balance reflects the deposit automatically."
+      ],
+      tips: [
+        "Setting a deposit account means you don't need a matching manual transaction just to keep that account's balance right.",
+        "The Paycheck page filters to unpaid paychecks sorted by how soon they're due, so you always see what needs assigning next first."
+      ] },
+    { icon: "⌂", title: "Calendar", id: "calendar",
+      steps: [
+        "Add a chore with a repeat schedule (weekly, every 2/3/4/6 months, or yearly) — it rotates through the <strong>Chore rotation</strong> panel automatically.",
+        "Select <strong>Complete</strong> on a chore to reveal its next occurrence; anything overdue turns red as \"Past due.\"",
+        "Add birthdays and anniversaries once — they recur every year automatically.",
+        "Set <strong>Remind before</strong> (or <strong>Don't remind</strong>) and <strong>Remind me at</strong> to control exactly when the reminder email fires, then select <strong>Mark wished</strong> once you've reached out.",
+        "Add a plain Reminder with its own independent remind time, fully separate from the event's own date — so a noon event can remind you an hour earlier.",
+        "Use the member chips above the grid to filter the whole calendar down to one person."
+      ],
+      tips: [
+        "Completed chores stay visible on the calendar grid instead of disappearing, so you can see what actually got done.",
+        "Assign chores to different household members and rotate fairly — everyone sees only their own past-due items highlighted on Home."
+      ] },
+    { icon: "✎", title: "Notes", id: "notes",
+      steps: [
+        "Create a note, give it a label and color, and add a checklist if it needs one.",
+        "Nest checklist items under a parent item for sub-steps — typing will suggest matches from items you've used before.",
+        "Select <strong>Pin</strong> on notes you check often so they stay at the top.",
+        "Select <strong>Archive</strong> once a note is done but might be useful again later.",
+        "Deleted notes move to Trash and are permanently removed after 7 days — recover one before then if needed."
+      ],
+      tips: ["Drag checklist items to reorder them — handy for turning a note into a step-by-step list."] },
+    { icon: "✒", title: "Journal", id: "journal",
+      steps: [
+        "Open Journal and add an entry for the day — mood, gratitude, tags, photos, and free text are all optional.",
+        "Use the AI reflection option for a short prompt back on what you wrote, if you'd find that helpful.",
+        "Browse past entries by date to see patterns over time."
+      ],
+      tips: ["This is private to you — never shared with other household members, even ones with full access to everything else."] },
+    { icon: "◫", title: "Plan", id: "plan",
+      steps: [
+        "Add a task with a start time and duration on the daily timeline.",
+        "Drag or resize a task block to adjust when it happens.",
+        "Log what actually happened afterward so Plan can compare planned versus actual.",
+        "Break a task into subtasks for anything with multiple steps."
+      ],
+      tips: ["Like Journal, Plan is private to you alone — a personal planner, not a shared household calendar."] },
+    { icon: "▢", title: "Documents", id: "documents",
+      steps: [
+        "Select <strong>+ New folder</strong> to organize files, or drag files/whole folders straight onto the page to upload.",
+        "Use the ⋮ menu on any file to open, download, rename, make a copy, view file information, move it, or delete it.",
+        "Link a folder or an individual document to a Note, or to a specific asset/liability in Wealth (for example, a mortgage folder linked to your home) so the paperwork behind a number is easy to find later."
+      ],
+      tips: ["Documents are shared across every household you own, not just the one currently selected — so they don't disappear when you switch households."] },
+    { icon: "⚖", title: "Decisions", id: "decisions",
+      steps: [
+        "Select <strong>Add decision</strong> and type the question you're weighing (e.g. \"Should we move to a bigger apartment?\").",
+        "Add notes for context, and attach any relevant files.",
+        "List out Pros and Cons together as they come up.",
+        "Once you've chosen, fill in what you decided and select <strong>Mark decided</strong> — you can always <strong>Reopen</strong> it later if things change."
+      ],
+      tips: ["Decisions are shared across all your households too, just like Documents — a running family log, not tied to one specific household."] },
+    { icon: "💸", title: "Shared Expenses", id: "shared-expenses",
+      steps: [
+        "Add people you split money with under <strong>Friends</strong> — add their email any time to send an invite.",
+        "Use <strong>Record a debt</strong> for a simple one-off — pick a person, an amount, and whether you owe them or they owe you.",
+        "Use <strong>Split a bill with friends</strong> when you paid the whole thing yourself — enter the total bill (including your own share), pick a split type (equal, exact amounts, percentage, or shares), and only your friends' portions get tracked as amounts owed to you.",
+        "Select <strong>Settle up</strong> against a person's running balance once they've paid you back (or you've paid them), for the full amount or a partial one."
+      ],
+      tips: ["Assign a Ledger transaction directly to an IOU split (via the 👥 icon) when you're entering the original purchase, instead of creating the split separately afterward."] },
+    { icon: "♨", title: "Meals and recipes", id: "meals",
+      steps: [
+        "Save a reusable recipe under <strong>Recipes</strong> with its ingredients and nutrition info.",
+        "In <strong>Meals</strong>, drop a saved recipe into a day and slot on the weekly planner.",
+        "Use the grocery list built automatically from that week's planned ingredients.",
+        "Post the grocery list straight to a budget line when you're ready to shop."
+      ],
+      tips: ["Build a small library of go-to recipes once — planning a week becomes picking from a list instead of starting from zero."] },
+    { icon: "◎", title: "Goals", id: "goals",
+      steps: [
+        "Add a sinking fund with a name, a target amount, and optionally a target date.",
+        "Update <strong>Saved so far</strong> as you contribute — the progress bar and remaining balance recalculate automatically."
+      ],
+      tips: ["Use Goals for anything you're saving toward outside a monthly bill — vacations, a big purchase, an emergency fund."] },
+    { icon: "▥", title: "Wealth", id: "wealth",
+      steps: [
+        "Add a real bank or credit-card <strong>Account</strong> with its opening balance.",
+        "Let the balance update itself from there on — it's computed live from linked transactions, paychecks, and transfers, never entered by hand.",
+        "Link an account to a <strong>Net worth</strong> asset or liability so that entry updates automatically as the account does.",
+        "For debt, check the <strong>Debt payoff tracker</strong> — it estimates a payoff date and suggested payment from the balance, rate, and term you enter."
+      ],
+      tips: ["Move an account-to-account payment (like paying a credit card from checking) to a Transfer instead of leaving it as a regular expense/income pair — the ⇄ icon on a matched transaction does this in one step."] },
+    { icon: "♙", title: "Sharing", id: "sharing",
+      steps: [
+        "Select <strong>Invite</strong>, choose a preset role (co-owner, adult, viewer, or meals/chores-only) or pick exact areas to share instead.",
+        "Send the one-time invite code to the person you're inviting.",
+        "Resend a new code any time theirs lapsed or was already used — a code is single-use.",
+        "Select <strong>Revoke</strong> next to any member in the list to remove their access."
+      ],
+      tips: ["Pick \"exact areas to share\" instead of a preset role for anyone who should only see, say, Calendar and Chores and nothing about the household's money."] },
+    { icon: "◷", title: "Reports and export", id: "reports",
+      steps: [
+        "Choose a scope — month, date range, or whole year — from the toolbar at the top.",
+        "Review the cards: Budget vs Expense, Cash flow trend, Cash flow breakdown (the Sankey chart), Category/Subcategory, and Tags.",
+        "Select any Sankey segment, category, subcategory, or tag to drill down into the exact transactions behind that number.",
+        "Use the header's download control to export whatever you're currently viewing as a file."
+      ],
+      tips: ["If a refund never got matched to its purchase, that category's total will look higher than it really is until you assign the refund to the same budget line — see the Transactions tips above."] }
   ];
   return `
     <section class="help-layout">
@@ -4409,11 +4543,18 @@ function renderHelp() {
         <article><span>2</span><div><strong>Add what is real</strong><small>Start empty and enter only your data.</small></div></article>
         <article><span>3</span><div><strong>Review together</strong><small>Share access and revisit the plan.</small></div></article>
       </section>
+      <nav class="help-toc" aria-label="Jump to a topic">
+        ${guides.map((guide) => `<button type="button" class="help-toc-link" data-help-jump="${guide.id}">${guide.icon} ${guide.title}</button>`).join("")}
+      </nav>
       <section class="help-grid">
-        ${guides.map(([icon, title, copy]) => `
-          <article class="help-topic">
-            <span class="help-topic-icon">${icon}</span>
-            <div><h3>${title}</h3><p>${copy}</p></div>
+        ${guides.map((guide) => `
+          <article class="help-topic" id="help-${guide.id}">
+            <span class="help-topic-icon">${guide.icon}</span>
+            <div>
+              <h3>${guide.title}</h3>
+              <ol class="help-steps">${guide.steps.map((step) => `<li>${step}</li>`).join("")}</ol>
+              ${guide.tips?.length ? `<div class="help-tips"><strong>Get the most out of it</strong><ul>${guide.tips.map((tip) => `<li>${tip}</li>`).join("")}</ul></div>` : ""}
+            </div>
           </article>
         `).join("")}
       </section>
@@ -6850,6 +6991,36 @@ function bindViewEvents() {
   };
   $("#transactionForm select[name='recurrence']")?.addEventListener("change", updateTransactionFormFields);
   updateTransactionFormFields();
+
+  // Manually-added transactions skip the Bank Stream inbox entirely, so
+  // without this they never got the same refund auto-match Bank Stream rows
+  // do. Recomputed on every payee/amount/date edit against the real ledger
+  // (not the inbox pool - a hand-typed refund has no pending draft sibling to
+  // match against); only auto-fills the Subcategory once per form session so
+  // it doesn't fight a choice the user already made by hand.
+  let transactionFormLineTouched = false;
+  $("#transactionForm select[name='lineId']")?.addEventListener("change", () => {
+    transactionFormLineTouched = true;
+  });
+  const updateTransactionRefundHint = () => {
+    const form = $("#transactionForm");
+    const hint = form?.querySelector("[data-transaction-refund-hint]");
+    if (!form || !hint) return;
+    const amount = Number(form.amount.value);
+    const payee = form.payee.value;
+    const date = form.date.value;
+    const match = amount < 0 && payee ? refundMatch({ payee, amount, date }, state.transactions) : null;
+    if (match) {
+      hint.hidden = false;
+      hint.textContent = `Matches the ${money.format(match.amount)} purchase at ${match.payee} on ${formatShortDate(match.date)} - Subcategory set to that line.`;
+      if (!transactionFormLineTouched) form.lineId.value = match.lineId;
+    } else {
+      hint.hidden = true;
+    }
+  };
+  ["payee", "amount", "date"].forEach((field) => {
+    $(`#transactionForm [name='${field}']`)?.addEventListener("input", updateTransactionRefundHint);
+  });
 
   $("#addIncomeButton")?.addEventListener("click", () => {
     state.paychecks.push({ date: new Date().toISOString().slice(0, 10), name: `Income ${state.paychecks.length + 1}`, amount: 0, assignedLineIds: [] });
@@ -9567,6 +9738,12 @@ nav.addEventListener("click", async (event) => {
 });
 
 view.addEventListener("click", (event) => {
+  const helpJumpButton = event.target.closest("[data-help-jump]");
+  if (helpJumpButton) {
+    document.getElementById(`help-${helpJumpButton.dataset.helpJump}`)?.scrollIntoView({ behavior: "smooth", block: "start" });
+    return;
+  }
+
   const acceptButton = event.target.closest("[data-accept-import]");
   if (acceptButton) {
     acceptImportTransaction(acceptButton);
