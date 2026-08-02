@@ -28,6 +28,16 @@ CLOUD_SQL_CREATE="${CLOUD_SQL_CREATE:-true}"
 DB_NAME="${DB_NAME:-household_hub}"
 DB_USER="${DB_USER:-household_hub}"
 DB_PASSWORD="${DB_PASSWORD:-${POSTGRES_PASSWORD:-}}"
+# Set DATABASE_URL to skip Cloud SQL entirely and connect to any external
+# Postgres (e.g. Neon, Supabase) instead - the app already supports this
+# connection path (see server/index.js), it just was never wired up here.
+DATABASE_URL="${DATABASE_URL:-}"
+DATABASE_SSL="${DATABASE_SSL:-false}"
+USE_CLOUD_SQL="true"
+if [[ -n "${DATABASE_URL}" ]]; then
+  USE_CLOUD_SQL="false"
+fi
+CONNECTION_NAME=""
 
 SESSION_SECRET="${SESSION_SECRET:?Set SESSION_SECRET}"
 ADMIN_EMAIL="${ADMIN_EMAIL:?Set ADMIN_EMAIL for the private administrator}"
@@ -59,7 +69,7 @@ NOTIFICATION_SECRET_NAME="${NOTIFICATION_SECRET_NAME:-familyloop-notification-se
 FINNHUB_API_KEY_SECRET="${FINNHUB_API_KEY_SECRET:-familyloop-finnhub-api-key}"
 GEMINI_API_KEY_SECRET="${GEMINI_API_KEY_SECRET:-familyloop-gemini-api-key}"
 
-if [[ -z "${DB_PASSWORD}" ]]; then
+if [[ "${USE_CLOUD_SQL}" == "true" && -z "${DB_PASSWORD}" ]]; then
   echo "Set DB_PASSWORD or POSTGRES_PASSWORD for Cloud SQL" >&2
   exit 1
 fi
@@ -114,49 +124,57 @@ if ! gcloud artifacts repositories describe "${REPOSITORY}" --location "${REGION
     --project "${PROJECT_ID}"
 fi
 
-if ! gcloud sql instances describe "${CLOUD_SQL_INSTANCE}" --project "${PROJECT_ID}" >/dev/null 2>&1; then
-  if [[ "${CLOUD_SQL_CREATE}" != "true" ]]; then
-    echo "Cloud SQL instance ${CLOUD_SQL_INSTANCE} does not exist and CLOUD_SQL_CREATE is not true" >&2
-    exit 1
+if [[ "${USE_CLOUD_SQL}" == "true" ]]; then
+  if ! gcloud sql instances describe "${CLOUD_SQL_INSTANCE}" --project "${PROJECT_ID}" >/dev/null 2>&1; then
+    if [[ "${CLOUD_SQL_CREATE}" != "true" ]]; then
+      echo "Cloud SQL instance ${CLOUD_SQL_INSTANCE} does not exist and CLOUD_SQL_CREATE is not true" >&2
+      exit 1
+    fi
+    gcloud sql instances create "${CLOUD_SQL_INSTANCE}" \
+      --project "${PROJECT_ID}" \
+      --region "${REGION}" \
+      --database-version POSTGRES_16 \
+      --edition ENTERPRISE \
+      --tier "${CLOUD_SQL_TIER}" \
+      --availability-type zonal \
+      --storage-size "${CLOUD_SQL_STORAGE_SIZE}" \
+      --storage-type HDD \
+      --no-storage-auto-increase \
+      --no-backup
   fi
-  gcloud sql instances create "${CLOUD_SQL_INSTANCE}" \
-    --project "${PROJECT_ID}" \
-    --region "${REGION}" \
-    --database-version POSTGRES_16 \
-    --edition ENTERPRISE \
-    --tier "${CLOUD_SQL_TIER}" \
-    --availability-type zonal \
-    --storage-size "${CLOUD_SQL_STORAGE_SIZE}" \
-    --storage-type HDD \
-    --no-storage-auto-increase \
-    --no-backup
-fi
 
-if ! gcloud sql databases describe "${DB_NAME}" --instance "${CLOUD_SQL_INSTANCE}" --project "${PROJECT_ID}" >/dev/null 2>&1; then
-  gcloud sql databases create "${DB_NAME}" --instance "${CLOUD_SQL_INSTANCE}" --project "${PROJECT_ID}"
-fi
+  if ! gcloud sql databases describe "${DB_NAME}" --instance "${CLOUD_SQL_INSTANCE}" --project "${PROJECT_ID}" >/dev/null 2>&1; then
+    gcloud sql databases create "${DB_NAME}" --instance "${CLOUD_SQL_INSTANCE}" --project "${PROJECT_ID}"
+  fi
 
-if ! gcloud sql users describe "${DB_USER}" --instance "${CLOUD_SQL_INSTANCE}" --project "${PROJECT_ID}" >/dev/null 2>&1; then
-  gcloud sql users create "${DB_USER}" \
-    --instance "${CLOUD_SQL_INSTANCE}" \
-    --password "${DB_PASSWORD}" \
-    --project "${PROJECT_ID}"
-else
-  gcloud sql users set-password "${DB_USER}" \
-    --instance "${CLOUD_SQL_INSTANCE}" \
-    --password "${DB_PASSWORD}" \
-    --project "${PROJECT_ID}"
-fi
+  if ! gcloud sql users describe "${DB_USER}" --instance "${CLOUD_SQL_INSTANCE}" --project "${PROJECT_ID}" >/dev/null 2>&1; then
+    gcloud sql users create "${DB_USER}" \
+      --instance "${CLOUD_SQL_INSTANCE}" \
+      --password "${DB_PASSWORD}" \
+      --project "${PROJECT_ID}"
+  else
+    gcloud sql users set-password "${DB_USER}" \
+      --instance "${CLOUD_SQL_INSTANCE}" \
+      --password "${DB_PASSWORD}" \
+      --project "${PROJECT_ID}"
+  fi
 
-CONNECTION_NAME="$(gcloud sql instances describe "${CLOUD_SQL_INSTANCE}" --project "${PROJECT_ID}" --format='value(connectionName)')"
+  CONNECTION_NAME="$(gcloud sql instances describe "${CLOUD_SQL_INSTANCE}" --project "${PROJECT_ID}" --format='value(connectionName)')"
+fi
 
 if [[ "${SETUP_ONLY}" == "true" ]]; then
   echo "Cloud Run setup complete."
-  echo "Cloud SQL instance: ${CONNECTION_NAME}"
+  if [[ "${USE_CLOUD_SQL}" == "true" ]]; then
+    echo "Cloud SQL instance: ${CONNECTION_NAME}"
+  else
+    echo "Using external DATABASE_URL, no Cloud SQL instance provisioned."
+  fi
   exit 0
 fi
 
-put_secret "${DB_PASSWORD_SECRET}" "${DB_PASSWORD}"
+if [[ "${USE_CLOUD_SQL}" == "true" ]]; then
+  put_secret "${DB_PASSWORD_SECRET}" "${DB_PASSWORD}"
+fi
 put_secret "${SESSION_SECRET_NAME}" "${SESSION_SECRET}"
 put_secret "${ADMIN_PASSWORD_SECRET}" "${ADMIN_PASSWORD}"
 put_secret "${NOTIFICATION_SECRET_NAME}" "${NOTIFICATION_SECRET}"
@@ -172,7 +190,10 @@ fi
 
 gcloud builds submit --tag "${IMAGE}" --project "${PROJECT_ID}" .
 
-SECRET_REFS="DB_PASSWORD=${DB_PASSWORD_SECRET}:latest,SESSION_SECRET=${SESSION_SECRET_NAME}:latest,ADMIN_PASSWORD=${ADMIN_PASSWORD_SECRET}:latest,NOTIFICATION_SECRET=${NOTIFICATION_SECRET_NAME}:latest"
+SECRET_REFS="SESSION_SECRET=${SESSION_SECRET_NAME}:latest,ADMIN_PASSWORD=${ADMIN_PASSWORD_SECRET}:latest,NOTIFICATION_SECRET=${NOTIFICATION_SECRET_NAME}:latest"
+if [[ "${USE_CLOUD_SQL}" == "true" ]]; then
+  SECRET_REFS="${SECRET_REFS},DB_PASSWORD=${DB_PASSWORD_SECRET}:latest"
+fi
 if [[ -n "${SMTP_PASS}" ]]; then
   SECRET_REFS="${SECRET_REFS},SMTP_PASS=${SMTP_PASS_SECRET}:latest"
 fi
@@ -183,22 +204,32 @@ if [[ -n "${GEMINI_API_KEY}" ]]; then
   SECRET_REFS="${SECRET_REFS},GEMINI_API_KEY=${GEMINI_API_KEY_SECRET}:latest"
 fi
 
-gcloud run deploy "${SERVICE_NAME}" \
-  --project "${PROJECT_ID}" \
-  --region "${REGION}" \
-  --image "${IMAGE}" \
-  --allow-unauthenticated \
-  --execution-environment gen2 \
-  --cpu 1 \
-  --memory 512Mi \
-  --concurrency 20 \
-  --min-instances 0 \
-  --max-instances 1 \
-  --cpu-throttling \
-  --no-cpu-boost \
-  --add-cloudsql-instances "${CONNECTION_NAME}" \
-  --set-secrets "${SECRET_REFS}" \
-  --set-env-vars "CLOUD_SQL_CONNECTION_NAME=${CONNECTION_NAME},DB_NAME=${DB_NAME},DB_USER=${DB_USER},ADMIN_EMAIL=${ADMIN_EMAIL},ADMIN_NAME=${ADMIN_NAME},APP_BASE_URL=${APP_BASE_URL},EMAIL_FROM=${EMAIL_FROM},SMTP_HOST=${SMTP_HOST},SMTP_PORT=${SMTP_PORT},SMTP_SECURE=${SMTP_SECURE},SMTP_USER=${SMTP_USER},GCS_BUCKET=${GCS_BUCKET},GOOGLE_CLIENT_ID=${GOOGLE_CLIENT_ID},GOOGLE_MAPS_API_KEY=${GOOGLE_MAPS_API_KEY}"
+ENV_VARS="ADMIN_EMAIL=${ADMIN_EMAIL},ADMIN_NAME=${ADMIN_NAME},APP_BASE_URL=${APP_BASE_URL},EMAIL_FROM=${EMAIL_FROM},SMTP_HOST=${SMTP_HOST},SMTP_PORT=${SMTP_PORT},SMTP_SECURE=${SMTP_SECURE},SMTP_USER=${SMTP_USER},GCS_BUCKET=${GCS_BUCKET},GOOGLE_CLIENT_ID=${GOOGLE_CLIENT_ID},GOOGLE_MAPS_API_KEY=${GOOGLE_MAPS_API_KEY}"
+DEPLOY_ARGS=(
+  "${SERVICE_NAME}"
+  --project "${PROJECT_ID}"
+  --region "${REGION}"
+  --image "${IMAGE}"
+  --allow-unauthenticated
+  --execution-environment gen2
+  --cpu 1
+  --memory 512Mi
+  --concurrency 20
+  --min-instances 0
+  --max-instances 1
+  --cpu-throttling
+  --no-cpu-boost
+  --set-secrets "${SECRET_REFS}"
+)
+if [[ "${USE_CLOUD_SQL}" == "true" ]]; then
+  DEPLOY_ARGS+=(--add-cloudsql-instances "${CONNECTION_NAME}")
+  ENV_VARS="CLOUD_SQL_CONNECTION_NAME=${CONNECTION_NAME},DB_NAME=${DB_NAME},DB_USER=${DB_USER},${ENV_VARS}"
+else
+  ENV_VARS="DATABASE_URL=${DATABASE_URL},DATABASE_SSL=${DATABASE_SSL},${ENV_VARS}"
+fi
+DEPLOY_ARGS+=(--set-env-vars "${ENV_VARS}")
+
+gcloud run deploy "${DEPLOY_ARGS[@]}"
 
 SERVICE_URL="$(gcloud run services describe "${SERVICE_NAME}" --project "${PROJECT_ID}" --region "${REGION}" --format='value(status.url)')"
 
@@ -210,4 +241,8 @@ if [[ -z "${APP_BASE_URL}" ]]; then
 fi
 
 echo "Cloud Run URL: ${SERVICE_URL}"
-echo "Cloud SQL instance: ${CONNECTION_NAME}"
+if [[ "${USE_CLOUD_SQL}" == "true" ]]; then
+  echo "Cloud SQL instance: ${CONNECTION_NAME}"
+else
+  echo "Database: external (DATABASE_URL)"
+fi
