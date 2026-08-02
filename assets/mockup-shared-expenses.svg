@@ -1,0 +1,26 @@
+<svg viewBox="0 0 640 260" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Shared Expenses page showing a split-a-bill total and two per-person balance cards, one owed to you and one you owe">
+  <rect width="640" height="260" rx="14" fill="#eef3f7"/>
+
+  <rect x="20" y="20" width="600" height="70" rx="10" fill="#ffffff" stroke="#dfe7ef"/>
+  <text x="40" y="46" font-family="Inter, sans-serif" font-size="12" font-weight="700" fill="#6b7280">SPLIT A BILL - DINNER</text>
+  <text x="40" y="70" font-family="Inter, sans-serif" font-size="18" font-weight="900" fill="#1d2945">Total bill $90.00</text>
+  <text x="580" y="70" font-family="Inter, sans-serif" font-size="13" fill="#6b7280" text-anchor="end">Your share $30.00</text>
+
+  <rect x="20" y="106" width="290" height="130" rx="10" fill="#ffffff" stroke="#dfe7ef"/>
+  <circle cx="52" cy="140" r="18" fill="#e6f6ef"/>
+  <text x="52" y="145" font-family="Inter, sans-serif" font-size="12" font-weight="700" fill="#13936d" text-anchor="middle">SM</text>
+  <text x="80" y="136" font-family="Inter, sans-serif" font-size="13" font-weight="800" fill="#1d2945">Sam</text>
+  <text x="80" y="152" font-family="Inter, sans-serif" font-size="11" fill="#6b7280">Owes you</text>
+  <text x="280" y="146" font-family="Inter, sans-serif" font-size="16" font-weight="900" fill="#13936d" text-anchor="end">$30.00</text>
+  <rect x="40" y="180" width="90" height="30" rx="15" fill="#e6f6ef"/>
+  <text x="85" y="199" font-family="Inter, sans-serif" font-size="11" font-weight="700" fill="#13936d" text-anchor="middle">Settle up</text>
+
+  <rect x="330" y="106" width="290" height="130" rx="10" fill="#ffffff" stroke="#dfe7ef"/>
+  <circle cx="362" cy="140" r="18" fill="#fdeaea"/>
+  <text x="362" y="145" font-family="Inter, sans-serif" font-size="12" font-weight="700" fill="#e05252" text-anchor="middle">JO</text>
+  <text x="390" y="136" font-family="Inter, sans-serif" font-size="13" font-weight="800" fill="#1d2945">Jordan</text>
+  <text x="390" y="152" font-family="Inter, sans-serif" font-size="11" fill="#6b7280">You owe</text>
+  <text x="590" y="146" font-family="Inter, sans-serif" font-size="16" font-weight="900" fill="#e05252" text-anchor="end">$15.00</text>
+  <rect x="350" y="180" width="90" height="30" rx="15" fill="#fff0f0"/>
+  <text x="395" y="199" font-family="Inter, sans-serif" font-size="11" font-weight="700" fill="#e05252" text-anchor="middle">Settle up</text>
+</svg>

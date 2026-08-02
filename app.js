@@ -4393,6 +4393,7 @@ function renderHelp() {
         "Running two currencies (e.g. a home country and an overseas one)? That's exactly what a second household is for."
       ] },
     { icon: "▦", title: "Budget", id: "budget",
+      image: { src: "assets/mockup-budget.svg", alt: "A Housing category with planned/spent totals and two subcategory rows with progress bars" },
       steps: [
         "First time in a month? Select <strong>Start planning</strong>, then add each paycheck under <strong>Add income</strong>.",
         "Select <strong>Add category</strong> and type a name (e.g. Housing, Food, Debt).",
@@ -4407,6 +4408,7 @@ function renderHelp() {
         "Recurring bills (HOA, insurance, property tax, subscriptions) are worth marking as recurring so FamilyLoop sets aside savings for them every month instead of one big hit when the bill lands."
       ] },
     { icon: "☰", title: "Transactions", id: "transactions",
+      image: { src: "assets/mockup-bank-stream.svg", alt: "A Bank Stream refund row with a Refund match pill and Subcategory pre-filled to the matched purchase's budget line" },
       steps: [
         "Use <strong>+ Add transaction</strong> for something you're entering by hand, or <strong>+ Import CSV/PDF</strong> to bring in a bank or credit-card statement.",
         "Imported rows land in the <strong>Bank Stream</strong> review queue first — nothing counts until you accept or dismiss each one.",
@@ -4431,6 +4433,7 @@ function renderHelp() {
         "The Paycheck page filters to unpaid paychecks sorted by how soon they're due, so you always see what needs assigning next first."
       ] },
     { icon: "⌂", title: "Calendar", id: "calendar",
+      image: { src: "assets/mockup-calendar.svg", alt: "A week grid with a past-due chore card and a chore rotation panel showing who's up next" },
       steps: [
         "Add a chore with a repeat schedule (weekly, every 2/3/4/6 months, or yearly) — it rotates through the <strong>Chore rotation</strong> panel automatically.",
         "Select <strong>Complete</strong> on a chore to reveal its next occurrence; anything overdue turns red as \"Past due.\"",
@@ -4468,6 +4471,7 @@ function renderHelp() {
       ],
       tips: ["Like Journal, Plan is private to you alone — a personal planner, not a shared household calendar."] },
     { icon: "▢", title: "Documents", id: "documents",
+      image: { src: "assets/mockup-documents.svg", alt: "A folder card and two file cards in a grid, with a file information panel below" },
       steps: [
         "Select <strong>+ New folder</strong> to organize files, or drag files/whole folders straight onto the page to upload.",
         "Use the ⋮ menu on any file to open, download, rename, make a copy, view file information, move it, or delete it.",
@@ -4483,6 +4487,7 @@ function renderHelp() {
       ],
       tips: ["Decisions are shared across all your households too, just like Documents — a running family log, not tied to one specific household."] },
     { icon: "💸", title: "Shared Expenses", id: "shared-expenses",
+      image: { src: "assets/mockup-shared-expenses.svg", alt: "A split-a-bill total with two per-person balance cards, one owed to you and one you owe" },
       steps: [
         "Add people you split money with under <strong>Friends</strong> — add their email any time to send an invite.",
         "Use <strong>Record a debt</strong> for a simple one-off — pick a person, an amount, and whether you owe them or they owe you.",
@@ -4505,6 +4510,7 @@ function renderHelp() {
       ],
       tips: ["Use Goals for anything you're saving toward outside a monthly bill — vacations, a big purchase, an emergency fund."] },
     { icon: "▥", title: "Wealth", id: "wealth",
+      image: { src: "assets/mockup-wealth.svg", alt: "A net worth summary strip and two account cards with colored type dots and a debt payoff tracker" },
       steps: [
         "Add a real bank or credit-card <strong>Account</strong> with its opening balance.",
         "Let the balance update itself from there on — it's computed live from linked transactions, paychecks, and transfers, never entered by hand.",
@@ -4521,6 +4527,7 @@ function renderHelp() {
       ],
       tips: ["Pick \"exact areas to share\" instead of a preset role for anyone who should only see, say, Calendar and Chores and nothing about the household's money."] },
     { icon: "◷", title: "Reports and export", id: "reports",
+      image: { src: "assets/mockup-reports-category.svg", alt: "The Category report card: a horizontal bar with an icon and dollar amount per category, sorted largest first" },
       steps: [
         "Choose a scope — month, date range, or whole year — from the toolbar at the top.",
         "Review the cards: Budget vs Expense, Cash flow trend, Cash flow breakdown (the Sankey chart), Category/Subcategory, and Tags.",
@@ -4548,10 +4555,11 @@ function renderHelp() {
       </nav>
       <section class="help-grid">
         ${guides.map((guide) => `
-          <article class="help-topic" id="help-${guide.id}">
+          <article class="help-topic ${guide.image ? "has-image" : ""}" id="help-${guide.id}">
             <span class="help-topic-icon">${guide.icon}</span>
             <div>
               <h3>${guide.title}</h3>
+              ${guide.image ? `<img class="help-topic-image" src="${guide.image.src}" alt="${escapeHtml(guide.image.alt)}" loading="lazy">` : ""}
               <ol class="help-steps">${guide.steps.map((step) => `<li>${step}</li>`).join("")}</ol>
               ${guide.tips?.length ? `<div class="help-tips"><strong>Get the most out of it</strong><ul>${guide.tips.map((tip) => `<li>${tip}</li>`).join("")}</ul></div>` : ""}
             </div>

@@ -1,0 +1,28 @@
+<svg viewBox="0 0 640 280" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Documents page showing a folder card and two file cards in a grid, one with a thumbnail preview">
+  <rect width="640" height="280" rx="14" fill="#eef3f7"/>
+
+  <rect x="20" y="20" width="180" height="120" rx="10" fill="#ffffff" stroke="#dfe7ef"/>
+  <rect x="36" y="40" width="60" height="44" rx="6" fill="#d99a24"/>
+  <text x="66" y="68" font-family="Inter, sans-serif" font-size="20" fill="#ffffff" text-anchor="middle">📁</text>
+  <text x="36" y="106" font-family="Inter, sans-serif" font-size="12" font-weight="700" fill="#1d2945">Mortgage</text>
+  <text x="36" y="122" font-family="Inter, sans-serif" font-size="10" fill="#6b7280">Linked to Home</text>
+
+  <rect x="220" y="20" width="180" height="120" rx="10" fill="#ffffff" stroke="#dfe7ef"/>
+  <rect x="236" y="36" width="148" height="60" rx="6" fill="#eef3fb"/>
+  <text x="310" y="72" font-family="Inter, sans-serif" font-size="18" text-anchor="middle">🧾</text>
+  <text x="236" y="112" font-family="Inter, sans-serif" font-size="11" font-weight="700" fill="#1d2945">Insurance-policy.pdf</text>
+  <text x="236" y="126" font-family="Inter, sans-serif" font-size="9" fill="#6b7280">Opened by Demo User</text>
+
+  <rect x="420" y="20" width="180" height="120" rx="10" fill="#ffffff" stroke="#dfe7ef"/>
+  <rect x="436" y="36" width="148" height="60" rx="6" fill="#e6f6ef"/>
+  <text x="510" y="72" font-family="Inter, sans-serif" font-size="18" text-anchor="middle">🖼️</text>
+  <text x="436" y="112" font-family="Inter, sans-serif" font-size="11" font-weight="700" fill="#1d2945">appraisal-2026.jpg</text>
+  <text x="436" y="126" font-family="Inter, sans-serif" font-size="9" fill="#6b7280">Uploaded Jun 12</text>
+
+  <rect x="20" y="160" width="600" height="100" rx="10" fill="#ffffff" stroke="#dfe7ef"/>
+  <text x="40" y="188" font-family="Inter, sans-serif" font-size="12" font-weight="800" fill="#1d2945">File information</text>
+  <text x="40" y="212" font-family="Inter, sans-serif" font-size="11" fill="#6b7280">Type: application/pdf</text>
+  <text x="40" y="230" font-family="Inter, sans-serif" font-size="11" fill="#6b7280">Uploaded by: Demo User - Jun 10, 2026</text>
+  <text x="340" y="212" font-family="Inter, sans-serif" font-size="11" fill="#6b7280">Size: 1.2 MB</text>
+  <text x="340" y="230" font-family="Inter, sans-serif" font-size="11" fill="#6b7280">Last opened: Jun 14, 2026</text>
+</svg>

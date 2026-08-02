@@ -698,6 +698,16 @@ main {
   font-size: 1rem;
 }
 
+.help-topic-image {
+  display: block;
+  width: 100%;
+  height: auto;
+  margin: 0.5rem 0 0.75rem;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--bg);
+}
+
 .help-toc {
   display: flex;
   flex-wrap: wrap;

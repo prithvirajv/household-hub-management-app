@@ -49,6 +49,8 @@ more convenient.
 
 ## Budget
 
+![A Housing category with planned/spent totals and two subcategory rows with progress bars](../assets/mockup-budget.svg)
+
 1. First time in a month? Select **Start planning**, then add each paycheck
    under **Add income**.
 2. Select **Add category** and type a name (e.g. Housing, Food, Debt).
@@ -73,6 +75,8 @@ more convenient.
   instead of one big hit when the bill lands.
 
 ## Transactions
+
+![A Bank Stream refund row with a Refund match pill and Subcategory pre-filled to the matched purchase's budget line](../assets/mockup-bank-stream.svg)
 
 1. Use **+ Add transaction** for something you're entering by hand, or
    **+ Import CSV/PDF** to bring in a bank or credit-card statement.
@@ -115,6 +119,8 @@ more convenient.
   due, so you always see what needs assigning next first.
 
 ## Calendar
+
+![A week grid with a past-due chore card and a chore rotation panel showing who's up next](../assets/mockup-calendar.svg)
 
 1. Add a chore with a repeat schedule (weekly, every 2/3/4/6 months, or
    yearly) — it rotates through the **Chore rotation** panel automatically.
@@ -178,6 +184,8 @@ more convenient.
 
 ## Documents
 
+![A folder card and two file cards in a grid, with a file information panel below](../assets/mockup-documents.svg)
+
 1. Select **+ New folder** to organize files, or drag files/whole folders
    straight onto the page to upload.
 2. Use the ⋮ menu on any file to open, download, rename, make a copy, view
@@ -204,6 +212,8 @@ more convenient.
   — a running family log, not tied to one specific household.
 
 ## Shared Expenses
+
+![A split-a-bill total with two per-person balance cards, one owed to you and one you owe](../assets/mockup-shared-expenses.svg)
 
 1. Add people you split money with under **Friends** — add their email any
    time to send an invite.
@@ -250,6 +260,8 @@ more convenient.
 
 ## Wealth
 
+![A net worth summary strip and two account cards with colored type dots and a debt payoff tracker](../assets/mockup-wealth.svg)
+
 1. Add a real bank or credit-card **Account** with its opening balance.
 2. Let the balance update itself from there on — it's computed live from
    linked transactions, paychecks, and transfers, never entered by hand.
@@ -278,6 +290,8 @@ more convenient.
   household's money.
 
 ## Reports and Export
+
+![The Category report card: a horizontal bar with an icon and dollar amount per category, sorted largest first](../assets/mockup-reports-category.svg)
 
 1. Choose a scope — month, date range, or whole year — from the toolbar at
    the top.

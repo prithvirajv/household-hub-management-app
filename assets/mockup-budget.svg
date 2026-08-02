@@ -1,0 +1,33 @@
+<svg viewBox="0 0 640 360" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Budget page showing a Housing category with planned and spent totals, and two subcategory rows with progress bars">
+  <rect width="640" height="360" rx="14" fill="#eef3f7"/>
+  <rect x="20" y="20" width="600" height="60" rx="10" fill="#ffffff" stroke="#dfe7ef"/>
+  <text x="40" y="45" font-family="Inter, sans-serif" font-size="12" font-weight="700" fill="#6b7280">LEFT TO BUDGET</text>
+  <text x="40" y="68" font-family="Inter, sans-serif" font-size="20" font-weight="900" fill="#13936d">$0.00</text>
+  <text x="560" y="55" font-family="Inter, sans-serif" font-size="12" fill="#6b7280" text-anchor="end">Zero-based - every dollar assigned</text>
+
+  <rect x="20" y="96" width="600" height="238" rx="10" fill="#ffffff" stroke="#dfe7ef"/>
+  <rect x="20" y="96" width="8" height="238" rx="4" fill="#3569d4"/>
+  <text x="46" y="122" font-family="Inter, sans-serif" font-size="15" font-weight="800" fill="#1d2945">Housing</text>
+  <text x="440" y="122" font-family="Inter, sans-serif" font-size="13" font-weight="700" fill="#1d2945">$2,200 planned</text>
+  <text x="580" y="122" font-family="Inter, sans-serif" font-size="13" fill="#6b7280" text-anchor="end">$1,950 spent</text>
+
+  <line x1="46" y1="136" x2="600" y2="136" stroke="#dfe7ef"/>
+
+  <text x="46" y="164" font-family="Inter, sans-serif" font-size="13" fill="#111827">Rent</text>
+  <text x="46" y="182" font-family="Inter, sans-serif" font-size="11" fill="#6b7280">Due day 1</text>
+  <rect x="220" y="158" width="260" height="10" rx="5" fill="#e5eee9"/>
+  <rect x="220" y="158" width="248" height="10" rx="5" fill="#3569d4"/>
+  <text x="580" y="167" font-family="Inter, sans-serif" font-size="12" fill="#111827" text-anchor="end">$1,800 / $1,900</text>
+
+  <text x="46" y="216" font-family="Inter, sans-serif" font-size="13" fill="#111827">Utilities</text>
+  <text x="46" y="234" font-family="Inter, sans-serif" font-size="11" fill="#6b7280">Due day 15</text>
+  <rect x="220" y="210" width="260" height="10" rx="5" fill="#e5eee9"/>
+  <rect x="220" y="210" width="120" height="10" rx="5" fill="#3569d4"/>
+  <text x="580" y="219" font-family="Inter, sans-serif" font-size="12" fill="#111827" text-anchor="end">$150 / $300</text>
+
+  <rect x="46" y="260" width="150" height="30" rx="15" fill="#e6f6ef"/>
+  <text x="121" y="280" font-family="Inter, sans-serif" font-size="12" font-weight="700" fill="#13936d" text-anchor="middle">+ Add subcategory</text>
+
+  <rect x="46" y="300" width="140" height="26" rx="13" fill="#eef3fb"/>
+  <text x="116" y="318" font-family="Inter, sans-serif" font-size="11" font-weight="700" fill="#1d2945" text-anchor="middle">Use previous budget</text>
+</svg>

@@ -1,0 +1,35 @@
+<svg viewBox="0 0 640 300" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Calendar page showing a week grid with a past-due chore card and a chore rotation panel">
+  <rect width="640" height="300" rx="14" fill="#eef3f7"/>
+
+  <rect x="20" y="20" width="380" height="260" rx="10" fill="#ffffff" stroke="#dfe7ef"/>
+  <text x="40" y="46" font-family="Inter, sans-serif" font-size="13" font-weight="800" fill="#1d2945">This week</text>
+  <g font-family="Inter, sans-serif" font-size="10" font-weight="700" fill="#6b7280">
+    <text x="40" y="66">MON</text><text x="94" y="66">TUE</text><text x="148" y="66">WED</text>
+    <text x="202" y="66">THU</text><text x="256" y="66">FRI</text><text x="310" y="66">SAT</text>
+  </g>
+  <g fill="#f4f7fb" stroke="#dfe7ef">
+    <rect x="36" y="74" width="48" height="60" rx="6"/><rect x="90" y="74" width="48" height="60" rx="6"/>
+    <rect x="144" y="74" width="48" height="60" rx="6"/><rect x="198" y="74" width="48" height="60" rx="6"/>
+    <rect x="252" y="74" width="48" height="60" rx="6"/><rect x="306" y="74" width="48" height="60" rx="6"/>
+  </g>
+  <rect x="90" y="80" width="40" height="16" rx="4" fill="#e05252"/>
+  <text x="110" y="92" font-family="Inter, sans-serif" font-size="8" font-weight="700" fill="#ffffff" text-anchor="middle">Past due</text>
+
+  <rect x="36" y="150" width="330" height="60" rx="8" fill="#fdeaea"/>
+  <text x="50" y="172" font-family="Inter, sans-serif" font-size="12" font-weight="800" fill="#1d2945">Credit card payoff due</text>
+  <text x="50" y="190" font-family="Inter, sans-serif" font-size="10" fill="#e05252">Reminder - Past due - Household</text>
+  <rect x="290" y="160" width="60" height="30" rx="15" fill="#ffffff"/>
+  <text x="320" y="179" font-family="Inter, sans-serif" font-size="10" font-weight="700" fill="#1d2945" text-anchor="middle">Mark done</text>
+
+  <rect x="420" y="20" width="200" height="260" rx="10" fill="#ffffff" stroke="#dfe7ef"/>
+  <text x="440" y="46" font-family="Inter, sans-serif" font-size="13" font-weight="800" fill="#1d2945">Chore rotation</text>
+  <circle cx="450" cy="76" r="16" fill="#e6f6ef"/>
+  <text x="450" y="80" font-family="Inter, sans-serif" font-size="11" font-weight="700" fill="#13936d" text-anchor="middle">DU</text>
+  <text x="474" y="72" font-family="Inter, sans-serif" font-size="11" font-weight="700" fill="#1d2945">Take out trash</text>
+  <text x="474" y="86" font-family="Inter, sans-serif" font-size="10" fill="#6b7280">Weekly - Demo User</text>
+
+  <circle cx="450" cy="120" r="16" fill="#eef3fb"/>
+  <text x="450" y="124" font-family="Inter, sans-serif" font-size="11" font-weight="700" fill="#3569d4" text-anchor="middle">JC</text>
+  <text x="474" y="116" font-family="Inter, sans-serif" font-size="11" font-weight="700" fill="#1d2945">Vacuum living room</text>
+  <text x="474" y="130" font-family="Inter, sans-serif" font-size="10" fill="#6b7280">Weekly - James Cruz</text>
+</svg>

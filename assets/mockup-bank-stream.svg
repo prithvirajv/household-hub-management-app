@@ -1,0 +1,28 @@
+<svg viewBox="0 0 640 260" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="A Bank Stream row for a refund, showing a Refund match pill and a Subcategory dropdown pre-filled with the matched purchase's budget line">
+  <rect width="640" height="260" rx="14" fill="#eef3f7"/>
+  <rect x="20" y="20" width="600" height="220" rx="10" fill="#ffffff" stroke="#dfe7ef"/>
+
+  <rect x="46" y="44" width="150" height="26" rx="13" fill="#eef3fb"/>
+  <text x="121" y="61" font-family="Inter, sans-serif" font-size="12" font-weight="700" fill="#3569d4" text-anchor="middle">Refund match</text>
+
+  <text x="46" y="106" font-family="Inter, sans-serif" font-size="11" font-weight="700" fill="#6b7280">PAYEE</text>
+  <rect x="46" y="112" width="150" height="34" rx="7" fill="#f4f7fb" stroke="#dfe7ef"/>
+  <text x="56" y="134" font-family="Inter, sans-serif" font-size="13" fill="#111827">Target.com</text>
+
+  <text x="216" y="106" font-family="Inter, sans-serif" font-size="11" font-weight="700" fill="#6b7280">DATE</text>
+  <rect x="216" y="112" width="110" height="34" rx="7" fill="#f4f7fb" stroke="#dfe7ef"/>
+  <text x="226" y="134" font-family="Inter, sans-serif" font-size="13" fill="#111827">2026-06-20</text>
+
+  <text x="346" y="106" font-family="Inter, sans-serif" font-size="11" font-weight="700" fill="#6b7280">AMOUNT</text>
+  <rect x="346" y="112" width="100" height="34" rx="7" fill="#f4f7fb" stroke="#dfe7ef"/>
+  <text x="356" y="134" font-family="Inter, sans-serif" font-size="13" fill="#e05252">-$42.50</text>
+
+  <text x="46" y="172" font-family="Inter, sans-serif" font-size="11" font-weight="700" fill="#6b7280">SUBCATEGORY</text>
+  <rect x="46" y="178" width="400" height="34" rx="7" fill="#e6f6ef" stroke="#a7e4ca"/>
+  <text x="58" y="200" font-family="Inter, sans-serif" font-size="13" font-weight="700" fill="#075f46">Debt - Credit card payoff ✓ matched</text>
+
+  <circle cx="530" cy="195" r="20" fill="#13936d"/>
+  <text x="530" y="201" font-family="Inter, sans-serif" font-size="16" fill="#ffffff" text-anchor="middle">✓</text>
+  <circle cx="580" cy="195" r="20" fill="#fff0f0"/>
+  <text x="580" y="201" font-family="Inter, sans-serif" font-size="16" fill="#e05252" text-anchor="middle">×</text>
+</svg>
