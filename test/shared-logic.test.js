@@ -8,7 +8,7 @@ const {
   smsGatewayAddress, paycheckOccurrencesSince, paycheckOccurrencesInRange, paycheckAllOccurrenceDatesInRange, recurringExpenseOccurrenceDates, accountBalance, accountsWithBalances,
   monthEndDateKey, assetValue, computeTrailingMonthKeys, computeReportCategoriesForScope, computeNetWorthAtDate, computeNetWorthTrend, computeCashFlowByMonth, sankeyFlowSegments,
   splitAmountEvenly, splitBillByPercentages, splitBillByShares, netBalancesByPerson, computeBillSplitAmounts, settleUpPersonIous, isValidEmail,
-  parseDelimitedText, parseBankCsvTransactions, normalizeForAccountMatch, matchAccountByFilename, isDuplicateTransaction, findTransferCandidate,
+  parseDelimitedText, parseBankCsvTransactions, normalizeForAccountMatch, matchAccountByFilename, matchAccountByHints, extractAccountActivityLabel, isDuplicateTransaction, findTransferCandidate,
   orderRefundMatch, normalizeForPayeeMatch, payeesFuzzyMatch, refundFuzzyMatch, refundMatch,
   parseCreditCardStatementText, parseCheckingAccountActivityText, parseBankStatementPdfText, normalizeTag, groupTransactionsByTag, monthKeysInRange, spentByLineInMonth,
   recurringBudgetSetAside, nextRecurringBudgetDueDate, monthsUntilDueInclusive,
@@ -1095,6 +1095,19 @@ test("matchAccountByFilename matches a filename with extra words/dates against a
   assert.equal(matchAccountByFilename("Costco Citi Jul 142026.CSV", accounts).id, "a1");
   assert.equal(matchAccountByFilename("BoFA.csv", accounts).id, "a2");
   assert.equal(matchAccountByFilename("unrelated-export.csv", accounts), null);
+});
+
+test("matchAccountByHints tries each hint in order and returns the first that matches any account, skipping empty/unmatched hints along the way", () => {
+  const accounts = [{ id: "a1", name: "Adv Plus Banking" }, { id: "a2", name: "Costco Citi" }];
+  assert.equal(matchAccountByHints(["Adv Plus Banking - 6769", "Bank of America Online Banking Deposit Print Transaction Details.pdf"], accounts).id, "a1", "the content-extracted account label (a stronger, more specific signal) wins even though it's checked first");
+  assert.equal(matchAccountByHints(["", undefined, "Bank of America Online Banking Deposit Print Transaction Details.pdf"], accounts), null, "a generic auto-generated filename with no account-identifying text matches nothing, and empty/missing hints are skipped rather than throwing");
+  assert.equal(matchAccountByHints(["no such account anywhere", "Costco Citi Statement.pdf"], accounts).id, "a2", "falls through to a later hint once an earlier one fails to match");
+});
+
+test("extractAccountActivityLabel pulls the account name/digits off a checking-activity PDF's own title line, and returns '' for a credit-card statement with no such line", () => {
+  assert.equal(extractAccountActivityLabel("Adv Plus Banking - 6769 : Account Activity\nBalance Summary: $1.00"), "Adv Plus Banking - 6769");
+  assert.equal(extractAccountActivityLabel("Statement Date: 05/20/26\n\nPURCHASE\n05/20    AMAZON MKTPLACE PMTS Amzn.com/bill WA                  74.40"), "");
+  assert.equal(extractAccountActivityLabel(""), "");
 });
 
 test("isDuplicateTransaction matches on amount alone (payee is ignored) within a 2-day date tolerance", () => {

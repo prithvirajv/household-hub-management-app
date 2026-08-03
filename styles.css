@@ -1916,6 +1916,25 @@ main {
   color: var(--muted);
 }
 
+.bank-stream-bulk-account {
+  margin-bottom: 0.75rem;
+  padding: 0.6rem 0.75rem;
+  background: var(--green-soft);
+  border-radius: 10px;
+}
+
+.bank-stream-bulk-account label {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  flex-wrap: wrap;
+}
+
+.bank-stream-bulk-account small {
+  color: var(--green);
+  font-weight: 700;
+}
+
 .recurring-expense-row {
   background: var(--soft-blue);
 }

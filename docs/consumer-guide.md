@@ -108,6 +108,12 @@ more convenient.
   Bank of America's Online Banking print-to-PDF); a still-"Processing" row
   that hasn't posted yet imports dated today with a **Pending** pill, so it
   isn't lost — just correct the date once your bank posts it for real.
+- An import auto-links to a Wealth account by matching its name against the
+  file's own name (and, for a checking-account PDF, the account label
+  printed on the statement itself, e.g. "Adv Plus Banking - 6769") — if
+  nothing matches, use **Set account for all unlinked rows** above the list
+  to assign one account to everything in a single action instead of picking
+  it row by row.
 
 ## Paycheck/Income
 

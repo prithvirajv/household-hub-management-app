@@ -1661,6 +1661,7 @@ function renderTransactions() {
     if (month && month !== state.budget.month) otherMonthCounts[month] = (otherMonthCounts[month] || 0) + 1;
   });
   const otherMonthEntries = Object.entries(otherMonthCounts).sort(([a], [b]) => a.localeCompare(b));
+  const unlinkedDraftCount = allImported.filter((transaction) => !transaction.accountId).length;
   const unassignedLedger = [];
   const lineOptions = (selectedLineId) => allLines().map((line) => `<option value="${line.id}" ${line.id === selectedLineId ? "selected" : ""}>${line.category} - ${line.name}</option>`).join("");
   const firstCategory = state.budget.categories[0];
@@ -1782,6 +1783,11 @@ function renderTransactions() {
           ${otherMonthEntries.length ? `<div class="bank-stream-other-months">
             <small>Also pending in:</small>
             ${otherMonthEntries.map(([month, count]) => `<button type="button" class="pill-button" data-switch-budget-month="${month}">${formatMonth(month)} (${count})</button>`).join("")}
+          </div>` : ""}
+          ${unlinkedDraftCount && state.accounts.length ? `<div class="bank-stream-bulk-account">
+            <label><small>Set account for all ${unlinkedDraftCount} unlinked row${unlinkedDraftCount === 1 ? "" : "s"} (every month)</small>
+              <select id="bankStreamBulkAccount"><option value="">Choose an account…</option>${accountOptions("")}</select>
+            </label>
           </div>` : ""}
           ${imported.length ? `<div class="bank-stream-sort-row">
             <span>Sort:</span>
@@ -4421,7 +4427,8 @@ function renderHelp() {
         "A refund or return is auto-matched to its original purchase by payee, amount, and date, and pre-filled with that purchase's budget line — always double-check the suggested line before accepting, especially if it wasn't a confident match.",
         "\"Possible duplicate\" and \"Possible transfer\" pills flag likely re-imports and account-to-account movements (like a credit card payment from checking) before you accept them — use the ⇄ icon to move a transfer instead of counting it as an expense.",
         "Tag transactions (e.g. \"Florida trip\") to see them grouped together later in Reports.",
-        "CSV import recognizes exports from Chase, Capital One, Wells Fargo, Discover, Amex, and Citi, among others — both plain checking-style files and credit-card-style files (positive = purchase) are detected automatically. PDF import recognizes both a monthly credit-card statement and a checking/deposit account's \"Account Activity\" print export (e.g. Bank of America's Online Banking print-to-PDF); a still-\"Processing\" row that hasn't posted yet imports dated today with a <strong>Pending</strong> pill, so it isn't lost — just correct the date once your bank posts it for real."
+        "CSV import recognizes exports from Chase, Capital One, Wells Fargo, Discover, Amex, and Citi, among others — both plain checking-style files and credit-card-style files (positive = purchase) are detected automatically. PDF import recognizes both a monthly credit-card statement and a checking/deposit account's \"Account Activity\" print export (e.g. Bank of America's Online Banking print-to-PDF); a still-\"Processing\" row that hasn't posted yet imports dated today with a <strong>Pending</strong> pill, so it isn't lost — just correct the date once your bank posts it for real.",
+        "An import auto-links to a Wealth account by matching its name against the file's own name (and, for a checking-account PDF, the account label printed on the statement itself, e.g. \"Adv Plus Banking - 6769\") — if nothing matches, use <strong>Set account for all unlinked rows</strong> above the list to assign one account to everything in a single action instead of picking it row by row."
       ] },
     { icon: "☑", title: "Paycheck/Income", id: "paycheck",
       steps: [
@@ -7202,8 +7209,13 @@ function bindViewEvents() {
   // Bank Stream draft from an earlier import, or (a return within the same
   // billing cycle) another row in this very batch - so the search pool
   // covers all three instead of only the accepted ledger.
-  function addBankStreamRows(rows, file, idPrefix) {
-    const matchedAccount = matchAccountByFilename(file.name, state.accounts);
+  function addBankStreamRows(rows, file, idPrefix, extraAccountHint) {
+    // A checking-account "Account Activity" PDF's own title line names the
+    // real account ("Adv Plus Banking - 6769") - the upload's filename is
+    // BofA's own generic "...Print Transaction Details.pdf" regardless of
+    // which account it's for, so that alone can never match; the content
+    // hint is tried first since it's the more specific/reliable signal.
+    const matchedAccount = matchAccountByHints([extraAccountHint, file.name], state.accounts);
     state.transactionInboxDrafts ||= [];
     const alreadyKnown = [...state.transactions, ...state.transactionInboxDrafts];
     const duplicateCount = rows.filter((row) => isDuplicateTransaction(row, alreadyKnown)).length;
@@ -7241,13 +7253,13 @@ function bindViewEvents() {
         bankImportFeedback = `Reading ${file.name}…`;
         render();
         try {
-          const { rows } = await api("/api/bank-statement/parse-pdf", { method: "POST", body: JSON.stringify({ fileBase64 }) });
+          const { rows, accountHint } = await api("/api/bank-statement/parse-pdf", { method: "POST", body: JSON.stringify({ fileBase64 }) });
           if (!rows.length) {
             bankImportFeedback = `No transactions found in ${file.name} — this may be a scanned/image PDF that can't be read as text.`;
             render();
             return;
           }
-          addBankStreamRows(rows, file, "pdf-import");
+          addBankStreamRows(rows, file, "pdf-import", accountHint);
         } catch (error) {
           bankImportFeedback = error.message || `Could not read ${file.name}.`;
           render();
@@ -7435,6 +7447,27 @@ function bindViewEvents() {
       transactionValidationFeedback = "";
       autosaveState();
     });
+  });
+
+  $("#bankStreamBulkAccount")?.addEventListener("change", (event) => {
+    const accountId = event.target.value;
+    if (!accountId) return;
+    // Only touches drafts with no account yet - never overwrites a row the
+    // filename match already linked correctly, or one someone hand-picked.
+    const unlinked = (state.transactionInboxDrafts || []).filter((draft) => !draft.accountId);
+    let skippedClosed = 0;
+    unlinked.forEach((draft) => {
+      if (accountAllowsDate(accountId, draft.date)) {
+        draft.accountId = accountId;
+      } else {
+        skippedClosed += 1;
+      }
+    });
+    transactionValidationFeedback = skippedClosed
+      ? `${accountName(accountId)} was applied to ${unlinked.length - skippedClosed} row${unlinked.length - skippedClosed === 1 ? "" : "s"} - ${skippedClosed} skipped because they're dated after that account's close date.`
+      : "";
+    autosaveState();
+    render();
   });
 
   document.querySelectorAll("[data-ledger-entry-payee]").forEach((input) => {

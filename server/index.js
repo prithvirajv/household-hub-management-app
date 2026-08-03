@@ -14,7 +14,7 @@ const { Pool } = require("pg");
 const { OAuth2Client } = require("google-auth-library");
 const { countries } = require("countries-list");
 const { defaultState } = require("./default-state");
-const { validateJournalPayload, buildDocumentObjectPath, wouldCreateFolderCycle, SMS_CARRIERS, smsGatewayAddress, rollAnnualNotifyAtForward, choreNotifyAt, parseBankStatementPdfText, isValidEmail } = require("../lib/shared-logic");
+const { validateJournalPayload, buildDocumentObjectPath, wouldCreateFolderCycle, SMS_CARRIERS, smsGatewayAddress, rollAnnualNotifyAtForward, choreNotifyAt, parseBankStatementPdfText, extractAccountActivityLabel, isValidEmail } = require("../lib/shared-logic");
 const pdfParse = require("pdf-parse");
 const ExcelJS = require("exceljs");
 
@@ -3361,7 +3361,14 @@ app.post("/api/bank-statement/parse-pdf", requireSession, async (req, res, next)
       return res.status(400).json({ error: "Could not read this PDF - it may be scanned/image-based rather than text-based" });
     }
     const rows = parseBankStatementPdfText(text);
-    res.json({ rows });
+    // A checking-account "Account Activity" export's own title line names
+    // the real account/last-4 digits ("Adv Plus Banking - 6769") - unlike
+    // the upload's filename, which this print export always generates the
+    // same generic way regardless of which account it's for, so the client
+    // can't match an account by filename alone for this format. "" for a
+    // credit-card statement, which has no such title line.
+    const accountHint = extractAccountActivityLabel(text);
+    res.json({ rows, accountHint });
   } catch (error) {
     next(error);
   }
