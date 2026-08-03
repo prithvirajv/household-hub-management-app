@@ -1595,7 +1595,11 @@ function renderBudget() {
 }
 
 function ledgerEntryRow(transaction, index, transferMatch) {
-  const lineOptions = allLines().map((line) => `<option value="${line.id}" ${line.id === transaction.lineId ? "selected" : ""}>${line.category} - ${line.name}</option>`).join("");
+  // Same placeholder as Bank Stream's own lineOptions - without it, a
+  // genuinely-unassigned transaction (lineId: "") has no matching "selected"
+  // option and the browser silently displays whichever line sorts first
+  // alphabetically, indistinguishable from a real choice.
+  const lineOptions = (transaction.lineId ? "" : `<option value="" disabled selected>Choose a subcategory…</option>`) + allLines().map((line) => `<option value="${line.id}" ${line.id === transaction.lineId ? "selected" : ""}>${line.category} - ${line.name}</option>`).join("");
   return `
     <div class="ledger-entry-row ${state.accounts.length ? "has-accounts" : ""}">
       <input class="line-name-input" aria-label="Payee" data-ledger-entry-payee="${index}" value="${escapeHtml(transaction.payee)}">
@@ -1611,7 +1615,7 @@ function ledgerEntryRow(transaction, index, transferMatch) {
 }
 
 function recurringExpenseRow(recurring, index) {
-  const lineOptions = allLines().map((line) => `<option value="${line.id}" ${line.id === recurring.lineId ? "selected" : ""}>${line.category} - ${line.name}</option>`).join("");
+  const lineOptions = (recurring.lineId ? "" : `<option value="" disabled selected>Choose a subcategory…</option>`) + allLines().map((line) => `<option value="${line.id}" ${line.id === recurring.lineId ? "selected" : ""}>${line.category} - ${line.name}</option>`).join("");
   return `
     <div class="recurring-expense-row">
       <label class="row-field row-payee"><small>Payee</small><input data-recurring-payee="${index}" value="${escapeHtml(recurring.payee)}"></label>
@@ -1684,7 +1688,14 @@ function renderTransactions() {
   // to unassigned in one action instead of reviewing every row by hand.
   const historyMatchedDraftCount = allImported.filter((transaction) => transaction.historyMatch).length;
   const unassignedLedger = [];
-  const lineOptions = (selectedLineId) => allLines().map((line) => `<option value="${line.id}" ${line.id === selectedLineId ? "selected" : ""}>${line.category} - ${line.name}</option>`).join("");
+  // Without an explicit placeholder, a still-unassigned draft (lineId: "")
+  // has no <option> that matches "selected" at all - the browser then just
+  // displays whichever line sorts first alphabetically, indistinguishable
+  // from a real choice. That silent default is exactly what looked like a
+  // persistent wrong-subcategory bug even after the underlying history-match
+  // bug was fixed and drafts were re-imported clean: nothing had actually
+  // been assigned, the dropdown was just showing its own fallback.
+  const lineOptions = (selectedLineId) => (selectedLineId ? "" : `<option value="" disabled selected>Choose a subcategory…</option>`) + allLines().map((line) => `<option value="${line.id}" ${line.id === selectedLineId ? "selected" : ""}>${line.category} - ${line.name}</option>`).join("");
   const firstCategory = state.budget.categories[0];
   return `
     <section class="work-grid">
@@ -1717,7 +1728,7 @@ function renderTransactions() {
               <option value="monthly">Monthly</option>
             </select></label>
             <label data-transaction-end-date-field hidden>End date (optional)<input name="endDate" type="date"></label>
-            <label class="form-row-full">Subcategory<select name="lineId">${allLines().map((line) => `<option value="${line.id}">${line.category} - ${line.name}</option>`).join("")}</select></label>
+            <label class="form-row-full">Subcategory<select name="lineId"><option value="" disabled selected>Choose a subcategory…</option>${allLines().map((line) => `<option value="${line.id}">${line.category} - ${line.name}</option>`).join("")}</select></label>
             <button class="ghost form-row-full" id="transactionAiSuggestButton" type="button">✨ Suggest with AI</button>
             <p class="muted form-row-full" data-transaction-refund-hint hidden></p>
             ${state.accounts.length ? `<label class="form-row-full">Account<select name="accountId"><option value="">Not linked</option>${accountOptions("")}</select></label>` : ""}
@@ -9982,7 +9993,13 @@ function acceptImportTransaction(button) {
     return;
   }
   transactionValidationFeedback = "";
-  const lineId = inboxItem.lineId || allLines()[0]?.id;
+  // Never silently fall back to "whichever line sorts first alphabetically"
+  // - that's indistinguishable from a real choice and was the exact
+  // mechanism (paired with the Subcategory dropdown's own missing
+  // placeholder) that made a since-fixed bug look worse than it was. A
+  // truly-unassigned accept becomes a truly-unassigned ledger entry, which
+  // the Insights "N unassigned transactions" nudge already surfaces.
+  const lineId = inboxItem.lineId || "";
   const memo = inboxItem.recurringId ? "Recurring bill" : "Accepted bank stream item";
   state.transactions.unshift(makeTransaction({ date: inboxItem.date, payee: inboxItem.payee, amount: Number(inboxItem.amount), lineId, memo, accountId: inboxItem.accountId || "", orderNumber: inboxItem.orderNumber || "", tags: inboxItem.tags || [] }));
   state.transactionInboxDone ||= [];
