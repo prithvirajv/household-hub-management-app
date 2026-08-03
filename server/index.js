@@ -14,7 +14,7 @@ const { Pool } = require("pg");
 const { OAuth2Client } = require("google-auth-library");
 const { countries } = require("countries-list");
 const { defaultState } = require("./default-state");
-const { validateJournalPayload, buildDocumentObjectPath, wouldCreateFolderCycle, SMS_CARRIERS, smsGatewayAddress, rollAnnualNotifyAtForward, choreNotifyAt, parseCreditCardStatementText, isValidEmail } = require("../lib/shared-logic");
+const { validateJournalPayload, buildDocumentObjectPath, wouldCreateFolderCycle, SMS_CARRIERS, smsGatewayAddress, rollAnnualNotifyAtForward, choreNotifyAt, parseBankStatementPdfText, isValidEmail } = require("../lib/shared-logic");
 const pdfParse = require("pdf-parse");
 const ExcelJS = require("exceljs");
 
@@ -3340,6 +3340,9 @@ app.delete("/api/documents/:id", requireSession, async (req, res, next) => {
 // the 15mb json limit above) purely to extract its text server-side with
 // pdf-parse; the actual transaction extraction is the same pure, shared,
 // unit-tested function the client would otherwise have needed to duplicate.
+// parseBankStatementPdfText auto-detects a credit-card monthly statement vs.
+// a checking/deposit account's "Account Activity" print export from the
+// extracted text itself, so this one endpoint/upload button handles either.
 // Nothing is persisted here - the client turns the returned rows into bank
 // stream drafts itself, same as a parsed CSV.
 const MAX_BANK_STATEMENT_PDF_BYTES = 10 * 1024 * 1024;
@@ -3357,7 +3360,7 @@ app.post("/api/bank-statement/parse-pdf", requireSession, async (req, res, next)
     } catch (_parseError) {
       return res.status(400).json({ error: "Could not read this PDF - it may be scanned/image-based rather than text-based" });
     }
-    const rows = parseCreditCardStatementText(text);
+    const rows = parseBankStatementPdfText(text);
     res.json({ rows });
   } catch (error) {
     next(error);

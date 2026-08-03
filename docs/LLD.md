@@ -164,11 +164,30 @@ byte-for-byte between the browser, the server, and the test suite.
   `computeBillSplitAmounts`, `settleUpPersonIous`, `isValidEmail`.
 - **Bank import & matching**: `parseDelimitedText`,
   `parseBankCsvTransactions`, `parseCreditCardStatementText`,
+  `parseCheckingAccountActivityText`, `parseBankStatementPdfText`,
   `normalizeForAccountMatch`, `matchAccountByFilename`,
   `isDuplicateTransaction`, `findTransferCandidate`, `orderRefundMatch`,
   `normalizeForPayeeMatch`, `payeesFuzzyMatch`, `refundFuzzyMatch`,
   `refundMatch` (see [§6](#6-key-algorithms) for how the refund-matching
-  chain actually works).
+  chain actually works). `parseBankStatementPdfText` auto-detects a
+  checking/deposit account's "Account Activity" print export (e.g. Bank of
+  America's Online Banking print-to-PDF — a Posting date/Description/Type/
+  Amount/Available balance table, with a still-pending row showing
+  "Processing" instead of a date) vs. a credit-card monthly statement from
+  the extracted text's own column-header signature, and delegates to
+  whichever of the other two matches; `/api/bank-statement/parse-pdf` calls
+  this dispatcher rather than `parseCreditCardStatementText` directly.
+  `parseBankCsvTransactions`'s header/format detection was hardened after
+  testing real institutions' own export column names (Chase's "Posting
+  Date", Discover's "Trans. Date"/"Post Date") and a headerless
+  five-column Wells Fargo format that has no header row to key off at all
+  (recognized structurally: every row has 5 fields, the first two parse as
+  a date and a number); its credit-card-vs-checking sign detection also now
+  treats any "...payment...thank you"/"online payment"-style negative
+  description as a strong signal on its own, since a small file with a
+  tied purchase-vs-payment count (a perfectly ordinary partial-month Amex
+  or Discover export) used to fall back to checking-style and come out
+  with every row's sign backwards.
 - **Tags**: `normalizeTag`, `groupTransactionsByTag`.
 - **Budgeting/reports math**: `monthKeysInRange`, `spentByLineInMonth`,
   `recurringBudgetSetAside`, `nextRecurringBudgetDueDate`,

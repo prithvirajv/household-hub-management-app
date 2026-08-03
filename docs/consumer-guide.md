@@ -100,6 +100,14 @@ more convenient.
   instead of counting it as an expense.
 - Tag transactions (e.g. "Florida trip") to see them grouped together later
   in Reports.
+- CSV import recognizes exports from Chase, Capital One, Wells Fargo,
+  Discover, Amex, and Citi, among others — both plain checking-style files
+  and credit-card-style files (positive = purchase) are detected
+  automatically. PDF import recognizes both a monthly credit-card statement
+  and a checking/deposit account's "Account Activity" print export (e.g.
+  Bank of America's Online Banking print-to-PDF); a still-"Processing" row
+  that hasn't posted yet imports dated today with a **Pending** pill, so it
+  isn't lost — just correct the date once your bank posts it for real.
 
 ## Paycheck/Income
 

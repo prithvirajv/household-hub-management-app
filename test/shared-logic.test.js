@@ -10,7 +10,7 @@ const {
   splitAmountEvenly, splitBillByPercentages, splitBillByShares, netBalancesByPerson, computeBillSplitAmounts, settleUpPersonIous, isValidEmail,
   parseDelimitedText, parseBankCsvTransactions, normalizeForAccountMatch, matchAccountByFilename, isDuplicateTransaction, findTransferCandidate,
   orderRefundMatch, normalizeForPayeeMatch, payeesFuzzyMatch, refundFuzzyMatch, refundMatch,
-  parseCreditCardStatementText, normalizeTag, groupTransactionsByTag, monthKeysInRange, spentByLineInMonth,
+  parseCreditCardStatementText, parseCheckingAccountActivityText, parseBankStatementPdfText, normalizeTag, groupTransactionsByTag, monthKeysInRange, spentByLineInMonth,
   recurringBudgetSetAside, nextRecurringBudgetDueDate, monthsUntilDueInclusive,
   annualEventDate, nextAnnualEventDate, annualEventNotifyAt, rollAnnualNotifyAtForward,
   nextPendingChoreOccurrence, currentChoreOccurrenceDate, zonedTimeToUtcIso, choreNotifyAt
@@ -1028,6 +1028,63 @@ test("parseBankCsvTransactions: a checking-style export (mostly negative) is una
   ]);
 });
 
+test("parseBankCsvTransactions: recognizes Chase's own 'Posting Date' header text (a real export column name this parser used to miss entirely, returning nothing)", () => {
+  const csv = [
+    "Details,Posting Date,Description,Amount,Type,Balance,Check or Slip #",
+    "DEBIT,06/12/2026,SAMPLE COFFEE SHOP,-4.75,DEBIT_CARD,1200.00,",
+    "DEBIT,06/10/2026,SAMPLE GROCERY STORE,-62.10,DEBIT_CARD,1204.75,",
+    "CREDIT,06/09/2026,SAMPLE EMPLOYER PAYROLL,1500.00,ACH_CREDIT,1266.85,"
+  ].join("\n");
+  assert.deepEqual(parseBankCsvTransactions(csv), [
+    { date: "2026-06-12", payee: "SAMPLE COFFEE SHOP", amount: 4.75 },
+    { date: "2026-06-10", payee: "SAMPLE GROCERY STORE", amount: 62.10 },
+    { date: "2026-06-09", payee: "SAMPLE EMPLOYER PAYROLL", amount: -1500, isDeposit: true }
+  ]);
+});
+
+test("parseBankCsvTransactions: recognizes Discover's own 'Trans. Date'/'Post Date' header text, and a payment/thank-you description overrides a tied purchase-vs-payment volume count", () => {
+  const csv = [
+    "Trans. Date,Post Date,Description,Amount,Category",
+    "06/12/2026,06/13/2026,SAMPLE RESTAURANT,25.40,Restaurants",
+    "06/09/2026,06/10/2026,SAMPLE PAYMENT - THANK YOU,-400.00,Payments and Credits"
+  ].join("\n");
+  assert.deepEqual(parseBankCsvTransactions(csv), [
+    { date: "2026-06-12", payee: "SAMPLE RESTAURANT", amount: 25.40 },
+    { date: "2026-06-09", payee: "SAMPLE PAYMENT - THANK YOU", amount: -400, isPayment: true }
+  ], "with one purchase and one payment (a volume tie), the payment-description signal alone must decide this is credit-card-style - without it, the tie falls back to checking-style and both rows come out with flipped/wrong signs");
+});
+
+test("parseBankCsvTransactions: a payment/thank-you description signal fixes an Amex-style export where the tied purchase-vs-payment count would otherwise flip both rows' signs", () => {
+  const csv = [
+    "Date,Description,Card Member,Account #,Amount",
+    "06/12/2026,SAMPLE AIRLINE TICKET,SAMPLE PERSON,-12345,412.00",
+    "06/05/2026,SAMPLE PAYMENT RECEIVED - THANK YOU,SAMPLE PERSON,-12345,-412.00"
+  ].join("\n");
+  assert.deepEqual(parseBankCsvTransactions(csv), [
+    { date: "2026-06-12", payee: "SAMPLE AIRLINE TICKET", amount: 412 },
+    { date: "2026-06-05", payee: "SAMPLE PAYMENT RECEIVED - THANK YOU", amount: -412, isPayment: true }
+  ], "the real charge stays a positive spend and the payment-received row is flagged isPayment - previously (before the payment-description signal) this tied 1-purchase/1-payment file fell back to checking-style and came out completely backwards: the charge as a negative 'deposit' and the payment as a positive spend");
+});
+
+test("parseBankCsvTransactions: Wells Fargo's headerless export (\"date\",\"amount\",\"*\",\"\",\"description\" with no header row at all) is recognized structurally", () => {
+  const csv = [
+    `"06/12/2026","-52.30","*","","SAMPLE PHARMACY PURCHASE"`,
+    `"06/10/2026","1500.00","*","","SAMPLE PAYROLL DEPOSIT"`
+  ].join("\n");
+  assert.deepEqual(parseBankCsvTransactions(csv), [
+    { date: "2026-06-12", payee: "SAMPLE PHARMACY PURCHASE", amount: 52.30 },
+    { date: "2026-06-10", payee: "SAMPLE PAYROLL DEPOSIT", amount: -1500, isDeposit: true }
+  ]);
+});
+
+test("parseBankCsvTransactions: a plain 5-column file that doesn't match Wells Fargo's date/amount-in-column-0/1 shape still returns nothing, rather than the headerless fallback misfiring on an unrelated file", () => {
+  const csv = [
+    `"not a date","not a number","x","y","z"`,
+    `"also not a date","still not a number","a","b","c"`
+  ].join("\n");
+  assert.deepEqual(parseBankCsvTransactions(csv), []);
+});
+
 test("normalizeForAccountMatch strips punctuation, spaces, and case", () => {
   assert.equal(normalizeForAccountMatch("Costco Citi"), "costcociti");
   assert.equal(normalizeForAccountMatch("BoFA"), "bofa");
@@ -1166,6 +1223,86 @@ PURCHASE
 test("parseCreditCardStatementText: returns an empty array for text with no matching transaction lines", () => {
   assert.deepEqual(parseCreditCardStatementText("Not a statement at all"), []);
   assert.deepEqual(parseCreditCardStatementText(""), []);
+});
+
+// Modeled on a checking/deposit account's "Account Activity" print export
+// (e.g. Bank of America's Online Banking > Deposit > Print Transaction
+// Details) - every page repeats the column header and a footer/URL/page-
+// number line, a long description wraps onto its own line before the Type/
+// Amount columns catch up to it, and a not-yet-posted item shows the literal
+// word "Processing" instead of a date. All names/numbers below are made up.
+const CHECKING_ACTIVITY_SAMPLE_TEXT = `
+Adv Plus Banking - 1234 : Account Activity
+Balance Summary: $500.00 (available balance as of today 06/15/2026)
+View: today: 06/15/2026
+
+Transactions
+
+Posting date Description Type Amount Available balance
+
+Processing PAYMENT TO ACCT #9999 ON 06/15 VIA WEB Debit -$40.00 $500.00
+
+Processing Zelle Transfer CONF# AB12CD34; JANE SAMPLE
+DOE
+Debit -$75.00 $540.00
+
+06/12/2026 Zelle payment from JOHN EXAMPLE for "Shared grocery
+run"; Conf# xy98zw76
+Transfer $22.50 $615.00
+
+06/10/2026 ACME CORP DES:PAYROLL ID:XXXXX0001 INDN:SAMPLE
+EMPLOYEE...
+Deposit $1,200.00 $592.50
+
+Statement as of 06/09/2026
+
+06/08/2026 GENERIC UTILITY CO DES:BILL PAY ID:XXXXX1234
+INDN:SAMPLE PERSON...
+Other Payment -$88.20 $607.50
+
+06/05/2026 SAMPLE ATM 06/05 #XXXXX0000 WITHDRWL MAIN ST
+ANYTOWN ST
+Withdrawal -$100.00 $519.30
+
+6/15/26, 9:00 AM Bank of America | Online Banking | Deposit | Print Transaction Details
+https://secure.bankofamerica.com/deposit-details/print/?adx=deadbeef 1/2
+`;
+
+test("parseCheckingAccountActivityText: extracts a full 'Account Activity' print export, flipping to this app's spend-positive sign convention", () => {
+  const rows = parseCheckingAccountActivityText(CHECKING_ACTIVITY_SAMPLE_TEXT, "2026-06-15");
+  assert.deepEqual(rows, [
+    { date: "2026-06-15", payee: "PAYMENT TO ACCT #9999 ON 06/15 VIA WEB", amount: 40.00, isPending: true },
+    { date: "2026-06-15", payee: "Zelle Transfer CONF# AB12CD34; JANE SAMPLE DOE", amount: 75.00, isPending: true },
+    { date: "2026-06-12", payee: `Zelle payment from JOHN EXAMPLE for "Shared grocery run"; Conf# xy98zw76`, amount: -22.50, isDeposit: true },
+    { date: "2026-06-10", payee: "ACME CORP DES:PAYROLL ID:XXXXX0001 INDN:SAMPLE EMPLOYEE...", amount: -1200.00, isDeposit: true },
+    { date: "2026-06-08", payee: "GENERIC UTILITY CO DES:BILL PAY ID:XXXXX1234 INDN:SAMPLE PERSON...", amount: 88.20 },
+    { date: "2026-06-05", payee: "SAMPLE ATM 06/05 #XXXXX0000 WITHDRWL MAIN ST ANYTOWN ST", amount: 100.00 }
+  ], "Processing rows are dated with the supplied today-date and flagged isPending; a money-in row (positive in the printed table) flips to negative and gets isDeposit; the header, boilerplate, 'Statement as of', and footer/URL lines are all ignored rather than corrupting a description");
+});
+
+test("parseCheckingAccountActivityText: defaults 'today' to the real current date when none is supplied", () => {
+  const today = new Date().toISOString().slice(0, 10);
+  const rows = parseCheckingAccountActivityText("Posting date Description Type Amount Available balance\nProcessing SAMPLE PENDING CHARGE Debit -$5.00 $100.00\n");
+  assert.deepEqual(rows, [{ date: today, payee: "SAMPLE PENDING CHARGE", amount: 5.00, isPending: true }]);
+});
+
+test("parseCheckingAccountActivityText: returns an empty array for text with no matching rows", () => {
+  assert.deepEqual(parseCheckingAccountActivityText("Not a statement at all"), []);
+  assert.deepEqual(parseCheckingAccountActivityText(""), []);
+});
+
+test("parseBankStatementPdfText: auto-detects a checking 'Account Activity' export vs. a credit-card statement from the text alone", () => {
+  const checkingRows = parseBankStatementPdfText(CHECKING_ACTIVITY_SAMPLE_TEXT);
+  assert.equal(checkingRows.length, 6, "the checking-format header signature routes to parseCheckingAccountActivityText");
+
+  const creditCardText = `
+Statement Date: 05/20/26
+
+PURCHASE
+05/20    AMAZON MKTPLACE PMTS Amzn.com/bill WA                  74.40
+`;
+  const creditCardRows = parseBankStatementPdfText(creditCardText);
+  assert.deepEqual(creditCardRows, [{ date: "2026-05-20", payee: "AMAZON MKTPLACE PMTS Amzn.com/bill WA", amount: 74.40, orderNumber: "" }], "text without the checking header signature falls back to parseCreditCardStatementText");
 });
 
 test("normalizeTag trims and lowercases so casing/whitespace differences match", () => {
