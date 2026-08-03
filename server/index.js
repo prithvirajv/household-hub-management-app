@@ -1290,6 +1290,50 @@ app.post("/api/journal/reflection", requireSession, async (req, res, next) => {
   }
 });
 
+// AI fallback for suggestSubcategoryFromHistory (lib/shared-logic.js): only
+// worth calling for a payee history has never seen before - the client is
+// expected to try the free, instant, local history match first and only
+// reach this endpoint when that comes up empty, so this is a deliberately
+// user/row-triggered action (a button click), never fired automatically
+// across a whole import - a 200-row statement import would mean 200 paid
+// API calls if it were. The model is asked to answer with the bare
+// subcategory id and nothing else (not JSON) to keep parsing trivial and
+// avoid the model wrapping its answer in markdown/prose; the returned id is
+// still validated against the exact list this request sent before ever
+// being trusted, since a model can hallucinate an id that was never offered.
+const SUBCATEGORY_SUGGEST_MAX_PAYEE_CHARS = 200;
+const SUBCATEGORY_SUGGEST_MAX_LINES = 300;
+
+app.post("/api/transactions/suggest-subcategory", requireSession, async (req, res, next) => {
+  try {
+    if (!GEMINI_API_KEY) return res.status(503).json({ error: "AI suggestions are not configured for this deployment" });
+    const payee = String(req.body?.payee || "").trim();
+    const lines = Array.isArray(req.body?.lines) ? req.body.lines : [];
+    if (!payee) return res.status(400).json({ error: "No payee to categorize" });
+    if (payee.length > SUBCATEGORY_SUGGEST_MAX_PAYEE_CHARS) return res.status(400).json({ error: "Payee text is too long" });
+    if (!lines.length) return res.status(400).json({ error: "No subcategories to choose from yet - add a budget category first" });
+    if (lines.length > SUBCATEGORY_SUGGEST_MAX_LINES) return res.status(400).json({ error: "Too many subcategories to suggest from" });
+    const validIds = new Set(lines.map((line) => String(line?.id || "")).filter(Boolean));
+    const optionsText = lines.map((line) => `${line.id}: ${line.label}`).join("\n");
+
+    const response = await fetch(`${GEMINI_API_BASE_URL}/v1beta/models/${encodeURIComponent(GEMINI_MODEL)}:generateContent?key=${encodeURIComponent(GEMINI_API_KEY)}`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        contents: [{ role: "user", parts: [{ text: `Payee: ${payee}\n\nOptions:\n${optionsText}` }] }],
+        systemInstruction: { parts: [{ text: "You are categorizing a household bank transaction for a budgeting app. Given a payee name and a list of budget subcategory options (each line is \"id: Category - Name\"), reply with ONLY the exact id of the single best-matching option - nothing else, no explanation, no punctuation, no quotes. If nothing listed is a reasonable, confident match, reply with exactly: none" }] },
+        generationConfig: { maxOutputTokens: 20 }
+      })
+    });
+    const body = await response.json().catch(() => ({}));
+    if (!response.ok) return res.status(502).json({ error: body?.error?.message || "The AI suggestion service is unavailable right now" });
+    const text = body.candidates?.[0]?.content?.parts?.[0]?.text?.trim();
+    res.json({ lineId: text && validIds.has(text) ? text : null });
+  } catch (error) {
+    next(error);
+  }
+});
+
 app.get("/api/stock-quote", requireSession, async (req, res, next) => {
   try {
     const symbol = String(req.query.symbol || "").trim().toUpperCase();

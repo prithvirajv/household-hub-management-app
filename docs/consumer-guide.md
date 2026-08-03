@@ -104,6 +104,10 @@ more convenient.
   payee) were categorized most recently, in both Bank Stream (a **From
   history** pill) and the manual Add transaction form — always worth a
   glance before accepting, since it's a suggestion, not a guarantee.
+- No history for a payee yet? Select **✨ Suggest with AI** (on the Add
+  transaction form, or the ✨ button next to an unlinked Bank Stream row) to
+  have it pick from your real budget lines — only runs when you ask, one
+  payee at a time, never automatically across a whole import.
 - CSV import recognizes exports from Chase, Capital One, Wells Fargo,
   Discover, Amex, and Citi, among others — both plain checking-style files
   and credit-card-style files (positive = purchase) are detected

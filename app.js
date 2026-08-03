@@ -291,6 +291,20 @@ function allLines() {
       .map((line) => ({ ...line, category: category.name, color: category.color })));
 }
 
+// AI fallback for a payee suggestSubcategoryFromHistory has never seen
+// before. Deliberately not called automatically for every unmatched row in
+// a batch import (a 200-row statement would mean 200 paid API calls) - only
+// ever fired by an explicit click, one payee at a time.
+async function suggestSubcategoryWithAI(payee) {
+  return api("/api/transactions/suggest-subcategory", {
+    method: "POST",
+    body: JSON.stringify({
+      payee,
+      lines: allLines().map((line) => ({ id: line.id, label: `${line.category} - ${line.name}` }))
+    })
+  });
+}
+
 function allTransactionTagLabels() {
   return groupTransactionsByTag(state.transactions).map((group) => group.label);
 }
@@ -1697,6 +1711,7 @@ function renderTransactions() {
             </select></label>
             <label data-transaction-end-date-field hidden>End date (optional)<input name="endDate" type="date"></label>
             <label class="form-row-full">Subcategory<select name="lineId">${allLines().map((line) => `<option value="${line.id}">${line.category} - ${line.name}</option>`).join("")}</select></label>
+            <button class="ghost form-row-full" id="transactionAiSuggestButton" type="button">✨ Suggest with AI</button>
             <p class="muted form-row-full" data-transaction-refund-hint hidden></p>
             ${state.accounts.length ? `<label class="form-row-full">Account<select name="accountId"><option value="">Not linked</option>${accountOptions("")}</select></label>` : ""}
             <label class="form-row-full">Tags (optional)<input name="tags" list="transactionTagOptions" placeholder="Florida trip"></label>
@@ -1809,6 +1824,7 @@ function renderTransactions() {
               <label class="row-field row-date"><small>Date</small><input type="date" data-bank-stream-date="${transaction.id}" value="${transaction.date}"></label>
               <label class="row-field row-amount"><small>Amount</small><input class="money-input" type="number" step="0.01" data-bank-stream-amount="${transaction.id}" value="${transaction.amount}"></label>
               <label class="row-field row-select"><small>Subcategory</small><select data-bank-stream-line="${transaction.id}">${lineOptions(transaction.lineId)}</select></label>
+              ${!transaction.lineId ? `<button class="icon-button" data-ai-suggest-line="${transaction.id}" type="button" aria-label="Suggest a subcategory with AI for ${escapeHtml(transaction.payee)}" title="No history match for this payee - ask AI to suggest a subcategory">✨</button>` : ""}
               <div class="row-account-actions">
                 ${state.accounts.length ? `<label class="row-field row-select"><small>Account</small><select data-bank-stream-account="${transaction.id}"><option value="">Not linked</option>${accountOptions(transaction.accountId || "")}</select></label>` : ""}
                 <div class="row-actions">
@@ -4429,6 +4445,7 @@ function renderHelp() {
         "\"Possible duplicate\" and \"Possible transfer\" pills flag likely re-imports and account-to-account movements (like a credit card payment from checking) before you accept them — use the ⇄ icon to move a transfer instead of counting it as an expense.",
         "Tag transactions (e.g. \"Florida trip\") to see them grouped together later in Reports.",
         "A new transaction's Subcategory is pre-filled from how you (or a similar payee) were categorized most recently, in both Bank Stream (a <strong>From history</strong> pill) and the manual Add transaction form - always worth a glance before accepting, since it's a suggestion, not a guarantee.",
+        "No history for a payee yet? Select <strong>✨ Suggest with AI</strong> (on the Add transaction form, or the ✨ button next to an unlinked Bank Stream row) to have it pick from your real budget lines - only runs when you ask, one payee at a time, never automatically across a whole import.",
         "CSV import recognizes exports from Chase, Capital One, Wells Fargo, Discover, Amex, and Citi, among others — both plain checking-style files and credit-card-style files (positive = purchase) are detected automatically. PDF import recognizes both a monthly credit-card statement and a checking/deposit account's \"Account Activity\" print export (e.g. Bank of America's Online Banking print-to-PDF); a still-\"Processing\" row that hasn't posted yet imports dated today with a <strong>Pending</strong> pill, so it isn't lost — just correct the date once your bank posts it for real.",
         "An import auto-links to a Wealth account by matching its name against the file's own name (and, for a checking-account PDF, the account label printed on the statement itself, e.g. \"Adv Plus Banking - 6769\") — if nothing matches, use <strong>Set account for all unlinked rows</strong> above the list to assign one account to everything in a single action instead of picking it row by row."
       ] },
@@ -7063,6 +7080,33 @@ function bindViewEvents() {
     $(`#transactionForm [name='${field}']`)?.addEventListener("input", updateTransactionRefundHint);
   });
 
+  $("#transactionAiSuggestButton")?.addEventListener("click", async () => {
+    const form = $("#transactionForm");
+    const button = $("#transactionAiSuggestButton");
+    const payee = form?.payee.value.trim();
+    if (!payee) {
+      showToast("Enter a payee first.");
+      return;
+    }
+    button.disabled = true;
+    const originalLabel = button.textContent;
+    button.textContent = "Asking AI…";
+    try {
+      const { lineId } = await suggestSubcategoryWithAI(payee);
+      if (lineId) {
+        form.lineId.value = lineId;
+        transactionFormLineTouched = true;
+      } else {
+        showToast("AI couldn't find a confident match for this payee - pick one manually.");
+      }
+    } catch (error) {
+      showToast(error.message || "AI suggestion failed - try again or pick manually.");
+    } finally {
+      button.disabled = false;
+      button.textContent = originalLabel;
+    }
+  });
+
   $("#addIncomeButton")?.addEventListener("click", () => {
     state.paychecks.push({ date: new Date().toISOString().slice(0, 10), name: `Income ${state.paychecks.length + 1}`, amount: 0, assignedLineIds: [] });
     state.budget.income = budgetIncomeFromPaychecks();
@@ -7430,6 +7474,30 @@ function bindViewEvents() {
         draft.historyMatch = false;
       }
       autosaveState();
+    });
+  });
+
+  document.querySelectorAll("[data-ai-suggest-line]").forEach((button) => {
+    button.addEventListener("click", async () => {
+      const draft = (state.transactionInboxDrafts || []).find((item) => item.id === button.dataset.aiSuggestLine);
+      if (!draft) return;
+      button.disabled = true;
+      button.textContent = "…";
+      try {
+        const { lineId } = await suggestSubcategoryWithAI(draft.payee);
+        if (lineId) {
+          draft.lineId = lineId;
+          draft.historyMatch = false;
+          autosaveState();
+          render();
+        } else {
+          showToast("AI couldn't find a confident match for this payee - pick one manually.");
+        }
+      } catch (error) {
+        showToast(error.message || "AI suggestion failed - try again or pick manually.");
+        button.disabled = false;
+        button.textContent = "✨";
+      }
     });
   });
 

@@ -74,6 +74,7 @@ erDiagram
 | | `GET /readyz` (DB-aware — this is what deploy health-checks poll) | public |
 | Misc | `GET /api/countries` | public |
 | AI | `POST /api/journal/reflection` (Gemini) | session |
+| | `POST /api/transactions/suggest-subcategory` (Gemini) | session |
 | | `GET /api/stock-quote` (Finnhub) | session |
 | Auth | `GET /api/session` | public |
 | | `PATCH /api/auth/me` | session |
@@ -169,7 +170,15 @@ byte-for-byte between the browser, the server, and the test suite.
   `isDuplicateTransaction`, `findTransferCandidate`, `orderRefundMatch`,
   `normalizeForPayeeMatch`, `payeesFuzzyMatch`, `refundFuzzyMatch`,
   `refundMatch` (see [§6](#6-key-algorithms) for how the refund-matching
-  chain actually works). `parseBankStatementPdfText` auto-detects a
+  chain actually works), `suggestSubcategoryFromHistory` (an
+  exact-then-fuzzy payee match against already-categorized transactions,
+  most-recently-categorized line wins outright over a line with more total
+  hits — the free, local, no-API-call first pass Bank Stream and the manual
+  Add transaction form both try before ever falling back to
+  `/api/transactions/suggest-subcategory`'s Gemini call, which is
+  deliberately never triggered automatically across a whole import - only a
+  single explicit per-row/per-form button click, so a 200-row statement
+  import can't turn into 200 paid API calls). `parseBankStatementPdfText` auto-detects a
   checking/deposit account's "Account Activity" print export (e.g. Bank of
   America's Online Banking print-to-PDF — a Posting date/Description/Type/
   Amount/Available balance table, with a still-pending row showing
