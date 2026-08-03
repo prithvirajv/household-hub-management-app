@@ -1801,6 +1801,7 @@ function renderTransactions() {
               ${transaction.isDeposit ? `<span class="pill" title="Detected as money coming in from this file's Debit/Credit or signed-Amount column">Deposit</span>` : ""}
               ${transaction.isPayment ? `<span class="pill pill-info" title="Looks like a card payoff/autopay - probably belongs in Move to Transfers, not as a regular expense">Card payment</span>` : ""}
               ${transaction.isPending ? `<span class="pill pill-warning" title="Hadn't posted yet in the statement - dated today by default, correct it once your bank assigns a real posting date">Pending</span>` : ""}
+              ${transaction.historyMatch ? `<span class="pill pill-info" title="Subcategory pre-filled from how you've categorized this payee (or a similar one) most recently - double-check before accepting">From history</span>` : ""}
               ${transaction.possibleDuplicate ? `<span class="pill pill-warning" title="Matches an existing transaction with the same amount within 2 days">Possible duplicate</span>` : ""}
               ${transaction.refundMatch ? `<span class="pill pill-info" title="Refund for the ${money.format(transaction.refundMatch.amount)} purchase on ${formatShortDate(transaction.refundMatch.date)}${transaction.orderNumber ? ` (order ${escapeHtml(transaction.orderNumber)})` : ""}">Refund match</span>` : ""}
               ${transaction.transferMatch ? `<span class="pill pill-info" title="Matches ${escapeHtml(accountName(transaction.transferMatch.accountId))}'s ${exactMoney.format(Math.abs(transaction.transferMatch.amount))} on ${formatShortDate(transaction.transferMatch.date)}">Possible transfer</span>` : ""}
@@ -4427,6 +4428,7 @@ function renderHelp() {
         "A refund or return is auto-matched to its original purchase by payee, amount, and date, and pre-filled with that purchase's budget line — always double-check the suggested line before accepting, especially if it wasn't a confident match.",
         "\"Possible duplicate\" and \"Possible transfer\" pills flag likely re-imports and account-to-account movements (like a credit card payment from checking) before you accept them — use the ⇄ icon to move a transfer instead of counting it as an expense.",
         "Tag transactions (e.g. \"Florida trip\") to see them grouped together later in Reports.",
+        "A new transaction's Subcategory is pre-filled from how you (or a similar payee) were categorized most recently, in both Bank Stream (a <strong>From history</strong> pill) and the manual Add transaction form - always worth a glance before accepting, since it's a suggestion, not a guarantee.",
         "CSV import recognizes exports from Chase, Capital One, Wells Fargo, Discover, Amex, and Citi, among others — both plain checking-style files and credit-card-style files (positive = purchase) are detected automatically. PDF import recognizes both a monthly credit-card statement and a checking/deposit account's \"Account Activity\" print export (e.g. Bank of America's Online Banking print-to-PDF); a still-\"Processing\" row that hasn't posted yet imports dated today with a <strong>Pending</strong> pill, so it isn't lost — just correct the date once your bank posts it for real.",
         "An import auto-links to a Wealth account by matching its name against the file's own name (and, for a checking-account PDF, the account label printed on the statement itself, e.g. \"Adv Plus Banking - 6769\") — if nothing matches, use <strong>Set account for all unlinked rows</strong> above the list to assign one account to everything in a single action instead of picking it row by row."
       ] },
@@ -7042,6 +7044,17 @@ function bindViewEvents() {
       hint.hidden = false;
       hint.textContent = `Matches the ${money.format(match.amount)} purchase at ${match.payee} on ${formatShortDate(match.date)} - Subcategory set to that line.`;
       if (!transactionFormLineTouched) form.lineId.value = match.lineId;
+      return;
+    }
+    // No refund to pin the line to - fall back to how this payee (or a
+    // similar one) was categorized most recently, same as a Bank Stream
+    // import does when it has no refund match either.
+    const historyLineId = payee ? suggestSubcategoryFromHistory(payee, state.transactions) : null;
+    if (historyLineId) {
+      const line = allLines().find((candidate) => candidate.id === historyLineId);
+      hint.hidden = false;
+      hint.textContent = `You've categorized ${payee} (or a similar payee) as ${line ? `${line.category} - ${line.name}` : "this line"} most recently - Subcategory set to that line.`;
+      if (!transactionFormLineTouched) form.lineId.value = historyLineId;
     } else {
       hint.hidden = true;
     }
@@ -7222,17 +7235,23 @@ function bindViewEvents() {
     const rowRefundMatchPool = [...alreadyKnown, ...rows];
     rows.forEach((row) => {
       const rowRefundMatch = refundMatch(row, rowRefundMatchPool);
+      // A refund match (this exact row is the return for a specific
+      // purchase) is a much stronger, more literal signal than history -
+      // only fall back to "you've categorized payees like this before" when
+      // there's no refund to pin the line to.
+      const historyLineId = rowRefundMatch ? "" : suggestSubcategoryFromHistory(row.payee, state.transactions);
       state.transactionInboxDrafts.unshift({
         id: uniqueId(idPrefix),
         payee: row.payee,
         amount: row.amount,
-        lineId: rowRefundMatch?.lineId || "",
+        lineId: rowRefundMatch?.lineId || historyLineId || "",
         accountId: matchedAccount?.id || "",
         date: row.date,
         orderNumber: row.orderNumber || "",
         isDeposit: !!row.isDeposit,
         isPayment: !!row.isPayment,
-        isPending: !!row.isPending
+        isPending: !!row.isPending,
+        historyMatch: !!(!rowRefundMatch && historyLineId)
       });
     });
     const duplicateNote = duplicateCount ? ` ${duplicateCount} look${duplicateCount === 1 ? "s" : ""} like a duplicate of a transaction you already have — check before accepting.` : "";
@@ -7403,7 +7422,13 @@ function bindViewEvents() {
   document.querySelectorAll("[data-bank-stream-line]").forEach((select) => {
     select.addEventListener("change", () => {
       const draft = (state.transactionInboxDrafts || []).find((item) => item.id === select.dataset.bankStreamLine);
-      if (draft) draft.lineId = select.value;
+      if (draft) {
+        draft.lineId = select.value;
+        // The "From history" pill describes where the *current* line came
+        // from - once someone hand-picks a different one, keeping the pill
+        // up would misattribute their own choice to the suggestion.
+        draft.historyMatch = false;
+      }
       autosaveState();
     });
   });

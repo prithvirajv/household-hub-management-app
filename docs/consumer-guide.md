@@ -100,6 +100,10 @@ more convenient.
   instead of counting it as an expense.
 - Tag transactions (e.g. "Florida trip") to see them grouped together later
   in Reports.
+- A new transaction's Subcategory is pre-filled from how you (or a similar
+  payee) were categorized most recently, in both Bank Stream (a **From
+  history** pill) and the manual Add transaction form — always worth a
+  glance before accepting, since it's a suggestion, not a guarantee.
 - CSV import recognizes exports from Chase, Capital One, Wells Fargo,
   Discover, Amex, and Citi, among others — both plain checking-style files
   and credit-card-style files (positive = purchase) are detected

@@ -9,7 +9,7 @@ const {
   monthEndDateKey, assetValue, computeTrailingMonthKeys, computeReportCategoriesForScope, computeNetWorthAtDate, computeNetWorthTrend, computeCashFlowByMonth, sankeyFlowSegments,
   splitAmountEvenly, splitBillByPercentages, splitBillByShares, netBalancesByPerson, computeBillSplitAmounts, settleUpPersonIous, isValidEmail,
   parseDelimitedText, parseBankCsvTransactions, normalizeForAccountMatch, matchAccountByFilename, matchAccountByHints, extractAccountActivityLabel, isDuplicateTransaction, findTransferCandidate,
-  orderRefundMatch, normalizeForPayeeMatch, payeesFuzzyMatch, refundFuzzyMatch, refundMatch,
+  orderRefundMatch, normalizeForPayeeMatch, payeesFuzzyMatch, refundFuzzyMatch, refundMatch, suggestSubcategoryFromHistory,
   parseCreditCardStatementText, parseCheckingAccountActivityText, parseBankStatementPdfText, normalizeTag, groupTransactionsByTag, monthKeysInRange, spentByLineInMonth,
   recurringBudgetSetAside, nextRecurringBudgetDueDate, monthsUntilDueInclusive,
   annualEventDate, nextAnnualEventDate, annualEventNotifyAt, rollAnnualNotifyAtForward,
@@ -1173,6 +1173,37 @@ test("refundMatch prefers an exact orderNumber match, falling back to fuzzy matc
   assert.deepEqual(refundMatch({ orderNumber: "A-1", payee: "Amazon", amount: -30, date: "2026-06-10" }, [orderedPurchase, fuzzyPurchase]), orderedPurchase, "orderNumber match wins even when a fuzzy candidate also exists");
   assert.deepEqual(refundMatch({ payee: "COSTCO.COM", amount: -30, date: "2026-06-10" }, [orderedPurchase, fuzzyPurchase]), fuzzyPurchase, "falls back to fuzzy matching when the candidate has no orderNumber");
   assert.deepEqual(refundMatch({ orderNumber: "no-such-order", payee: "COSTCO.COM", amount: -30, date: "2026-06-10" }, [orderedPurchase, fuzzyPurchase]), fuzzyPurchase, "a candidate whose orderNumber doesn't match anything still falls back to fuzzy matching, since the two sides of a real pair don't always carry the same order id");
+});
+
+test("suggestSubcategoryFromHistory: the single most recently categorized transaction for a payee wins outright, even against a line with far more historical hits", () => {
+  const transactions = [
+    { payee: "SAWNEE EMC Bill Payment", amount: 140, date: "2026-01-02", lineId: "utilities" },
+    { payee: "SAWNEE EMC Bill Payment", amount: 138, date: "2026-02-02", lineId: "utilities" },
+    { payee: "Sawnee EMC Bill Payment", amount: 145, date: "2026-03-02", lineId: "utilities" },
+    // The household re-categorized this payee starting in April - fewer
+    // total observations on the new line, but it's the more recent choice.
+    { payee: "SAWNEE EMC Bill Payment", amount: 150, date: "2026-04-02", lineId: "home-services" },
+    { payee: "Some Other Payee", amount: 20, date: "2026-01-01", lineId: "misc" }
+  ];
+  assert.equal(suggestSubcategoryFromHistory("SAWNEE EMC Bill Payment", transactions), "home-services", "3 historical uses of 'utilities' still lose to a single more-recent use of 'home-services'");
+});
+
+test("suggestSubcategoryFromHistory: falls back to the same fuzzy same-merchant heuristic refundMatch uses when there's no exact payee match, and returns null when nothing matches at all", () => {
+  const transactions = [
+    { payee: "TARGET STORE 1147", amount: 42, date: "2026-01-05", lineId: "shopping" },
+    { payee: "TARGET STORE 1147", amount: 18, date: "2026-02-05", lineId: "shopping" }
+  ];
+  assert.equal(suggestSubcategoryFromHistory("TARGET.COM", transactions), "shopping", "no exact match for 'TARGET.COM', but it fuzzy-matches the same merchant");
+  assert.equal(suggestSubcategoryFromHistory("A Completely Unrelated Payee", transactions), null);
+  assert.equal(suggestSubcategoryFromHistory("", transactions), null, "an empty payee never matches anything");
+});
+
+test("suggestSubcategoryFromHistory: ignores transactions with no lineId yet (unassigned/still-pending history teaches nothing)", () => {
+  const transactions = [
+    { payee: "Coffee Shop", amount: 5, date: "2026-01-01", lineId: "" },
+    { payee: "Coffee Shop", amount: 6, date: "2026-01-08", lineId: undefined }
+  ];
+  assert.equal(suggestSubcategoryFromHistory("Coffee Shop", transactions), null);
 });
 
 test("parseCreditCardStatementText: purchases stay positive, refunds go negative, and Order Number lines attach to the row above them", () => {
