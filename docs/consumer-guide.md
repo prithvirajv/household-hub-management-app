@@ -100,14 +100,18 @@ more convenient.
   instead of counting it as an expense.
 - Tag transactions (e.g. "Florida trip") to see them grouped together later
   in Reports.
-- A new transaction's Subcategory is pre-filled from how you (or a similar
-  payee) were categorized most recently, in both Bank Stream (a **From
-  history** pill) and the manual Add transaction form — always worth a
-  glance before accepting, since it's a suggestion, not a guarantee.
-- No history for a payee yet? Select **✨ Suggest with AI** (on the Add
-  transaction form, or the ✨ button next to an unlinked Bank Stream row) to
-  have it pick from your real budget lines — only runs when you ask, one
-  payee at a time, never automatically across a whole import.
+- A new transaction's Subcategory **and** Wealth account are both pre-filled
+  from how you (or a similar payee) were categorized/linked most recently,
+  in both Bank Stream (a **From history** pill for Subcategory, an
+  **Account from history** pill for the account) and the manual Add
+  transaction form — always worth a glance before accepting, since it's a
+  suggestion, not a guarantee.
+- No history for a payee yet? Select **✨ Suggest with AI** for Subcategory,
+  or **✨ Suggest account with AI** for the account (both on the Add
+  transaction form, or their matching ✨ buttons next to an unlinked Bank
+  Stream row) to have it pick from your real budget lines or Wealth
+  accounts — only runs when you ask, one payee at a time, never
+  automatically across a whole import.
 - CSV import recognizes exports from Chase, Capital One, Wells Fargo,
   Discover, Amex, and Citi, among others — both plain checking-style files
   and credit-card-style files (positive = purchase) are detected
@@ -118,10 +122,11 @@ more convenient.
   isn't lost — just correct the date once your bank posts it for real.
 - An import auto-links to a Wealth account by matching its name against the
   file's own name (and, for a checking-account PDF, the account label
-  printed on the statement itself, e.g. "Adv Plus Banking - 6769") — if
-  nothing matches, use **Set account for all unlinked rows** above the list
-  to assign one account to everything in a single action instead of picking
-  it row by row.
+  printed on the statement itself, e.g. "Adv Plus Banking - 6769") — if that
+  whole-file match comes up empty, each row still falls back to the
+  per-payee account history/AI suggestion above; if nothing matches at all,
+  use **Set account for all unlinked rows** above the list to assign one
+  account to everything in a single action instead of picking it row by row.
 
 ## Paycheck/Income
 

@@ -1334,6 +1334,44 @@ app.post("/api/transactions/suggest-subcategory", requireSession, async (req, re
   }
 });
 
+// AI fallback for suggestAccountFromHistory (lib/shared-logic.js) - same
+// pattern and same reasoning as /api/transactions/suggest-subcategory above:
+// history-first on the client, this only fires on an explicit per-row button
+// click, and the model's answer is validated against the exact account id
+// list the request sent before ever being trusted.
+const ACCOUNT_SUGGEST_MAX_PAYEE_CHARS = 200;
+const ACCOUNT_SUGGEST_MAX_ACCOUNTS = 100;
+
+app.post("/api/transactions/suggest-account", requireSession, async (req, res, next) => {
+  try {
+    if (!GEMINI_API_KEY) return res.status(503).json({ error: "AI suggestions are not configured for this deployment" });
+    const payee = String(req.body?.payee || "").trim();
+    const accounts = Array.isArray(req.body?.accounts) ? req.body.accounts : [];
+    if (!payee) return res.status(400).json({ error: "No payee to link" });
+    if (payee.length > ACCOUNT_SUGGEST_MAX_PAYEE_CHARS) return res.status(400).json({ error: "Payee text is too long" });
+    if (!accounts.length) return res.status(400).json({ error: "No accounts to choose from yet - add a Wealth account first" });
+    if (accounts.length > ACCOUNT_SUGGEST_MAX_ACCOUNTS) return res.status(400).json({ error: "Too many accounts to suggest from" });
+    const validIds = new Set(accounts.map((account) => String(account?.id || "")).filter(Boolean));
+    const optionsText = accounts.map((account) => `${account.id}: ${account.label}`).join("\n");
+
+    const response = await fetch(`${GEMINI_API_BASE_URL}/v1beta/models/${encodeURIComponent(GEMINI_MODEL)}:generateContent?key=${encodeURIComponent(GEMINI_API_KEY)}`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        contents: [{ role: "user", parts: [{ text: `Payee: ${payee}\n\nOptions:\n${optionsText}` }] }],
+        systemInstruction: { parts: [{ text: "You are linking a household bank transaction to the account it belongs to, for a budgeting app. Given a payee name and a list of account options (each line is \"id: Account name (type)\"), reply with ONLY the exact id of the single best-matching option - nothing else, no explanation, no punctuation, no quotes. If nothing listed is a reasonable, confident match, reply with exactly: none" }] },
+        generationConfig: { maxOutputTokens: 20 }
+      })
+    });
+    const body = await response.json().catch(() => ({}));
+    if (!response.ok) return res.status(502).json({ error: body?.error?.message || "The AI suggestion service is unavailable right now" });
+    const text = body.candidates?.[0]?.content?.parts?.[0]?.text?.trim();
+    res.json({ accountId: text && validIds.has(text) ? text : null });
+  } catch (error) {
+    next(error);
+  }
+});
+
 app.get("/api/stock-quote", requireSession, async (req, res, next) => {
   try {
     const symbol = String(req.query.symbol || "").trim().toUpperCase();

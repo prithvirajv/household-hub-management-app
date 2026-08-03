@@ -189,7 +189,18 @@ byte-for-byte between the browser, the server, and the test suite.
   back to `/api/transactions/suggest-subcategory`'s Gemini call, which is
   deliberately never triggered automatically across a whole import - only a
   single explicit per-row/per-form button click, so a 200-row statement
-  import can't turn into 200 paid API calls. `parseBankStatementPdfText` auto-detects a
+  import can't turn into 200 paid API calls. `suggestAccountFromHistory`
+  mirrors `suggestSubcategoryFromHistory` exactly (same exact-payee-match-
+  only rule, no fuzzy fallback, deliberately applying the lesson from that
+  incident from the start) but for which Wealth account a payee's
+  transactions have actually been linked to; its own AI fallback,
+  `/api/transactions/suggest-account`, mirrors `/api/transactions/suggest-
+  subcategory`'s validation/prompt/hallucination-guard shape as well, and is
+  wired into Bank Stream (an "Account from history" pill, falling back to a
+  per-row ✨ button only when the whole-file `matchAccountByFilename`/
+  `matchAccountByHints` match came up empty for that import) and the manual
+  Add transaction form (a `transactionFormAccountTouched` flag mirroring
+  `transactionFormLineTouched`, so it doesn't fight a manual pick). `parseBankStatementPdfText` auto-detects a
   checking/deposit account's "Account Activity" print export (e.g. Bank of
   America's Online Banking print-to-PDF — a Posting date/Description/Type/
   Amount/Available balance table, with a still-pending row showing

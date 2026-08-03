@@ -9,7 +9,7 @@ const {
   monthEndDateKey, assetValue, computeTrailingMonthKeys, computeReportCategoriesForScope, computeNetWorthAtDate, computeNetWorthTrend, computeCashFlowByMonth, sankeyFlowSegments,
   splitAmountEvenly, splitBillByPercentages, splitBillByShares, netBalancesByPerson, computeBillSplitAmounts, settleUpPersonIous, isValidEmail,
   parseDelimitedText, parseBankCsvTransactions, normalizeForAccountMatch, matchAccountByFilename, matchAccountByHints, extractAccountActivityLabel, isDuplicateTransaction, findTransferCandidate,
-  orderRefundMatch, normalizeForPayeeMatch, payeesFuzzyMatch, refundFuzzyMatch, refundMatch, suggestSubcategoryFromHistory,
+  orderRefundMatch, normalizeForPayeeMatch, payeesFuzzyMatch, refundFuzzyMatch, refundMatch, suggestSubcategoryFromHistory, suggestAccountFromHistory,
   parseCreditCardStatementText, parseCheckingAccountActivityText, parseBankStatementPdfText, normalizeTag, groupTransactionsByTag, monthKeysInRange, spentByLineInMonth,
   recurringBudgetSetAside, nextRecurringBudgetDueDate, monthsUntilDueInclusive,
   annualEventDate, nextAnnualEventDate, annualEventNotifyAt, rollAnnualNotifyAtForward,
@@ -1213,6 +1213,35 @@ test("suggestSubcategoryFromHistory: ignores transactions with no lineId yet (un
     { payee: "Coffee Shop", amount: 6, date: "2026-01-08", lineId: undefined }
   ];
   assert.equal(suggestSubcategoryFromHistory("Coffee Shop", transactions), null);
+});
+
+test("suggestAccountFromHistory: the single most recently linked account for an exact payee match wins outright, mirroring suggestSubcategoryFromHistory's own tie-break rule", () => {
+  const transactions = [
+    { payee: "SAWNEE EMC Bill Payment", amount: 140, date: "2026-01-02", accountId: "old-checking" },
+    { payee: "SAWNEE EMC Bill Payment", amount: 138, date: "2026-02-02", accountId: "old-checking" },
+    // The household switched which account pays this bill starting in
+    // March - fewer total observations on the new account, but it's the
+    // more recent choice.
+    { payee: "SAWNEE EMC Bill Payment", amount: 145, date: "2026-03-02", accountId: "new-checking" }
+  ];
+  assert.equal(suggestAccountFromHistory("SAWNEE EMC Bill Payment", transactions), "new-checking");
+});
+
+test("suggestAccountFromHistory: is exact-match only, deliberately never fuzzy - the same generic-prefix cross-contamination that hit suggestSubcategoryFromHistory must never happen here either", () => {
+  const transactions = [
+    { payee: "Zelle payment to NUR MOHAMMAD Conf# qznyvr4du", amount: 1100, date: "2026-07-30", accountId: "checking" }
+  ];
+  assert.equal(suggestAccountFromHistory("Zelle payment from SARITHA SHEELA for Backpack amount", transactions), null, "shares only the generic 'Zelle payment' prefix - must not inherit its accountId");
+  assert.equal(suggestAccountFromHistory("A Completely Unrelated Payee", transactions), null);
+  assert.equal(suggestAccountFromHistory("", transactions), null, "an empty payee never matches anything");
+});
+
+test("suggestAccountFromHistory: ignores transactions with no accountId yet (never-linked history teaches nothing)", () => {
+  const transactions = [
+    { payee: "Coffee Shop", amount: 5, date: "2026-01-01", accountId: "" },
+    { payee: "Coffee Shop", amount: 6, date: "2026-01-08", accountId: undefined }
+  ];
+  assert.equal(suggestAccountFromHistory("Coffee Shop", transactions), null);
 });
 
 test("parseCreditCardStatementText: purchases stay positive, refunds go negative, and Order Number lines attach to the row above them", () => {
