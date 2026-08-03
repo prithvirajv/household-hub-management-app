@@ -171,14 +171,25 @@ byte-for-byte between the browser, the server, and the test suite.
   `normalizeForPayeeMatch`, `payeesFuzzyMatch`, `refundFuzzyMatch`,
   `refundMatch` (see [§6](#6-key-algorithms) for how the refund-matching
   chain actually works), `suggestSubcategoryFromHistory` (an
-  exact-then-fuzzy payee match against already-categorized transactions,
-  most-recently-categorized line wins outright over a line with more total
-  hits — the free, local, no-API-call first pass Bank Stream and the manual
-  Add transaction form both try before ever falling back to
-  `/api/transactions/suggest-subcategory`'s Gemini call, which is
+  exact-normalized-payee match against already-categorized transactions -
+  deliberately no fuzzy fallback, unlike `refundMatch`/`payeesFuzzyMatch`:
+  a first version tried the same prefix-fuzzy heuristic, but on payee text
+  alone (no corroborating amount+date window the way refund pairing has)
+  it collapsed unrelated transactions sharing only a generic prefix -
+  "Zelle payment to X" vs "Zelle payment from Y" - onto whichever one
+  happened to be categorized most recently, a real incident that
+  mis-suggested the same wrong subcategory across a whole statement
+  import; Bank Stream has a "Clear N suggested subcategories" recovery
+  action, scoped to exactly the drafts flagged `historyMatch`, for exactly
+  this failure mode. The single most-recently-categorized transaction for
+  an exact payee match still wins outright over a line with more total
+  hits, so a household that changed how it categorizes a payee gets the
+  newer choice immediately) — the free, local, no-API-call first pass Bank
+  Stream and the manual Add transaction form both try before ever falling
+  back to `/api/transactions/suggest-subcategory`'s Gemini call, which is
   deliberately never triggered automatically across a whole import - only a
   single explicit per-row/per-form button click, so a 200-row statement
-  import can't turn into 200 paid API calls). `parseBankStatementPdfText` auto-detects a
+  import can't turn into 200 paid API calls. `parseBankStatementPdfText` auto-detects a
   checking/deposit account's "Account Activity" print export (e.g. Bank of
   America's Online Banking print-to-PDF — a Posting date/Description/Type/
   Amount/Available balance table, with a still-pending row showing

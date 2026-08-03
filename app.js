@@ -1676,6 +1676,13 @@ function renderTransactions() {
   });
   const otherMonthEntries = Object.entries(otherMonthCounts).sort(([a], [b]) => a.localeCompare(b));
   const unlinkedDraftCount = allImported.filter((transaction) => !transaction.accountId).length;
+  // A payee-history bug (fixed) briefly let a shared generic prefix - e.g.
+  // "Zelle payment to X" and "Zelle payment from Y" - cross-contaminate
+  // subcategory suggestions across a whole statement import. historyMatch
+  // marks exactly the drafts that came from that auto-suggestion (never a
+  // manual pick or a refund match), so this offers to reset just those back
+  // to unassigned in one action instead of reviewing every row by hand.
+  const historyMatchedDraftCount = allImported.filter((transaction) => transaction.historyMatch).length;
   const unassignedLedger = [];
   const lineOptions = (selectedLineId) => allLines().map((line) => `<option value="${line.id}" ${line.id === selectedLineId ? "selected" : ""}>${line.category} - ${line.name}</option>`).join("");
   const firstCategory = state.budget.categories[0];
@@ -1803,6 +1810,10 @@ function renderTransactions() {
             <label><small>Set account for all ${unlinkedDraftCount} unlinked row${unlinkedDraftCount === 1 ? "" : "s"} (every month)</small>
               <select id="bankStreamBulkAccount"><option value="">Choose an account…</option>${accountOptions("")}</select>
             </label>
+          </div>` : ""}
+          ${historyMatchedDraftCount ? `<div class="bank-stream-bulk-account bank-stream-bulk-warning">
+            <span><small>A since-fixed bug could have mis-suggested the Subcategory on ${historyMatchedDraftCount} row${historyMatchedDraftCount === 1 ? "" : "s"} (every month) marked <strong>From history</strong> — safe to clear and redo if any look wrong.</small></span>
+            <button type="button" id="bankStreamClearHistoryMatches" class="ghost">Clear ${historyMatchedDraftCount} suggested subcategor${historyMatchedDraftCount === 1 ? "y" : "ies"}</button>
           </div>` : ""}
           ${imported.length ? `<div class="bank-stream-sort-row">
             <span>Sort:</span>
@@ -7559,6 +7570,17 @@ function bindViewEvents() {
     transactionValidationFeedback = skippedClosed
       ? `${accountName(accountId)} was applied to ${unlinked.length - skippedClosed} row${unlinked.length - skippedClosed === 1 ? "" : "s"} - ${skippedClosed} skipped because they're dated after that account's close date.`
       : "";
+    autosaveState();
+    render();
+  });
+
+  $("#bankStreamClearHistoryMatches")?.addEventListener("click", () => {
+    const matched = (state.transactionInboxDrafts || []).filter((draft) => draft.historyMatch);
+    matched.forEach((draft) => {
+      draft.lineId = "";
+      draft.historyMatch = false;
+    });
+    transactionValidationFeedback = `Cleared the suggested Subcategory on ${matched.length} row${matched.length === 1 ? "" : "s"} - pick each one by hand, or re-suggest with the ✨ AI button.`;
     autosaveState();
     render();
   });

@@ -1935,6 +1935,20 @@ main {
   font-weight: 700;
 }
 
+.bank-stream-bulk-warning {
+  background: rgba(217, 154, 36, 0.14);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+}
+
+.bank-stream-bulk-warning small {
+  color: var(--gold);
+  font-weight: 500;
+}
+
 .recurring-expense-row {
   background: var(--soft-blue);
 }

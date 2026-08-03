@@ -1188,14 +1188,23 @@ test("suggestSubcategoryFromHistory: the single most recently categorized transa
   assert.equal(suggestSubcategoryFromHistory("SAWNEE EMC Bill Payment", transactions), "home-services", "3 historical uses of 'utilities' still lose to a single more-recent use of 'home-services'");
 });
 
-test("suggestSubcategoryFromHistory: falls back to the same fuzzy same-merchant heuristic refundMatch uses when there's no exact payee match, and returns null when nothing matches at all", () => {
+test("suggestSubcategoryFromHistory: is exact-match only, deliberately never fuzzy - a near-miss spelling variant and a merely-similar-looking payee both return null rather than guessing", () => {
   const transactions = [
     { payee: "TARGET STORE 1147", amount: 42, date: "2026-01-05", lineId: "shopping" },
     { payee: "TARGET STORE 1147", amount: 18, date: "2026-02-05", lineId: "shopping" }
   ];
-  assert.equal(suggestSubcategoryFromHistory("TARGET.COM", transactions), "shopping", "no exact match for 'TARGET.COM', but it fuzzy-matches the same merchant");
+  assert.equal(suggestSubcategoryFromHistory("TARGET.COM", transactions), null, "no exact match for 'TARGET.COM' - unlike refundMatch, there's no amount+date to corroborate a fuzzy guess here, so it stays null rather than risking a wrong suggestion");
   assert.equal(suggestSubcategoryFromHistory("A Completely Unrelated Payee", transactions), null);
   assert.equal(suggestSubcategoryFromHistory("", transactions), null, "an empty payee never matches anything");
+});
+
+test("suggestSubcategoryFromHistory: a shared generic prefix across unrelated payees ('Zelle payment to X' vs 'Zelle payment from Y') never cross-contaminates a suggestion - regression test for a real production incident where a whole statement import collapsed onto one wrong subcategory", () => {
+  const transactions = [
+    { payee: "Zelle payment to NUR MOHAMMAD Conf# qznyvr4du", amount: 1100, date: "2026-07-30", lineId: "home-repair" },
+    { payee: "Online transfer from CHK 6777 Confirmation# k7ufdtq0i; KRISHNAMURTHY, SUDHARSAN", amount: 1050, date: "2026-01-30", lineId: "cloudcost" }
+  ];
+  assert.equal(suggestSubcategoryFromHistory("Zelle payment from SARITHA SHEELA for Backpack amount", transactions), null, "shares only the generic 'Zelle payment' prefix with the history entry - must not inherit its lineId");
+  assert.equal(suggestSubcategoryFromHistory("Online transfer from CHK 6777 Confirmation# o524gmpag; KRISHNAMURTHY, SUDHARSAN", transactions), null, "a different confirmation number is a different transaction, not the same payee");
 });
 
 test("suggestSubcategoryFromHistory: ignores transactions with no lineId yet (unassigned/still-pending history teaches nothing)", () => {
