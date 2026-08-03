@@ -99,6 +99,146 @@
         gap: 0.6rem;
       }
 
+      /* Features mega-menu */
+      .nav-dropdown {
+        position: relative;
+      }
+
+      .nav-dropdown-trigger {
+        display: flex;
+        align-items: center;
+        gap: 0.35rem;
+        background: none;
+        border: none;
+        font: inherit;
+        font-weight: 700;
+        color: var(--navy-2);
+        cursor: pointer;
+        padding: 0;
+      }
+
+      .nav-dropdown-trigger:hover {
+        color: var(--green);
+      }
+
+      .nav-dropdown-trigger .chevron {
+        font-size: 0.65rem;
+        transition: transform 0.15s ease;
+        color: var(--muted);
+      }
+
+      .nav-dropdown[data-open="true"] .nav-dropdown-trigger .chevron {
+        transform: rotate(180deg);
+      }
+
+      .nav-dropdown[data-open="true"] .nav-dropdown-trigger {
+        color: var(--green);
+      }
+
+      .nav-dropdown-panel {
+        display: none;
+        position: absolute;
+        top: calc(100% + 18px);
+        left: 50%;
+        transform: translateX(-50%);
+        width: min(760px, 82vw);
+        background: var(--panel);
+        border: 1px solid var(--line);
+        border-radius: 14px;
+        box-shadow: var(--shadow);
+        padding: 1.5rem;
+        gap: 1.5rem;
+        grid-template-columns: repeat(4, minmax(0, 1fr));
+        z-index: 20;
+      }
+
+      .nav-dropdown[data-open="true"] .nav-dropdown-panel {
+        display: grid;
+      }
+
+      .nav-dropdown-item h4 {
+        display: flex;
+        align-items: center;
+        gap: 0.4rem;
+        margin: 0 0 0.35rem;
+        font-size: 0.85rem;
+        color: var(--navy);
+      }
+
+      .nav-dropdown-item p {
+        margin: 0 0 0.6rem;
+        color: var(--muted);
+        font-size: 0.78rem;
+        font-weight: 400;
+      }
+
+      .nav-dropdown-item ul {
+        margin: 0;
+        padding-left: 1rem;
+        font-size: 0.78rem;
+        font-weight: 400;
+        color: var(--text);
+      }
+
+      .nav-dropdown-item li + li {
+        margin-top: 0.25rem;
+      }
+
+      /* Mobile menu */
+      .nav-toggle {
+        display: none;
+        background: none;
+        border: 1px solid var(--line);
+        border-radius: 10px;
+        width: 40px;
+        height: 40px;
+        cursor: pointer;
+        align-items: center;
+        justify-content: center;
+      }
+
+      .nav-toggle span,
+      .nav-toggle span::before,
+      .nav-toggle span::after {
+        content: "";
+        display: block;
+        width: 18px;
+        height: 2px;
+        background: var(--navy);
+        position: relative;
+        transition: transform 0.15s ease, opacity 0.15s ease;
+      }
+
+      .nav-toggle span::before {
+        position: absolute;
+        top: -6px;
+      }
+
+      .nav-toggle span::after {
+        position: absolute;
+        top: 6px;
+      }
+
+      .site-nav[data-mobile-open="true"] .nav-toggle span {
+        background: transparent;
+      }
+
+      .site-nav[data-mobile-open="true"] .nav-toggle span::before {
+        top: 0;
+        transform: rotate(45deg);
+        background: var(--navy);
+      }
+
+      .site-nav[data-mobile-open="true"] .nav-toggle span::after {
+        top: 0;
+        transform: rotate(-45deg);
+        background: var(--navy);
+      }
+
+      .mobile-nav-panel {
+        display: none;
+      }
+
       .btn {
         display: inline-flex;
         align-items: center;
@@ -414,10 +554,61 @@
       @media (max-width: 860px) {
         .site-nav-links { display: none; }
         .site-nav-cta .btn-ghost { display: none; }
+        .nav-toggle { display: flex; }
         .hero .wrap { grid-template-columns: 1fr; }
         .hero-image { order: -1; }
         .feature-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
         .privacy-callout .card { grid-template-columns: 1fr; }
+
+        .site-nav[data-mobile-open="true"] .mobile-nav-panel {
+          display: block;
+          border-top: 1px solid var(--line);
+          padding: 1rem 0 1.25rem;
+        }
+
+        .mobile-nav-panel .wrap {
+          display: flex;
+          flex-direction: column;
+          gap: 0.9rem;
+        }
+
+        .mobile-nav-group {
+          display: flex;
+          flex-direction: column;
+          gap: 0.7rem;
+        }
+
+        .mobile-nav-panel a {
+          text-decoration: none;
+          color: var(--navy-2);
+          font-weight: 700;
+          font-size: 0.95rem;
+        }
+
+        .mobile-nav-sub {
+          display: flex;
+          flex-direction: column;
+          gap: 0.5rem;
+          padding-left: 0.9rem;
+          border-left: 2px solid var(--line);
+        }
+
+        .mobile-nav-sub a {
+          color: var(--muted);
+          font-weight: 600;
+          font-size: 0.88rem;
+        }
+
+        .mobile-nav-cta {
+          display: flex;
+          gap: 0.6rem;
+          padding-top: 0.4rem;
+          border-top: 1px solid var(--line);
+        }
+
+        .mobile-nav-cta .btn {
+          flex: 1;
+        }
       }
 
       @media (max-width: 480px) {
@@ -433,20 +624,84 @@
     </style>
   </head>
   <body>
-    <header class="site-nav">
+    <header class="site-nav" id="siteNav">
       <div class="wrap">
         <a class="site-brand" href="/welcome.html">
           <img src="/assets/favicon.svg" alt="">
           FamilyLoop
         </a>
         <nav class="site-nav-links">
-          <a href="#features">Features</a>
+          <div class="nav-dropdown" id="featuresDropdown">
+            <button class="nav-dropdown-trigger" id="featuresDropdownTrigger" type="button" aria-expanded="false">
+              Features <span class="chevron">▼</span>
+            </button>
+            <div class="nav-dropdown-panel" role="menu">
+              <div class="nav-dropdown-item" role="none">
+                <h4>💰 Money</h4>
+                <p>Zero-based budgeting that actually balances.</p>
+                <ul>
+                  <li>Categories &amp; subcategories with planned vs. spent</li>
+                  <li>Bank import with automatic refund matching</li>
+                  <li>Cash flow, net worth &amp; category reports</li>
+                </ul>
+              </div>
+              <div class="nav-dropdown-item" role="none">
+                <h4>🏠 Household</h4>
+                <p>The everyday logistics, shared by everyone.</p>
+                <ul>
+                  <li>Shared calendar with chores and rotation</li>
+                  <li>Birthday &amp; anniversary reminders</li>
+                  <li>Meal planning with an auto grocery list</li>
+                </ul>
+              </div>
+              <div class="nav-dropdown-item" role="none">
+                <h4>🤝 Together</h4>
+                <p>Money and decisions shared without the awkwardness.</p>
+                <ul>
+                  <li>Split a bill or track an IOU with friends</li>
+                  <li>Weigh a decision with pros, cons &amp; outcome</li>
+                  <li>Invite by exact area, not all-or-nothing</li>
+                </ul>
+              </div>
+              <div class="nav-dropdown-item" role="none">
+                <h4>📁 Documents</h4>
+                <p>The paperwork behind every number, always findable.</p>
+                <ul>
+                  <li>Upload and organize files into folders</li>
+                  <li>Link a document to an account or a note</li>
+                  <li>Photo and PDF previews, right in the browser</li>
+                </ul>
+              </div>
+            </div>
+          </div>
           <a href="#privacy">Privacy</a>
           <a href="/index.html#help">Help</a>
         </nav>
         <div class="site-nav-cta">
           <a class="btn btn-ghost" href="/index.html">Sign in</a>
           <a class="btn btn-primary" href="/index.html">Try the demo</a>
+        </div>
+        <button class="nav-toggle" id="mobileNavToggle" type="button" aria-expanded="false" aria-label="Open menu">
+          <span></span>
+        </button>
+      </div>
+      <div class="mobile-nav-panel" id="mobileNavPanel">
+        <div class="wrap">
+          <div class="mobile-nav-group">
+            <a href="#features">Features</a>
+            <div class="mobile-nav-sub">
+              <a href="#features">💰 Money</a>
+              <a href="#features">🏠 Household</a>
+              <a href="#features">🤝 Together</a>
+              <a href="#features">📁 Documents</a>
+            </div>
+          </div>
+          <a href="#privacy">Privacy</a>
+          <a href="/index.html#help">Help</a>
+          <div class="mobile-nav-cta">
+            <a class="btn btn-ghost" href="/index.html">Sign in</a>
+            <a class="btn btn-primary" href="/index.html">Try the demo</a>
+          </div>
         </div>
       </div>
     </header>
@@ -577,5 +832,51 @@
         </div>
       </div>
     </footer>
+    <script>
+      (function () {
+        const dropdown = document.getElementById("featuresDropdown");
+        const trigger = document.getElementById("featuresDropdownTrigger");
+        const nav = document.getElementById("siteNav");
+        const mobileToggle = document.getElementById("mobileNavToggle");
+
+        function closeDropdown() {
+          dropdown.dataset.open = "false";
+          trigger.setAttribute("aria-expanded", "false");
+        }
+
+        trigger.addEventListener("click", (event) => {
+          event.stopPropagation();
+          const isOpen = dropdown.dataset.open === "true";
+          dropdown.dataset.open = isOpen ? "false" : "true";
+          trigger.setAttribute("aria-expanded", String(!isOpen));
+        });
+
+        mobileToggle.addEventListener("click", () => {
+          const isOpen = nav.dataset.mobileOpen === "true";
+          nav.dataset.mobileOpen = isOpen ? "false" : "true";
+          mobileToggle.setAttribute("aria-expanded", String(!isOpen));
+          if (!isOpen) closeDropdown();
+        });
+
+        document.addEventListener("click", (event) => {
+          if (!dropdown.contains(event.target)) closeDropdown();
+        });
+
+        document.addEventListener("keydown", (event) => {
+          if (event.key === "Escape") {
+            closeDropdown();
+            nav.dataset.mobileOpen = "false";
+            mobileToggle.setAttribute("aria-expanded", "false");
+          }
+        });
+
+        document.querySelectorAll(".mobile-nav-panel a").forEach((link) => {
+          link.addEventListener("click", () => {
+            nav.dataset.mobileOpen = "false";
+            mobileToggle.setAttribute("aria-expanded", "false");
+          });
+        });
+      })();
+    </script>
   </body>
 </html>
