@@ -1230,7 +1230,14 @@ test("parseCreditCardStatementText: returns an empty array for text with no matc
 // Details) - every page repeats the column header and a footer/URL/page-
 // number line, a long description wraps onto its own line before the Type/
 // Amount columns catch up to it, and a not-yet-posted item shows the literal
-// word "Processing" instead of a date. All names/numbers below are made up.
+// word "Processing" instead of a date. Whitespace here deliberately mirrors
+// pdf-parse's REAL output on an actual exported PDF of this format (verified
+// directly, not just how a PDF viewer renders it) - adjacent table cells on
+// the same source line are glued with NO separator at all
+// ("ProcessingPAYMENT TO...Debit-$40.00$500.00"); only where the original
+// layout happened to wrap onto a new line does a real separator exist there,
+// which parseCheckingAccountActivityText re-inserts as a single space when
+// it joins lines back together. All names/numbers below are made up.
 const CHECKING_ACTIVITY_SAMPLE_TEXT = `
 Adv Plus Banking - 1234 : Account Activity
 Balance Summary: $500.00 (available balance as of today 06/15/2026)
@@ -1238,34 +1245,34 @@ View: today: 06/15/2026
 
 Transactions
 
-Posting date Description Type Amount Available balance
+Posting dateDescriptionTypeAmountAvailable balance
 
-Processing PAYMENT TO ACCT #9999 ON 06/15 VIA WEB Debit -$40.00 $500.00
+ProcessingPAYMENT TO ACCT #9999 ON 06/15 VIA WEBDebit-$40.00$500.00
 
-Processing Zelle Transfer CONF# AB12CD34; JANE SAMPLE
+ProcessingZelle Transfer CONF# AB12CD34; JANE SAMPLE
 DOE
-Debit -$75.00 $540.00
+Debit-$75.00$540.00
 
-06/12/2026 Zelle payment from JOHN EXAMPLE for "Shared grocery
+06/12/2026Zelle payment from JOHN EXAMPLE for "Shared grocery
 run"; Conf# xy98zw76
-Transfer $22.50 $615.00
+Transfer$22.50$615.00
 
-06/10/2026 ACME CORP DES:PAYROLL ID:XXXXX0001 INDN:SAMPLE
+06/10/2026ACME CORP DES:PAYROLL ID:XXXXX0001 INDN:SAMPLE
 EMPLOYEE...
-Deposit $1,200.00 $592.50
+Deposit$1,200.00$592.50
 
 Statement as of 06/09/2026
 
-06/08/2026 GENERIC UTILITY CO DES:BILL PAY ID:XXXXX1234
+06/08/2026GENERIC UTILITY CO DES:BILL PAY ID:XXXXX1234
 INDN:SAMPLE PERSON...
-Other Payment -$88.20 $607.50
+Other
+Payment
+-$88.20$607.50
 
-06/05/2026 SAMPLE ATM 06/05 #XXXXX0000 WITHDRWL MAIN ST
-ANYTOWN ST
-Withdrawal -$100.00 $519.30
+06/05/2026SAMPLE ATM 06/05 #XXXXX0000 WITHDRWL MAIN ST ANYTOWN STWithdrawal-$100.00$519.30
 
-6/15/26, 9:00 AM Bank of America | Online Banking | Deposit | Print Transaction Details
-https://secure.bankofamerica.com/deposit-details/print/?adx=deadbeef 1/2
+6/15/26, 9:00 AMBank of America | Online Banking | Deposit | Print Transaction Details
+https://secure.bankofamerica.com/deposit-details/print/?adx=deadbeef1/2
 `;
 
 test("parseCheckingAccountActivityText: extracts a full 'Account Activity' print export, flipping to this app's spend-positive sign convention", () => {
@@ -1277,12 +1284,12 @@ test("parseCheckingAccountActivityText: extracts a full 'Account Activity' print
     { date: "2026-06-10", payee: "ACME CORP DES:PAYROLL ID:XXXXX0001 INDN:SAMPLE EMPLOYEE...", amount: -1200.00, isDeposit: true },
     { date: "2026-06-08", payee: "GENERIC UTILITY CO DES:BILL PAY ID:XXXXX1234 INDN:SAMPLE PERSON...", amount: 88.20 },
     { date: "2026-06-05", payee: "SAMPLE ATM 06/05 #XXXXX0000 WITHDRWL MAIN ST ANYTOWN ST", amount: 100.00 }
-  ], "Processing rows are dated with the supplied today-date and flagged isPending; a money-in row (positive in the printed table) flips to negative and gets isDeposit; the header, boilerplate, 'Statement as of', and footer/URL lines are all ignored rather than corrupting a description");
+  ], "Processing rows are dated with the supplied today-date and flagged isPending; a money-in row (positive in the printed table) flips to negative and gets isDeposit; the header, boilerplate, 'Statement as of', and footer/URL lines are all ignored rather than corrupting a description - all despite zero whitespace between most adjacent table cells");
 });
 
 test("parseCheckingAccountActivityText: defaults 'today' to the real current date when none is supplied", () => {
   const today = new Date().toISOString().slice(0, 10);
-  const rows = parseCheckingAccountActivityText("Posting date Description Type Amount Available balance\nProcessing SAMPLE PENDING CHARGE Debit -$5.00 $100.00\n");
+  const rows = parseCheckingAccountActivityText("Posting dateDescriptionTypeAmountAvailable balance\nProcessingSAMPLE PENDING CHARGEDebit-$5.00$100.00\n");
   assert.deepEqual(rows, [{ date: today, payee: "SAMPLE PENDING CHARGE", amount: 5.00, isPending: true }]);
 });
 
