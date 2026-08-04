@@ -7199,7 +7199,12 @@ function bindViewEvents() {
     // real-world date - a one-time paycheck's date is what paycheckActiveInMonth
     // checks against, so defaulting to "today" made a new income row invisible
     // whenever it was added while viewing any month other than the current one.
-    state.paychecks.push({ date: `${state.budget.month}-01`, name: `Income ${state.paychecks.length + 1}`, amount: 0, assignedLineIds: [] });
+    // recurrence is explicit "once", not left blank - ensurePaycheckRecurrenceData
+    // defaults a blank recurrence to "monthly" (for pre-recurrence-field legacy
+    // data), which would otherwise turn a single backfilled/historical income
+    // entry into an ongoing recurring paycheck that keeps generating occurrences
+    // in every month afterward, including whatever month is actually current.
+    state.paychecks.push({ date: `${state.budget.month}-01`, name: `Income ${state.paychecks.length + 1}`, amount: 0, assignedLineIds: [], recurrence: "once" });
     state.budget.income = budgetIncomeFromPaychecks();
     autosaveState();
     render();
@@ -7862,7 +7867,12 @@ function bindViewEvents() {
   });
 
   $("#addPaycheckButton")?.addEventListener("click", () => {
-    state.paychecks.push({ date: new Date().toISOString().slice(0, 10), name: `Paycheck/Income ${state.paychecks.length + 1}`, amount: 0, assignedLineIds: [], recurrence: "monthly" });
+    // Same reasoning as #addIncomeButton: date to the viewed budget month
+    // (not today's real date) and default to a one-time recurrence, not
+    // "monthly" - otherwise a single backfilled/historical entry keeps
+    // generating occurrences into every month afterward, including whichever
+    // month is actually current.
+    state.paychecks.push({ date: `${state.budget.month}-01`, name: `Paycheck/Income ${state.paychecks.length + 1}`, amount: 0, assignedLineIds: [], recurrence: "once" });
     autosaveState();
     render();
   });
