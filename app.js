@@ -7195,7 +7195,11 @@ function bindViewEvents() {
   });
 
   $("#addIncomeButton")?.addEventListener("click", () => {
-    state.paychecks.push({ date: new Date().toISOString().slice(0, 10), name: `Income ${state.paychecks.length + 1}`, amount: 0, assignedLineIds: [] });
+    // Dated to the first of the currently-viewed budget month, not today's
+    // real-world date - a one-time paycheck's date is what paycheckActiveInMonth
+    // checks against, so defaulting to "today" made a new income row invisible
+    // whenever it was added while viewing any month other than the current one.
+    state.paychecks.push({ date: `${state.budget.month}-01`, name: `Income ${state.paychecks.length + 1}`, amount: 0, assignedLineIds: [] });
     state.budget.income = budgetIncomeFromPaychecks();
     autosaveState();
     render();
