@@ -301,6 +301,12 @@ more convenient.
 - Move an account-to-account payment (like paying a credit card from
   checking) to a Transfer instead of leaving it as a regular expense/income
   pair — the ⇄ icon on a matched transaction does this in one step.
+- Under **Net worth**, each stock or mutual fund is its own holding (Symbol,
+  Shares, Price per share) — for a brokerage with several positions, use
+  **+ Add multiple** instead of adding them one at a time: enter the account
+  name once, add a row per symbol, and submit to create them all together,
+  each named with that account as a prefix (e.g. "Brokerage M2 - AAPL") so
+  they're easy to spot as belonging together in the list.
 
 ## Sharing
 

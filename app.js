@@ -88,6 +88,10 @@ let profileVerifyFeedbackIsError = false;
 // Keyed by asset id (not index, since rows can reorder/delete) so a stale
 // "Refresh price" result never gets attributed to the wrong stock row.
 let stockPriceFeedback = {};
+// Draft rows for the bulk-add-holdings dialog - only ever lives for the
+// duration of one dialog session, never persisted like the real
+// state.goals.netWorth.assets rows it eventually creates.
+let bulkHoldingsRows = [];
 // privateData is scoped to the signed-in user (not the household) and is never part
 // of `state` or autosaveState() — it must never reach the shared household blob.
 let privateData = null;
@@ -4079,7 +4083,7 @@ function renderWealth() {
           </article>`).join("") : `<div class="onboarding-empty compact-onboarding"><div class="empty-symbol" aria-hidden="true">↓</div><h3>Add a debt when you are ready</h3><p>Track its balance, rate, payment, and the asset it secures.</p></div>`}
         </section>
       </div>
-      <section class="card wealth-holdings"><div class="section-head"><div><span class="card-label">Net worth</span><h3>Assets, investments and liabilities</h3></div><button id="addNetWorthItemButton" type="button">+ Add holding</button></div><div class="net-worth-strip"><strong data-net-worth-total>${money.format(netWorth().total)}</strong><span>Assets <b data-net-worth-assets>${money.format(netWorth().assets)}</b> Liabilities <b data-net-worth-liabilities>${money.format(netWorth().liabilities)}</b></span></div><div class="net-worth-items">${state.goals.netWorth.assets.map((asset, index) => netWorthItemRow(asset, "asset", index)).join("")}${state.goals.netWorth.liabilities.map((item, index) => netWorthItemRow(item, "liability", index)).join("")}</div>${state.goals.netWorth.assets.length || state.goals.netWorth.liabilities.length ? "" : `<div class="empty-inline">No assets, investments or liabilities yet</div>`}</section>
+      <section class="card wealth-holdings"><div class="section-head"><div><span class="card-label">Net worth</span><h3>Assets, investments and liabilities</h3></div><button id="addNetWorthItemButton" type="button">+ Add holding</button><button id="addNetWorthBulkButton" class="ghost" type="button">+ Add multiple</button></div><div class="net-worth-strip"><strong data-net-worth-total>${money.format(netWorth().total)}</strong><span>Assets <b data-net-worth-assets>${money.format(netWorth().assets)}</b> Liabilities <b data-net-worth-liabilities>${money.format(netWorth().liabilities)}</b></span></div><div class="net-worth-items">${state.goals.netWorth.assets.map((asset, index) => netWorthItemRow(asset, "asset", index)).join("")}${state.goals.netWorth.liabilities.map((item, index) => netWorthItemRow(item, "liability", index)).join("")}</div>${state.goals.netWorth.assets.length || state.goals.netWorth.liabilities.length ? "" : `<div class="empty-inline">No assets, investments or liabilities yet</div>`}</section>
     </section>`;
 }
 
@@ -4594,7 +4598,10 @@ function renderHelp() {
         "Link an account to a <strong>Net worth</strong> asset or liability so that entry updates automatically as the account does.",
         "For debt, check the <strong>Debt payoff tracker</strong> — it estimates a payoff date and suggested payment from the balance, rate, and term you enter."
       ],
-      tips: ["Move an account-to-account payment (like paying a credit card from checking) to a Transfer instead of leaving it as a regular expense/income pair — the ⇄ icon on a matched transaction does this in one step."] },
+      tips: [
+        "Move an account-to-account payment (like paying a credit card from checking) to a Transfer instead of leaving it as a regular expense/income pair — the ⇄ icon on a matched transaction does this in one step.",
+        "Under Net worth, each stock or mutual fund is its own holding - for a brokerage with several positions, use <strong>+ Add multiple</strong> instead of adding them one at a time: enter the account name once, add a row per symbol, and submit to create them all together, each named with that account as a prefix so they're easy to spot as belonging together in the list."
+      ] },
     { icon: "♙", title: "Sharing", id: "sharing",
       steps: [
         "Select <strong>Invite</strong>, choose a preset role (co-owner, adult, viewer, or meals/chores-only) or pick exact areas to share instead.",
@@ -8423,6 +8430,8 @@ function bindViewEvents() {
     render();
   });
 
+  $("#addNetWorthBulkButton")?.addEventListener("click", openBulkAddHoldingsDialog);
+
   document.querySelectorAll("[data-net-worth-name]").forEach((input) => {
     input.addEventListener("input", () => {
       const [type, indexValue] = input.dataset.netWorthName.split(":");
@@ -10560,6 +10569,82 @@ $("#exportReportForm").addEventListener("submit", async (event) => {
     submitButton.disabled = false;
     submitButton.textContent = originalLabel;
   }
+});
+
+function renderBulkHoldingsRows() {
+  const container = $("#bulkAddHoldingsRows");
+  if (!container) return;
+  container.innerHTML = bulkHoldingsRows.map((row, index) => `
+    <div class="iou-split-row">
+      <input placeholder="Symbol (AAPL)" value="${escapeHtml(row.symbol || "")}" data-bulk-holding-symbol="${index}" aria-label="Symbol for row ${index + 1}">
+      <input type="number" min="0" step="0.0001" inputmode="decimal" placeholder="Shares" value="${row.shares || ""}" data-bulk-holding-shares="${index}" aria-label="Shares for row ${index + 1}">
+      <input type="number" min="0" step="0.01" inputmode="decimal" placeholder="Price per share" value="${row.price || ""}" data-bulk-holding-price="${index}" aria-label="Price per share for row ${index + 1}">
+      <button type="button" class="icon-button ghost" data-remove-bulk-holding-row="${index}" aria-label="Remove row ${index + 1}">×</button>
+    </div>
+  `).join("");
+  container.querySelectorAll("[data-bulk-holding-symbol]").forEach((input) => {
+    input.addEventListener("input", () => {
+      bulkHoldingsRows[Number(input.dataset.bulkHoldingSymbol)].symbol = input.value.toUpperCase();
+    });
+  });
+  container.querySelectorAll("[data-bulk-holding-shares]").forEach((input) => {
+    input.addEventListener("input", () => {
+      bulkHoldingsRows[Number(input.dataset.bulkHoldingShares)].shares = Number(input.value || 0);
+    });
+  });
+  container.querySelectorAll("[data-bulk-holding-price]").forEach((input) => {
+    input.addEventListener("input", () => {
+      bulkHoldingsRows[Number(input.dataset.bulkHoldingPrice)].price = Number(input.value || 0);
+    });
+  });
+  container.querySelectorAll("[data-remove-bulk-holding-row]").forEach((button) => {
+    button.addEventListener("click", () => {
+      bulkHoldingsRows.splice(Number(button.dataset.removeBulkHoldingRow), 1);
+      if (!bulkHoldingsRows.length) bulkHoldingsRows.push({ symbol: "", shares: 0, price: 0 });
+      renderBulkHoldingsRows();
+    });
+  });
+}
+
+function openBulkAddHoldingsDialog() {
+  const form = $("#bulkAddHoldingsForm");
+  form.reset();
+  bulkHoldingsRows = [{ symbol: "", shares: 0, price: 0 }, { symbol: "", shares: 0, price: 0 }];
+  renderBulkHoldingsRows();
+  $("#bulkAddHoldingsMessage").textContent = "";
+  $("#bulkAddHoldingsDialog").showModal();
+}
+
+$("#closeBulkAddHoldingsDialogButton").addEventListener("click", () => $("#bulkAddHoldingsDialog").close());
+$("#cancelBulkAddHoldingsButton").addEventListener("click", () => $("#bulkAddHoldingsDialog").close());
+$("#addBulkHoldingRowButton").addEventListener("click", () => {
+  bulkHoldingsRows.push({ symbol: "", shares: 0, price: 0 });
+  renderBulkHoldingsRows();
+});
+
+$("#bulkAddHoldingsForm").addEventListener("submit", (event) => {
+  event.preventDefault();
+  const data = Object.fromEntries(new FormData(event.currentTarget));
+  const accountName = String(data.accountName || "").trim();
+  if (!accountName) {
+    $("#bulkAddHoldingsMessage").textContent = "Enter an account name first.";
+    return;
+  }
+  const rows = bulkHoldingsRows
+    .map((row) => ({ symbol: String(row.symbol || "").trim().toUpperCase(), shares: Number(row.shares) || 0, price: Number(row.price) || 0 }))
+    .filter((row) => row.symbol);
+  if (!rows.length) {
+    $("#bulkAddHoldingsMessage").textContent = "Enter at least one stock or fund symbol.";
+    return;
+  }
+  rows.forEach((row) => {
+    const asset = { id: uniqueId(`${accountName}-${row.symbol}`), name: `${accountName} - ${row.symbol}`, value: 0, assetClass: "stock", symbol: row.symbol, shares: row.shares, price: row.price };
+    asset.value = assetValue(asset);
+    state.goals.netWorth.assets.push(asset);
+  });
+  autosaveState();
+  $("#bulkAddHoldingsDialog").close();
+  render();
 });
 
 let assignIouDraftTotal = 0;

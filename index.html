@@ -295,6 +295,26 @@
       </div>
     </dialog>
 
+    <dialog id="bulkAddHoldingsDialog" class="app-dialog">
+      <div class="delete-budget-line-dialog-content">
+        <div class="section-head">
+          <div><span class="card-label">Net worth</span><h2>Add multiple stocks or funds</h2></div>
+          <button id="closeBulkAddHoldingsDialogButton" class="icon-button ghost" type="button" aria-label="Close">×</button>
+        </div>
+        <p class="muted">Enter one row per stock or mutual fund - they're each added as their own holding, named with this account as a prefix so they're easy to spot together in the list.</p>
+        <form id="bulkAddHoldingsForm">
+          <label>Account name<input name="accountName" placeholder="Brokerage M2" required></label>
+          <div id="bulkAddHoldingsRows" class="iou-split-rows"></div>
+          <button id="addBulkHoldingRowButton" class="ghost" type="button">+ Add another row</button>
+          <p id="bulkAddHoldingsMessage" class="form-message"></p>
+          <div class="dialog-actions">
+            <button id="cancelBulkAddHoldingsButton" class="ghost" type="button">Cancel</button>
+            <button type="submit">Add holdings</button>
+          </div>
+        </form>
+      </div>
+    </dialog>
+
     <dialog id="confirmDialog" class="app-dialog confirm-dialog">
       <div class="delete-budget-line-dialog-content">
         <div class="section-head">
@@ -320,6 +340,6 @@
     <script src="https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/build/pdf.min.js"></script>
     <script>if (window.pdfjsLib) pdfjsLib.GlobalWorkerOptions.workerSrc = "https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/build/pdf.worker.min.js";</script>
     <script src="/lib/shared-logic.js?v=20260803-3"></script>
-    <script src="/app.js?v=20260803-8"></script>
+    <script src="/app.js?v=20260809-1"></script>
   </body>
 </html>
