@@ -1,7 +1,7 @@
 const assert = require("node:assert/strict");
 const test = require("node:test");
 const {
-  applyChecklistToggle, bucketChecklistItems, findChecklistDuplicate, moveChecklistItem, moveArrayItemById, mealWeeksForMonth, groupPlanTasksByBucket, validateJournalPayload,
+  applyChecklistToggle, bucketChecklistItems, findChecklistDuplicate, moveChecklistItem, moveArrayItemById, groupStockHoldings, mealWeeksForMonth, groupPlanTasksByBucket, validateJournalPayload,
   dailyTaskOccursOnDate, isDailyTaskDoneOnDate, toggleDailyTaskDoneOnDate,
   timeToMinutes, minutesToTime, snapMinutes, layoutTimelineBlocks, comparePlannedToActual,
   sanitizeFilename, buildDocumentObjectPath, wouldCreateFolderCycle, buildFolderTree,
@@ -252,6 +252,25 @@ test("moveArrayItemById is a no-op when dropped on itself or a missing id", () =
   assert.equal(moveArrayItemById(accounts, "a", "a", false), accounts);
   assert.equal(moveArrayItemById(accounts, "missing", "a", false), accounts);
   assert.equal(moveArrayItemById(accounts, "a", "missing", false), accounts);
+});
+
+test("groupStockHoldings groups holdings that share a groupId into one card, in first-seen order", () => {
+  const assets = [
+    { id: "a1", groupId: "g1", groupName: "Brokerage M2", assetClass: "stock", symbol: "AAPL" },
+    { id: "cash1", assetClass: "cash", value: 500 },
+    { id: "a2", groupId: "g1", groupName: "Brokerage M2", assetClass: "stock", symbol: "HD" }
+  ];
+  const groups = groupStockHoldings(assets);
+  assert.equal(groups.length, 1);
+  assert.equal(groups[0].groupId, "g1");
+  assert.equal(groups[0].groupName, "Brokerage M2");
+  assert.deepEqual(groups[0].items.map((item) => item.id), ["a1", "a2"]);
+});
+
+test("groupStockHoldings falls back to a holding's own id as its group when it has no groupId (legacy solo holding)", () => {
+  const assets = [{ id: "solo-1", name: "401k VTSAX", assetClass: "stock", symbol: "VTSAX" }];
+  const groups = groupStockHoldings(assets);
+  assert.deepEqual(groups, [{ groupId: "solo-1", groupName: "401k VTSAX", items: assets }]);
 });
 
 test("checking a child marks the parent done once every sibling is done", () => {

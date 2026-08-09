@@ -3448,6 +3448,71 @@ text.cashflow-sankey-clickable:hover {
   border-left-color: var(--coral);
 }
 
+/* One card per brokerage/mutual-fund account instead of one row per
+   symbol - see groupStockHoldings(). Reuses .account-item/.debt-edit-grid
+   for the left column and .stock-market-value for the value panel, same
+   convention as the rest of Wealth, rather than inventing a fresh layout. */
+.stock-group-card {
+  display: flex;
+  align-items: flex-start;
+  gap: 1rem;
+  border-left: 5px solid var(--green);
+}
+
+.stock-group-main {
+  flex: 1;
+  min-width: 0;
+  display: grid;
+  gap: 0.65rem;
+}
+
+.stock-group-stat {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.stock-group-stat span {
+  color: var(--muted);
+  font-size: 0.68rem;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+
+.stock-group-stat strong {
+  font-size: 0.9rem;
+}
+
+.stock-group-stat button {
+  align-self: flex-start;
+  min-height: 0;
+  padding: 0.2rem 0.5rem;
+  font-size: 0.72rem;
+}
+
+.stock-group-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+}
+
+.stock-chip {
+  background: var(--green-soft);
+  color: var(--green);
+  border: 1px solid var(--green);
+  border-radius: 999px;
+  padding: 0.3rem 0.75rem;
+  font-weight: 800;
+  font-size: 0.78rem;
+  min-height: auto;
+}
+
+.stock-group-value-panel {
+  min-width: 190px;
+  align-self: stretch;
+}
+
 .net-worth-item label {
   min-width: 0;
   color: var(--muted);

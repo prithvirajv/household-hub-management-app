@@ -303,12 +303,15 @@ more convenient.
   pair — the ⇄ icon on a matched transaction does this in one step.
 - Drag an account by its ⠿ handle to reorder the **Accounts** list — useful
   for putting the ones you check most often at the top.
-- Under **Net worth**, each stock or mutual fund is its own holding (Symbol,
-  Shares, Price per share) — for a brokerage with several positions, use
-  **+ Add multiple** instead of adding them one at a time: enter the account
-  name once, add a row per symbol, and submit to create them all together,
-  each named with that account as a prefix (e.g. "Brokerage M2 - AAPL") so
-  they're easy to spot as belonging together in the list.
+- Under **Net worth**, a brokerage or 401(k) with several stocks or mutual
+  funds shows as one card, not one row per symbol: use **+ Add multiple** to
+  create it (enter the account name once, add a row per symbol, submit), and
+  the card shows a chip per holding plus a combined market value. To add,
+  edit, or remove individual holdings later, select **Manage list** on that
+  card (or click any chip) instead of deleting and re-adding the whole
+  account — clearing a row's symbol removes just that one holding, and a
+  blank new row is skipped rather than erroring. **↻ Live price** on the
+  card refreshes every holding in it at once.
 
 ## Sharing
 

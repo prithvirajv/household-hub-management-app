@@ -7,7 +7,7 @@
     <title>FamilyLoop</title>
     <link rel="icon" type="image/svg+xml" href="/assets/favicon.svg">
     <link rel="apple-touch-icon" href="/assets/apple-touch-icon.png">
-    <link rel="stylesheet" href="/styles.css?v=20260809-1">
+    <link rel="stylesheet" href="/styles.css?v=20260809-2">
     <script src="https://accounts.google.com/gsi/client" async defer></script>
   </head>
   <body>
@@ -298,10 +298,10 @@
     <dialog id="bulkAddHoldingsDialog" class="app-dialog">
       <div class="delete-budget-line-dialog-content">
         <div class="section-head">
-          <div><span class="card-label">Net worth</span><h2>Add multiple stocks or funds</h2></div>
+          <div><span class="card-label">Net worth</span><h2 id="bulkAddHoldingsTitle">Add multiple stocks or funds</h2></div>
           <button id="closeBulkAddHoldingsDialogButton" class="icon-button ghost" type="button" aria-label="Close">×</button>
         </div>
-        <p class="muted">Enter one row per stock or mutual fund - they're each added as their own holding, named with this account as a prefix so they're easy to spot together in the list.</p>
+        <p id="bulkAddHoldingsDescription" class="muted">Enter one row per stock or mutual fund - they're each added as their own holding, named with this account as a prefix so they're easy to spot together in the list.</p>
         <form id="bulkAddHoldingsForm">
           <label>Account name<input name="accountName" placeholder="Brokerage M2" required></label>
           <div id="bulkAddHoldingsRows" class="iou-split-rows"></div>
@@ -309,7 +309,7 @@
           <p id="bulkAddHoldingsMessage" class="form-message"></p>
           <div class="dialog-actions">
             <button id="cancelBulkAddHoldingsButton" class="ghost" type="button">Cancel</button>
-            <button type="submit">Add holdings</button>
+            <button id="bulkAddHoldingsSubmitButton" type="submit">Add holdings</button>
           </div>
         </form>
       </div>
@@ -339,7 +339,7 @@
 
     <script src="https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/build/pdf.min.js"></script>
     <script>if (window.pdfjsLib) pdfjsLib.GlobalWorkerOptions.workerSrc = "https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/build/pdf.worker.min.js";</script>
-    <script src="/lib/shared-logic.js?v=20260809-1"></script>
-    <script src="/app.js?v=20260809-2"></script>
+    <script src="/lib/shared-logic.js?v=20260809-2"></script>
+    <script src="/app.js?v=20260809-3"></script>
   </body>
 </html>

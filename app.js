@@ -4083,8 +4083,38 @@ function renderWealth() {
           </article>`).join("") : `<div class="onboarding-empty compact-onboarding"><div class="empty-symbol" aria-hidden="true">↓</div><h3>Add a debt when you are ready</h3><p>Track its balance, rate, payment, and the asset it secures.</p></div>`}
         </section>
       </div>
-      <section class="card wealth-holdings"><div class="section-head"><div><span class="card-label">Net worth</span><h3>Assets, investments and liabilities</h3></div><button id="addNetWorthItemButton" type="button">+ Add holding</button><button id="addNetWorthBulkButton" class="ghost" type="button">+ Add multiple</button></div><div class="net-worth-strip"><strong data-net-worth-total>${money.format(netWorth().total)}</strong><span>Assets <b data-net-worth-assets>${money.format(netWorth().assets)}</b> Liabilities <b data-net-worth-liabilities>${money.format(netWorth().liabilities)}</b></span></div><div class="net-worth-items">${state.goals.netWorth.assets.map((asset, index) => netWorthItemRow(asset, "asset", index)).join("")}${state.goals.netWorth.liabilities.map((item, index) => netWorthItemRow(item, "liability", index)).join("")}</div>${state.goals.netWorth.assets.length || state.goals.netWorth.liabilities.length ? "" : `<div class="empty-inline">No assets, investments or liabilities yet</div>`}</section>
+      <section class="card wealth-holdings"><div class="section-head"><div><span class="card-label">Net worth</span><h3>Assets, investments and liabilities</h3></div><button id="addNetWorthItemButton" type="button">+ Add holding</button><button id="addNetWorthBulkButton" class="ghost" type="button">+ Add multiple</button></div><div class="net-worth-strip"><strong data-net-worth-total>${money.format(netWorth().total)}</strong><span>Assets <b data-net-worth-assets>${money.format(netWorth().assets)}</b> Liabilities <b data-net-worth-liabilities>${money.format(netWorth().liabilities)}</b></span></div><div class="net-worth-items">${groupStockHoldings(state.goals.netWorth.assets).map((group) => netWorthStockGroupCard(group)).join("")}${state.goals.netWorth.assets.map((asset, index) => ({ asset, index })).filter(({ asset }) => asset.assetClass !== "stock").map(({ asset, index }) => netWorthItemRow(asset, "asset", index)).join("")}${state.goals.netWorth.liabilities.map((item, index) => netWorthItemRow(item, "liability", index)).join("")}</div>${state.goals.netWorth.assets.length || state.goals.netWorth.liabilities.length ? "" : `<div class="empty-inline">No assets, investments or liabilities yet</div>`}</section>
     </section>`;
+}
+
+// Only ever called on state.goals.netWorth.assets - a stock group is always
+// an asset card. The per-item Type selector still lets someone move a
+// single holding to the liabilities array (same as before grouping
+// existed); doing so just drops that one holding out of its group's card,
+// the same way it always dropped out of the stock-specific fields once
+// moved (assetClass survives the move, but netWorthItemRow only renders
+// the stock fields for non-liability items).
+function netWorthStockGroupCard(group) {
+  const totalValue = group.items.reduce((sum, item) => sum + assetValue(item), 0);
+  const holdingsLabel = `${group.items.length} holding${group.items.length === 1 ? "" : "s"}`;
+  return `<article class="account-item stock-group-card">
+    <div class="stock-group-main">
+      <div class="debt-edit-grid">
+        <label class="debt-name-field">Name<input data-stock-group-name="${group.groupId}" value="${escapeHtml(group.groupName)}" aria-label="Account name"></label>
+        <div class="stock-group-stat"><span>Type</span><strong>Asset</strong></div>
+        <div class="stock-group-stat"><span>Asset class</span><strong>Stocks</strong></div>
+        <div class="stock-group-stat"><span>Holdings</span><strong>${holdingsLabel}</strong><button type="button" class="ghost" data-manage-stock-group="${group.groupId}">Manage list →</button></div>
+      </div>
+      <div class="stock-group-chips">${group.items.map((item) => `<button type="button" class="stock-chip" data-manage-stock-group="${group.groupId}">${escapeHtml(item.symbol || item.name)}</button>`).join("")}</div>
+    </div>
+    <div class="stock-market-value stock-group-value-panel">
+      <span>Market value</span>
+      <strong>${money.format(totalValue)}</strong>
+      <button type="button" class="ghost stock-refresh-button" data-refresh-stock-group="${group.groupId}">↻ Live price</button>
+      <small class="muted">Live pricing across ${holdingsLabel}</small>
+    </div>
+    <button class="icon-button danger-button" data-delete-stock-group="${group.groupId}" type="button" aria-label="Remove ${escapeHtml(group.groupName)}">×</button>
+  </article>`;
 }
 
 const accountTypeColors = { checking: "var(--blue)", savings: "var(--green)", cash: "var(--gold)", credit_card: "var(--coral)", other: "var(--muted)" };
@@ -4602,7 +4632,7 @@ function renderHelp() {
       tips: [
         "Move an account-to-account payment (like paying a credit card from checking) to a Transfer instead of leaving it as a regular expense/income pair — the ⇄ icon on a matched transaction does this in one step.",
         "Drag an account by its ⠿ handle to reorder the <strong>Accounts</strong> list - useful for putting the ones you check most often at the top.",
-        "Under Net worth, each stock or mutual fund is its own holding - for a brokerage with several positions, use <strong>+ Add multiple</strong> instead of adding them one at a time: enter the account name once, add a row per symbol, and submit to create them all together, each named with that account as a prefix so they're easy to spot as belonging together in the list."
+        "Under Net worth, a brokerage or 401(k) with several stocks or mutual funds shows as one card, not one row per symbol - use <strong>+ Add multiple</strong> to create it, then <strong>Manage list</strong> on that card (or click any chip) any time you need to add, edit, or remove individual holdings. <strong>↻ Live price</strong> on the card refreshes every holding in it at once."
       ] },
     { icon: "♙", title: "Sharing", id: "sharing",
       steps: [
@@ -8542,6 +8572,71 @@ function bindViewEvents() {
     });
   });
 
+  // A stock group's items are matched by groupId, falling back to the
+  // group's own id for a legacy solo holding with no groupId of its own -
+  // same fallback groupStockHoldings() uses to build the group in the
+  // first place, so a rename/delete here always hits every item it showed.
+  const stockGroupAssets = (groupId) => state.goals.netWorth.assets.filter((asset) => asset.assetClass === "stock" && (asset.groupId || asset.id) === groupId);
+
+  document.querySelectorAll("[data-stock-group-name]").forEach((input) => {
+    const applyName = (name) => {
+      stockGroupAssets(input.dataset.stockGroupName).forEach((asset) => {
+        asset.groupName = name;
+        asset.name = `${name} - ${asset.symbol || ""}`;
+      });
+      autosaveState();
+    };
+    input.addEventListener("input", () => applyName(input.value));
+    input.addEventListener("change", () => {
+      const name = input.value.trim() || "Untitled account";
+      input.value = name;
+      applyName(name);
+    });
+  });
+
+  document.querySelectorAll("[data-manage-stock-group]").forEach((button) => {
+    button.addEventListener("click", () => openManageStockGroupDialog(button.dataset.manageStockGroup));
+  });
+
+  document.querySelectorAll("[data-refresh-stock-group]").forEach((button) => {
+    button.addEventListener("click", async () => {
+      const items = stockGroupAssets(button.dataset.refreshStockGroup);
+      button.disabled = true;
+      await Promise.all(items.map(async (asset) => {
+        const symbol = (asset.symbol || "").trim().toUpperCase();
+        if (!symbol) return;
+        try {
+          const result = await api(`/api/stock-quote?symbol=${encodeURIComponent(symbol)}`);
+          asset.price = result.price;
+          asset.value = assetValue(asset);
+        } catch {
+          // A single symbol failing (bad ticker, rate limit) shouldn't block
+          // the rest of the group from refreshing - leave that one holding's
+          // price as-is rather than aborting the whole batch.
+        }
+      }));
+      autosaveState();
+      render();
+    });
+  });
+
+  document.querySelectorAll("[data-delete-stock-group]").forEach((button) => {
+    button.addEventListener("click", async () => {
+      const items = stockGroupAssets(button.dataset.deleteStockGroup);
+      if (!items.length) return;
+      const confirmed = await showConfirm(`This deletes ${items.length} holding${items.length === 1 ? "" : "s"} under this account.`, {
+        title: `Remove ${items[0].groupName || items[0].name}?`,
+        confirmLabel: "Delete"
+      });
+      if (!confirmed) return;
+      const ids = new Set(items.map((item) => item.id));
+      state.goals.netWorth.assets = state.goals.netWorth.assets.filter((asset) => !ids.has(asset.id));
+      state.goals.debts = state.goals.debts.filter((debt) => !ids.has(debt.id));
+      autosaveState();
+      render();
+    });
+  });
+
   document.querySelectorAll("[data-net-worth-type]").forEach((select) => {
     select.addEventListener("change", () => {
       const [type, indexValue] = select.dataset.netWorthType.split(":");
@@ -10618,6 +10713,13 @@ $("#exportReportForm").addEventListener("submit", async (event) => {
   }
 });
 
+// The same dialog serves two purposes: creating a fresh group of holdings
+// ("+ Add multiple", editingStockGroupId null) and editing an existing
+// group's holdings ("Manage list", editingStockGroupId set to that group's
+// id). Rows carry an `id` when they came from an existing asset, so submit
+// can tell an edited holding from a newly added one.
+let editingStockGroupId = null;
+
 function renderBulkHoldingsRows() {
   const container = $("#bulkAddHoldingsRows");
   if (!container) return;
@@ -10654,10 +10756,30 @@ function renderBulkHoldingsRows() {
 }
 
 function openBulkAddHoldingsDialog() {
+  editingStockGroupId = null;
   const form = $("#bulkAddHoldingsForm");
   form.reset();
   bulkHoldingsRows = [{ symbol: "", shares: 0, price: 0 }, { symbol: "", shares: 0, price: 0 }];
   renderBulkHoldingsRows();
+  $("#bulkAddHoldingsTitle").textContent = "Add multiple stocks or funds";
+  $("#bulkAddHoldingsDescription").textContent = "Enter one row per stock or mutual fund - they're each added as their own holding, named with this account as a prefix so they're easy to spot together in the list.";
+  $("#bulkAddHoldingsSubmitButton").textContent = "Add holdings";
+  $("#bulkAddHoldingsMessage").textContent = "";
+  $("#bulkAddHoldingsDialog").showModal();
+}
+
+function openManageStockGroupDialog(groupId) {
+  const items = state.goals.netWorth.assets.filter((asset) => asset.assetClass === "stock" && (asset.groupId || asset.id) === groupId);
+  if (!items.length) return;
+  editingStockGroupId = groupId;
+  const form = $("#bulkAddHoldingsForm");
+  form.reset();
+  form.accountName.value = items[0].groupName || items[0].name;
+  bulkHoldingsRows = items.map((item) => ({ id: item.id, symbol: item.symbol || "", shares: item.shares || 0, price: item.price || 0 }));
+  renderBulkHoldingsRows();
+  $("#bulkAddHoldingsTitle").textContent = "Manage holdings";
+  $("#bulkAddHoldingsDescription").textContent = "Edit a row, clear its symbol to remove that holding, or add a new row - saving updates this account's whole holdings list.";
+  $("#bulkAddHoldingsSubmitButton").textContent = "Save holdings";
   $("#bulkAddHoldingsMessage").textContent = "";
   $("#bulkAddHoldingsDialog").showModal();
 }
@@ -10678,17 +10800,43 @@ $("#bulkAddHoldingsForm").addEventListener("submit", (event) => {
     return;
   }
   const rows = bulkHoldingsRows
-    .map((row) => ({ symbol: String(row.symbol || "").trim().toUpperCase(), shares: Number(row.shares) || 0, price: Number(row.price) || 0 }))
+    .map((row) => ({ id: row.id, symbol: String(row.symbol || "").trim().toUpperCase(), shares: Number(row.shares) || 0, price: Number(row.price) || 0 }))
     .filter((row) => row.symbol);
   if (!rows.length) {
     $("#bulkAddHoldingsMessage").textContent = "Enter at least one stock or fund symbol.";
     return;
   }
-  rows.forEach((row) => {
-    const asset = { id: uniqueId(`${accountName}-${row.symbol}`), name: `${accountName} - ${row.symbol}`, value: 0, assetClass: "stock", symbol: row.symbol, shares: row.shares, price: row.price };
-    asset.value = assetValue(asset);
-    state.goals.netWorth.assets.push(asset);
-  });
+  if (editingStockGroupId) {
+    const keptIds = new Set(rows.filter((row) => row.id).map((row) => row.id));
+    state.goals.netWorth.assets = state.goals.netWorth.assets.filter((asset) => {
+      const inThisGroup = asset.assetClass === "stock" && (asset.groupId || asset.id) === editingStockGroupId;
+      return !inThisGroup || keptIds.has(asset.id);
+    });
+    rows.forEach((row) => {
+      if (row.id) {
+        const asset = state.goals.netWorth.assets.find((item) => item.id === row.id);
+        if (!asset) return;
+        asset.groupId = editingStockGroupId;
+        asset.groupName = accountName;
+        asset.symbol = row.symbol;
+        asset.shares = row.shares;
+        asset.price = row.price;
+        asset.name = `${accountName} - ${row.symbol}`;
+        asset.value = assetValue(asset);
+      } else {
+        const asset = { id: uniqueId(`${accountName}-${row.symbol}`), name: `${accountName} - ${row.symbol}`, value: 0, assetClass: "stock", symbol: row.symbol, shares: row.shares, price: row.price, groupId: editingStockGroupId, groupName: accountName };
+        asset.value = assetValue(asset);
+        state.goals.netWorth.assets.push(asset);
+      }
+    });
+  } else {
+    const groupId = uniqueId(accountName);
+    rows.forEach((row) => {
+      const asset = { id: uniqueId(`${accountName}-${row.symbol}`), name: `${accountName} - ${row.symbol}`, value: 0, assetClass: "stock", symbol: row.symbol, shares: row.shares, price: row.price, groupId, groupName: accountName };
+      asset.value = assetValue(asset);
+      state.goals.netWorth.assets.push(asset);
+    });
+  }
   autosaveState();
   $("#bulkAddHoldingsDialog").close();
   render();
