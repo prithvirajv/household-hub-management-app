@@ -2929,6 +2929,31 @@ main {
   background: var(--green);
 }
 
+/* Debt payoff bar is its own class, not .bar - it fills with the debt
+   accent (coral) as the balance goes down, opposite of a savings-goal bar
+   filling green as it goes up, and needs real percent-paid-off math
+   (debtPayoffProgressPercent) rather than .bar's arbitrary-target percent. */
+.debt-progress-bar {
+  height: 8px;
+  overflow: hidden;
+  border-radius: 4px;
+  background: #fdeaea;
+}
+
+.debt-progress-bar span {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: var(--coral);
+  transition: width 0.8s ease;
+}
+
+.debt-progress-caption {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.76rem;
+}
+
 .invite-box,
 .shared-box {
   border-radius: 8px;
@@ -3448,15 +3473,19 @@ text.cashflow-sankey-clickable:hover {
   border-left-color: var(--coral);
 }
 
-/* One card per brokerage/mutual-fund account instead of one row per
-   symbol - see groupStockHoldings(). Reuses .account-item/.debt-edit-grid
-   for the left column and .stock-market-value for the value panel, same
-   convention as the rest of Wealth, rather than inventing a fresh layout. */
+/* One card per brokerage/retirement account instead of one row per symbol
+   - see groupStockHoldings(). Background/radius/padding match .net-worth-item
+   so it reads as part of the same list, not a visually distinct white card;
+   .stock-market-value for the value panel follows the same convention as
+   the rest of Wealth rather than inventing a fresh layout. */
 .stock-group-card {
   display: flex;
   align-items: flex-start;
   gap: 1rem;
   border-left: 5px solid var(--green);
+  background: var(--soft-blue);
+  border-radius: 7px;
+  padding: 0.7rem;
 }
 
 .stock-group-main {
@@ -3466,6 +3495,14 @@ text.cashflow-sankey-clickable:hover {
   gap: 0.65rem;
 }
 
+.stock-group-grid {
+  display: grid;
+  grid-template-columns: minmax(160px, 1.5fr) minmax(90px, 0.8fr) minmax(140px, 1fr);
+  gap: 0.65rem;
+  align-items: end;
+}
+
+.stock-group-grid .name-field,
 .stock-group-stat {
   min-width: 0;
   display: flex;
@@ -3473,11 +3510,16 @@ text.cashflow-sankey-clickable:hover {
   gap: 0.25rem;
 }
 
+.stock-group-grid .name-field span,
 .stock-group-stat span {
   color: var(--muted);
   font-size: 0.68rem;
   font-weight: 900;
   text-transform: uppercase;
+}
+
+.stock-group-grid .name-field strong {
+  font-size: 0.95rem;
 }
 
 .stock-group-stat strong {
@@ -3506,11 +3548,244 @@ text.cashflow-sankey-clickable:hover {
   font-weight: 800;
   font-size: 0.78rem;
   min-height: auto;
+  display: inline-block;
 }
 
 .stock-group-value-panel {
   min-width: 190px;
   align-self: stretch;
+  padding: 0.85rem;
+  border-radius: 10px;
+}
+
+.gain-loss {
+  font-weight: 800;
+}
+
+.gain-loss.gain {
+  color: var(--green);
+}
+
+.gain-loss.loss {
+  color: var(--coral);
+}
+
+.live-price-pill {
+  align-self: flex-start;
+  min-height: 0;
+  padding: 0.3rem 0.6rem;
+  font-size: 0.76rem;
+  border: 1px solid var(--green);
+  border-radius: 999px;
+  background: white;
+  color: var(--green);
+  font-weight: 800;
+}
+
+/* Manage holdings modal - a wide, live-editing table (every field writes
+   straight to state on change, same convention as the rest of Wealth)
+   rather than the old stage-then-submit bulk-add dialog. */
+@keyframes holdingsModalFadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes holdingsModalFadeScale {
+  from { opacity: 0; transform: scale(0.96) translateY(6px); }
+  to { opacity: 1; transform: scale(1) translateY(0); }
+}
+
+.holdings-modal-dialog {
+  width: min(960px, calc(100vw - 2rem));
+  max-height: 88vh;
+  border-radius: 16px;
+  animation: holdingsModalFadeScale 180ms ease;
+}
+
+.holdings-modal-dialog::backdrop {
+  animation: holdingsModalFadeIn 150ms ease;
+}
+
+.holdings-modal-content {
+  display: grid;
+  grid-template-rows: auto 1fr auto;
+  max-height: 88vh;
+}
+
+.holdings-modal-dialog .section-head {
+  padding: 1.1rem 1.4rem;
+  border-bottom: 1px solid var(--line);
+  margin: 0;
+}
+
+.holdings-modal-body {
+  padding: 1rem 1.4rem;
+  overflow-y: auto;
+}
+
+.holdings-modal-body > label {
+  display: block;
+  color: var(--muted);
+  font-size: 0.7rem;
+  font-weight: 900;
+  text-transform: uppercase;
+  margin-bottom: 1rem;
+}
+
+.holdings-modal-body > label input {
+  margin-top: 0.25rem;
+  width: 100%;
+  min-height: 36px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: white;
+  padding: 0 0.6rem;
+  font-size: 0.88rem;
+  font-weight: 700;
+  color: var(--text);
+  text-transform: none;
+}
+
+.holdings-modal-table-head,
+.holdings-modal-row {
+  display: grid;
+  grid-template-columns: 1.1fr 1fr 0.7fr 0.9fr 1.15fr 0.9fr 0.95fr 30px;
+  gap: 0.6rem;
+  align-items: center;
+}
+
+.holdings-modal-table-head {
+  padding: 0 0.2rem 0.5rem;
+  color: var(--muted);
+  font-size: 0.66rem;
+  font-weight: 900;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.holdings-modal-row {
+  padding: 0.55rem 0.2rem;
+  border-top: 1px solid var(--line);
+  align-items: start;
+}
+
+.holdings-modal-row input,
+.holdings-modal-row select {
+  width: 100%;
+  min-height: 34px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: white;
+  padding: 0 0.5rem;
+  font-size: 0.82rem;
+  color: var(--text);
+}
+
+.holdings-modal-price-row {
+  display: flex;
+  gap: 0.4rem;
+  align-items: center;
+}
+
+.holdings-modal-price-row input {
+  flex: 1;
+  min-width: 0;
+}
+
+.holdings-modal-refresh-button {
+  flex-shrink: 0;
+  width: 32px;
+  height: 32px;
+  min-height: 0;
+  padding: 0;
+  background: var(--green-soft);
+  border: 1px solid var(--green);
+  color: var(--green);
+  border-radius: 6px;
+  font-size: 0.85rem;
+}
+
+.holdings-modal-price-cell small {
+  display: block;
+  margin-top: 0.3rem;
+  font-size: 0.68rem;
+  color: var(--muted);
+}
+
+.holdings-modal-price-cell small.stock-price-error {
+  color: var(--coral);
+}
+
+.holdings-modal-market-value {
+  font-size: 0.85rem;
+  font-weight: 800;
+  color: var(--green);
+  padding-top: 0.5rem;
+}
+
+.holdings-modal-gain-loss {
+  font-size: 0.8rem;
+  font-weight: 800;
+  color: var(--muted);
+  padding-top: 0.5rem;
+}
+
+.holdings-modal-gain-loss.gain {
+  color: var(--green);
+}
+
+.holdings-modal-gain-loss.loss {
+  color: var(--coral);
+}
+
+.holdings-modal-remove {
+  width: 30px;
+  height: 30px;
+  min-height: 0;
+  padding: 0;
+  background: #fff0f0;
+  color: var(--coral);
+  border-radius: 6px;
+  font-weight: 800;
+}
+
+.holdings-modal-add-row {
+  width: 100%;
+  margin-top: 0.75rem;
+  background: transparent;
+  border: 1.5px dashed var(--green);
+  color: var(--green);
+  border-radius: 8px;
+  padding: 0.7rem;
+  font-weight: 800;
+}
+
+.holdings-modal-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 1rem 1.4rem;
+  border-top: 1px solid var(--line);
+}
+
+.holdings-modal-footer-label {
+  color: var(--muted);
+  font-size: 0.7rem;
+  font-weight: 900;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.holdings-modal-footer strong {
+  font-size: 1.15rem;
+  display: block;
+  margin-top: 0.15rem;
+}
+
+.holdings-modal-footer-actions {
+  display: flex;
+  gap: 0.6rem;
 }
 
 .net-worth-item label {
@@ -5093,6 +5368,38 @@ text.cashflow-sankey-clickable:hover {
     grid-column: 2;
     width: 100%;
   }
+
+  .stock-group-card {
+    flex-direction: column;
+  }
+
+  .stock-group-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .stock-group-value-panel {
+    width: 100%;
+  }
+
+  .holdings-modal-table-head {
+    display: none;
+  }
+
+  .holdings-modal-row {
+    grid-template-columns: 1fr 1fr;
+    grid-template-areas: "symbol assetclass" "shares costbasis" "price price" "marketvalue gainloss" "remove remove";
+    border-top: 2px solid var(--line);
+    padding: 0.8rem 0.2rem;
+  }
+
+  .holdings-modal-row [data-holding-symbol] { grid-area: symbol; }
+  .holdings-modal-row [data-holding-type] { grid-area: assetclass; }
+  .holdings-modal-row [data-holding-shares] { grid-area: shares; }
+  .holdings-modal-row [data-holding-cost-basis] { grid-area: costbasis; }
+  .holdings-modal-row .holdings-modal-price-cell { grid-area: price; }
+  .holdings-modal-row .holdings-modal-market-value { grid-area: marketvalue; }
+  .holdings-modal-row .holdings-modal-gain-loss { grid-area: gainloss; }
+  .holdings-modal-row .holdings-modal-remove { grid-area: remove; width: 100%; }
 }
 
 .private-note {
@@ -6694,4 +7001,123 @@ text.cashflow-sankey-clickable:hover {
     animation: none;
     transition: none;
   }
+}
+
+/* ================================================================
+   Home dashboard warm-theme direction - a design proposal ("a direction
+   to evaluate, not a like-for-like replacement" per its own brief), not
+   an approved app-wide token change. Scoped to body.home-warm-theme main
+   only, toggled in renderShell() when currentView === "home". Deliberately
+   leaves the sidebar alone: it's a persistent element shared by every page,
+   so recoloring it only while on Home would flash cool-to-warm-to-cool on
+   every navigation in and out rather than reading as a restyled page.
+   ================================================================ */
+body.home-warm-theme main {
+  --warm-bg: oklch(97% 0.013 75);
+  --warm-panel: oklch(99% 0.005 75);
+  --warm-soft: oklch(95% 0.012 75);
+  --warm-line: oklch(90% 0.012 75);
+  --warm-text: oklch(24% 0.018 55);
+  --warm-muted: oklch(53% 0.018 60);
+  --warm-accent-soft: color-mix(in srgb, var(--green) 14%, white);
+  --warm-accent-text: color-mix(in srgb, var(--green) 75%, black);
+  background: var(--warm-bg);
+  color: var(--warm-text);
+}
+
+body.home-warm-theme .topbar h2 {
+  font-size: 1.9rem;
+  letter-spacing: -0.015em;
+}
+
+body.home-warm-theme .home-status-line {
+  margin: 0.35rem 0 0;
+  font-size: 0.95rem;
+  color: var(--warm-muted);
+}
+
+body.home-warm-theme main .card {
+  background: var(--warm-panel);
+  border-color: var(--warm-line);
+  border-radius: 20px;
+  box-shadow: none;
+}
+
+body.home-warm-theme main .card-label {
+  color: var(--warm-accent-text);
+}
+
+body.home-warm-theme main h3 {
+  color: var(--warm-text);
+}
+
+body.home-warm-theme main .metric {
+  background: var(--warm-panel);
+  border: 1px solid var(--warm-line);
+  border-radius: 18px;
+  box-shadow: none;
+}
+
+body.home-warm-theme main .metric span,
+body.home-warm-theme main .metric small {
+  color: var(--warm-muted);
+}
+
+body.home-warm-theme main .metric strong {
+  color: var(--warm-text);
+  font-size: 1.4rem;
+}
+
+body.home-warm-theme main .metric-danger strong {
+  color: var(--coral);
+}
+
+body.home-warm-theme main .metric-warning strong {
+  color: var(--gold);
+}
+
+body.home-warm-theme main .metric-good strong {
+  color: var(--warm-accent-text);
+}
+
+body.home-warm-theme main .compact-row {
+  background: transparent;
+  border-top: 1px solid var(--warm-line);
+  border-radius: 0;
+  padding: 0.85rem 0.2rem;
+}
+
+body.home-warm-theme main .compact-row:first-child {
+  border-top: 0;
+}
+
+body.home-warm-theme main .compact-row.overdue {
+  background: transparent;
+}
+
+body.home-warm-theme main .compact-row strong {
+  color: var(--warm-text);
+}
+
+body.home-warm-theme main .compact-row small {
+  color: var(--warm-muted);
+}
+
+body.home-warm-theme main .compact-row.overdue small {
+  color: var(--coral);
+}
+
+body.home-warm-theme main button.ghost {
+  border-radius: 999px;
+  background: var(--warm-soft);
+  color: var(--warm-text);
+  border-color: var(--warm-line);
+}
+
+body.home-warm-theme main .pill-button,
+body.home-warm-theme main .chore-complete-group button {
+  border-radius: 999px;
+  background: var(--warm-accent-soft);
+  color: var(--warm-accent-text);
+  font-weight: 800;
 }

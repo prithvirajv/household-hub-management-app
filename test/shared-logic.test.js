@@ -1,7 +1,7 @@
 const assert = require("node:assert/strict");
 const test = require("node:test");
 const {
-  applyChecklistToggle, bucketChecklistItems, findChecklistDuplicate, moveChecklistItem, moveArrayItemById, groupStockHoldings, mealWeeksForMonth, groupPlanTasksByBucket, validateJournalPayload,
+  applyChecklistToggle, bucketChecklistItems, findChecklistDuplicate, moveChecklistItem, moveArrayItemById, groupStockHoldings, isHoldingAssetClass, assetClassLabelForHoldings, holdingGainLoss, groupGainLoss, debtPayoffProgressPercent, mealWeeksForMonth, groupPlanTasksByBucket, validateJournalPayload,
   dailyTaskOccursOnDate, isDailyTaskDoneOnDate, toggleDailyTaskDoneOnDate,
   timeToMinutes, minutesToTime, snapMinutes, layoutTimelineBlocks, comparePlannedToActual,
   sanitizeFilename, buildDocumentObjectPath, wouldCreateFolderCycle, buildFolderTree,
@@ -271,6 +271,73 @@ test("groupStockHoldings falls back to a holding's own id as its group when it h
   const assets = [{ id: "solo-1", name: "401k VTSAX", assetClass: "stock", symbol: "VTSAX" }];
   const groups = groupStockHoldings(assets);
   assert.deepEqual(groups, [{ groupId: "solo-1", groupName: "401k VTSAX", items: assets }]);
+});
+
+test("groupStockHoldings also groups retirement holdings, the same as stock", () => {
+  const assets = [
+    { id: "r1", groupId: "g1", groupName: "401(k) - Fidelity", assetClass: "retirement", symbol: "FXAIX" },
+    { id: "r2", groupId: "g1", groupName: "401(k) - Fidelity", assetClass: "retirement", symbol: "FSKAX" },
+    { id: "cash1", assetClass: "cash", value: 500 }
+  ];
+  const groups = groupStockHoldings(assets);
+  assert.equal(groups.length, 1);
+  assert.deepEqual(groups[0].items.map((item) => item.id), ["r1", "r2"]);
+});
+
+test("isHoldingAssetClass is true for stock and retirement, false for everything else", () => {
+  assert.equal(isHoldingAssetClass("stock"), true);
+  assert.equal(isHoldingAssetClass("retirement"), true);
+  assert.equal(isHoldingAssetClass("cash"), false);
+  assert.equal(isHoldingAssetClass("property"), false);
+  assert.equal(isHoldingAssetClass("other"), false);
+});
+
+test("assetClassLabelForHoldings labels a group Stocks, Mutual Funds, or Mixed", () => {
+  assert.equal(assetClassLabelForHoldings([{ holdingType: "stock" }, { holdingType: "stock" }]), "Stocks");
+  assert.equal(assetClassLabelForHoldings([{ holdingType: "fund" }]), "Mutual Funds");
+  assert.equal(assetClassLabelForHoldings([{ holdingType: "stock" }, { holdingType: "fund" }]), "Mixed");
+  assert.equal(assetClassLabelForHoldings([{}]), "Stocks", "a holding with no holdingType defaults to stock");
+});
+
+test("debtPayoffProgressPercent derives percent paid off from balance + payment history, with no original-balance field to rely on", () => {
+  assert.equal(debtPayoffProgressPercent({ balance: 8000, payments: [{ principal: 1000 }, { principal: 1000 }] }), 20);
+  assert.equal(debtPayoffProgressPercent({ balance: 5000, payments: [] }), 0, "no payments yet means 0% paid off, not a divide-by-zero crash");
+  assert.equal(debtPayoffProgressPercent({ balance: 0, payments: [] }), 0, "no balance and no payments is 0%, not NaN");
+});
+
+test("holdingGainLoss computes $ and % gain from cost basis vs current price", () => {
+  const gain = holdingGainLoss({ shares: 10, price: 220, costBasis: 200 });
+  assert.equal(gain.amount, 200);
+  assert.equal(gain.percent, 10);
+  assert.equal(gain.hasCostBasis, true);
+
+  const loss = holdingGainLoss({ shares: 5, price: 90, costBasis: 100 });
+  assert.equal(loss.amount, -50);
+  assert.equal(loss.percent, -10);
+});
+
+test("holdingGainLoss reports hasCostBasis:false instead of a false -100% when no cost basis was ever set", () => {
+  const result = holdingGainLoss({ shares: 10, price: 220, costBasis: 0 });
+  assert.equal(result.hasCostBasis, false);
+  assert.equal(result.amount, 0);
+  assert.equal(result.percent, 0);
+});
+
+test("groupGainLoss aggregates only holdings that have a cost basis set, not treating unpriced ones as break-even", () => {
+  const items = [
+    { shares: 10, price: 220, costBasis: 200 },
+    { shares: 5, price: 90, costBasis: 100 },
+    { shares: 3, price: 50, costBasis: 0 }
+  ];
+  const result = groupGainLoss(items);
+  assert.equal(result.hasCostBasis, true);
+  assert.equal(result.amount, 150);
+  assert.equal(result.percent, 6);
+});
+
+test("groupGainLoss returns hasCostBasis:false when no holding in the group has a cost basis", () => {
+  const result = groupGainLoss([{ shares: 10, price: 220, costBasis: 0 }]);
+  assert.deepEqual(result, { amount: 0, percent: 0, hasCostBasis: false });
 });
 
 test("checking a child marks the parent done once every sibling is done", () => {

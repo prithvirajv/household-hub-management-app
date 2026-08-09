@@ -88,10 +88,15 @@ let profileVerifyFeedbackIsError = false;
 // Keyed by asset id (not index, since rows can reorder/delete) so a stale
 // "Refresh price" result never gets attributed to the wrong stock row.
 let stockPriceFeedback = {};
-// Draft rows for the bulk-add-holdings dialog - only ever lives for the
-// duration of one dialog session, never persisted like the real
-// state.goals.netWorth.assets rows it eventually creates.
-let bulkHoldingsRows = [];
+// Keyed by groupId - whether a grouped holding card's "Live price" batch
+// refresh has fired at least once this session, so its caption can switch
+// from a static holdings count to "updated just now".
+let stockGroupRefreshedFeedback = {};
+// Which stock/retirement group the Manage holdings modal currently has
+// open, if any - every field in that modal writes straight to the matching
+// asset in state.goals.netWorth.assets (autosaved immediately), so this is
+// just which group's rows to render, not a staging area.
+let currentHoldingsModalGroupId = null;
 // privateData is scoped to the signed-in user (not the household) and is never part
 // of `state` or autosaveState() — it must never reach the shared household blob.
 let privateData = null;
@@ -1281,6 +1286,20 @@ function renderShell() {
                             ? "Home"
           : `${monthLabel()} plan`;
   $("#householdName").textContent = title.toUpperCase();
+  document.body.classList.toggle("home-warm-theme", isHomeView);
+  $("#homeStatusLine").hidden = !isHomeView;
+  if (isHomeView) {
+    const firstName = (sessionUser?.name || "there").trim().split(" ")[0];
+    const hour = new Date().getHours();
+    const timeOfDay = hour < 12 ? "morning" : hour < 18 ? "afternoon" : "evening";
+    $("#householdName").textContent = new Date().toLocaleDateString(undefined, { weekday: "long", month: "long", day: "numeric" }).toUpperCase();
+    $("#viewTitle").textContent = `Good ${timeOfDay}, ${firstName}`;
+    const pastDue = homeActionItems().filter((item) => item.overdue).length;
+    const dueToday = homeActionItems().length - pastDue;
+    const openBillsAndGoals = billAndGoalReminders().length;
+    const totalOpen = pastDue + dueToday + openBillsAndGoals;
+    $("#homeStatusLine").textContent = totalOpen === 0 ? "You're all caught up — nothing needs attention today." : `${totalOpen} thing${totalOpen === 1 ? "" : "s"} need your attention today.`;
+  }
   $("#userName").textContent = sessionUser?.name || "Demo User";
   $("#userEmail").textContent = sessionUser?.email || "demo@familyloop.net";
   $("#userInitials").textContent = initialsFromName(sessionUser?.name || "Demo User");
@@ -1307,8 +1326,8 @@ function renderShell() {
   renderNav();
   const metrics = metricsForView();
   $("#metrics").hidden = metrics.length === 0;
-  $("#metrics").innerHTML = metrics.map(([label, value, note]) => `
-    <article class="metric">
+  $("#metrics").innerHTML = metrics.map(([label, value, note, state]) => `
+    <article class="metric${state ? ` metric-${state}` : ""}">
       <span>${label}</span>
       <strong>${value}</strong>
       ${note ? `<small>${note}</small>` : ""}
@@ -1325,7 +1344,13 @@ function metricsForView() {
     const pastDue = items.filter((item) => item.overdue).length;
     const dueToday = items.length - pastDue;
     const openBillsAndGoals = billAndGoalReminders().length;
-    return [["Past due", String(pastDue), "chores, birthdays and reminders"], ["Due today", String(dueToday), "needs action today"], ["Bills & goals", String(openBillsAndGoals), "still open"], ["All caught up", pastDue + dueToday + openBillsAndGoals === 0 ? "Yes" : "Not yet", "across the household"]];
+    const allCaughtUp = pastDue + dueToday + openBillsAndGoals === 0;
+    return [
+      ["Past due", String(pastDue), "chores, birthdays and reminders", pastDue ? "danger" : "neutral"],
+      ["Due today", String(dueToday), "needs action today", dueToday ? "warning" : "neutral"],
+      ["Bills & goals", String(openBillsAndGoals), "still open", "neutral"],
+      ["All caught up", allCaughtUp ? "Yes" : "Not yet", "across the household", allCaughtUp ? "good" : "neutral"]
+    ];
   }
   if (currentView === "calendar") {
     const annualEventsThisMonth = annualEventOccurrencesForMonth().length;
@@ -4077,13 +4102,14 @@ function renderWealth() {
               <label class="debt-asset-field">Subcategory<select data-debt-line="${index}" aria-label="Subcategory for ${escapeHtml(debt.name)} payments">${debtLineOptions(debt)}</select></label>
             </div>
             <div class="debt-payoff-summary"><span><b>Estimated payoff</b>${termLabel(payoffMonths(debt))}</span><span><b>Suggested EMI</b>${debt.termMonths ? money.format(suggestedEmi(debt)) : "Set a loan term"}</span>${debt.termMonths ? `<button class="ghost" data-use-suggested-emi="${index}" type="button">Use suggested EMI</button>` : ""}</div>
-            <div class="bar"><span style="width:${Math.max(4, Math.min(95, Math.round((1 - debt.balance / 15000) * 100)))}%"></span></div>
+            <div class="debt-progress-bar"><span style="width:${debtPayoffProgressPercent(debt)}%"></span></div>
+            <p class="debt-progress-caption">${debtPayoffProgressPercent(debt)}% paid off · ${money.format(debt.balance)} remaining</p>
             <div class="payment-row"><label>Additional payment<input data-debt-payment="${index}" value="0" type="number" min="0" step="0.01"></label><button class="ghost" data-apply-debt-payment="${index}" type="button" ${Number(debt.minimum || 0) <= 0 ? "disabled" : ""}>Record EMI payment</button><button class="icon-button danger-button" data-delete-debt="${index}" type="button" aria-label="Delete ${escapeHtml(debt.name)}">×</button></div>
             ${debt.payments?.length ? `<details class="payment-history"><summary>Payment history (${debt.payments.length})</summary>${debt.payments.slice(0, 8).map((payment, paymentIndex) => `<div><input type="date" data-debt-payment-date="${index}:${paymentIndex}" value="${payment.date}" aria-label="Date for this ${escapeHtml(debt.name)} payment"><span>${money.format(payment.amount)} paid</span><span>${money.format(payment.principal)} principal</span><span>${money.format(payment.interest)} interest</span><button class="icon-button danger-button" data-delete-debt-payment="${index}:${paymentIndex}" type="button" aria-label="Remove this ${escapeHtml(debt.name)} payment and restore its balance">×</button></div>`).join("")}</details>` : ""}
           </article>`).join("") : `<div class="onboarding-empty compact-onboarding"><div class="empty-symbol" aria-hidden="true">↓</div><h3>Add a debt when you are ready</h3><p>Track its balance, rate, payment, and the asset it secures.</p></div>`}
         </section>
       </div>
-      <section class="card wealth-holdings"><div class="section-head"><div><span class="card-label">Net worth</span><h3>Assets, investments and liabilities</h3></div><button id="addNetWorthItemButton" type="button">+ Add holding</button><button id="addNetWorthBulkButton" class="ghost" type="button">+ Add multiple</button></div><div class="net-worth-strip"><strong data-net-worth-total>${money.format(netWorth().total)}</strong><span>Assets <b data-net-worth-assets>${money.format(netWorth().assets)}</b> Liabilities <b data-net-worth-liabilities>${money.format(netWorth().liabilities)}</b></span></div><div class="net-worth-items">${groupStockHoldings(state.goals.netWorth.assets).map((group) => netWorthStockGroupCard(group)).join("")}${state.goals.netWorth.assets.map((asset, index) => ({ asset, index })).filter(({ asset }) => asset.assetClass !== "stock").map(({ asset, index }) => netWorthItemRow(asset, "asset", index)).join("")}${state.goals.netWorth.liabilities.map((item, index) => netWorthItemRow(item, "liability", index)).join("")}</div>${state.goals.netWorth.assets.length || state.goals.netWorth.liabilities.length ? "" : `<div class="empty-inline">No assets, investments or liabilities yet</div>`}</section>
+      <section class="card wealth-holdings"><div class="section-head"><div><span class="card-label">Net worth</span><h3>Assets, investments and liabilities</h3></div><button id="addNetWorthItemButton" type="button">+ Add holding</button><button id="addNetWorthBulkButton" class="ghost" type="button">+ Add multiple</button></div><div class="net-worth-strip"><strong data-net-worth-total>${money.format(netWorth().total)}</strong><span>Assets <b data-net-worth-assets>${money.format(netWorth().assets)}</b> Liabilities <b data-net-worth-liabilities>${money.format(netWorth().liabilities)}</b></span></div><div class="net-worth-items">${groupStockHoldings(state.goals.netWorth.assets).map((group) => netWorthStockGroupCard(group)).join("")}${state.goals.netWorth.assets.map((asset, index) => ({ asset, index })).filter(({ asset }) => !isHoldingAssetClass(asset.assetClass)).map(({ asset, index }) => netWorthItemRow(asset, "asset", index)).join("")}${state.goals.netWorth.liabilities.map((item, index) => netWorthItemRow(item, "liability", index)).join("")}</div>${state.goals.netWorth.assets.length || state.goals.netWorth.liabilities.length ? "" : `<div class="empty-inline">No assets, investments or liabilities yet</div>`}</section>
     </section>`;
 }
 
@@ -4094,24 +4120,31 @@ function renderWealth() {
 // the same way it always dropped out of the stock-specific fields once
 // moved (assetClass survives the move, but netWorthItemRow only renders
 // the stock fields for non-liability items).
+//
+// Renaming the account and editing/adding/removing individual holdings both
+// live in the Manage holdings modal now (one entry point per action, same
+// principle as the chips below being read-only) - the card itself is a
+// read-only summary.
 function netWorthStockGroupCard(group) {
   const totalValue = group.items.reduce((sum, item) => sum + assetValue(item), 0);
   const holdingsLabel = `${group.items.length} holding${group.items.length === 1 ? "" : "s"}`;
+  const gainLoss = groupGainLoss(group.items);
+  const liveCaption = stockGroupRefreshedFeedback[group.groupId] ? "Live pricing • updated just now" : `Live pricing across ${holdingsLabel}`;
   return `<article class="account-item stock-group-card">
     <div class="stock-group-main">
-      <div class="debt-edit-grid">
-        <label class="debt-name-field">Name<input data-stock-group-name="${group.groupId}" value="${escapeHtml(group.groupName)}" aria-label="Account name"></label>
-        <div class="stock-group-stat"><span>Type</span><strong>Asset</strong></div>
-        <div class="stock-group-stat"><span>Asset class</span><strong>Stocks</strong></div>
+      <div class="stock-group-grid">
+        <div class="name-field"><span>Name</span><strong>${escapeHtml(group.groupName)}</strong></div>
+        <div class="stock-group-stat"><span>Asset class</span><strong>${assetClassLabelForHoldings(group.items)}</strong></div>
         <div class="stock-group-stat"><span>Holdings</span><strong>${holdingsLabel}</strong><button type="button" class="ghost" data-manage-stock-group="${group.groupId}">Manage list →</button></div>
       </div>
-      <div class="stock-group-chips">${group.items.map((item) => `<button type="button" class="stock-chip" data-manage-stock-group="${group.groupId}">${escapeHtml(item.symbol || item.name)}</button>`).join("")}</div>
+      <div class="stock-group-chips">${group.items.map((item) => `<span class="stock-chip">${escapeHtml(item.symbol || item.name)}</span>`).join("")}</div>
     </div>
     <div class="stock-market-value stock-group-value-panel">
       <span>Market value</span>
       <strong>${money.format(totalValue)}</strong>
-      <button type="button" class="ghost stock-refresh-button" data-refresh-stock-group="${group.groupId}">↻ Live price</button>
-      <small class="muted">Live pricing across ${holdingsLabel}</small>
+      ${gainLoss.hasCostBasis ? `<small class="gain-loss ${gainLoss.amount < 0 ? "loss" : "gain"}">${gainLoss.amount >= 0 ? "+" : ""}${money.format(gainLoss.amount)} (${gainLoss.percent >= 0 ? "+" : ""}${gainLoss.percent.toFixed(1)}%)</small>` : ""}
+      <button type="button" class="live-price-pill" data-refresh-stock-group="${group.groupId}">↻ Live price</button>
+      <small class="muted">${liveCaption}</small>
     </div>
     <button class="icon-button danger-button" data-delete-stock-group="${group.groupId}" type="button" aria-label="Remove ${escapeHtml(group.groupName)}">×</button>
   </article>`;
@@ -4632,7 +4665,8 @@ function renderHelp() {
       tips: [
         "Move an account-to-account payment (like paying a credit card from checking) to a Transfer instead of leaving it as a regular expense/income pair — the ⇄ icon on a matched transaction does this in one step.",
         "Drag an account by its ⠿ handle to reorder the <strong>Accounts</strong> list - useful for putting the ones you check most often at the top.",
-        "Under Net worth, a brokerage or 401(k) with several stocks or mutual funds shows as one card, not one row per symbol - use <strong>+ Add multiple</strong> to create it, then <strong>Manage list</strong> on that card (or click any chip) any time you need to add, edit, or remove individual holdings. <strong>↻ Live price</strong> on the card refreshes every holding in it at once."
+        "Under Net worth, a brokerage or retirement account with several stocks or mutual funds shows as one card - use <strong>+ Add multiple</strong> to create it, or switch an item's Asset class to Stock or Retirement to convert it. <strong>Manage list</strong> on the card is where you add, edit, or remove individual holdings.",
+        "Enter each holding's <strong>Avg. cost</strong> in Manage list to see gain/loss in dollars and percent, per holding and totaled on the card - holdings with no cost basis entered are left out of the total rather than counted as break-even."
       ] },
     { icon: "♙", title: "Sharing", id: "sharing",
       steps: [
@@ -8462,7 +8496,7 @@ function bindViewEvents() {
     render();
   });
 
-  $("#addNetWorthBulkButton")?.addEventListener("click", openBulkAddHoldingsDialog);
+  $("#addNetWorthBulkButton")?.addEventListener("click", openNewHoldingsGroupModal);
 
   document.querySelectorAll("[data-net-worth-name]").forEach((input) => {
     input.addEventListener("input", () => {
@@ -8576,26 +8610,10 @@ function bindViewEvents() {
   // group's own id for a legacy solo holding with no groupId of its own -
   // same fallback groupStockHoldings() uses to build the group in the
   // first place, so a rename/delete here always hits every item it showed.
-  const stockGroupAssets = (groupId) => state.goals.netWorth.assets.filter((asset) => asset.assetClass === "stock" && (asset.groupId || asset.id) === groupId);
-
-  document.querySelectorAll("[data-stock-group-name]").forEach((input) => {
-    const applyName = (name) => {
-      stockGroupAssets(input.dataset.stockGroupName).forEach((asset) => {
-        asset.groupName = name;
-        asset.name = `${name} - ${asset.symbol || ""}`;
-      });
-      autosaveState();
-    };
-    input.addEventListener("input", () => applyName(input.value));
-    input.addEventListener("change", () => {
-      const name = input.value.trim() || "Untitled account";
-      input.value = name;
-      applyName(name);
-    });
-  });
+  const stockGroupAssets = (groupId) => state.goals.netWorth.assets.filter((asset) => isHoldingAssetClass(asset.assetClass) && (asset.groupId || asset.id) === groupId);
 
   document.querySelectorAll("[data-manage-stock-group]").forEach((button) => {
-    button.addEventListener("click", () => openManageStockGroupDialog(button.dataset.manageStockGroup));
+    button.addEventListener("click", () => openHoldingsModal(button.dataset.manageStockGroup));
   });
 
   document.querySelectorAll("[data-refresh-stock-group]").forEach((button) => {
@@ -8615,6 +8633,7 @@ function bindViewEvents() {
           // price as-is rather than aborting the whole batch.
         }
       }));
+      stockGroupRefreshedFeedback[button.dataset.refreshStockGroup] = true;
       autosaveState();
       render();
     });
@@ -10713,132 +10732,254 @@ $("#exportReportForm").addEventListener("submit", async (event) => {
   }
 });
 
-// The same dialog serves two purposes: creating a fresh group of holdings
-// ("+ Add multiple", editingStockGroupId null) and editing an existing
-// group's holdings ("Manage list", editingStockGroupId set to that group's
-// id). Rows carry an `id` when they came from an existing asset, so submit
-// can tell an edited holding from a newly added one.
-let editingStockGroupId = null;
-
-function renderBulkHoldingsRows() {
-  const container = $("#bulkAddHoldingsRows");
-  if (!container) return;
-  container.innerHTML = bulkHoldingsRows.map((row, index) => `
-    <div class="iou-split-row">
-      <input placeholder="Symbol (AAPL)" value="${escapeHtml(row.symbol || "")}" data-bulk-holding-symbol="${index}" aria-label="Symbol for row ${index + 1}">
-      <input type="number" min="0" step="0.0001" inputmode="decimal" placeholder="Shares" value="${row.shares || ""}" data-bulk-holding-shares="${index}" aria-label="Shares for row ${index + 1}">
-      <input type="number" min="0" step="0.01" inputmode="decimal" placeholder="Price per share" value="${row.price || ""}" data-bulk-holding-price="${index}" aria-label="Price per share for row ${index + 1}">
-      <button type="button" class="icon-button ghost" data-remove-bulk-holding-row="${index}" aria-label="Remove row ${index + 1}">×</button>
-    </div>
-  `).join("");
-  container.querySelectorAll("[data-bulk-holding-symbol]").forEach((input) => {
-    input.addEventListener("input", () => {
-      bulkHoldingsRows[Number(input.dataset.bulkHoldingSymbol)].symbol = input.value.toUpperCase();
-    });
-  });
-  container.querySelectorAll("[data-bulk-holding-shares]").forEach((input) => {
-    input.addEventListener("input", () => {
-      bulkHoldingsRows[Number(input.dataset.bulkHoldingShares)].shares = Number(input.value || 0);
-    });
-  });
-  container.querySelectorAll("[data-bulk-holding-price]").forEach((input) => {
-    input.addEventListener("input", () => {
-      bulkHoldingsRows[Number(input.dataset.bulkHoldingPrice)].price = Number(input.value || 0);
-    });
-  });
-  container.querySelectorAll("[data-remove-bulk-holding-row]").forEach((button) => {
-    button.addEventListener("click", () => {
-      bulkHoldingsRows.splice(Number(button.dataset.removeBulkHoldingRow), 1);
-      if (!bulkHoldingsRows.length) bulkHoldingsRows.push({ symbol: "", shares: 0, price: 0 });
-      renderBulkHoldingsRows();
-    });
-  });
+// Every field in this modal writes straight to the matching asset in
+// state.goals.netWorth.assets (autosaved on each change), the same live-edit
+// convention the rest of Wealth already uses - there's no staged draft to
+// submit, so the modal has no form/submit handler, just a "Done" button
+// that closes it. A row with no id yet can't exist (every row IS an asset,
+// even mid-composition with a blank symbol) - the "close" handler below
+// purges any still-blank rows so an abandoned add never leaves debris.
+function holdingsModalItems() {
+  if (!currentHoldingsModalGroupId) return [];
+  return state.goals.netWorth.assets.filter((asset) => isHoldingAssetClass(asset.assetClass) && asset.groupId === currentHoldingsModalGroupId);
 }
 
-function openBulkAddHoldingsDialog() {
-  editingStockGroupId = null;
-  const form = $("#bulkAddHoldingsForm");
-  form.reset();
-  bulkHoldingsRows = [{ symbol: "", shares: 0, price: 0 }, { symbol: "", shares: 0, price: 0 }];
-  renderBulkHoldingsRows();
-  $("#bulkAddHoldingsTitle").textContent = "Add multiple stocks or funds";
-  $("#bulkAddHoldingsDescription").textContent = "Enter one row per stock or mutual fund - they're each added as their own holding, named with this account as a prefix so they're easy to spot together in the list.";
-  $("#bulkAddHoldingsSubmitButton").textContent = "Add holdings";
-  $("#bulkAddHoldingsMessage").textContent = "";
-  $("#bulkAddHoldingsDialog").showModal();
+function updateHoldingsModalTotal() {
+  const totalEl = $("#holdingsModalTotal");
+  if (!totalEl) return;
+  const total = holdingsModalItems().reduce((sum, item) => sum + assetValue(item), 0);
+  totalEl.textContent = money.format(total);
 }
 
-function openManageStockGroupDialog(groupId) {
-  const items = state.goals.netWorth.assets.filter((asset) => asset.assetClass === "stock" && (asset.groupId || asset.id) === groupId);
-  if (!items.length) return;
-  editingStockGroupId = groupId;
-  const form = $("#bulkAddHoldingsForm");
-  form.reset();
-  form.accountName.value = items[0].groupName || items[0].name;
-  bulkHoldingsRows = items.map((item) => ({ id: item.id, symbol: item.symbol || "", shares: item.shares || 0, price: item.price || 0 }));
-  renderBulkHoldingsRows();
-  $("#bulkAddHoldingsTitle").textContent = "Manage holdings";
-  $("#bulkAddHoldingsDescription").textContent = "Edit a row, clear its symbol to remove that holding, or add a new row - saving updates this account's whole holdings list.";
-  $("#bulkAddHoldingsSubmitButton").textContent = "Save holdings";
-  $("#bulkAddHoldingsMessage").textContent = "";
-  $("#bulkAddHoldingsDialog").showModal();
+function holdingGainLossMarkup(item) {
+  const gain = holdingGainLoss(item);
+  if (!gain.hasCostBasis) return { className: "holdings-modal-gain-loss", text: "—" };
+  const className = `holdings-modal-gain-loss ${gain.amount < 0 ? "loss" : "gain"}`;
+  const text = `${gain.amount >= 0 ? "+" : ""}${money.format(gain.amount)} (${gain.percent >= 0 ? "+" : ""}${gain.percent.toFixed(1)}%)`;
+  return { className, text };
 }
 
-$("#closeBulkAddHoldingsDialogButton").addEventListener("click", () => $("#bulkAddHoldingsDialog").close());
-$("#cancelBulkAddHoldingsButton").addEventListener("click", () => $("#bulkAddHoldingsDialog").close());
-$("#addBulkHoldingRowButton").addEventListener("click", () => {
-  bulkHoldingsRows.push({ symbol: "", shares: 0, price: 0 });
-  renderBulkHoldingsRows();
-});
-
-$("#bulkAddHoldingsForm").addEventListener("submit", (event) => {
-  event.preventDefault();
-  const data = Object.fromEntries(new FormData(event.currentTarget));
-  const accountName = String(data.accountName || "").trim();
-  if (!accountName) {
-    $("#bulkAddHoldingsMessage").textContent = "Enter an account name first.";
-    return;
-  }
-  const rows = bulkHoldingsRows
-    .map((row) => ({ id: row.id, symbol: String(row.symbol || "").trim().toUpperCase(), shares: Number(row.shares) || 0, price: Number(row.price) || 0 }))
-    .filter((row) => row.symbol);
-  if (!rows.length) {
-    $("#bulkAddHoldingsMessage").textContent = "Enter at least one stock or fund symbol.";
-    return;
-  }
-  if (editingStockGroupId) {
-    const keptIds = new Set(rows.filter((row) => row.id).map((row) => row.id));
-    state.goals.netWorth.assets = state.goals.netWorth.assets.filter((asset) => {
-      const inThisGroup = asset.assetClass === "stock" && (asset.groupId || asset.id) === editingStockGroupId;
-      return !inThisGroup || keptIds.has(asset.id);
-    });
-    rows.forEach((row) => {
-      if (row.id) {
-        const asset = state.goals.netWorth.assets.find((item) => item.id === row.id);
-        if (!asset) return;
-        asset.groupId = editingStockGroupId;
-        asset.groupName = accountName;
-        asset.symbol = row.symbol;
-        asset.shares = row.shares;
-        asset.price = row.price;
-        asset.name = `${accountName} - ${row.symbol}`;
-        asset.value = assetValue(asset);
-      } else {
-        const asset = { id: uniqueId(`${accountName}-${row.symbol}`), name: `${accountName} - ${row.symbol}`, value: 0, assetClass: "stock", symbol: row.symbol, shares: row.shares, price: row.price, groupId: editingStockGroupId, groupName: accountName };
-        asset.value = assetValue(asset);
-        state.goals.netWorth.assets.push(asset);
-      }
-    });
-  } else {
-    const groupId = uniqueId(accountName);
-    rows.forEach((row) => {
-      const asset = { id: uniqueId(`${accountName}-${row.symbol}`), name: `${accountName} - ${row.symbol}`, value: 0, assetClass: "stock", symbol: row.symbol, shares: row.shares, price: row.price, groupId, groupName: accountName };
-      asset.value = assetValue(asset);
-      state.goals.netWorth.assets.push(asset);
-    });
+function recomputeHoldingsModalRow(assetId) {
+  const asset = state.goals.netWorth.assets.find((item) => item.id === assetId);
+  if (!asset) return;
+  asset.value = assetValue(asset);
+  const marketValueEl = document.querySelector(`[data-holding-market-value="${assetId}"]`);
+  if (marketValueEl) marketValueEl.textContent = money.format(asset.value);
+  const gainEl = document.querySelector(`[data-holding-gain-loss="${assetId}"]`);
+  if (gainEl) {
+    const gain = holdingGainLossMarkup(asset);
+    gainEl.className = gain.className;
+    gainEl.textContent = gain.text;
   }
   autosaveState();
-  $("#bulkAddHoldingsDialog").close();
+  updateHoldingsModalTotal();
+}
+
+function holdingsModalRowHtml(item) {
+  const feedback = stockPriceFeedback[item.id];
+  const gain = holdingGainLossMarkup(item);
+  return `<div class="holdings-modal-row" data-holding-row="${item.id}">
+    <input value="${escapeHtml(item.symbol || "")}" placeholder="e.g. AAPL" data-holding-symbol="${item.id}" aria-label="Symbol">
+    <select data-holding-type="${item.id}" aria-label="Asset class">
+      <option value="stock" ${item.holdingType !== "fund" ? "selected" : ""}>Stock</option>
+      <option value="fund" ${item.holdingType === "fund" ? "selected" : ""}>Mutual Fund</option>
+    </select>
+    <input type="number" min="0" step="0.0001" inputmode="decimal" value="${item.shares || 0}" data-holding-shares="${item.id}" aria-label="Shares">
+    <input type="number" min="0" step="0.01" inputmode="decimal" value="${item.costBasis || 0}" data-holding-cost-basis="${item.id}" aria-label="Average share price paid" placeholder="Avg. cost">
+    <div class="holdings-modal-price-cell">
+      <div class="holdings-modal-price-row">
+        <input type="number" min="0" step="0.01" inputmode="decimal" value="${item.price || 0}" data-holding-price="${item.id}" aria-label="Price per share">
+        <button type="button" class="holdings-modal-refresh-button" data-holding-refresh="${item.id}" title="Refresh live price" aria-label="Refresh live price for ${escapeHtml(item.symbol || "this holding")}">⟳</button>
+      </div>
+      <small class="${feedback?.isError ? "stock-price-error" : ""}">${feedback ? feedback.message : "Not refreshed yet"}</small>
+    </div>
+    <div class="holdings-modal-market-value" data-holding-market-value="${item.id}">${money.format(assetValue(item))}</div>
+    <div class="${gain.className}" data-holding-gain-loss="${item.id}">${gain.text}</div>
+    <button type="button" class="holdings-modal-remove" data-holding-remove="${item.id}" aria-label="Remove ${escapeHtml(item.symbol || "this holding")}">×</button>
+  </div>`;
+}
+
+function wireHoldingsModalRowEvents() {
+  const container = $("#holdingsModalRows");
+  if (!container) return;
+  const findAsset = (id) => state.goals.netWorth.assets.find((item) => item.id === id);
+
+  container.querySelectorAll("[data-holding-symbol]").forEach((input) => {
+    input.addEventListener("input", () => {
+      const asset = findAsset(input.dataset.holdingSymbol);
+      if (!asset) return;
+      asset.symbol = input.value.toUpperCase();
+      const accountName = $("#holdingsModalAccountName").value.trim();
+      asset.name = accountName ? `${accountName} - ${asset.symbol}` : asset.symbol;
+      autosaveState();
+    });
+  });
+  container.querySelectorAll("[data-holding-type]").forEach((select) => {
+    select.addEventListener("change", () => {
+      const asset = findAsset(select.dataset.holdingType);
+      if (!asset) return;
+      asset.holdingType = select.value;
+      autosaveState();
+    });
+  });
+  container.querySelectorAll("[data-holding-shares]").forEach((input) => {
+    input.addEventListener("input", () => {
+      const asset = findAsset(input.dataset.holdingShares);
+      if (!asset) return;
+      asset.shares = Math.max(0, Number(input.value || 0));
+      recomputeHoldingsModalRow(asset.id);
+    });
+  });
+  container.querySelectorAll("[data-holding-cost-basis]").forEach((input) => {
+    input.addEventListener("input", () => {
+      const asset = findAsset(input.dataset.holdingCostBasis);
+      if (!asset) return;
+      asset.costBasis = Math.max(0, Number(input.value || 0));
+      recomputeHoldingsModalRow(asset.id);
+    });
+  });
+  container.querySelectorAll("[data-holding-price]").forEach((input) => {
+    input.addEventListener("input", () => {
+      const asset = findAsset(input.dataset.holdingPrice);
+      if (!asset) return;
+      asset.price = Math.max(0, Number(input.value || 0));
+      recomputeHoldingsModalRow(asset.id);
+    });
+  });
+  container.querySelectorAll("[data-holding-refresh]").forEach((button) => {
+    button.addEventListener("click", async () => {
+      const asset = findAsset(button.dataset.holdingRefresh);
+      if (!asset) return;
+      const symbol = (asset.symbol || "").trim().toUpperCase();
+      if (!symbol) {
+        stockPriceFeedback[asset.id] = { message: "Enter a symbol first.", isError: true };
+        renderHoldingsModalRows();
+        return;
+      }
+      button.disabled = true;
+      try {
+        const result = await api(`/api/stock-quote?symbol=${encodeURIComponent(symbol)}`);
+        asset.price = result.price;
+        asset.value = assetValue(asset);
+        stockPriceFeedback[asset.id] = { message: `Updated to ${money.format(result.price)}`, isError: false };
+      } catch (error) {
+        stockPriceFeedback[asset.id] = { message: error.message, isError: true };
+      }
+      autosaveState();
+      renderHoldingsModalRows();
+      updateHoldingsModalTotal();
+    });
+  });
+  container.querySelectorAll("[data-holding-remove]").forEach((button) => {
+    button.addEventListener("click", () => {
+      const id = button.dataset.holdingRemove;
+      state.goals.netWorth.assets = state.goals.netWorth.assets.filter((item) => item.id !== id);
+      delete stockPriceFeedback[id];
+      autosaveState();
+      renderHoldingsModalRows();
+      updateHoldingsModalTotal();
+    });
+  });
+}
+
+function renderHoldingsModalRows() {
+  const container = $("#holdingsModalRows");
+  if (!container) return;
+  container.innerHTML = holdingsModalItems().map((item) => holdingsModalRowHtml(item)).join("");
+  wireHoldingsModalRowEvents();
+}
+
+function openHoldingsModal(groupId) {
+  const items = state.goals.netWorth.assets.filter((asset) => isHoldingAssetClass(asset.assetClass) && (asset.groupId || asset.id) === groupId);
+  if (!items.length) return;
+  // A legacy solo holding (no groupId of its own) is adopted into a real
+  // group as soon as it's opened here, so every subsequent lookup by
+  // groupId - including this same modal's own rows - works uniformly.
+  items.forEach((item) => { item.groupId = groupId; });
+  currentHoldingsModalGroupId = groupId;
+  $("#holdingsModalAccountName").value = items[0].groupName || items[0].name || "";
+  renderHoldingsModalRows();
+  updateHoldingsModalTotal();
+  $("#holdingsModalMessage").textContent = "";
+  $("#holdingsModalDialog").showModal();
+}
+
+function openNewHoldingsGroupModal() {
+  const groupId = uniqueId("account");
+  const asset = { id: uniqueId(`${groupId}-1`), name: "", value: 0, assetClass: "stock", symbol: "", holdingType: "stock", shares: 0, price: 0, costBasis: 0, groupId, groupName: "" };
+  state.goals.netWorth.assets.push(asset);
+  autosaveState();
+  currentHoldingsModalGroupId = groupId;
+  $("#holdingsModalAccountName").value = "";
+  renderHoldingsModalRows();
+  updateHoldingsModalTotal();
+  $("#holdingsModalMessage").textContent = "";
+  $("#holdingsModalDialog").showModal();
+}
+
+$("#holdingsModalAccountName").addEventListener("input", (event) => {
+  const name = event.target.value;
+  holdingsModalItems().forEach((asset) => {
+    asset.groupName = name;
+    asset.name = asset.symbol ? `${name} - ${asset.symbol}` : name;
+  });
+  autosaveState();
+});
+
+$("#addHoldingsModalRowButton").addEventListener("click", () => {
+  if (!currentHoldingsModalGroupId) return;
+  const accountName = $("#holdingsModalAccountName").value.trim();
+  const existingClass = holdingsModalItems()[0]?.assetClass || "stock";
+  const asset = {
+    id: uniqueId(`${currentHoldingsModalGroupId}-${Date.now()}`), name: accountName, value: 0,
+    assetClass: existingClass, symbol: "", holdingType: "stock", shares: 0, price: 0, costBasis: 0,
+    groupId: currentHoldingsModalGroupId, groupName: accountName
+  };
+  state.goals.netWorth.assets.push(asset);
+  autosaveState();
+  renderHoldingsModalRows();
+  updateHoldingsModalTotal();
+});
+
+$("#holdingsModalRefreshAllButton").addEventListener("click", async (event) => {
+  if (!currentHoldingsModalGroupId) return;
+  const button = event.currentTarget;
+  const items = holdingsModalItems();
+  button.disabled = true;
+  await Promise.all(items.map(async (asset) => {
+    const symbol = (asset.symbol || "").trim().toUpperCase();
+    if (!symbol) return;
+    try {
+      const result = await api(`/api/stock-quote?symbol=${encodeURIComponent(symbol)}`);
+      asset.price = result.price;
+      asset.value = assetValue(asset);
+      stockPriceFeedback[asset.id] = { message: `Updated to ${money.format(result.price)}`, isError: false };
+    } catch (error) {
+      stockPriceFeedback[asset.id] = { message: error.message, isError: true };
+    }
+  }));
+  stockGroupRefreshedFeedback[currentHoldingsModalGroupId] = true;
+  autosaveState();
+  renderHoldingsModalRows();
+  updateHoldingsModalTotal();
+  button.disabled = false;
+});
+
+$("#closeHoldingsModalButton").addEventListener("click", () => $("#holdingsModalDialog").close());
+$("#holdingsModalDoneButton").addEventListener("click", () => $("#holdingsModalDialog").close());
+
+// Fires for every close path (Done, ×, Esc) - purges any row still mid-
+// composition (blank symbol, never finished) so an abandoned "+ Add
+// multiple" or a cleared-out row never leaves an empty asset behind.
+$("#holdingsModalDialog").addEventListener("close", () => {
+  if (!currentHoldingsModalGroupId) return;
+  const groupId = currentHoldingsModalGroupId;
+  state.goals.netWorth.assets = state.goals.netWorth.assets.filter((asset) => {
+    const inThisGroup = isHoldingAssetClass(asset.assetClass) && asset.groupId === groupId;
+    return !inThisGroup || (asset.symbol || "").trim();
+  });
+  currentHoldingsModalGroupId = null;
+  autosaveState();
   render();
 });
 

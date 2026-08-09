@@ -295,7 +295,9 @@ more convenient.
 3. Link an account to a **Net worth** asset or liability so that entry
    updates automatically as the account does.
 4. For debt, check the **Debt payoff tracker** — it estimates a payoff date
-   and suggested payment from the balance, rate, and term you enter.
+   and suggested payment from the balance, rate, and term you enter, and
+   shows a progress bar of the real percent paid off so far, computed from
+   your logged payment history.
 
 **Get the most out of it**
 - Move an account-to-account payment (like paying a credit card from
@@ -303,15 +305,21 @@ more convenient.
   pair — the ⇄ icon on a matched transaction does this in one step.
 - Drag an account by its ⠿ handle to reorder the **Accounts** list — useful
   for putting the ones you check most often at the top.
-- Under **Net worth**, a brokerage or 401(k) with several stocks or mutual
-  funds shows as one card, not one row per symbol: use **+ Add multiple** to
-  create it (enter the account name once, add a row per symbol, submit), and
-  the card shows a chip per holding plus a combined market value. To add,
-  edit, or remove individual holdings later, select **Manage list** on that
-  card (or click any chip) instead of deleting and re-adding the whole
-  account — clearing a row's symbol removes just that one holding, and a
-  blank new row is skipped rather than erroring. **↻ Live price** on the
-  card refreshes every holding in it at once.
+- Under **Net worth**, a brokerage or retirement account (401(k), IRA) with
+  several stocks or mutual funds shows as one card, not one row per symbol:
+  use **+ Add multiple** to create it, or switch an existing item's Asset
+  class to **Stock** or **Retirement** to convert it into one. The card
+  shows a chip per holding, an Asset class label that updates automatically
+  (Stocks / Mutual Funds / Mixed), and a combined market value. Select
+  **Manage list** on the card any time you need to add, edit, or remove
+  individual holdings — clearing a row's symbol removes just that one
+  holding, and a blank new row is skipped rather than erroring.
+- Enter each holding's **Avg. cost** (what you paid per share) in Manage
+  list to see its gain or loss in dollars and percent, both per holding and
+  totaled on the card — holdings with no cost basis entered are left out of
+  the total rather than counted as break-even. **↻ Live price** refreshes
+  every holding in a group at once from the card, or one at a time from
+  Manage list.
 
 ## Sharing
 

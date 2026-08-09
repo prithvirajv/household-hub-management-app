@@ -7,7 +7,7 @@
     <title>FamilyLoop</title>
     <link rel="icon" type="image/svg+xml" href="/assets/favicon.svg">
     <link rel="apple-touch-icon" href="/assets/apple-touch-icon.png">
-    <link rel="stylesheet" href="/styles.css?v=20260809-2">
+    <link rel="stylesheet" href="/styles.css?v=20260809-3">
     <script src="https://accounts.google.com/gsi/client" async defer></script>
   </head>
   <body>
@@ -37,6 +37,7 @@
           <div>
             <p id="householdName" class="eyebrow">Household workspace</p>
             <h2 id="viewTitle">Dashboard</h2>
+            <p id="homeStatusLine" class="home-status-line" hidden></p>
           </div>
           <div class="topbar-actions">
             <label class="month-control">Month<input id="monthPicker" type="month" value="2026-05"></label>
@@ -295,23 +296,31 @@
       </div>
     </dialog>
 
-    <dialog id="bulkAddHoldingsDialog" class="app-dialog">
-      <div class="delete-budget-line-dialog-content">
+    <dialog id="holdingsModalDialog" class="app-dialog holdings-modal-dialog">
+      <div class="holdings-modal-content">
         <div class="section-head">
-          <div><span class="card-label">Net worth</span><h2 id="bulkAddHoldingsTitle">Add multiple stocks or funds</h2></div>
-          <button id="closeBulkAddHoldingsDialogButton" class="icon-button ghost" type="button" aria-label="Close">×</button>
+          <div><span class="card-label">Net worth</span><h2>Manage holdings</h2></div>
+          <button id="closeHoldingsModalButton" class="icon-button ghost" type="button" aria-label="Close">×</button>
         </div>
-        <p id="bulkAddHoldingsDescription" class="muted">Enter one row per stock or mutual fund - they're each added as their own holding, named with this account as a prefix so they're easy to spot together in the list.</p>
-        <form id="bulkAddHoldingsForm">
-          <label>Account name<input name="accountName" placeholder="Brokerage M2" required></label>
-          <div id="bulkAddHoldingsRows" class="iou-split-rows"></div>
-          <button id="addBulkHoldingRowButton" class="ghost" type="button">+ Add another row</button>
-          <p id="bulkAddHoldingsMessage" class="form-message"></p>
-          <div class="dialog-actions">
-            <button id="cancelBulkAddHoldingsButton" class="ghost" type="button">Cancel</button>
-            <button id="bulkAddHoldingsSubmitButton" type="submit">Add holdings</button>
+        <div class="holdings-modal-body">
+          <label>Account name<input id="holdingsModalAccountName" placeholder="Brokerage M2" aria-label="Account name"></label>
+          <div class="holdings-modal-table-head">
+            <div>Symbol</div><div>Asset class</div><div>Shares</div><div>Avg. cost</div><div>Price per share</div><div>Market value</div><div>Gain/loss</div><div></div>
           </div>
-        </form>
+          <div id="holdingsModalRows"></div>
+          <button id="addHoldingsModalRowButton" class="holdings-modal-add-row" type="button">+ Add stock or mutual fund</button>
+          <p id="holdingsModalMessage" class="form-message"></p>
+        </div>
+        <div class="holdings-modal-footer">
+          <div>
+            <span class="holdings-modal-footer-label">Total market value</span>
+            <strong id="holdingsModalTotal">$0</strong>
+          </div>
+          <div class="holdings-modal-footer-actions">
+            <button id="holdingsModalRefreshAllButton" class="live-price-pill" type="button">⟳ Refresh all live prices</button>
+            <button id="holdingsModalDoneButton" type="button">Done</button>
+          </div>
+        </div>
       </div>
     </dialog>
 
@@ -339,7 +348,7 @@
 
     <script src="https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/build/pdf.min.js"></script>
     <script>if (window.pdfjsLib) pdfjsLib.GlobalWorkerOptions.workerSrc = "https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/build/pdf.worker.min.js";</script>
-    <script src="/lib/shared-logic.js?v=20260809-2"></script>
-    <script src="/app.js?v=20260809-3"></script>
+    <script src="/lib/shared-logic.js?v=20260809-3"></script>
+    <script src="/app.js?v=20260809-4"></script>
   </body>
 </html>
