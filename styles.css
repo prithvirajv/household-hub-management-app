@@ -1,20 +1,30 @@
 :root {
-  --navy: #1d2945;
-  --navy-2: #2b3758;
-  --bg: #eef3f7;
-  --panel: #ffffff;
-  --soft: #f4f7fb;
-  --soft-blue: #eef3fb;
-  --line: #dfe7ef;
-  --text: #111827;
-  --muted: #6b7280;
+  /* Warm cream/charcoal direction (design handoff v2) - replaces the
+     previous cool navy/blue-gray palette app-wide. --green/--green-soft/
+     --blue/--gold/--coral are the app's semantic colors and are
+     deliberately kept as-is per the handoff. Variable names are unchanged
+     from the old palette (--navy still means "sidebar surface", --soft-blue
+     still means "tinted row background") so every selector already themed
+     through these tokens picks up the new palette automatically - only the
+     values change here. */
+  --navy: oklch(24% 0.02 65);
+  --navy-2: oklch(30% 0.02 65);
+  --bg: oklch(97% 0.014 75);
+  --panel: oklch(99% 0.006 75);
+  --soft: oklch(95% 0.014 75);
+  --soft-blue: oklch(93% 0.01 75);
+  --line: oklch(90% 0.012 75);
+  --text: oklch(23% 0.02 55);
+  --muted: oklch(52% 0.02 60);
   --green: #13936d;
   --green-soft: #e6f6ef;
   --blue: #3569d4;
   --gold: #d99a24;
   --coral: #e05252;
-  --shadow: 0 16px 40px rgba(29, 41, 69, 0.14);
-  --card-radius: 12px;
+  --shadow: 0 14px 34px rgba(80, 60, 30, 0.1);
+  --card-radius: 14px;
+  --sidebar-text: oklch(88% 0.012 75);
+  --sidebar-muted: oklch(75% 0.015 75);
 }
 
 * {
@@ -71,9 +81,46 @@ button:disabled {
 }
 
 button.ghost {
-  background: white;
+  background: var(--panel);
   color: var(--text);
   border: 1px solid var(--line);
+}
+
+/* Custom checkbox: a rounded-square button instead of the browser's native
+   box, filled with the accent + a checkmark when checked - used wherever a
+   checkbox represents completion (Notes checklists, Plan tasks/subtasks,
+   Home's plan list, Meals grocery list) for one consistent look instead of
+   each platform's native checkbox rendering differently. Left as native
+   elsewhere (Sharing's scope toggles, household pickers) where the
+   semantics are selection, not completion. */
+input[type="checkbox"] {
+  appearance: none;
+  -webkit-appearance: none;
+  width: 18px;
+  height: 18px;
+  min-height: 0;
+  flex-shrink: 0;
+  border: 1.5px solid var(--line);
+  border-radius: 5px;
+  background: var(--panel);
+  cursor: pointer;
+  display: inline-grid;
+  place-items: center;
+  transition: background 100ms ease, border-color 100ms ease;
+}
+
+input[type="checkbox"]:checked {
+  background: var(--green);
+  border-color: var(--green);
+}
+
+input[type="checkbox"]:checked::after {
+  content: "";
+  width: 5px;
+  height: 9px;
+  border: solid white;
+  border-width: 0 2px 2px 0;
+  transform: rotate(45deg) translate(-1px, -1px);
 }
 
 input,
@@ -83,7 +130,7 @@ select {
   border: 1px solid var(--line);
   border-radius: 6px;
   padding: 0.45rem 0.55rem;
-  background: white;
+  background: var(--panel);
   color: var(--text);
 }
 
@@ -147,7 +194,7 @@ label {
 }
 
 .brand p {
-  color: #c4d0e3;
+  color: var(--sidebar-muted);
   font-size: 0.76rem;
   line-height: 1.25;
 }
@@ -168,7 +215,7 @@ nav {
 
 .sidebar-household .household-control {
   width: 100%;
-  color: #c4d0e3;
+  color: var(--sidebar-muted);
 }
 
 .sidebar-household .household-control select {
@@ -223,7 +270,7 @@ nav {
   align-items: center;
   gap: 0.55rem;
   background: transparent;
-  color: #d8e2f1;
+  color: var(--sidebar-text);
   text-align: left;
   border: 1px solid transparent;
   padding: 0.58rem 0.65rem;
@@ -495,11 +542,11 @@ main {
   border-radius: 8px;
   padding: 0;
   color: var(--text);
-  box-shadow: 0 24px 70px rgba(17, 24, 39, 0.28);
+  box-shadow: 0 24px 70px rgba(40, 30, 20, 0.28);
 }
 
 .app-dialog::backdrop {
-  background: rgba(17, 24, 39, 0.48);
+  background: rgba(30, 24, 18, 0.48);
 }
 
 .app-dialog form {
@@ -863,10 +910,58 @@ main {
   width: 100%;
   min-height: 40px;
   margin-top: 0.2rem;
-  background: white;
+  background: var(--panel);
   color: var(--text);
   font-weight: 800;
   text-transform: none;
+}
+
+/* Conic-gradient progress ring for savings goals - a celebratory treatment
+   distinct from the bar-based progress used for budget/debt, since a goal
+   is something to look forward to filling rather than a limit to stay
+   under. */
+.goal-ring-row {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+}
+
+.goal-ring {
+  width: 74px;
+  height: 74px;
+  min-width: 74px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  transition: background 0.7s ease;
+}
+
+.goal-ring-inner {
+  width: 54px;
+  height: 54px;
+  border-radius: 50%;
+  background: var(--panel);
+  display: grid;
+  place-items: center;
+  font-size: 1.3rem;
+}
+
+.goal-ring-stats {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.6rem;
+  flex: 1;
+  min-width: 0;
+}
+
+.goal-contribution-row {
+  display: flex;
+  gap: 0.5rem;
+}
+
+.goal-contribution-row input {
+  flex: 1;
+  min-width: 0;
 }
 
 .help-topic h3,
@@ -1040,7 +1135,7 @@ main {
 }
 
 .soft-card {
-  background: #fbfdff;
+  background: var(--panel);
 }
 
 .section-head {
@@ -2433,7 +2528,7 @@ main {
   gap: 0.7rem;
   border: 1px solid var(--line);
   border-radius: 8px;
-  background: #fbfdff;
+  background: var(--panel);
   padding: 0.75rem;
   position: relative;
 }
@@ -2766,7 +2861,7 @@ main {
 .meal-day {
   border: 1px solid var(--line);
   border-radius: 8px;
-  background: #fbfdff;
+  background: var(--panel);
   padding: 0.55rem;
   display: grid;
   gap: 0.45rem;
@@ -2866,7 +2961,7 @@ main {
   gap: 0.65rem;
   border: 1px solid var(--line);
   border-radius: 8px;
-  background: #fbfdff;
+  background: var(--panel);
   padding: 0.7rem;
 }
 
@@ -2963,9 +3058,16 @@ main {
 
 .invite-box {
   display: flex;
+  align-items: center;
   justify-content: space-between;
   gap: 1rem;
   text-transform: uppercase;
+}
+
+.invite-copy-button {
+  margin-left: auto;
+  padding: 0.3rem 0.8rem;
+  font-size: 0.75rem;
 }
 
 .shared-box p {
@@ -3130,53 +3232,187 @@ main {
   align-items: flex-end;
 }
 
-/* width/height attributes (not just viewBox) define the intrinsic aspect
-   ratio; height:auto lets the browser scale it uniformly with no text
-   distortion, unlike the line chart above which uses a fixed CSS height +
-   preserveAspectRatio="none" since it draws no text of its own. */
-.cashflow-sankey-svg {
-  width: 100%;
-  height: auto;
-  display: block;
+/* Cash flow breakdown - a single stacked bar (each category a proportional-
+   width segment) + wrapped legend, replacing the earlier Sankey ribbon
+   diagram. Segment colors come from the selected Reports color theme. */
+.cashflow-breakdown-bar {
+  display: flex;
+  height: 34px;
+  border-radius: 8px;
+  overflow: hidden;
 }
 
-.cashflow-sankey-node {
-  fill: var(--navy);
+.cashflow-breakdown-segment {
+  transition: width 0.7s ease, filter 0.15s ease;
 }
 
-.cashflow-sankey-ribbon {
-  opacity: 0.35;
+.cashflow-breakdown-clickable {
+  cursor: pointer;
 }
 
-.cashflow-sankey-label {
-  fill: var(--text);
-  font-size: 11px;
+.cashflow-breakdown-clickable:hover {
+  filter: brightness(1.1);
+}
+
+.cashflow-breakdown-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.7rem 1.1rem;
+  margin-top: 0.9rem;
+}
+
+.cashflow-breakdown-legend-item {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-size: 0.78rem;
   font-weight: 700;
-  dominant-baseline: middle;
 }
 
-.cashflow-sankey-label-income {
-  fill: var(--muted);
-  font-size: 10px;
+.cashflow-breakdown-legend-item i {
+  width: 9px;
+  height: 9px;
+  border-radius: 2px;
+  flex-shrink: 0;
+}
+
+/* Reports toolbar: segmented pill controls (scope, density, category style)
+   and the color-theme swatch picker. */
+.reports-scope-pills {
+  display: inline-flex;
+  background: var(--soft-blue);
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  padding: 3px;
+  gap: 2px;
+}
+
+.reports-scope-pills button {
+  border: none;
+  border-radius: 999px;
+  padding: 0.5rem 1rem;
+  font-weight: 800;
+  font-size: 0.82rem;
+  background: transparent;
+  color: var(--text);
+  min-height: 0;
+}
+
+.reports-scope-pills button:hover:not(.active) {
+  filter: none;
+  background: var(--panel);
+}
+
+.reports-scope-pills button.active {
+  background: var(--green);
+  color: white;
+}
+
+.reports-appearance-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 1.2rem;
+  margin-top: 0.9rem;
+  padding-top: 0.9rem;
+  border-top: 1px solid var(--line);
+}
+
+.reports-appearance-group {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+}
+
+.reports-appearance-label {
+  font-size: 0.7rem;
   font-weight: 900;
+  color: var(--muted);
   text-transform: uppercase;
   letter-spacing: 0.03em;
 }
 
-.cashflow-sankey-clickable {
-  cursor: pointer;
+.reports-theme-swatches {
+  display: flex;
+  gap: 0.4rem;
 }
 
-.cashflow-sankey-ribbon.cashflow-sankey-clickable:hover {
-  opacity: 0.55;
+.reports-theme-swatch {
+  display: flex;
+  gap: 2px;
+  padding: 0.4rem;
+  border-radius: 999px;
+  background: var(--panel);
+  border: 1.5px solid var(--line);
+  min-height: 0;
 }
 
-rect.cashflow-sankey-clickable:hover {
-  filter: brightness(1.12);
+.reports-theme-swatch.active {
+  border-color: var(--green);
 }
 
-text.cashflow-sankey-clickable:hover {
-  text-decoration: underline;
+.reports-theme-swatch i {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  display: block;
+}
+
+/* Category report - conic-gradient ring alternative to the bar list. */
+.report-category-rings {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(96px, 1fr));
+  gap: 0.9rem;
+}
+
+.report-category-ring {
+  background: none;
+  border: none;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.3rem;
+  color: var(--text);
+  min-height: 0;
+  text-align: center;
+}
+
+.report-category-ring-dial {
+  width: 74px;
+  height: 74px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  transition: background 0.7s ease;
+}
+
+.report-category-ring-icon {
+  width: 54px;
+  height: 54px;
+  border-radius: 50%;
+  background: var(--panel);
+  display: grid;
+  place-items: center;
+  font-size: 1.1rem;
+}
+
+.report-category-ring strong {
+  font-size: 0.78rem;
+}
+
+.report-category-ring-lines {
+  display: grid;
+  gap: 0.2rem;
+}
+
+.report-category-ring-lines span {
+  font-size: 0.7rem;
+  color: var(--muted);
+}
+
+.reports-density-compact .card {
+  padding: 0.7rem 0.8rem;
+  border-radius: 10px;
 }
 
 .reports-toolbar-fields label {
@@ -3299,7 +3535,7 @@ text.cashflow-sankey-clickable:hover {
   display: grid;
   gap: 0.2rem;
   border-radius: 8px;
-  background: linear-gradient(90deg, #e9fff5, #f4f1ff);
+  background: linear-gradient(90deg, #eafbf3, #fdf6ec);
   padding: 0.85rem;
 }
 
@@ -5908,7 +6144,7 @@ text.cashflow-sankey-clickable:hover {
   font-weight: 800;
   text-transform: uppercase;
   color: var(--muted);
-  background: #fbfdff;
+  background: var(--panel);
   border-bottom: 1px solid var(--line);
 }
 
@@ -6610,6 +6846,7 @@ text.cashflow-sankey-clickable:hover {
 
 .decision-card.is-decided {
   background: var(--soft);
+  border-left: 3px solid var(--green);
 }
 
 .decision-card-header {
@@ -6617,6 +6854,29 @@ text.cashflow-sankey-clickable:hover {
   align-items: center;
   flex-wrap: wrap;
   gap: 0.5rem;
+}
+
+.decision-expand-toggle {
+  border: 1px solid var(--line);
+  background: var(--panel);
+  color: var(--muted);
+  width: 26px;
+  height: 26px;
+  min-height: 0;
+  border-radius: 6px;
+  display: grid;
+  place-items: center;
+  font-size: 0.75rem;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.decision-expand-toggle:hover {
+  filter: brightness(0.97);
+}
+
+.decision-collapsed-summary {
+  font-size: 0.9rem;
 }
 
 .decision-title-input {
@@ -6634,7 +6894,7 @@ text.cashflow-sankey-clickable:hover {
 
 .decision-title-input:focus {
   border-color: var(--green);
-  background: white;
+  background: var(--panel);
   outline: 0;
 }
 
@@ -6655,7 +6915,7 @@ text.cashflow-sankey-clickable:hover {
 
 .decision-notes-input:focus {
   border-color: var(--line);
-  background: white;
+  background: var(--panel);
   outline: 0;
 }
 
@@ -6938,7 +7198,7 @@ text.cashflow-sankey-clickable:hover {
 
 .card:hover {
   transform: translateY(-2px);
-  box-shadow: 0 20px 48px rgba(29, 41, 69, 0.18);
+  box-shadow: 0 20px 48px rgba(80, 60, 30, 0.16);
 }
 
 /* --- Expand/collapse animate-in for drill-down panels (Sankey segment,
@@ -6978,146 +7238,41 @@ text.cashflow-sankey-clickable:hover {
   animation: chart-line-draw-in 0.9s ease-out forwards;
 }
 
-@keyframes ribbon-draw-in {
-  from {
-    opacity: 0;
-  }
-  to {
-    opacity: 0.35;
-  }
-}
-
-.cashflow-sankey-ribbon {
-  animation: ribbon-draw-in 0.5s ease-out forwards;
-}
-
 @media (prefers-reduced-motion: reduce) {
   .card,
   .toast,
   .tag-transaction-list,
   .documents-file-info-panel,
   .networth-chart-line,
-  .cashflow-sankey-ribbon {
+  .cashflow-breakdown-segment,
+  .report-category-ring-dial {
     animation: none;
     transition: none;
   }
 }
 
 /* ================================================================
-   Home dashboard warm-theme direction - a design proposal ("a direction
-   to evaluate, not a like-for-like replacement" per its own brief), not
-   an approved app-wide token change. Scoped to body.home-warm-theme main
-   only, toggled in renderShell() when currentView === "home". Deliberately
-   leaves the sidebar alone: it's a persistent element shared by every page,
-   so recoloring it only while on Home would flash cool-to-warm-to-cool on
-   every navigation in and out rather than reading as a restyled page.
+   Home dashboard - personalized greeting/status line and colored metric
+   states. Originally scoped to a Home-only "warm theme" class; now that
+   the whole app runs on the warm palette (see :root above), these are
+   just plain app-wide rules - .home-status-line only ever renders on
+   Home anyway, and metric-state coloring is generically useful wherever
+   metricsForView() supplies a 4th tuple field.
    ================================================================ */
-body.home-warm-theme main {
-  --warm-bg: oklch(97% 0.013 75);
-  --warm-panel: oklch(99% 0.005 75);
-  --warm-soft: oklch(95% 0.012 75);
-  --warm-line: oklch(90% 0.012 75);
-  --warm-text: oklch(24% 0.018 55);
-  --warm-muted: oklch(53% 0.018 60);
-  --warm-accent-soft: color-mix(in srgb, var(--green) 14%, white);
-  --warm-accent-text: color-mix(in srgb, var(--green) 75%, black);
-  background: var(--warm-bg);
-  color: var(--warm-text);
-}
-
-body.home-warm-theme .topbar h2 {
-  font-size: 1.9rem;
-  letter-spacing: -0.015em;
-}
-
-body.home-warm-theme .home-status-line {
+.home-status-line {
   margin: 0.35rem 0 0;
   font-size: 0.95rem;
-  color: var(--warm-muted);
+  color: var(--muted);
 }
 
-body.home-warm-theme main .card {
-  background: var(--warm-panel);
-  border-color: var(--warm-line);
-  border-radius: 20px;
-  box-shadow: none;
-}
-
-body.home-warm-theme main .card-label {
-  color: var(--warm-accent-text);
-}
-
-body.home-warm-theme main h3 {
-  color: var(--warm-text);
-}
-
-body.home-warm-theme main .metric {
-  background: var(--warm-panel);
-  border: 1px solid var(--warm-line);
-  border-radius: 18px;
-  box-shadow: none;
-}
-
-body.home-warm-theme main .metric span,
-body.home-warm-theme main .metric small {
-  color: var(--warm-muted);
-}
-
-body.home-warm-theme main .metric strong {
-  color: var(--warm-text);
-  font-size: 1.4rem;
-}
-
-body.home-warm-theme main .metric-danger strong {
+.metric-danger strong {
   color: var(--coral);
 }
 
-body.home-warm-theme main .metric-warning strong {
+.metric-warning strong {
   color: var(--gold);
 }
 
-body.home-warm-theme main .metric-good strong {
-  color: var(--warm-accent-text);
-}
-
-body.home-warm-theme main .compact-row {
-  background: transparent;
-  border-top: 1px solid var(--warm-line);
-  border-radius: 0;
-  padding: 0.85rem 0.2rem;
-}
-
-body.home-warm-theme main .compact-row:first-child {
-  border-top: 0;
-}
-
-body.home-warm-theme main .compact-row.overdue {
-  background: transparent;
-}
-
-body.home-warm-theme main .compact-row strong {
-  color: var(--warm-text);
-}
-
-body.home-warm-theme main .compact-row small {
-  color: var(--warm-muted);
-}
-
-body.home-warm-theme main .compact-row.overdue small {
-  color: var(--coral);
-}
-
-body.home-warm-theme main button.ghost {
-  border-radius: 999px;
-  background: var(--warm-soft);
-  color: var(--warm-text);
-  border-color: var(--warm-line);
-}
-
-body.home-warm-theme main .pill-button,
-body.home-warm-theme main .chore-complete-group button {
-  border-radius: 999px;
-  background: var(--warm-accent-soft);
-  color: var(--warm-accent-text);
-  font-weight: 800;
+.metric-good strong {
+  color: color-mix(in srgb, var(--green) 75%, black);
 }

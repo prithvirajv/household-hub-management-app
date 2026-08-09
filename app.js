@@ -54,6 +54,26 @@ let reportsCardFilter = "all";
 let reportsSelectedTag = "";
 let reportsExpandedSankeyLineKey = null;
 let reportsSelectedCategoryLine = "";
+// Reports' own appearance settings - a per-viewer display preference, not
+// household data, so these stay session-local (like reportsCardFilter)
+// rather than round-tripping through autosaveState().
+let reportsDensity = "comfortable";
+let reportsColorTheme = "fresh";
+let reportsCategoryStyle = "bars";
+let reportsExpandedRingCategory = null;
+// Three full curated palettes (accent + negative color + a 5-color chart
+// palette) a viewer can swap between on the Reports page - independent of
+// each category's own stored .color (that's the app-wide Budget-page
+// assignment; Reports charts intentionally re-color by theme+index instead
+// so switching themes here never touches Budget's own category colors).
+const REPORTS_THEMES = {
+  fresh: { accent: "#13936d", negative: "#e05252", palette: ["#13936d", "#3569d4", "#c9891e", "#e05252", "#7c5cff"] },
+  sunset: { accent: "#d2601a", negative: "#b0304f", palette: ["#d2601a", "#b0304f", "#d99a24", "#8a3f9c", "#3d8f8a"] },
+  ocean: { accent: "#0d6e91", negative: "#b0413e", palette: ["#0d6e91", "#4d5fd1", "#0f9e8e", "#b0413e", "#7a5cc7"] }
+};
+// Which decision card has its pros/cons/notes/attachments expanded - one at
+// a time (accordion), same convention as Reports' expandedRingCategory.
+let expandedDecisionId = null;
 let splitBillType = "equal";
 let splitBillRows = [];
 // The payer's own row in the Split-a-bill card, shown alongside the friend
@@ -1286,7 +1306,6 @@ function renderShell() {
                             ? "Home"
           : `${monthLabel()} plan`;
   $("#householdName").textContent = title.toUpperCase();
-  document.body.classList.toggle("home-warm-theme", isHomeView);
   $("#homeStatusLine").hidden = !isHomeView;
   if (isHomeView) {
     const firstName = (sessionUser?.name || "there").trim().split(" ")[0];
@@ -3488,22 +3507,25 @@ function decisionItemRow(decisionId, listKey, item, index, total) {
 
 function renderDecisionCard(decision) {
   const isDecided = decision.status === "decided";
+  const isExpanded = expandedDecisionId === decision.id;
   return `<div class="card decision-card ${isDecided ? "is-decided" : ""}">
     <div class="decision-card-header">
+      <button type="button" class="decision-expand-toggle" data-toggle-decision="${decision.id}" aria-expanded="${isExpanded}" aria-label="${isExpanded ? "Collapse" : "Expand"} ${escapeHtml(decision.title)}">${isExpanded ? "▲" : "▼"}</button>
       <input class="decision-title-input" data-decision-title="${decision.id}" value="${escapeHtml(decision.title)}" aria-label="Decision title">
       <span class="pill ${isDecided ? "" : "pill-open"}">${isDecided ? "Decided" : "Open"}</span>
       <button class="icon-button danger-button" data-delete-decision="${decision.id}" type="button" aria-label="Delete ${escapeHtml(decision.title)}">×</button>
-    </div>
-    <textarea class="decision-notes-input" data-decision-notes="${decision.id}" placeholder="Any context worth remembering (optional)">${escapeHtml(decision.notes)}</textarea>
-    <div class="decision-attachments">
-      ${decision.attachments.map((attachment) => decisionAttachmentRow(decision.id, attachment)).join("")}
-      ${decision.attachments.length < DECISION_ATTACHMENT_MAX_COUNT ? `<label class="decision-attachment-picker ghost">+ Attach a file<input data-decision-attachment-input="${decision.id}" type="file" multiple></label>` : ""}
     </div>
     ${isDecided ? `<div class="decision-outcome">
       <strong>Outcome:</strong> ${escapeHtml(decision.outcome) || "<em>No outcome noted</em>"}
       <small>${decision.decidedAt ? ` · ${decision.decidedAt.slice(0, 10)}` : ""}</small>
       <button class="ghost" data-reopen-decision="${decision.id}" type="button">Reopen</button>
     </div>` : ""}
+    ${isExpanded ? `
+    <textarea class="decision-notes-input" data-decision-notes="${decision.id}" placeholder="Any context worth remembering (optional)">${escapeHtml(decision.notes)}</textarea>
+    <div class="decision-attachments">
+      ${decision.attachments.map((attachment) => decisionAttachmentRow(decision.id, attachment)).join("")}
+      ${decision.attachments.length < DECISION_ATTACHMENT_MAX_COUNT ? `<label class="decision-attachment-picker ghost">+ Attach a file<input data-decision-attachment-input="${decision.id}" type="file" multiple></label>` : ""}
+    </div>
     <div class="decision-columns">
       <div class="decision-column decision-column-pro">
         <h4>Pros</h4>
@@ -3526,6 +3548,7 @@ function renderDecisionCard(decision) {
       <input name="outcome" placeholder="What did you decide? (optional)">
       <button type="submit">Mark decided</button>
     </form>` : ""}
+    ` : `<div class="decision-collapsed-summary muted">${decision.pros.length} pro${decision.pros.length === 1 ? "" : "s"} · ${decision.cons.length} con${decision.cons.length === 1 ? "" : "s"}${decision.notes ? " · has notes" : ""}</div>`}
   </div>`;
 }
 
@@ -4050,7 +4073,9 @@ function renderGoals() {
     <section class="narrow-layout">
       <section class="card">
         <div class="section-head"><div><span class="card-label">Funding</span><h3>Sinking funds and goals</h3></div><button id="addGoalButton" type="button">+ Add goal</button></div>
-        ${state.goals.sinkingFunds.length ? state.goals.sinkingFunds.map((fund, index) => `
+        ${state.goals.sinkingFunds.length ? state.goals.sinkingFunds.map((fund, index) => {
+          const pct = Math.min(100, Math.round((Number(fund.saved || 0) / Math.max(Number(fund.target || 0), 1)) * 100));
+          return `
           <article class="goal-card">
             <div class="goal-edit-grid">
               <label class="goal-name-field">Goal name<input data-goal-name="${index}" value="${escapeHtml(fund.name || "")}" placeholder="Emergency fund"></label>
@@ -4059,10 +4084,21 @@ function renderGoals() {
               <label>Target date<input data-goal-date="${index}" type="date" value="${fund.targetDate || ""}"></label>
               <button class="icon-button danger-button" data-delete-goal="${index}" type="button" aria-label="Remove ${escapeHtml(fund.name || "goal")}">×</button>
             </div>
-            ${progressBlock("Progress", fund.saved, fund.target)}
-            <div class="split-stat"><span>${Math.round((fund.saved / Math.max(fund.target, 1)) * 100)}%</span><b>${money.format(fund.target - fund.saved)} remaining</b></div>
+            <div class="goal-ring-row">
+              <div class="goal-ring" style="background:conic-gradient(var(--green) ${pct}%, var(--soft-blue) ${pct}% 100%)"><div class="goal-ring-inner"><span aria-hidden="true">🎯</span></div></div>
+              <div class="goal-ring-stats">
+                <div class="split-stat"><span>Saved</span><b>${money.format(fund.saved)}</b></div>
+                <div class="split-stat"><span>Target</span><b>${money.format(fund.target)}</b></div>
+                <div class="split-stat"><span>${pct}%</span><b>${money.format(Math.max(0, fund.target - fund.saved))} remaining</b></div>
+              </div>
+            </div>
+            <div class="goal-contribution-row">
+              <input type="number" min="0" step="0.01" placeholder="Add a contribution" data-goal-contribution-input="${index}" aria-label="Contribution amount for ${escapeHtml(fund.name || "this goal")}">
+              <button type="button" class="ghost" data-goal-contribution-add="${index}">+ Add</button>
+            </div>
           </article>
-        `).join("") : `<div class="onboarding-empty compact-onboarding"><div class="empty-symbol" aria-hidden="true">◎</div><h3>Create your first goal</h3><p>Give it a target amount and date, then update the saved balance as you make progress.</p><button id="emptyAddGoalButton" type="button">Add a goal</button></div>`}
+        `;
+        }).join("") : `<div class="onboarding-empty compact-onboarding"><div class="empty-symbol" aria-hidden="true">◎</div><h3>Create your first goal</h3><p>Give it a target amount and date, then update the saved balance as you make progress.</p><button id="emptyAddGoalButton" type="button">Add a goal</button></div>`}
       </section>
     </section>`;
 }
@@ -4240,7 +4276,7 @@ function renderSharing() {
       <div class="main-stack">
         <section class="card">
           <div class="section-head"><div><span class="card-label">Household</span><h3>Complete household sharing</h3></div><button id="inviteButton" type="button">Generate invite</button></div>
-          <div class="invite-box"><span>Invite code</span><strong>${state.household.inviteCode || "No invite yet"}</strong></div>
+          <div class="invite-box"><span>Invite code</span><strong>${state.household.inviteCode || "No invite yet"}</strong>${state.household.inviteCode ? `<button class="ghost invite-copy-button" data-copy-invite-code="${escapeHtml(state.household.inviteCode)}" type="button">Copy</button>` : ""}</div>
           <div class="shared-box">
             <div class="section-head">
               <div>
@@ -4318,7 +4354,8 @@ function renderReports() {
   const months = cashFlowByMonth(monthKeys.length ? monthKeys : trailingMonthKeys(6));
   const totalIncome = months.reduce((sum, month) => sum + month.income, 0);
   const totalExpenses = months.reduce((sum, month) => sum + month.expenses, 0);
-  const sankeySegments = sankeyFlowSegments(categories, totalIncome, totalExpenses);
+  const reportsTheme = REPORTS_THEMES[reportsColorTheme] || REPORTS_THEMES.fresh;
+  const sankeySegments = sankeyFlowSegments(categories, totalIncome, totalExpenses).map((segment, index) => ({ ...segment, color: reportsTheme.palette[index % reportsTheme.palette.length] }));
   const budgetVsActual = budgetVsActualByCategory(monthKeys).filter((row) => row.planned !== 0 || row.actual !== 0);
   const rangeTransactions = state.transactions.filter((transaction) => (monthKeys.length ? monthKeys : trailingMonthKeys(6)).includes(transaction.date?.slice(0, 7)));
   const reportsTagGroups = groupTransactionsByTag(rangeTransactions).sort((a, b) => b.total - a.total);
@@ -4352,15 +4389,15 @@ function renderReports() {
     }
   }
   const showCard = (key) => reportsCardFilter === "all" || reportsCardFilter === key;
+  const scopePills = [["month", "Month"], ["range", "Date range"], ["year", "Whole year"]];
+  const themeSwatches = [["fresh", "Fresh"], ["sunset", "Sunset"], ["ocean", "Ocean"]];
   return `
     <section class="card reports-toolbar">
       <div class="section-head"><div><span class="card-label">Reports</span><h3>Scope</h3></div></div>
       <div class="reports-toolbar-fields">
-        <label>Time range<select id="reportsScopeType">
-          <option value="month" ${scope.type === "month" ? "selected" : ""}>Month</option>
-          <option value="range" ${scope.type === "range" ? "selected" : ""}>Date range</option>
-          <option value="year" ${scope.type === "year" ? "selected" : ""}>Whole year</option>
-        </select></label>
+        <div class="reports-scope-pills" role="group" aria-label="Time range">
+          ${scopePills.map(([value, label]) => `<button type="button" class="${scope.type === value ? "active" : ""}" data-reports-scope-type="${value}">${label}</button>`).join("")}
+        </div>
         ${scope.type === "month" ? `<label>Month<input type="month" id="reportsScopeMonth" value="${scope.month}"></label>` : ""}
         ${scope.type === "range" ? `<label>Start<input type="date" id="reportsScopeStart" value="${scope.start || ""}"></label><label>End<input type="date" id="reportsScopeEnd" value="${scope.end || ""}"></label>` : ""}
         ${scope.type === "year" ? `<label>Year<input type="number" id="reportsScopeYear" min="2000" max="2100" value="${scope.year}"></label>` : ""}
@@ -4376,8 +4413,30 @@ function renderReports() {
           <option value="tags" ${reportsCardFilter === "tags" ? "selected" : ""}>Tags</option>
         </select></label>
       </div>
+      <div class="reports-appearance-row">
+        <div class="reports-appearance-group">
+          <span class="reports-appearance-label">Density</span>
+          <div class="reports-scope-pills">
+            <button type="button" class="${reportsDensity === "comfortable" ? "active" : ""}" data-reports-density="comfortable">Comfortable</button>
+            <button type="button" class="${reportsDensity === "compact" ? "active" : ""}" data-reports-density="compact">Compact</button>
+          </div>
+        </div>
+        <div class="reports-appearance-group">
+          <span class="reports-appearance-label">Color theme</span>
+          <div class="reports-theme-swatches">
+            ${themeSwatches.map(([value, label]) => `<button type="button" class="reports-theme-swatch ${reportsColorTheme === value ? "active" : ""}" data-reports-theme="${value}" aria-label="${label} theme" title="${label}">${REPORTS_THEMES[value].palette.slice(0, 3).map((color) => `<i style="background:${color}"></i>`).join("")}</button>`).join("")}
+          </div>
+        </div>
+        <div class="reports-appearance-group">
+          <span class="reports-appearance-label">Category style</span>
+          <div class="reports-scope-pills">
+            <button type="button" class="${reportsCategoryStyle === "bars" ? "active" : ""}" data-reports-category-style="bars">Bars</button>
+            <button type="button" class="${reportsCategoryStyle === "rings" ? "active" : ""}" data-reports-category-style="rings">Rings</button>
+          </div>
+        </div>
+      </div>
     </section>
-    <section class="work-grid">
+    <section class="work-grid reports-density-${reportsDensity}">
       <div class="main-stack">
         ${showCard("networth") ? `<section class="card">
           <div class="section-head"><div><span class="card-label">Trend</span><h3>Net worth</h3></div><b class="${netWorthChange < 0 ? "danger" : ""}">${netWorthChange >= 0 ? "+" : ""}${money.format(netWorthChange)} over ${trend.length} months</b></div>
@@ -4390,7 +4449,7 @@ function renderReports() {
         </section>` : ""}
         ${showCard("cashflowbreakdown") ? `<section class="card">
           <div class="section-head"><div><span class="card-label">Breakdown</span><h3>Cash flow breakdown</h3></div><span>${money.format(totalIncome)} income this period</span></div>
-          ${sankeySegments.length ? cashFlowSankeySvg(sankeySegments, totalIncome) : `<div class="empty-inline">No income or spend in this period</div>`}
+          ${sankeySegments.length ? cashFlowBreakdownBar(sankeySegments, totalIncome) : `<div class="empty-inline">No income or spend in this period</div>`}
           ${sankeySegments.some((segment) => segment.lineIds.length) ? `<small class="muted">Click a category band for its transactions.</small>` : ""}
           ${expandedSankeySegment ? `
             <div class="tag-summary-total"><span>${escapeHtml(expandedSankeySegment.label)} total</span><b>${money.format(expandedSankeySegment.value)}</b></div>
@@ -4403,20 +4462,34 @@ function renderReports() {
             `).join("") : `<div class="empty-inline">No transactions found for this category.</div>`}</div>
           ` : ""}
         </section>` : ""}
-        ${showCard("category") ? `<section class="card"><div class="card-label">Spending</div><h3>Category report</h3>${[...categories].sort((a, b) => b.value - a.value).map((category) => `
-          <div class="report-row-group">
-            <div class="category-spend-row">
-              <span class="category-spend-icon" aria-hidden="true">${categoryIcon(category.name)}</span>
-              <strong class="category-spend-name">${escapeHtml(category.name)}</strong>
-              <div class="category-spend-bar-track"><span class="category-spend-bar-fill" style="width:${category.percent}%; background:${category.color}"></span></div>
-              <b class="category-spend-amount">${money.format(category.value)}</b>
+        ${showCard("category") ? (() => {
+          const sortedCategories = [...categories].sort((a, b) => b.value - a.value).map((category, index) => ({ ...category, themeColor: reportsTheme.palette[index % reportsTheme.palette.length] }));
+          const barsMarkup = sortedCategories.map((category) => `
+            <div class="report-row-group">
+              <div class="category-spend-row">
+                <span class="category-spend-icon" aria-hidden="true">${categoryIcon(category.name)}</span>
+                <strong class="category-spend-name">${escapeHtml(category.name)}</strong>
+                <div class="category-spend-bar-track"><span class="category-spend-bar-fill" style="width:${category.percent}%; background:${category.themeColor}"></span></div>
+                <b class="category-spend-amount">${money.format(category.value)}</b>
+              </div>
+              ${category.lines.length ? `<details class="report-subcategory-details">
+                <summary>${category.lines.length} subcategor${category.lines.length === 1 ? "y" : "ies"}</summary>
+                ${category.lines.map((line) => `<div class="report-subcategory-row"><span>${escapeHtml(line.name)}</span><b>${money.format(line.value)}</b></div>`).join("")}
+              </details>` : ""}
             </div>
-            ${category.lines.length ? `<details class="report-subcategory-details">
-              <summary>${category.lines.length} subcategor${category.lines.length === 1 ? "y" : "ies"}</summary>
-              ${category.lines.map((line) => `<div class="report-subcategory-row"><span>${escapeHtml(line.name)}</span><b>${money.format(line.value)}</b></div>`).join("")}
-            </details>` : ""}
-          </div>
-        `).join("")}</section>` : ""}
+          `).join("");
+          const ringsMarkup = `<div class="report-category-rings">${sortedCategories.map((category) => {
+            const key = category.lines.map((line) => line.id).join(",");
+            const expanded = reportsExpandedRingCategory === key;
+            return `<button type="button" class="report-category-ring" data-toggle-category-ring="${escapeHtml(key)}">
+              <div class="report-category-ring-dial" style="background:conic-gradient(${category.themeColor} ${category.percent}%, var(--soft-blue) ${category.percent}% 100%)"><span class="report-category-ring-icon">${categoryIcon(category.name)}</span></div>
+              <strong>${escapeHtml(category.name)}</strong>
+              <small class="muted">${money.format(category.value)}</small>
+              ${expanded && category.lines.length ? `<div class="report-category-ring-lines">${category.lines.map((line) => `<span>${escapeHtml(line.name)}: ${money.format(line.value)}</span>`).join("")}</div>` : ""}
+            </button>`;
+          }).join("")}</div>`;
+          return `<section class="card"><div class="card-label">Spending</div><h3>Category report</h3>${reportsCategoryStyle === "rings" ? ringsMarkup : barsMarkup}</section>`;
+        })() : ""}
         ${showCard("budgetvsactual") ? `<section class="card">
           <div class="card-label">Insight</div><h3>Budget vs Expense</h3>
           <div class="budget-vs-actual-list">${budgetVsActual.map((row) => `
@@ -4890,11 +4963,6 @@ function calendarManageRow(item) {
     ${directionsLinkHtml(reminderEvent?.location)}
     ${reminderEvent ? `<div class="chore-complete-group">${reminderCompletionControl(reminderEvent)}</div>` : ""}
   </div>`;
-}
-
-function progressBlock(label, value, target) {
-  const pct = Math.min(100, Math.round((value / Math.max(target, 1)) * 100));
-  return `<div class="progress-block"><div><span>${label}</span><b>${money.format(value)} / ${money.format(target)}</b></div><div class="bar"><span style="width:${pct}%"></span></div></div>`;
 }
 
 function progressNumberBlock(label, value, target, unit) {
@@ -5736,72 +5804,30 @@ function cashFlowChart(months) {
     <div class="cashflow-legend"><span class="cashflow-legend-income">Income</span><span class="cashflow-legend-expense">Expenses</span></div>`;
 }
 
-// Two-column flow diagram: a single "Income" node on the left splitting
-// into one stacked node per segment on the right, connected by a curved
-// filled ribbon per segment (a cubic bezier between the left bar's
-// proportional vertical slice and the right node - not a stroked line).
-// Height scales with segment count (unlike netWorthTrendSvg's fixed-height
-// line chart, a fixed height here would cram or waste space depending on
-// how many categories exist). Uses explicit width/height attributes (not
-// just viewBox) so height:auto in CSS scales it uniformly with no text
-// distortion - unlike the line chart, this one draws real <text> labels
-// inside the SVG, which preserveAspectRatio="none" would stretch.
-//
-// Right-side node heights are floored at minNodeHeight rather than pure
-// value-proportional: a household with several tiny categories (a few
-// percent of income each) would otherwise get near-zero-height nodes whose
-// labels all land at nearly the same y and overlap illegibly. Segments at
-// or above the floor keep their exact proportional height/order; only the
-// small ones get boosted, and the total SVG height grows to fit - the left
-// "Income" bar stays purely proportional throughout since it carries no
-// per-segment label, only the shared ribbon attachment points.
-function cashFlowSankeySvg(segments, totalIncome) {
-  const width = 560;
-  const padding = 20;
-  const rowHeight = 34;
-  const gap = 6;
-  const minNodeHeight = 20;
-  const baselineHeight = segments.length * rowHeight;
-  const nodeHeights = segments.map((segment) => {
-    const share = totalIncome > 0 ? segment.value / totalIncome : 0;
-    return Math.max(minNodeHeight, share * baselineHeight);
-  });
-  const totalGapHeight = Math.max(0, segments.length - 1) * gap;
-  const rightUsableHeight = nodeHeights.reduce((sum, nodeHeight) => sum + nodeHeight, 0);
-  const availableHeight = rightUsableHeight;
-  const height = segments.length ? padding * 2 + availableHeight + totalGapHeight : padding * 2 + rowHeight;
-  const leftX = padding;
-  const nodeWidth = 14;
-  const rightX = width - padding - 170;
-  let leftCursor = padding;
-  let rightCursor = padding;
-  const ribbons = segments.map((segment, index) => {
-    const share = totalIncome > 0 ? segment.value / totalIncome : 0;
-    const y0L = leftCursor;
-    const y1L = leftCursor + share * availableHeight;
-    const y0R = rightCursor;
-    const y1R = rightCursor + nodeHeights[index];
-    leftCursor = y1L;
-    rightCursor = y1R + gap;
-    return { segment, y0L, y1L, y0R, y1R };
-  });
-  const midX = (leftX + nodeWidth + rightX) / 2;
+// Single stacked bar (each category as a proportional-width segment) + a
+// wrapped legend below - replaces the earlier two-column Sankey ribbon
+// diagram with a simpler read: hover any segment for its exact amount,
+// click one with real transactions behind it to drill down (same
+// data-sankey-lines click handler the Sankey version used, reused as-is).
+// Colors come from the caller's chosen Reports color theme, cycling
+// through its 5-color palette by index - not each category's own stored
+// .color, so switching Reports themes never touches Budget's colors.
+function cashFlowBreakdownBar(segments, totalIncome) {
   return `
-    <svg viewBox="0 0 ${width} ${height}" width="${width}" height="${height}" class="cashflow-sankey-svg" role="img" aria-label="Cash flow breakdown">
-      <rect x="${leftX}" y="${padding}" width="${nodeWidth}" height="${availableHeight.toFixed(1)}" class="cashflow-sankey-node cashflow-sankey-node-income"></rect>
-      <text x="${leftX}" y="${padding - 6}" class="cashflow-sankey-label cashflow-sankey-label-income">Income</text>
-      ${ribbons.map(({ segment, y0L, y1L, y0R, y1R }) => {
+    <div class="cashflow-breakdown-bar">
+      ${segments.map((segment) => {
+        const pct = totalIncome > 0 ? (segment.value / totalIncome) * 100 : 0;
         const key = segment.lineIds.length ? segment.lineIds.join(",") : "";
-        const clickable = key ? ` data-sankey-lines="${escapeHtml(key)}"` : "";
-        return `<path d="M${(leftX + nodeWidth).toFixed(1)},${y0L.toFixed(1)} C${midX.toFixed(1)},${y0L.toFixed(1)} ${midX.toFixed(1)},${y0R.toFixed(1)} ${rightX.toFixed(1)},${y0R.toFixed(1)} L${rightX.toFixed(1)},${y1R.toFixed(1)} C${midX.toFixed(1)},${y1R.toFixed(1)} ${midX.toFixed(1)},${y1L.toFixed(1)} ${(leftX + nodeWidth).toFixed(1)},${y1L.toFixed(1)} Z" class="cashflow-sankey-ribbon ${key ? "cashflow-sankey-clickable" : ""}" style="fill:${segment.color}"${clickable}></path>`;
+        const clickable = key ? ` data-sankey-lines="${escapeHtml(key)}" tabindex="0" role="button" aria-label="${escapeHtml(segment.label)} transactions"` : "";
+        return `<div class="cashflow-breakdown-segment${key ? " cashflow-breakdown-clickable" : ""}" style="width:${pct.toFixed(2)}%; background:${segment.color}" title="${escapeHtml(segment.label)}: ${money.format(segment.value)}"${clickable}></div>`;
       }).join("")}
-      ${ribbons.map(({ segment, y0R, y1R }) => {
-        const key = segment.lineIds.length ? segment.lineIds.join(",") : "";
-        const clickable = key ? ` data-sankey-lines="${escapeHtml(key)}"` : "";
-        const clickableClass = key ? "cashflow-sankey-clickable" : "";
-        return `<rect x="${rightX}" y="${y0R.toFixed(1)}" width="${nodeWidth}" height="${Math.max(0, y1R - y0R).toFixed(1)}" class="cashflow-sankey-node ${clickableClass}" style="fill:${segment.color}"${clickable}></rect><text x="${rightX + nodeWidth + 8}" y="${((y0R + y1R) / 2 + 4).toFixed(1)}" class="cashflow-sankey-label ${clickableClass}"${clickable}>${escapeHtml(segment.label)} · ${money.format(segment.value)} (${totalIncome > 0 ? Math.round((segment.value / totalIncome) * 100) : 0}%)</text>`;
+    </div>
+    <div class="cashflow-breakdown-legend">
+      ${segments.map((segment) => {
+        const pct = totalIncome > 0 ? Math.round((segment.value / totalIncome) * 100) : 0;
+        return `<span class="cashflow-breakdown-legend-item"><i style="background:${segment.color}"></i>${escapeHtml(segment.label)} <b>${money.format(segment.value)}</b> <small class="muted">${pct}%</small></span>`;
       }).join("")}
-    </svg>`;
+    </div>`;
 }
 
 // ---- Export-only chart renderers ----
@@ -7589,12 +7615,39 @@ function bindViewEvents() {
     });
   });
 
-  $("#reportsScopeType")?.addEventListener("change", (event) => {
-    const type = event.currentTarget.value;
-    if (type === "month") reportsScope = { type: "month", month: state.budget.month };
-    else if (type === "range") reportsScope = { type: "range", start: `${state.budget.month}-01`, end: monthEndDateKey(state.budget.month) };
-    else reportsScope = { type: "year", year: state.budget.month.slice(0, 4) };
-    render();
+  document.querySelectorAll("[data-reports-scope-type]").forEach((button) => {
+    button.addEventListener("click", () => {
+      const type = button.dataset.reportsScopeType;
+      if (type === "month") reportsScope = { type: "month", month: state.budget.month };
+      else if (type === "range") reportsScope = { type: "range", start: `${state.budget.month}-01`, end: monthEndDateKey(state.budget.month) };
+      else reportsScope = { type: "year", year: state.budget.month.slice(0, 4) };
+      render();
+    });
+  });
+  document.querySelectorAll("[data-reports-density]").forEach((button) => {
+    button.addEventListener("click", () => {
+      reportsDensity = button.dataset.reportsDensity;
+      render();
+    });
+  });
+  document.querySelectorAll("[data-reports-theme]").forEach((button) => {
+    button.addEventListener("click", () => {
+      reportsColorTheme = button.dataset.reportsTheme;
+      render();
+    });
+  });
+  document.querySelectorAll("[data-reports-category-style]").forEach((button) => {
+    button.addEventListener("click", () => {
+      reportsCategoryStyle = button.dataset.reportsCategoryStyle;
+      render();
+    });
+  });
+  document.querySelectorAll("[data-toggle-category-ring]").forEach((button) => {
+    button.addEventListener("click", () => {
+      const key = button.dataset.toggleCategoryRing;
+      reportsExpandedRingCategory = reportsExpandedRingCategory === key ? null : key;
+      render();
+    });
   });
   $("#reportsScopeMonth")?.addEventListener("change", (event) => {
     reportsScope = { type: "month", month: event.currentTarget.value || state.budget.month };
@@ -8336,6 +8389,19 @@ function bindViewEvents() {
   document.querySelectorAll("[data-delete-goal]").forEach((button) => {
     button.addEventListener("click", () => {
       state.goals.sinkingFunds.splice(Number(button.dataset.deleteGoal), 1);
+      autosaveState();
+      render();
+    });
+  });
+
+  document.querySelectorAll("[data-goal-contribution-add]").forEach((button) => {
+    button.addEventListener("click", () => {
+      const index = Number(button.dataset.goalContributionAdd);
+      const fund = state.goals.sinkingFunds[index];
+      const input = document.querySelector(`[data-goal-contribution-input="${index}"]`);
+      const amount = Number(input?.value || 0);
+      if (!fund || amount <= 0) return;
+      fund.saved = Math.max(0, Number(fund.saved || 0) + amount);
       autosaveState();
       render();
     });
@@ -9187,6 +9253,17 @@ function bindViewEvents() {
     render();
   });
 
+  document.querySelectorAll("[data-copy-invite-code]").forEach((button) => {
+    button.addEventListener("click", async () => {
+      try {
+        await navigator.clipboard.writeText(button.dataset.copyInviteCode);
+        showToast("Copied!", { type: "success" });
+      } catch {
+        showToast("Couldn't copy - select and copy the code manually.");
+      }
+    });
+  });
+
   $("#inviteMemberForm")?.addEventListener("submit", async (event) => {
     event.preventDefault();
     const form = event.currentTarget;
@@ -9589,7 +9666,7 @@ function bindViewEvents() {
     const formData = new FormData(event.currentTarget);
     const title = String(formData.get("title") || "").trim();
     if (!title) return;
-    state.decisions.push({
+    const newDecision = {
       id: uniqueId("decision"),
       title,
       notes: String(formData.get("notes") || "").trim(),
@@ -9599,7 +9676,9 @@ function bindViewEvents() {
       pros: [],
       cons: [],
       createdAt: new Date().toISOString()
-    });
+    };
+    state.decisions.push(newDecision);
+    expandedDecisionId = newDecision.id;
     event.currentTarget.reset();
     autosaveState();
     render();
@@ -9796,6 +9875,14 @@ function bindViewEvents() {
     button.addEventListener("click", () => {
       state.decisions = state.decisions.filter((item) => item.id !== button.dataset.deleteDecision);
       autosaveState();
+      render();
+    });
+  });
+
+  document.querySelectorAll("[data-toggle-decision]").forEach((button) => {
+    button.addEventListener("click", () => {
+      const id = button.dataset.toggleDecision;
+      expandedDecisionId = expandedDecisionId === id ? null : id;
       render();
     });
   });

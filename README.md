@@ -30,6 +30,15 @@ goes straight to sign-in as it always has. Treat `/welcome.html` as a page
 to review and iterate on before deciding whether to route the bare domain
 to it.
 
+Every "Sign in" / "Try the demo" call to action on the page opens an
+in-page modal (email/password, "Open household", "Try the demo instead",
+"Forgot password?") rather than linking straight to `/index.html`. The
+modal is a real sign-in, not a mock: it posts to the same
+`/api/auth/signin` and `/api/auth/demo` endpoints `index.html`'s own
+sign-in form uses, then redirects to `/index.html` once the session cookie
+is set. "Create your household" still links directly to `/index.html`'s
+signup form, since the modal only covers sign-in and the demo.
+
 ## Consumer Demo
 
 Select **Try demo** on the sign-in screen. Demo access does not expose reusable credentials and never receives application administrator access.

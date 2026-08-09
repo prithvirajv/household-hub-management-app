@@ -295,21 +295,28 @@ on *any* failed order match rather than only a missing order number — see
 first if refund auto-matching is ever reported as too loose (false
 positives) or still too narrow (real pairs still going unmatched).
 
-### 6.2 Cash-flow Sankey drill-down
+### 6.2 Cash-flow breakdown drill-down
 
 `sankeyFlowSegments(categories, totalIncome, totalExpenses)` turns the
 existing per-category report totals into `{label, value, color, lineIds}`
 segments (descending by value), plus a trailing synthetic "Savings" segment
-(`totalIncome - totalExpenses`) when positive. `cashFlowSankeySvg(...)`
-renders these as a two-column ribbon diagram by hand (no charting library —
-consistent with the rest of the app's SVG charts).
+(`totalIncome - totalExpenses`) when positive. The function name and its
+tests (`test/shared-logic.test.js`) predate the visual redesign and were
+kept as-is since the data-prep contract didn't change. `cashFlowBreakdownBar(...)`
+(app.js) renders these as a single stacked bar plus a wrapped legend below
+it — replacing an earlier two-column Sankey ribbon diagram — by hand (no
+charting library, consistent with the rest of the app's SVG/CSS charts).
+Segment colors come from the Reports page's chosen `colorTheme` (fresh /
+sunset / ocean — see `REPORTS_THEMES` in app.js), cycled by index at render
+time, not from each category's own stored `.color` — so switching the
+Reports color theme never touches Budget's category colors.
 
 Categories have **no stable `id`** in the data model (only their budget
 *lines* do, and category names aren't guaranteed unique) — so the
 click-to-drill-down key is each segment's own joined set of line ids
 (`lineIds.join(",")`), not a category id. `data-sankey-lines` is set on the
-ribbon path, node rect, and label text for the same segment so any part of
-it is clickable.
+bar segment for the same segment, kept as the attribute name for the
+click-handler wiring it reuses verbatim from the old Sankey version.
 
 ### 6.3 Transfer detection (`findTransferCandidate`)
 

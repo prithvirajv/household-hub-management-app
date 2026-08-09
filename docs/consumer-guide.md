@@ -228,7 +228,8 @@ more convenient.
 ## Decisions
 
 1. Select **Add decision** and type the question you're weighing (e.g.
-   "Should we move to a bigger apartment?").
+   "Should we move to a bigger apartment?"). It opens up automatically so
+   you can start adding notes, pros, and cons right away.
 2. Add notes for context, and attach any relevant files.
 3. List out Pros and Cons together as they come up.
 4. Once you've chosen, fill in what you decided and select **Mark
@@ -237,6 +238,9 @@ more convenient.
 **Get the most out of it**
 - Decisions are shared across all your households too, just like Documents
   — a running family log, not tied to one specific household.
+- Each card can be collapsed (▼) to a one-line summary once you're done
+  with it — decided cards keep showing their outcome even collapsed, so you
+  can scan past decisions at a glance.
 
 ## Shared Expenses
 
@@ -342,11 +346,17 @@ more convenient.
 1. Choose a scope — month, date range, or whole year — from the toolbar at
    the top.
 2. Review the cards: Budget vs Expense, Cash flow trend, Cash flow
-   breakdown (the Sankey chart), Category report (an icon and bar per
-   category, largest first), Category/Subcategory, and Tags.
-3. Select any Sankey segment, category, subcategory, or tag to drill down
-   into the exact transactions behind that number.
-4. Use the header's download control to export whatever you're currently
+   breakdown (a stacked bar with each category as a proportional segment,
+   plus a legend), Category report (bars or, if you switch the appearance
+   below, a grid of progress rings), Category/Subcategory, and Tags.
+3. Select any breakdown segment, category, subcategory, or tag to drill
+   down into the exact transactions behind that number.
+4. Use the appearance row above the cards to adjust how the page looks:
+   **Density** (comfortable/compact), **Color theme** (fresh/sunset/ocean —
+   changes the accent and every chart's palette together), and **Category
+   style** (bars/rings for the Category report card). These are just your
+   own display preferences — they don't change anyone else's view.
+5. Use the header's download control to export whatever you're currently
    viewing as a file.
 
 **Get the most out of it**
