@@ -3040,6 +3040,12 @@ async function runBulkDocumentUpload(fileEntries) {
     folderCache.set(`${folder.parentId || ""}::${folder.name}`, folder.id);
   });
   let failures = 0;
+  // Keyed by message so uploading a whole folder that hits the same failure
+  // repeatedly (e.g. several files of an unsupported type) surfaces one
+  // clear reason instead of a wall of duplicate toasts - or worse, none at
+  // all, since a bare "N of M failed" count gives no way to tell why without
+  // opening devtools.
+  const failureMessages = new Map();
   for (let index = 0; index < fileEntries.length; index += 1) {
     const { file, relativePath } = fileEntries[index];
     documentsUploadProgress = { done: index, total: fileEntries.length, currentName: file.name };
@@ -3060,13 +3066,18 @@ async function runBulkDocumentUpload(fileEntries) {
       await uploadDocumentFile(file, folderId);
     } catch (error) {
       failures += 1;
+      const message = error?.message || "Upload failed";
+      failureMessages.set(message, (failureMessages.get(message) || 0) + 1);
     }
   }
   documentsUploading = false;
   documentsUploadProgress = null;
   await loadDocumentsData(false);
   render();
-  if (failures) showToast(`${failures} of ${fileEntries.length} file${fileEntries.length === 1 ? "" : "s"} failed to upload.`);
+  if (failures) {
+    const reasons = [...failureMessages.entries()].map(([message, count]) => `${message}${count > 1 ? ` (${count})` : ""}`).join("; ");
+    showToast(`${failures} of ${fileEntries.length} file${fileEntries.length === 1 ? "" : "s"} failed to upload: ${reasons}`);
+  }
 }
 
 const DOCUMENT_TYPE_BADGES = {

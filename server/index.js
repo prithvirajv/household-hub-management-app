@@ -3020,9 +3020,16 @@ const ALLOWED_DOCUMENT_CONTENT_TYPES = new Set([
   "application/msword",
   "application/vnd.ms-excel",
   "text/plain",
+  "text/csv",
   "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
   "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-  "application/vnd.openxmlformats-officedocument.presentationml.presentation"
+  "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+  // The browser reports this whenever it can't sniff a real MIME type for a
+  // file - routine for a "+ Upload folder" pick (webkitdirectory), which
+  // hits far more unusual/unrecognized file extensions than a household
+  // deliberately hand-picking individual files one at a time. Without this,
+  // every such file was rejected outright with no way to override it.
+  "application/octet-stream"
 ]);
 const MAX_DOCUMENT_SIZE_BYTES = 500 * 1024 * 1024;
 
