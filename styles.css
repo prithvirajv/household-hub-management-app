@@ -48,6 +48,21 @@ button {
   font-weight: 800;
   cursor: pointer;
   min-height: 34px;
+  transition: transform 100ms ease, filter 100ms ease;
+}
+
+/* Every button gets the same press feedback (darken + slight shrink) so a
+   click always reads as registered, even before whatever it triggers
+   (a render, a network request) finishes. Uses filter/transform rather than
+   background-color so it layers on top of every button variant's own colors
+   (ghost, danger, pill, nav, icon, ...) without needing a per-variant rule. */
+button:hover:not(:disabled) {
+  filter: brightness(0.95);
+}
+
+button:active:not(:disabled) {
+  transform: scale(0.96);
+  filter: brightness(0.9);
 }
 
 button:disabled {
@@ -2420,16 +2435,48 @@ main {
   border-radius: 8px;
   background: #fbfdff;
   padding: 0.75rem;
+  position: relative;
 }
 
 .account-item.liability {
   background: var(--soft-blue);
 }
 
+.account-item.dragging {
+  opacity: 0.4;
+}
+
+/* Same thin-edge-highlight convention as the note checklist's drag-over
+   states, so a dropped account visibly lands above/below its neighbor
+   instead of just swapping backgrounds. */
+.account-item.account-item-drag-over-top::before,
+.account-item.account-item-drag-over-bottom::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  height: 2px;
+  background: var(--blue);
+  border-radius: 1px;
+}
+
+.account-item.account-item-drag-over-top::before {
+  top: -3px;
+}
+
+.account-item.account-item-drag-over-bottom::after {
+  bottom: -3px;
+}
+
 .account-balance-row {
   display: flex;
   align-items: center;
   gap: 0.6rem;
+}
+
+.account-drag-handle {
+  cursor: grab;
+  color: var(--muted);
 }
 
 .account-balance-row .split-stat {

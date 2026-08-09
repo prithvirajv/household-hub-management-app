@@ -4093,7 +4093,7 @@ function accountItemRow(account, index) {
   const balance = currentAccountBalance(account.id);
   const isLiability = account.type === "credit_card";
   const typeLabels = { checking: "Checking", savings: "Savings", cash: "Cash", credit_card: "Credit card", other: "Other" };
-  return `<article class="account-item ${isLiability ? "liability" : ""}">
+  return `<article class="account-item ${isLiability ? "liability" : ""}" draggable="true" data-drag-account="${account.id}">
     <div class="debt-edit-grid">
       <label class="debt-name-field">Account name<input data-account-name="${index}" value="${escapeHtml(account.name)}" aria-label="Account name"></label>
       <label>Type<select data-account-type="${index}" aria-label="Type for ${escapeHtml(account.name)}">${Object.entries(typeLabels).map(([value, label]) => `<option value="${value}" ${account.type === value ? "selected" : ""}>${label}</option>`).join("")}</select></label>
@@ -4101,6 +4101,7 @@ function accountItemRow(account, index) {
       <label>Close date<input type="date" data-account-close-date="${index}" value="${account.closedAt}" aria-label="Close date for ${escapeHtml(account.name)}"></label>
     </div>
     <div class="account-balance-row">
+      <span class="account-drag-handle" aria-hidden="true" title="Drag to reorder">⠿</span>
       <i class="account-type-dot" style="background:${accountTypeColors[account.type] || accountTypeColors.other}" title="${typeLabels[account.type] || account.type}"></i>
       <div class="split-stat"><span>${isLiability ? "Owed" : "Balance"}</span><b class="${isLiability && balance > 0 ? "danger" : ""}">${money.format(balance)}</b></div>
       ${account.closedAt ? `<span class="pill pill-warning" title="No new transactions can be added after ${formatShortDate(account.closedAt)}">Closed ${formatShortDate(account.closedAt)}</span>` : ""}
@@ -4600,6 +4601,7 @@ function renderHelp() {
       ],
       tips: [
         "Move an account-to-account payment (like paying a credit card from checking) to a Transfer instead of leaving it as a regular expense/income pair — the ⇄ icon on a matched transaction does this in one step.",
+        "Drag an account by its ⠿ handle to reorder the <strong>Accounts</strong> list - useful for putting the ones you check most often at the top.",
         "Under Net worth, each stock or mutual fund is its own holding - for a brokerage with several positions, use <strong>+ Add multiple</strong> instead of adding them one at a time: enter the account name once, add a row per symbol, and submit to create them all together, each named with that account as a prefix so they're easy to spot as belonging together in the list."
       ] },
     { icon: "♙", title: "Sharing", id: "sharing",
@@ -8726,6 +8728,51 @@ function bindViewEvents() {
           render();
         }
       });
+    });
+  });
+
+  // Drag-to-reorder accounts on the Wealth page, same pattern as the note
+  // checklist reorder above: draggedAccountId is local to this one
+  // bindViewEvents pass, only needs to survive one drag gesture.
+  let draggedAccountId = null;
+  const clearAccountDragOverClasses = () => {
+    document.querySelectorAll(".account-item-drag-over-top, .account-item-drag-over-bottom").forEach((row) => {
+      row.classList.remove("account-item-drag-over-top", "account-item-drag-over-bottom");
+    });
+  };
+  document.querySelectorAll("[data-drag-account]").forEach((row) => {
+    row.addEventListener("dragstart", (event) => {
+      draggedAccountId = row.dataset.dragAccount;
+      event.dataTransfer.effectAllowed = "move";
+      event.dataTransfer.setData("text/plain", draggedAccountId);
+      row.classList.add("dragging");
+    });
+    row.addEventListener("dragend", () => {
+      row.classList.remove("dragging");
+      clearAccountDragOverClasses();
+      draggedAccountId = null;
+    });
+    row.addEventListener("dragover", (event) => {
+      if (!draggedAccountId) return;
+      event.preventDefault();
+      event.dataTransfer.dropEffect = "move";
+      const isAfter = event.clientY - row.getBoundingClientRect().top > row.getBoundingClientRect().height / 2;
+      row.classList.toggle("account-item-drag-over-bottom", isAfter);
+      row.classList.toggle("account-item-drag-over-top", !isAfter);
+    });
+    row.addEventListener("dragleave", () => {
+      row.classList.remove("account-item-drag-over-top", "account-item-drag-over-bottom");
+    });
+    row.addEventListener("drop", (event) => {
+      event.preventDefault();
+      clearAccountDragOverClasses();
+      if (!draggedAccountId) return;
+      const targetAccountId = row.dataset.dragAccount;
+      if (targetAccountId === draggedAccountId) return;
+      const insertAfter = event.clientY - row.getBoundingClientRect().top > row.getBoundingClientRect().height / 2;
+      state.accounts = moveArrayItemById(state.accounts, draggedAccountId, targetAccountId, insertAfter);
+      autosaveState();
+      render();
     });
   });
 

@@ -1,7 +1,7 @@
 const assert = require("node:assert/strict");
 const test = require("node:test");
 const {
-  applyChecklistToggle, bucketChecklistItems, findChecklistDuplicate, moveChecklistItem, mealWeeksForMonth, groupPlanTasksByBucket, validateJournalPayload,
+  applyChecklistToggle, bucketChecklistItems, findChecklistDuplicate, moveChecklistItem, moveArrayItemById, mealWeeksForMonth, groupPlanTasksByBucket, validateJournalPayload,
   dailyTaskOccursOnDate, isDailyTaskDoneOnDate, toggleDailyTaskDoneOnDate,
   timeToMinutes, minutesToTime, snapMinutes, layoutTimelineBlocks, comparePlannedToActual,
   sanitizeFilename, buildDocumentObjectPath, wouldCreateFolderCycle, buildFolderTree,
@@ -233,6 +233,25 @@ test("moveChecklistItem is a no-op when dropped on itself, a missing id, or its 
   assert.equal(moveChecklistItem(checklist, "parent-1", "parent-1", false), checklist);
   assert.equal(moveChecklistItem(checklist, "missing", "parent-1", false), checklist);
   assert.equal(moveChecklistItem(checklist, "parent-1", "child-1", false), checklist, "dragging a parent onto its own child isn't a valid drop");
+});
+
+test("moveArrayItemById moves a dragged item before the target when dropped on its top half", () => {
+  const accounts = [{ id: "a" }, { id: "b" }, { id: "c" }];
+  const result = moveArrayItemById(accounts, "c", "a", false);
+  assert.deepEqual(result.map((item) => item.id), ["c", "a", "b"]);
+});
+
+test("moveArrayItemById moves a dragged item after the target when dropped on its bottom half", () => {
+  const accounts = [{ id: "a" }, { id: "b" }, { id: "c" }];
+  const result = moveArrayItemById(accounts, "a", "b", true);
+  assert.deepEqual(result.map((item) => item.id), ["b", "a", "c"]);
+});
+
+test("moveArrayItemById is a no-op when dropped on itself or a missing id", () => {
+  const accounts = [{ id: "a" }, { id: "b" }];
+  assert.equal(moveArrayItemById(accounts, "a", "a", false), accounts);
+  assert.equal(moveArrayItemById(accounts, "missing", "a", false), accounts);
+  assert.equal(moveArrayItemById(accounts, "a", "missing", false), accounts);
 });
 
 test("checking a child marks the parent done once every sibling is done", () => {
