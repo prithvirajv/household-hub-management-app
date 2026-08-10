@@ -299,7 +299,7 @@ nav {
   overflow: hidden;
   border: 1px solid rgba(255, 255, 255, 0.25);
   border-top: 4px solid var(--coral);
-  background: white;
+  background: var(--panel);
 }
 
 .nav-calendar-icon-day {
@@ -402,7 +402,7 @@ main {
   gap: 0.6rem;
   border: 1px solid var(--line);
   border-radius: 8px;
-  background: white;
+  background: var(--panel);
   padding: 0.35rem 0.6rem;
 }
 
@@ -633,7 +633,7 @@ main {
   grid-template-columns: repeat(3, minmax(0, 1fr));
   border: 1px solid var(--line);
   border-radius: 8px;
-  background: white;
+  background: var(--panel);
 }
 
 .help-journey article {
@@ -675,7 +675,7 @@ main {
   overflow: hidden;
   border: 1px solid var(--line);
   border-radius: 8px;
-  background: white;
+  background: var(--panel);
   box-shadow: var(--shadow);
 }
 
@@ -847,7 +847,7 @@ main {
   padding: 2rem;
   border: 1px solid var(--line);
   border-radius: 8px;
-  background: white;
+  background: var(--panel);
   text-align: center;
   box-shadow: var(--shadow);
 }
@@ -1334,7 +1334,7 @@ main {
 
 .income-recurrence-select:focus {
   border-color: var(--blue);
-  background: white;
+  background: var(--panel);
   outline: 0;
 }
 
@@ -1378,7 +1378,7 @@ main {
 .line-name-input:focus,
 .money-input:focus {
   border-color: var(--blue);
-  background: white;
+  background: var(--panel);
   outline: 0;
 }
 
@@ -1490,7 +1490,7 @@ main {
   min-width: 0;
   padding: 0.45rem 0.6rem;
   border-radius: 7px;
-  background: #fff;
+  background: var(--panel);
   border: 1px solid var(--line);
 }
 
@@ -1898,7 +1898,7 @@ main {
   padding: 0.55rem 0.75rem;
   border-radius: 6px;
   border: 1px solid var(--line);
-  background: white;
+  background: var(--panel);
   color: var(--text);
   font-weight: 800;
   font-size: 0.85rem;
@@ -1916,7 +1916,7 @@ main {
   padding: 12px;
   border-radius: 8px;
   border: 1px solid var(--line);
-  background: white;
+  background: var(--panel);
   box-shadow: 0 8px 24px rgba(0, 0, 0, 0.12);
 }
 
@@ -2338,7 +2338,7 @@ main {
   overflow: auto;
   border: 1px solid var(--line);
   border-radius: 8px;
-  background: white;
+  background: var(--panel);
   box-shadow: var(--shadow);
   padding: 0.25rem;
 }
@@ -2347,7 +2347,7 @@ main {
   width: 100%;
   min-height: 36px;
   justify-content: flex-start;
-  background: white;
+  background: var(--panel);
   color: var(--text);
   text-align: left;
   padding: 0.45rem 0.6rem;
@@ -2389,7 +2389,7 @@ main {
   min-height: 34px;
   border: 1px solid var(--line);
   border-radius: 6px;
-  background: white;
+  background: var(--panel);
   color: var(--text);
   font-weight: 800;
   text-align: left;
@@ -2454,7 +2454,7 @@ main {
   border: 1px solid var(--line);
   border-radius: 999px;
   padding: 0.3rem 0.65rem;
-  background: white;
+  background: var(--panel);
   color: var(--muted);
   font-size: 0.72rem;
   font-weight: 800;
@@ -2615,7 +2615,7 @@ main {
 
 .paycheck-name-input:focus {
   border-color: var(--green);
-  background: white;
+  background: var(--panel);
   outline: 0;
 }
 
@@ -2626,7 +2626,7 @@ main {
   border: 1px solid var(--line);
   border-radius: 6px;
   padding: 0.3rem 0.5rem;
-  background: white;
+  background: var(--panel);
   color: var(--text);
 }
 
@@ -2760,7 +2760,7 @@ main {
   padding: 0.45rem;
   border-right: 1px solid var(--line);
   border-bottom: 1px solid var(--line);
-  background: white;
+  background: var(--panel);
   cursor: pointer;
 }
 
@@ -2877,7 +2877,7 @@ main {
 
 .meal-slot {
   border-radius: 6px;
-  background: white;
+  background: var(--panel);
   border: 1px solid var(--line);
   padding: 0.45rem;
   min-width: 0;
@@ -3083,7 +3083,7 @@ main {
   align-items: center;
   gap: 0.45rem;
   border-radius: 999px;
-  background: white;
+  background: var(--panel);
   border: 1px solid var(--line);
   padding: 0.45rem 0.65rem;
   color: var(--text);
@@ -3108,7 +3108,7 @@ main {
   align-items: center;
   gap: 0.45rem;
   border-radius: 6px;
-  background: white;
+  background: var(--panel);
   border: 1px solid var(--line);
   padding: 0.45rem 0.55rem;
   color: var(--text);
@@ -3577,7 +3577,7 @@ main {
   min-height: 40px;
   margin-top: 0.2rem;
   border-color: var(--line);
-  background: white;
+  background: var(--panel);
   color: var(--text);
   font-size: 0.9rem;
   font-weight: 800;
@@ -3600,7 +3600,7 @@ main {
   display: grid;
   gap: 0.15rem;
   border-radius: 7px;
-  background: white;
+  background: var(--panel);
   padding: 0.65rem 0.75rem;
   color: var(--muted);
   font-size: 0.82rem;
@@ -3813,7 +3813,7 @@ main {
   font-size: 0.76rem;
   border: 1px solid var(--green);
   border-radius: 999px;
-  background: white;
+  background: var(--panel);
   color: var(--green);
   font-weight: 800;
 }
@@ -3874,7 +3874,7 @@ main {
   min-height: 36px;
   border: 1px solid var(--line);
   border-radius: 6px;
-  background: white;
+  background: var(--panel);
   padding: 0 0.6rem;
   font-size: 0.88rem;
   font-weight: 700;
@@ -3911,7 +3911,7 @@ main {
   min-height: 34px;
   border: 1px solid var(--line);
   border-radius: 6px;
-  background: white;
+  background: var(--panel);
   padding: 0 0.5rem;
   font-size: 0.82rem;
   color: var(--text);
@@ -4037,7 +4037,7 @@ main {
   width: 100%;
   min-height: 38px;
   margin-top: 0.2rem;
-  background: white;
+  background: var(--panel);
   color: var(--text);
   font-size: 0.84rem;
   font-weight: 800;
@@ -4062,7 +4062,7 @@ main {
   position: absolute;
   inset: 28%;
   border-radius: 50%;
-  background: white;
+  background: var(--panel);
 }
 
 .notes-layout {
@@ -4080,7 +4080,7 @@ main {
   padding: 0.5rem;
   border: 1px solid var(--line);
   border-radius: 8px;
-  background: white;
+  background: var(--panel);
 }
 
 .notes-filter-panel > button {
@@ -4362,7 +4362,7 @@ main {
   margin: 0;
   border: 1px solid var(--line);
   border-radius: 8px;
-  background: white;
+  background: var(--panel);
   box-shadow: var(--shadow);
 }
 
@@ -4372,7 +4372,7 @@ main {
   align-items: center;
   justify-content: space-between;
   padding: 0.7rem 1rem;
-  background: white;
+  background: var(--panel);
   color: var(--muted);
   font-size: 0.95rem;
   font-weight: 700;
@@ -4537,7 +4537,7 @@ main {
   padding: 0.45rem 0.65rem;
   border: 1px solid var(--line);
   border-radius: 7px;
-  background: white;
+  background: var(--panel);
   cursor: pointer;
   list-style: none;
 }
@@ -4567,8 +4567,8 @@ main {
   padding: 0.35rem;
   border: 1px solid var(--line);
   border-radius: 7px;
-  background: white;
-  box-shadow: 0 8px 20px rgba(25, 38, 61, 0.16);
+  background: var(--panel);
+  box-shadow: 0 8px 20px rgba(80, 60, 30, 0.16);
 }
 
 .note-label-picker-options label {
@@ -4625,9 +4625,9 @@ main {
   gap: 0.75rem;
   margin: 0;
   padding: 0.95rem 1rem;
-  border: 1px solid #d8dee9;
+  border: 1px solid var(--line);
   border-radius: 8px;
-  box-shadow: 0 2px 8px rgba(25, 38, 61, 0.06);
+  box-shadow: 0 2px 8px rgba(80, 60, 30, 0.06);
 }
 
 .note-card-toolbar {
@@ -4640,7 +4640,7 @@ main {
   gap: 0;
   margin-top: 0.15rem;
   padding-top: 0.45rem;
-  border-top: 1px solid rgba(107, 117, 134, 0.18);
+  border-top: 1px solid var(--line);
   opacity: 0.65;
   transition: opacity 120ms ease;
 }
@@ -4721,7 +4721,7 @@ main {
 .note-card-toolbar > button:hover,
 .note-card-toolbar summary:hover,
 .note-color-control:hover {
-  background: rgba(25, 38, 61, 0.08);
+  background: rgba(80, 60, 30, 0.08);
   color: var(--text);
 }
 
@@ -4754,8 +4754,8 @@ main {
   padding: 0.65rem;
   border: 1px solid var(--line);
   border-radius: 7px;
-  background: white;
-  box-shadow: 0 10px 28px rgba(25, 38, 61, 0.18);
+  background: var(--panel);
+  box-shadow: 0 10px 28px rgba(80, 60, 30, 0.18);
 }
 
 .note-toolbar-popover-panel label {
@@ -4786,7 +4786,7 @@ main {
   min-height: 38px;
   justify-content: flex-start;
   border: 0;
-  background: white;
+  background: var(--panel);
   color: var(--text);
   text-align: left;
 }
@@ -5050,8 +5050,8 @@ main {
   overflow: hidden;
   border: 1px solid var(--line);
   border-radius: 7px;
-  background: white;
-  box-shadow: 0 8px 20px rgba(25, 38, 61, 0.16);
+  background: var(--panel);
+  box-shadow: 0 8px 20px rgba(80, 60, 30, 0.16);
 }
 
 .note-item-suggestions[hidden] {
@@ -5068,7 +5068,7 @@ main {
   border: 0;
   border-bottom: 1px solid var(--line);
   border-radius: 0;
-  background: white;
+  background: var(--panel);
   color: var(--text);
   text-align: left;
 }
@@ -5091,7 +5091,7 @@ main {
 .note-completed {
   margin-top: 0.1rem;
   padding-top: 0.65rem;
-  border-top: 1px solid rgba(107, 117, 134, 0.25);
+  border-top: 1px solid var(--line);
 }
 
 .note-completed summary {
@@ -5135,7 +5135,7 @@ main {
   justify-content: flex-start;
   margin-top: 0.1rem;
   padding-top: 0.65rem;
-  border-top: 1px solid rgba(107, 117, 134, 0.18);
+  border-top: 1px solid var(--line);
 }
 
 .note-card-actions button {
@@ -5745,7 +5745,7 @@ main {
   padding: 0.4rem 0.5rem;
   border: 1px solid var(--line);
   border-radius: 10px;
-  background: white;
+  background: var(--panel);
   color: var(--muted);
   font-size: 0.68rem;
   font-weight: 800;
@@ -5949,7 +5949,7 @@ main {
   padding: 0.4rem 0.85rem;
   border: 1px solid var(--line);
   border-radius: 999px;
-  background: white;
+  background: var(--panel);
   color: var(--muted);
   font-weight: 800;
   font-size: 0.8rem;
@@ -5975,7 +5975,7 @@ main {
   padding: 0.6rem 0.75rem;
   border: 1px solid var(--line);
   border-radius: 8px;
-  background: white;
+  background: var(--panel);
 }
 
 .plan-task-row-daily {
@@ -6014,7 +6014,7 @@ main {
   padding: 0.3rem 0.7rem;
   border: 1px solid var(--line);
   border-radius: 999px;
-  background: white;
+  background: var(--panel);
   font-weight: 700;
   font-size: 0.78rem;
   cursor: pointer;
@@ -6129,7 +6129,7 @@ main {
   grid-template-rows: auto 1fr;
   border: 1px solid var(--line);
   border-radius: 8px;
-  background: white;
+  background: var(--panel);
   overflow: hidden;
 }
 
@@ -6362,7 +6362,7 @@ main {
   padding: 0.6rem 0.75rem;
   border: 1px solid var(--line);
   border-radius: 8px;
-  background: white;
+  background: var(--panel);
 }
 
 .plan-timeline-detail h4 {
@@ -6483,7 +6483,7 @@ main {
   padding: 0.6rem 0.75rem;
   border: 1px solid var(--line);
   border-radius: 8px;
-  background: white;
+  background: var(--panel);
 }
 
 /* Name and action icons stack as two rows rather than sharing one - three
@@ -6523,7 +6523,7 @@ main {
   justify-content: center;
   border: 1px solid var(--line);
   border-radius: 8px;
-  background: white;
+  background: var(--panel);
   color: var(--text);
   flex-shrink: 0;
 }
@@ -6560,7 +6560,7 @@ main {
   padding: 0.6rem;
   border: 1px solid var(--line);
   border-radius: 10px;
-  background: white;
+  background: var(--panel);
   min-width: 0;
 }
 
@@ -6696,7 +6696,7 @@ main {
   padding: 0.4rem;
   border: 1px solid var(--line);
   border-radius: 8px;
-  background: white;
+  background: var(--panel);
   box-shadow: 0 8px 24px rgba(15, 23, 42, 0.12);
 }
 
@@ -6781,7 +6781,7 @@ main {
   padding: 0.25rem 0.55rem;
   border: 1px solid var(--line);
   border-radius: 999px;
-  background: white;
+  background: var(--panel);
   font-size: 0.75rem;
   font-weight: 700;
   color: var(--text);
@@ -6794,7 +6794,7 @@ main {
   padding: 0.55rem;
   border: 1px solid var(--line);
   border-radius: 7px;
-  background: white;
+  background: var(--panel);
 }
 
 .wealth-doc-list-row {
@@ -6996,7 +6996,7 @@ main {
 
 .decision-item-input:focus {
   border-color: var(--line);
-  background: white;
+  background: var(--panel);
   outline: 0;
 }
 
