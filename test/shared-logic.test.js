@@ -9,7 +9,7 @@ const {
   monthEndDateKey, assetValue, computeTrailingMonthKeys, computeReportCategoriesForScope, computeNetWorthAtDate, computeNetWorthTrend, computeCashFlowByMonth, sankeyFlowSegments,
   splitAmountEvenly, splitBillByPercentages, splitBillByShares, netBalancesByPerson, computeBillSplitAmounts, settleUpPersonIous, isValidEmail,
   parseDelimitedText, parseBankCsvTransactions, normalizeForAccountMatch, matchAccountByFilename, matchAccountByHints, extractAccountActivityLabel, isDuplicateTransaction, findTransferCandidate,
-  orderRefundMatch, normalizeForPayeeMatch, payeesFuzzyMatch, refundFuzzyMatch, refundMatch, suggestSubcategoryFromHistory, suggestAccountFromHistory,
+  orderRefundMatch, normalizeForPayeeMatch, payeesFuzzyMatch, refundFuzzyMatch, refundMatch, suggestSubcategoryFromHistory, suggestAccountFromHistory, payeeCategorizationConfidence,
   parseCreditCardStatementText, parseCheckingAccountActivityText, parseBankStatementPdfText, normalizeTag, groupTransactionsByTag, monthKeysInRange, spentByLineInMonth,
   recurringBudgetSetAside, nextRecurringBudgetDueDate, monthsUntilDueInclusive,
   annualEventDate, nextAnnualEventDate, annualEventNotifyAt, rollAnnualNotifyAtForward,
@@ -1343,6 +1343,23 @@ test("suggestSubcategoryFromHistory: the single most recently categorized transa
     { payee: "Some Other Payee", amount: 20, date: "2026-01-01", lineId: "misc" }
   ];
   assert.equal(suggestSubcategoryFromHistory("SAWNEE EMC Bill Payment", transactions), "home-services", "3 historical uses of 'utilities' still lose to a single more-recent use of 'home-services'");
+});
+
+test("payeeCategorizationConfidence: reads 100% when every past use of a payee agrees with the suggested line, lower when they don't", () => {
+  const consistent = [
+    { payee: "SAWNEE EMC Bill Payment", amount: 140, date: "2026-01-02", lineId: "utilities" },
+    { payee: "SAWNEE EMC Bill Payment", amount: 138, date: "2026-02-02", lineId: "utilities" }
+  ];
+  assert.deepEqual(payeeCategorizationConfidence("SAWNEE EMC Bill Payment", consistent), { lineId: "utilities", confidence: 100, sampleSize: 2 });
+
+  const split = [
+    { payee: "SAWNEE EMC Bill Payment", amount: 140, date: "2026-01-02", lineId: "utilities" },
+    { payee: "SAWNEE EMC Bill Payment", amount: 138, date: "2026-02-02", lineId: "utilities" },
+    { payee: "SAWNEE EMC Bill Payment", amount: 150, date: "2026-04-02", lineId: "home-services" }
+  ];
+  assert.deepEqual(payeeCategorizationConfidence("SAWNEE EMC Bill Payment", split), { lineId: "home-services", confidence: 33, sampleSize: 3 }, "most-recent line (home-services) wins as the suggestion, but only 1 of 3 past uses agree with it");
+
+  assert.equal(payeeCategorizationConfidence("Nobody Has Ever Seen This Payee", split), null);
 });
 
 test("suggestSubcategoryFromHistory: is exact-match only, deliberately never fuzzy - a near-miss spelling variant and a merely-similar-looking payee both return null rather than guessing", () => {

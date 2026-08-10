@@ -7,7 +7,7 @@
     <title>FamilyLoop</title>
     <link rel="icon" type="image/svg+xml" href="/assets/favicon.svg">
     <link rel="apple-touch-icon" href="/assets/apple-touch-icon.png">
-    <link rel="stylesheet" href="/styles.css?v=20260810-3">
+    <link rel="stylesheet" href="/styles.css?v=20260810-4">
     <script src="https://accounts.google.com/gsi/client" async defer></script>
   </head>
   <body>
@@ -44,6 +44,10 @@
             <label class="month-control">Month<input id="monthPicker" type="month" value="2026-05"></label>
             <label id="mealWeekHeaderControl" class="week-control" hidden>Week<select id="mealWeekHeaderSelect"></select></label>
             <button id="syncButton" class="icon-button ghost" type="button" aria-label="Refresh household data" title="Refresh household data">↻</button>
+            <div class="notification-bell-wrap">
+              <button id="notificationBellButton" class="icon-button ghost" type="button" aria-label="Notifications" title="Notifications">🔔<span id="notificationBellDot" class="notification-bell-dot" hidden></span></button>
+              <div id="notificationBellDropdown" class="notification-bell-dropdown" hidden></div>
+            </div>
             <button id="downloadCsvButton" class="icon-button ghost" type="button" aria-label="Export report">⇩</button>
             <div class="user-chip">
               <span id="userInitials">DU</span>
@@ -349,7 +353,7 @@
 
     <script src="https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/build/pdf.min.js"></script>
     <script>if (window.pdfjsLib) pdfjsLib.GlobalWorkerOptions.workerSrc = "https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/build/pdf.worker.min.js";</script>
-    <script src="/lib/shared-logic.js?v=20260810-1"></script>
-    <script src="/app.js?v=20260810-3"></script>
+    <script src="/lib/shared-logic.js?v=20260810-2"></script>
+    <script src="/app.js?v=20260810-4"></script>
   </body>
 </html>

@@ -289,6 +289,21 @@ nav {
   border-color: rgba(255, 255, 255, 0.08);
 }
 
+.nav-badge {
+  margin-left: auto;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 5px;
+  border-radius: 999px;
+  background: var(--coral);
+  color: white;
+  font-size: 0.68rem;
+  font-weight: 800;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
 .nav-calendar-icon {
   display: inline-flex;
   align-items: center;
@@ -387,6 +402,71 @@ main {
 
 .iou-receipt-upload {
   cursor: pointer;
+}
+
+.notification-bell-wrap {
+  position: relative;
+}
+
+.notification-bell-dot {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: var(--coral);
+  border: 2px solid var(--panel);
+}
+
+.notification-bell-dropdown {
+  position: absolute;
+  top: calc(100% + 8px);
+  right: 0;
+  width: 300px;
+  max-height: 360px;
+  overflow-y: auto;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  box-shadow: var(--shadow);
+  z-index: 40;
+  padding: 0.4rem;
+}
+
+.notification-bell-header {
+  font-size: 0.7rem;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--muted);
+  padding: 0.4rem 0.5rem;
+}
+
+.notification-bell-item {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 0.1rem;
+  text-align: left;
+  background: transparent;
+  border: none;
+  border-radius: 8px;
+  padding: 0.5rem;
+}
+
+.notification-bell-item:hover {
+  background: var(--soft);
+}
+
+.notification-bell-item small {
+  color: var(--muted);
+}
+
+.notification-bell-empty {
+  padding: 0.75rem 0.5rem;
+  color: var(--muted);
+  font-size: 0.85rem;
 }
 
 .icon-button.is-loading {
@@ -963,6 +1043,57 @@ main {
   min-width: 0;
 }
 
+.wealth-allocation-row {
+  display: flex;
+  align-items: center;
+  gap: 1.25rem;
+}
+
+.wealth-allocation-ring {
+  width: 96px;
+  height: 96px;
+  min-width: 96px;
+  border-radius: 50%;
+  transition: background 0.7s ease;
+  position: relative;
+}
+
+.wealth-allocation-ring::after {
+  content: "";
+  position: absolute;
+  inset: 26%;
+  border-radius: 50%;
+  background: var(--panel);
+}
+
+.wealth-allocation-legend {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
+}
+
+.wealth-allocation-legend-row {
+  display: grid;
+  grid-template-columns: 10px 1fr auto auto;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.84rem;
+}
+
+.wealth-allocation-legend-row i {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+}
+
+.wealth-allocation-legend-row small {
+  color: var(--muted);
+  min-width: 32px;
+  text-align: right;
+}
+
 .goal-contribution-row {
   display: flex;
   gap: 0.5rem;
@@ -1488,6 +1619,11 @@ main {
   color: var(--green);
 }
 
+.icon-button.active {
+  background: var(--green-soft);
+  color: var(--green);
+}
+
 .budget-rollover-badge {
   display: block;
   color: var(--green);
@@ -1805,6 +1941,21 @@ main {
 .pill-info {
   background: rgba(53, 105, 212, 0.14);
   color: var(--blue);
+}
+
+.bank-stream-confidence-good {
+  background: var(--green-soft);
+  color: var(--green);
+}
+
+.bank-stream-confidence-warning {
+  background: rgba(217, 154, 36, 0.14);
+  color: var(--gold);
+}
+
+.bank-stream-confidence-danger {
+  background: rgba(224, 82, 82, 0.14);
+  color: var(--coral);
 }
 
 .pill-button {
@@ -3565,6 +3716,38 @@ main {
 .reports-theme-swatches {
   display: flex;
   gap: 0.4rem;
+}
+
+.reports-yoy-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.2rem;
+  border-radius: 999px;
+  padding: 0.2rem 0.5rem;
+  font-size: 0.72rem;
+  font-weight: 800;
+}
+
+.reports-yoy-badge.good {
+  background: var(--green-soft);
+  color: var(--green);
+}
+
+.reports-yoy-badge.danger {
+  background: rgba(224, 82, 82, 0.14);
+  color: var(--coral);
+}
+
+.reports-yoy-row {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  margin: -0.3rem 0 0.5rem;
+}
+
+.reports-yoy-row small {
+  color: var(--muted);
+  margin-right: 0.4rem;
 }
 
 .reports-theme-swatch {

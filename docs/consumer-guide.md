@@ -138,6 +138,12 @@ more convenient.
   **Account from history** pill for the account) and the manual Add
   transaction form — always worth a glance before accepting, since it's a
   suggestion, not a guarantee.
+- A **From history**-suggested row also shows a match % (e.g. "80% match")
+  — a real number computed from how consistently you've categorized that
+  exact payee before, not a guess. Select the 🔒 icon next to a row's
+  Subcategory to always categorize that payee this way going forward; it
+  overrides the plain history guess (but never a literal refund match) on
+  every future import. Select it again to remove the rule.
 - No history for a payee yet? Select **✨ Suggest with AI** for Subcategory,
   or **✨ Suggest account with AI** for the account (both on the Add
   transaction form, or their matching ✨ buttons next to an unlinked Bank
@@ -363,6 +369,9 @@ more convenient.
    and suggested payment from the balance, rate, and term you enter, and
    shows a progress bar of the real percent paid off so far, computed from
    your logged payment history.
+5. The **Asset allocation** card breaks your net worth down into Cash,
+   Stocks & funds, Property, and Other, with a ring chart and a dollar/percent
+   legend — computed automatically from every asset's class, no setup needed.
 
 **Get the most out of it**
 - Move an account-to-account payment (like paying a credit card from
@@ -429,6 +438,8 @@ more convenient.
    changes the accent and every chart's palette together), and **Category
    style** (bars/rings for the Category report card). These are just your
    own display preferences — they don't change anyone else's view.
+5. Toggle **Compare to last year** to add a ▲/▼ badge to Net worth and Cash
+   flow showing the percent change against the same scope one year earlier.
 5. Use the header's download control to export whatever you're currently
    viewing as a file.
 

@@ -18,7 +18,7 @@ const views = [
   ["sharing", "Sharing", "🤝"],
   ["reports", "Reports", "📈"],
   ["profile", "Profile", "👤"],
-  ["help", "Help", "❓"],
+  ["help", "Help", "💬"],
   ["admin", "Admin", "🛠️"]
 ];
 
@@ -62,6 +62,7 @@ let reportsDensity = "comfortable";
 let reportsColorTheme = "fresh";
 let reportsCategoryStyle = "bars";
 let reportsExpandedRingCategory = null;
+let reportsCompareLastYear = false;
 // Three full curated palettes (accent + negative color + a 5-color chart
 // palette) a viewer can swap between on the Reports page - independent of
 // each category's own stored .color (that's the app-wide Budget-page
@@ -1402,12 +1403,58 @@ function calendarNavIconHtml() {
   return `<span class="nav-calendar-icon" aria-hidden="true" title="${fullLabel}"><span class="nav-calendar-icon-day">${now.getDate()}</span></span>`;
 }
 
+// Mocked-up counts kept intentionally small in scope: unpaid-and-due-soon
+// bills, and Bank Stream rows still waiting for review. Both are cheap to
+// derive from data already loaded for other views, so no new state needed.
+function navBadgeCounts() {
+  if (!state) return {};
+  const bills = billsRows().filter((bill) => !bill.paid).length;
+  const transactions = transactionInboxItems().filter((transaction) => !(state.transactionInboxDone || []).includes(transaction.id)).length;
+  return { bills, transactions };
+}
+
+// Same overdue-items + open-bills data Home's own status line already
+// summarizes (see renderShell's homeStatusLine block) - the bell just makes
+// it reachable from every view instead of only from Home.
+function notificationBellItems() {
+  if (!state) return [];
+  const overdueItems = homeActionItems().filter((item) => item.overdue).map((item) => ({
+    title: item.title,
+    detail: `${item.kind} · Past due`,
+    view: "home"
+  }));
+  const openBills = billsRows().filter((bill) => !bill.paid).map((bill) => ({
+    title: bill.name,
+    detail: `Bill · Due day ${bill.dueDay}`,
+    view: "bills"
+  }));
+  return [...overdueItems, ...openBills];
+}
+
+function renderNotificationBell() {
+  const items = notificationBellItems();
+  $("#notificationBellDot").hidden = items.length === 0;
+  $("#notificationBellDropdown").innerHTML = `
+    <div class="notification-bell-header">Notifications</div>
+    ${items.length ? items.map((item) => `
+      <button type="button" class="notification-bell-item" data-notification-bell-goto="${item.view}">
+        <strong>${escapeHtml(item.title)}</strong>
+        <small>${escapeHtml(item.detail)}</small>
+      </button>
+    `).join("") : `<div class="notification-bell-empty">Nothing needs attention.</div>`}
+  `;
+}
+
 function renderNav() {
-  nav.innerHTML = views.filter(([key]) => key !== "admin" || sessionUser?.isAdmin).map(([key, label, icon]) => `
+  const badgeCounts = navBadgeCounts();
+  nav.innerHTML = views.filter(([key]) => key !== "admin" || sessionUser?.isAdmin).map(([key, label, icon]) => {
+    const badge = badgeCounts[key] ? `<span class="nav-badge">${badgeCounts[key] > 99 ? "99+" : badgeCounts[key]}</span>` : "";
+    return `
     <button class="nav-button ${key === currentView ? "active" : ""}" data-view="${key}" type="button">
-      <span>${key === "calendar" ? calendarNavIconHtml() : icon}</span>${label}
+      <span>${key === "calendar" ? calendarNavIconHtml() : icon}</span>${label}${badge}
     </button>
-  `).join("");
+  `;
+  }).join("");
 }
 
 function renderShell() {
@@ -1491,6 +1538,7 @@ function renderShell() {
   $("#syncButton").hidden = isAdminView || isHelpView;
   $("#downloadCsvButton").hidden = isAdminView || isNotesView || isHelpView || isJournalView || isPlanView || isDocumentsView || isDecisionsView || isIousView || isProfileView || isHomeView;
   renderNav();
+  renderNotificationBell();
   const metrics = metricsForView();
   $("#metrics").hidden = metrics.length === 0;
   $("#metrics").innerHTML = metrics.map(([label, value, note, state]) => `
@@ -2004,6 +2052,24 @@ function recurringExpenseRow(recurring, index) {
     </div>`;
 }
 
+// A household-set override that always wins over the plain "most recent
+// use" history guess (suggestSubcategoryFromHistory) for one exact payee -
+// same normalization rule as history matching itself, so it can't cross-
+// contaminate a different payee that merely shares a generic prefix.
+function categorizationRuleForPayee(payee) {
+  const key = normalizeForPayeeMatch(payee);
+  if (!key) return "";
+  return state.transactionCategorizationRules?.[key] || "";
+}
+
+function setCategorizationRuleForPayee(payee, lineId) {
+  const key = normalizeForPayeeMatch(payee);
+  if (!key) return;
+  state.transactionCategorizationRules ||= {};
+  if (lineId) state.transactionCategorizationRules[key] = lineId;
+  else delete state.transactionCategorizationRules[key];
+}
+
 function renderTransactions() {
   ensureAccountsData();
   ensureRecurringExpensesPosted();
@@ -2026,7 +2092,9 @@ function renderTransactions() {
       transferMatch: findTransferCandidate(transaction, [
         ...state.transactions,
         ...(state.transactionInboxDrafts || []).filter((other) => other.id !== transaction.id)
-      ])
+      ]),
+      categorizationConfidence: transaction.lineId ? payeeCategorizationConfidence(transaction.payee, state.transactions) : null,
+      categorizationRuleLineId: categorizationRuleForPayee(transaction.payee)
     }));
   // Recent transactions is already filtered to the viewed month, so filter
   // Bank stream to match — otherwise a pending item from a different month
@@ -2218,6 +2286,8 @@ function renderTransactions() {
               ${transaction.isPayment ? `<span class="pill pill-info" title="Looks like a card payoff/autopay - probably belongs in Move to Transfers, not as a regular expense">Card payment</span>` : ""}
               ${transaction.isPending ? `<span class="pill pill-warning" title="Hadn't posted yet in the statement - dated today by default, correct it once your bank assigns a real posting date">Pending</span>` : ""}
               ${transaction.historyMatch ? `<span class="pill pill-info" title="Subcategory pre-filled from how you've categorized this payee (or a similar one) most recently - double-check before accepting">From history</span>` : ""}
+              ${transaction.categorizationRuleLineId ? `<span class="pill pill-info" title="Subcategory pre-filled from your 'always categorize this way' rule for this payee">🔒 Rule</span>` : ""}
+              ${transaction.categorizationConfidence ? `<span class="pill bank-stream-confidence-${transaction.categorizationConfidence.confidence >= 80 ? "good" : transaction.categorizationConfidence.confidence >= 50 ? "warning" : "danger"}" title="${transaction.categorizationConfidence.sampleSize} past transaction${transaction.categorizationConfidence.sampleSize === 1 ? "" : "s"} from this payee - ${transaction.categorizationConfidence.confidence}% used this same subcategory">${transaction.categorizationConfidence.confidence}% match</span>` : ""}
               ${transaction.accountHistoryMatch ? `<span class="pill pill-info" title="Account pre-filled from which account this payee's transactions have been linked to most recently - double-check before accepting">Account from history</span>` : ""}
               ${transaction.possibleDuplicate ? `<span class="pill pill-warning" title="Matches an existing transaction with the same amount within 2 days">Possible duplicate</span>` : ""}
               ${transaction.refundMatch ? `<span class="pill pill-info" title="Refund for the ${money.format(transaction.refundMatch.amount)} purchase on ${formatShortDate(transaction.refundMatch.date)}${transaction.orderNumber ? ` (order ${escapeHtml(transaction.orderNumber)})` : ""}">Refund match</span>` : ""}
@@ -2227,6 +2297,7 @@ function renderTransactions() {
               <label class="row-field row-amount"><small>Amount</small><input class="money-input" type="number" step="0.01" data-bank-stream-amount="${transaction.id}" value="${transaction.amount}"></label>
               <label class="row-field row-select"><small>Subcategory</small><select data-bank-stream-line="${transaction.id}">${lineOptions(transaction.lineId)}</select></label>
               ${!transaction.lineId ? `<button class="icon-button" data-ai-suggest-line="${transaction.id}" type="button" aria-label="Suggest a subcategory with AI for ${escapeHtml(transaction.payee)}" title="No history match for this payee - ask AI to suggest a subcategory">✨</button>` : ""}
+              ${transaction.lineId ? `<button class="icon-button ${transaction.categorizationRuleLineId === transaction.lineId ? "active" : ""}" data-toggle-categorization-rule="${transaction.id}" type="button" aria-label="${transaction.categorizationRuleLineId === transaction.lineId ? "Remove" : "Set"} always-categorize rule for ${escapeHtml(transaction.payee)}" title="${transaction.categorizationRuleLineId === transaction.lineId ? "Always categorizing this payee this way - click to remove the rule" : "Always categorize this payee this way"}">🔒</button>` : ""}
               <div class="row-account-actions">
                 ${state.accounts.length ? `<label class="row-field row-select"><small>Account</small><select data-bank-stream-account="${transaction.id}"><option value="">Not linked</option>${accountOptions(transaction.accountId || "")}</select></label>` : ""}
                 ${state.accounts.length && !transaction.accountId ? `<button class="icon-button" data-ai-suggest-account="${transaction.id}" type="button" aria-label="Suggest an account with AI for ${escapeHtml(transaction.payee)}" title="No history match for this payee - ask AI to suggest an account">✨</button>` : ""}
@@ -4499,11 +4570,41 @@ function renderGoals() {
     </section>`;
 }
 
+// Buckets every net-worth asset (not liabilities) into the four classes
+// the design calls out - retirement accounts are folded into "Stocks &
+// funds" rather than getting a fifth bucket, since they're already
+// stock/fund holdings under the hood (see isHoldingAssetClass).
+function assetAllocationBreakdown() {
+  const groups = { cash: 0, stock: 0, property: 0, other: 0 };
+  const labels = { cash: "Cash", stock: "Stocks & funds", property: "Property", other: "Other" };
+  const colors = { cash: "var(--blue)", stock: "var(--green)", property: "var(--gold)", other: "var(--muted)" };
+  state.goals.netWorth.assets.forEach((asset) => {
+    const bucket = asset.assetClass === "retirement" ? "stock" : (groups[asset.assetClass] !== undefined ? asset.assetClass : "other");
+    groups[bucket] += Math.max(0, assetValue(asset));
+  });
+  const total = Object.values(groups).reduce((sum, value) => sum + value, 0);
+  return Object.entries(groups)
+    .filter(([, value]) => value > 0)
+    .map(([key, value]) => ({ key, label: labels[key], value, percent: total ? Math.round((value / total) * 100) : 0, color: colors[key] }))
+    .sort((a, b) => b.value - a.value);
+}
+
+function assetAllocationRingHtml(segments) {
+  let cursor = 0;
+  const stops = segments.map((segment) => {
+    const start = cursor;
+    cursor += segment.percent;
+    return `${segment.color} ${start}% ${cursor}%`;
+  }).join(", ");
+  return `<div class="wealth-allocation-ring" style="background:conic-gradient(${stops || "var(--soft) 0 100%"})"></div>`;
+}
+
 function renderWealth() {
   if (ensureDebtNetWorthSync()) autosaveState();
   ensureAccountsData();
   const wealthTrend = netWorthTrend(trailingMonthKeys(6));
   const wealthNetWorthChange = wealthTrend.length ? netWorth().total - (wealthTrend[0]?.value || 0) : 0;
+  const allocation = assetAllocationBreakdown();
   return `
     <section class="work-grid wealth-layout">
       <div class="main-stack">
@@ -4512,6 +4613,15 @@ function renderWealth() {
           ${netWorthTrendSvg(wealthTrend)}
           <div class="networth-chart-labels">${wealthTrend.map((point) => `<span>${formatMonth(point.month).split(" ")[0].slice(0, 3)}</span>`).join("")}</div>
         </section>
+        ${allocation.length ? `<section class="card">
+          <div class="section-head"><div><span class="card-label">Breakdown</span><h3>Asset allocation</h3></div></div>
+          <div class="wealth-allocation-row">
+            ${assetAllocationRingHtml(allocation)}
+            <div class="wealth-allocation-legend">
+              ${allocation.map((segment) => `<div class="wealth-allocation-legend-row"><i style="background:${segment.color}"></i><span>${segment.label}</span><b>${money.format(segment.value)}</b><small>${segment.percent}%</small></div>`).join("")}
+            </div>
+          </div>
+        </section>` : ""}
         <section class="card">
           <div class="section-head"><div><span class="card-label">Cash flow</span><h3>Accounts</h3></div><button id="addAccountButton" type="button">+ Add account</button></div>
           ${state.accounts.length ? state.accounts.map((account, index) => accountItemRow(account, index)).join("") : `<div class="onboarding-empty compact-onboarding"><div class="empty-symbol" aria-hidden="true">▥</div><h3>Add your first account</h3><p>Track a checking account your paycheck deposits into, and a credit card whose purchases it pays off.</p></div>`}
@@ -4756,6 +4866,30 @@ function currentReportsScope() {
   return reportsScope;
 }
 
+// A same-length window shifted back exactly one year from each of this
+// scope's month keys - used only to compute the "vs last year" delta, never
+// shown as its own chart, so it doesn't need to handle gaps/duplicates the
+// way a real trend series would.
+function priorYearMonthKeys(monthKeys) {
+  return monthKeys.map((key) => {
+    const [year, month] = key.split("-");
+    return `${Number(year) - 1}-${month}`;
+  });
+}
+
+// null when there's nothing to compare against (division by zero or no
+// prior-year data at all) rather than a misleading 0%/∞% badge.
+function yoyDelta(current, previous) {
+  if (!previous) return null;
+  return Math.round(((current - previous) / Math.abs(previous)) * 100);
+}
+
+function yoyBadgeHtml(delta) {
+  if (delta === null) return "";
+  const up = delta >= 0;
+  return `<span class="reports-yoy-badge ${up ? "good" : "danger"}">${up ? "▲" : "▼"} ${Math.abs(delta)}% vs last year</span>`;
+}
+
 function renderReports() {
   const scope = currentReportsScope();
   const monthKeys = monthKeysForScope(scope);
@@ -4766,6 +4900,11 @@ function renderReports() {
   const months = cashFlowByMonth(monthKeys.length ? monthKeys : trailingMonthKeys(6));
   const totalIncome = months.reduce((sum, month) => sum + month.income, 0);
   const totalExpenses = months.reduce((sum, month) => sum + month.expenses, 0);
+  const priorMonths = reportsCompareLastYear ? cashFlowByMonth(priorYearMonthKeys(monthKeys.length ? monthKeys : trailingMonthKeys(6))) : [];
+  const priorIncome = priorMonths.reduce((sum, month) => sum + month.income, 0);
+  const priorExpenses = priorMonths.reduce((sum, month) => sum + month.expenses, 0);
+  const priorTrend = reportsCompareLastYear ? netWorthTrend(priorYearMonthKeys(monthKeys.length ? monthKeys : trailingMonthKeys(6))) : [];
+  const priorNetWorth = priorTrend[priorTrend.length - 1]?.value || 0;
   const reportsTheme = REPORTS_THEMES[reportsColorTheme] || REPORTS_THEMES.fresh;
   const sankeySegments = sankeyFlowSegments(categories, totalIncome, totalExpenses).map((segment, index) => ({ ...segment, color: reportsTheme.palette[index % reportsTheme.palette.length] }));
   const budgetVsActual = budgetVsActualByCategory(monthKeys).filter((row) => row.planned !== 0 || row.actual !== 0);
@@ -4827,6 +4966,12 @@ function renderReports() {
       </div>
       <div class="reports-appearance-row">
         <div class="reports-appearance-group">
+          <span class="reports-appearance-label">Compare</span>
+          <div class="reports-scope-pills">
+            <button type="button" class="${reportsCompareLastYear ? "active" : ""}" data-reports-compare-last-year>Compare to last year</button>
+          </div>
+        </div>
+        <div class="reports-appearance-group">
           <span class="reports-appearance-label">Density</span>
           <div class="reports-scope-pills">
             <button type="button" class="${reportsDensity === "comfortable" ? "active" : ""}" data-reports-density="comfortable">Comfortable</button>
@@ -4852,11 +4997,13 @@ function renderReports() {
       <div class="main-stack">
         ${showCard("networth") ? `<section class="card">
           <div class="section-head"><div><span class="card-label">Trend</span><h3>Net worth</h3></div><b class="${netWorthChange < 0 ? "danger" : ""}">${netWorthChange >= 0 ? "+" : ""}${money.format(netWorthChange)} over ${trend.length} months</b></div>
+          ${reportsCompareLastYear ? yoyBadgeHtml(yoyDelta(currentNetWorth, priorNetWorth)) : ""}
           ${netWorthTrendSvg(trend)}
           <div class="networth-chart-labels">${trend.map((point) => `<span>${formatMonth(point.month).split(" ")[0].slice(0, 3)}</span>`).join("")}</div>
         </section>` : ""}
         ${showCard("cashflow") ? `<section class="card">
           <div class="section-head"><div><span class="card-label">Trend</span><h3>Cash flow</h3></div><span>${money.format(totalIncome - totalExpenses)} net over ${months.length} months</span></div>
+          ${reportsCompareLastYear ? `<div class="reports-yoy-row">${yoyBadgeHtml(yoyDelta(totalIncome, priorIncome))}<small>income</small>${yoyBadgeHtml(yoyDelta(totalExpenses, priorExpenses))}<small>expenses</small></div>` : ""}
           ${cashFlowChart(months)}
         </section>` : ""}
         ${showCard("cashflowbreakdown") ? `<section class="card">
@@ -8003,6 +8150,10 @@ function bindViewEvents() {
       // only fall back to "you've categorized payees like this before" when
       // there's no refund to pin the line to.
       const historyLineId = rowRefundMatch ? "" : suggestSubcategoryFromHistory(row.payee, state.transactions);
+      // A household's own "always categorize this way" rule beats the plain
+      // most-recent-use guess (but never a literal refund match, which is
+      // tied to a specific purchase and could legitimately differ).
+      const ruleLineId = rowRefundMatch ? "" : categorizationRuleForPayee(row.payee);
       // The file-level filename/content-hint match (matchedAccount) applies
       // to every row in this import - only fall back to a per-payee history
       // guess when that whole-file match came up empty.
@@ -8011,14 +8162,14 @@ function bindViewEvents() {
         id: uniqueId(idPrefix),
         payee: row.payee,
         amount: row.amount,
-        lineId: rowRefundMatch?.lineId || historyLineId || "",
+        lineId: rowRefundMatch?.lineId || ruleLineId || historyLineId || "",
         accountId: matchedAccount?.id || historyAccountId || "",
         date: row.date,
         orderNumber: row.orderNumber || "",
         isDeposit: !!row.isDeposit,
         isPayment: !!row.isPayment,
         isPending: !!row.isPending,
-        historyMatch: !!(!rowRefundMatch && historyLineId),
+        historyMatch: !!(!rowRefundMatch && !ruleLineId && historyLineId),
         accountHistoryMatch: !!(!matchedAccount && historyAccountId)
       });
     });
@@ -8149,6 +8300,13 @@ function bindViewEvents() {
       render();
     });
   });
+  const compareLastYearButton = document.querySelector("[data-reports-compare-last-year]");
+  if (compareLastYearButton) {
+    compareLastYearButton.addEventListener("click", () => {
+      reportsCompareLastYear = !reportsCompareLastYear;
+      render();
+    });
+  }
   document.querySelectorAll("[data-reports-density]").forEach((button) => {
     button.addEventListener("click", () => {
       reportsDensity = button.dataset.reportsDensity;
@@ -8237,6 +8395,17 @@ function bindViewEvents() {
         draft.historyMatch = false;
       }
       autosaveState();
+    });
+  });
+
+  document.querySelectorAll("[data-toggle-categorization-rule]").forEach((button) => {
+    button.addEventListener("click", () => {
+      const draft = (state.transactionInboxDrafts || []).find((item) => item.id === button.dataset.toggleCategorizationRule);
+      if (!draft || !draft.lineId) return;
+      const alreadySet = categorizationRuleForPayee(draft.payee) === draft.lineId;
+      setCategorizationRuleForPayee(draft.payee, alreadySet ? "" : draft.lineId);
+      autosaveState();
+      render();
     });
   });
 
@@ -11337,6 +11506,26 @@ $("#syncButton").addEventListener("click", async (event) => {
     button.disabled = false;
     button.classList.remove("is-loading");
   }
+});
+
+$("#notificationBellButton").addEventListener("click", (event) => {
+  event.stopPropagation();
+  const dropdown = $("#notificationBellDropdown");
+  dropdown.hidden = !dropdown.hidden;
+});
+
+$("#notificationBellDropdown").addEventListener("click", (event) => {
+  const item = event.target.closest("[data-notification-bell-goto]");
+  if (!item) return;
+  currentView = item.dataset.notificationBellGoto;
+  $("#notificationBellDropdown").hidden = true;
+  render();
+});
+
+document.addEventListener("click", (event) => {
+  if ($("#notificationBellDropdown").hidden) return;
+  if (event.target.closest(".notification-bell-wrap")) return;
+  $("#notificationBellDropdown").hidden = true;
 });
 
 $("#monthPicker").addEventListener("change", (event) => {
