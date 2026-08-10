@@ -1709,11 +1709,79 @@ const renderers = {
   admin: renderAdmin
 };
 
+// A 7-day forward strip merging chores, birthdays/anniversaries, reminders,
+// and bills into one day-by-day view - each item appears on its single
+// next-due date, same semantics as homeActionItems()/the Calendar side
+// panels use everywhere else, just bucketed by day instead of listed flat.
+function homeWeekStrip() {
+  ensureChoreRecurrenceData();
+  ensureAnnualEventRecurrenceData();
+  const viewerKey = sessionUser?.email || "";
+  const today = new Date();
+  const days = [];
+  for (let offset = 0; offset < 7; offset += 1) {
+    const date = new Date(today.getFullYear(), today.getMonth(), today.getDate() + offset);
+    days.push({ dateKey: dateKey(date), label: date.toLocaleDateString(undefined, { weekday: "short", day: "numeric" }), items: [] });
+  }
+  const dayIndex = new Map(days.map((day) => [day.dateKey, day]));
+
+  state.calendar.chores.forEach((chore) => {
+    const occurrence = nextPendingChoreOccurrence(chore, viewerKey);
+    if (occurrence && dayIndex.has(occurrence.date) && isRelevantToViewer(chore.assignees, viewerKey)) {
+      dayIndex.get(occurrence.date).items.push({ title: chore.title, icon: "🧹" });
+    }
+  });
+  state.calendar.events.filter((event) => ANNUAL_EVENT_TYPES.includes(event.type)).forEach((event) => {
+    const occurrence = nextPendingAnnualEventOccurrence(event, new Date(), viewerKey);
+    if (occurrence && dayIndex.has(occurrence.date) && isRelevantToViewer(event.assignees, viewerKey)) {
+      dayIndex.get(occurrence.date).items.push({ title: annualEventDisplayTitle(event), icon: event.type === "birthday" ? "🎂" : "💍" });
+    }
+  });
+  state.calendar.events.filter((event) => event.type === "reminder" && event.date).forEach((event) => {
+    if (isReminderPendingFor(event, viewerKey) && dayIndex.has(event.date) && isRelevantToViewer(event.assignees, viewerKey)) {
+      dayIndex.get(event.date).items.push({ title: event.title, icon: "⏰" });
+    }
+  });
+  billsRows().forEach((bill) => {
+    if (bill.paid) return;
+    const dueKey = dateKey(new Date(today.getFullYear(), today.getMonth(), bill.dueDay));
+    if (dayIndex.has(dueKey)) dayIndex.get(dueKey).items.push({ title: bill.name, icon: "🧾" });
+  });
+
+  return days;
+}
+
+// Combines the entities that carry a real timestamp already (notes,
+// decisions, settled IOUs) into one reverse-chronological feed. Bill
+// payments aren't included - dismissedReminders only tracks *which* bills
+// are marked paid this month, not *when*, so adding them here would mean
+// fabricating a timestamp that doesn't exist.
+function homeRecentActivity(limit = 8) {
+  ensureNotesData();
+  const notesActivity = state.notes.entries
+    .filter((note) => !note.trashed && note.createdAt)
+    .map((note) => ({ at: note.createdAt, title: note.title || "Untitled note", detail: "Note added", icon: "📝" }));
+  const decisionsActivity = (state.decisions || []).flatMap((decision) => {
+    const rows = [];
+    if (decision.createdAt) rows.push({ at: decision.createdAt, title: decision.title || "Untitled decision", detail: "Decision raised", icon: "⚖️" });
+    if (decision.decidedAt) rows.push({ at: decision.decidedAt, title: decision.title || "Untitled decision", detail: "Decision made", icon: "⚖️" });
+    return rows;
+  });
+  const iouActivity = (state.ious || [])
+    .filter((iou) => iou.settled && iou.settledDate)
+    .map((iou) => ({ at: iou.settledDate, title: `Settled with ${iou.person}`, detail: money.format(iou.amount || 0), icon: "💸" }));
+  return [...notesActivity, ...decisionsActivity, ...iouActivity]
+    .sort((a, b) => String(b.at).localeCompare(String(a.at)))
+    .slice(0, limit);
+}
+
 function renderHome() {
   const items = homeActionItems();
   const billsAndGoals = billAndGoalReminders();
   const noteReminders = homeNoteReminders();
   const planTasks = homeTodayPlanTasks();
+  const weekStrip = homeWeekStrip();
+  const recentActivity = homeRecentActivity();
   return `
     <section class="work-grid">
       <div class="main-stack">
@@ -1726,6 +1794,17 @@ function renderHome() {
             <button id="homeAddAnniversaryButton" class="ghost" type="button">+ Add anniversary</button>
             <button id="homeAddTransactionButton" class="ghost" type="button">+ Add transaction</button>
             <button id="homeAddIncomeButton" class="ghost" type="button">+ Add income</button>
+          </div>
+        </section>
+        <section class="card home-week-strip-card">
+          <div class="card-label">This week</div><h3>Chores, bills, birthdays and reminders</h3>
+          <div class="home-week-strip">
+            ${weekStrip.map((day) => `
+              <div class="home-week-day ${day.dateKey === dateKey(new Date()) ? "today" : ""}">
+                <span class="home-week-day-label">${day.label}</span>
+                ${day.items.length ? day.items.map((item) => `<span class="home-week-item">${item.icon} ${escapeHtml(item.title)}</span>`).join("") : `<span class="home-week-item-empty">—</span>`}
+              </div>
+            `).join("")}
           </div>
         </section>
         <section class="card">
@@ -1753,6 +1832,10 @@ function renderHome() {
         <section class="card">
           <div class="section-head"><div><span class="card-label">Notes</span><h3>Reminders due</h3></div><button id="homeOpenNoteRemindersButton" class="ghost" type="button">Open Notes</button></div>
           ${noteReminders.length ? noteReminders.map((note) => `<div class="compact-row ${note.overdue ? "overdue" : ""}"><div><strong>${escapeHtml(note.title)}</strong><small>${note.overdue ? "Past due" : "Due today"} · ${escapeHtml(note.detail)}</small></div></div>`).join("") : `<div class="empty-inline">No note reminders due.</div>`}
+        </section>
+        <section class="card">
+          <div class="card-label">Household</div><h3>Recent activity</h3>
+          ${recentActivity.length ? recentActivity.map((entry) => `<div class="compact-row"><div><strong>${entry.icon} ${escapeHtml(entry.title)}</strong><small>${escapeHtml(entry.detail)} · ${formatShortDate(String(entry.at).slice(0, 10))}</small></div></div>`).join("") : `<div class="empty-inline">Nothing recent to show.</div>`}
         </section>
       </aside>
     </section>`;

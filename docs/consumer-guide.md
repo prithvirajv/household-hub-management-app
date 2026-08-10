@@ -31,6 +31,9 @@ more convenient.
    needed.
 6. Select the 🌙 icon in the top bar any time to switch to dark mode — it
    remembers your choice on this device.
+7. Home's **This week** strip merges chores, bills, birthdays, and reminders
+   into one 7-day view, and **Recent activity** lists notes, decisions, and
+   settled IOUs as they happen, newest first.
 
 ## Households
 
