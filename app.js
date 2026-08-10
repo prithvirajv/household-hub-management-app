@@ -1,6 +1,7 @@
 const views = [
   ["home", "Home", "🏠"],
   ["budget", "Budget", "📊"],
+  ["bills", "Bills", "🧾"],
   ["transactions", "Transactions", "💳"],
   ["paychecks", "Paycheck/Income", "💵"],
   ["calendar", "Calendar", "📅"],
@@ -74,6 +75,9 @@ const REPORTS_THEMES = {
 // Which decision card has its pros/cons/notes/attachments expanded - one at
 // a time (accordion), same convention as Reports' expandedRingCategory.
 let expandedDecisionId = null;
+// Bills page's own filter pill (all/due/overdue) - session-local display
+// state, same convention as Reports' reportsScope/reportsDensity.
+let billsFilter = "all";
 let splitBillType = "equal";
 let splitBillRows = [];
 // The payer's own row in the Split-a-bill card, shown alongside the friend
@@ -639,6 +643,39 @@ function dismissBudgetReminder(id) {
   }
   autosaveState();
   render();
+}
+
+// The Bills page is a dedicated view over the exact same recurring budget
+// lines Home's "Bills & Goals" card and the Paycheck page's Due-date flow
+// already read (allLines() + dueDay + spentByLine) - not a second, separate
+// place to enter bills - so "paid" here is the same signal those use: real
+// spending against the line, or a manual dismiss via the shared
+// dismissedReminders/"bill:<id>" mechanism (the same "Done" a household
+// already uses on Home). Marking a bill paid here also clears it from
+// Home's reminder list, and vice versa, since it's the same underlying id.
+function billsRows() {
+  const dismissed = state.budget.dismissedReminders?.[state.budget.month] || [];
+  return allLines()
+    .filter((line) => line.dueDay)
+    .map((line) => {
+      const spent = spentByLine(line.id);
+      const planned = Number(line.planned || 0);
+      const paid = spent >= planned || dismissed.includes(`bill:${line.id}`);
+      const frequency = line.recurringBill?.enabled && recurringBudgetFrequencyMonths[line.recurringBill.frequency]
+        ? line.recurringBill.frequency
+        : "monthly";
+      return {
+        id: line.id,
+        name: line.name,
+        category: line.category,
+        color: line.color,
+        planned,
+        dueDay: line.dueDay,
+        frequency,
+        paid
+      };
+    })
+    .sort((a, b) => a.dueDay - b.dueDay);
 }
 
 function remainingTotal() {
@@ -1394,6 +1431,20 @@ function metricsForView() {
   if (currentView === "recipes") return [["Saved recipes", String(state.meals.recipes.length), "available to meal plans"], ["Ingredients", String(new Set(state.meals.recipes.flatMap((recipe) => recipe.ingredients)).size), "unique grocery items"], ["Average protein", `${Math.round(state.meals.recipes.reduce((sum, recipe) => sum + Number(recipe.protein || 0), 0) / Math.max(state.meals.recipes.length, 1))}g`, "per recipe"], ["Household library", "Shared", "available to every member"]];
   if (currentView === "sharing") return [["Invite status", state.household.inviteCode || "Ready", "household invite"], ["Members", String(sharingAccess?.members.length ?? state.household.members.length), "active and invited users"], ["Shared scopes", String(state.household.sharedScopes.length), "workspace modules"], ["Activity", String(state.household.activity.length), "recent household changes"]];
   if (currentView === "reports") return [["Spending", money.format(spentTotal()), "posted transactions"], ["Budget health", money.format(margin), "zero balance target"], ["Net worth", money.format(netWorth().total), "current estimate"], ["Cash left", money.format(remainingTotal()), "after ledger"]];
+  if (currentView === "bills") {
+    const bills = billsRows();
+    const unpaid = bills.filter((bill) => !bill.paid);
+    const dueSoon = unpaid.filter((bill) => bill.dueDay <= new Date().getDate() + 7);
+    const monthlyTotal = bills.filter((bill) => bill.frequency === "monthly").reduce((sum, bill) => sum + bill.planned, 0);
+    const totalDue = bills.reduce((sum, bill) => sum + bill.planned, 0);
+    const paidCount = bills.length - unpaid.length;
+    return [
+      ["Due this week", String(dueSoon.length), dueSoon.length ? dueSoon.map((bill) => bill.name).join(", ") : "nothing due soon"],
+      ["Monthly recurring", money.format(monthlyTotal), `${bills.filter((bill) => bill.frequency === "monthly").length} bills`],
+      ["Total due", money.format(totalDue), `${bills.length} bills this month`],
+      ["Paid this cycle", String(paidCount), `of ${bills.length} total`]
+    ];
+  }
   if (currentView === "goals") return [["Active goals", String(state.goals.sinkingFunds.length), "sinking funds"], ["Saved", money.format(state.goals.sinkingFunds.reduce((sum, fund) => sum + fund.saved, 0)), "across goals"], ["Remaining", money.format(state.goals.sinkingFunds.reduce((sum, fund) => sum + fund.target - fund.saved, 0)), "to targets"]];
   if (currentView === "wealth") return [["Assets", money.format(netWorth().assets), "tracked"], ["Liabilities", money.format(netWorth().liabilities), "tracked"], ["Net worth", money.format(netWorth().total), "current estimate"], ["Debt accounts", String(state.goals.debts.length), "payoff plan"]];
   if (currentView === "admin") return [];
@@ -1439,6 +1490,7 @@ function render() {
 const renderers = {
   home: renderHome,
   budget: renderBudget,
+  bills: renderBills,
   transactions: renderTransactions,
   paychecks: renderPaychecks,
   calendar: renderCalendar,
@@ -1503,6 +1555,89 @@ function renderHome() {
         <section class="card">
           <div class="section-head"><div><span class="card-label">Notes</span><h3>Reminders due</h3></div><button id="homeOpenNoteRemindersButton" class="ghost" type="button">Open Notes</button></div>
           ${noteReminders.length ? noteReminders.map((note) => `<div class="compact-row ${note.overdue ? "overdue" : ""}"><div><strong>${escapeHtml(note.title)}</strong><small>${note.overdue ? "Past due" : "Due today"} · ${escapeHtml(note.detail)}</small></div></div>`).join("") : `<div class="empty-inline">No note reminders due.</div>`}
+        </section>
+      </aside>
+    </section>`;
+}
+
+// A bill's "account" and household-chat-staleness fields from the design
+// handoff have no real data behind them in FamilyLoop (bills aren't linked
+// to a wealth account, and there's no chat feature) - omitted rather than
+// faked. Everything else maps onto real budget-line fields.
+function billRow(bill) {
+  const today = new Date().getDate();
+  let dueLabel = `Due day ${bill.dueDay}`;
+  let dueClass = "neutral";
+  if (bill.paid) { dueLabel = "Paid"; dueClass = "good"; }
+  else if (bill.dueDay < today) { dueLabel = "Past due"; dueClass = "danger"; }
+  else if (bill.dueDay - today <= 3) dueClass = "danger";
+  else if (bill.dueDay - today <= 7) dueClass = "warning";
+  const frequencyLabel = bill.frequency === "monthly" ? "Monthly" : bill.frequency === "quarterly" ? "Quarterly" : "Yearly";
+  return `
+    <div class="bills-row ${bill.paid ? "paid" : ""}">
+      <i class="bills-row-dot" style="background:${bill.color}"></i>
+      <div class="bills-row-main">
+        <div class="bills-row-name">${escapeHtml(bill.name)}<span class="pill">${frequencyLabel}</span></div>
+        <div class="muted">${escapeHtml(bill.category)}</div>
+      </div>
+      <div class="bills-row-amount">
+        <strong>${money.format(bill.planned)}</strong>
+        <small class="bills-due-${dueClass}">${dueLabel}</small>
+      </div>
+      ${bill.paid
+        ? `<span class="bills-paid-check">✓ Paid</span>`
+        : `<button class="ghost" type="button" data-bills-mark-paid="${bill.id}">Mark paid</button>`}
+    </div>`;
+}
+
+function renderBills() {
+  const today = new Date().getDate();
+  const allBills = billsRows();
+  const filtered = allBills.filter((bill) => {
+    if (billsFilter === "due") return !bill.paid && bill.dueDay >= today && bill.dueDay - today <= 7;
+    if (billsFilter === "overdue") return !bill.paid && bill.dueDay < today;
+    return true;
+  });
+  const byCategory = new Map();
+  allBills.forEach((bill) => {
+    if (!byCategory.has(bill.category)) byCategory.set(bill.category, { name: bill.category, color: bill.color, total: 0 });
+    byCategory.get(bill.category).total += bill.planned;
+  });
+  const categoryBreakdown = [...byCategory.values()].sort((a, b) => b.total - a.total);
+  const maxCategory = Math.max(1, ...categoryBreakdown.map((category) => category.total));
+  const filterPills = [["all", "All"], ["due", "Due soon"], ["overdue", "Overdue"]];
+  return `
+    <section class="work-grid">
+      <div class="main-stack">
+        <section class="card">
+          <div class="section-head">
+            <div><span class="card-label">Bills</span><h3>Upcoming</h3></div>
+            <div class="reports-scope-pills" role="group" aria-label="Filter bills">
+              ${filterPills.map(([value, label]) => `<button type="button" class="${billsFilter === value ? "active" : ""}" data-bills-filter="${value}">${label}</button>`).join("")}
+            </div>
+          </div>
+          <div class="bills-list">
+            ${filtered.length ? filtered.map(billRow).join("") : `<div class="empty-inline">No bills match this filter.</div>`}
+          </div>
+        </section>
+      </div>
+      <aside class="side-stack">
+        <section class="card">
+          <div class="card-label">By category</div>
+          <h3>Monthly recurring</h3>
+          <div class="bills-category-breakdown">
+            ${categoryBreakdown.length ? categoryBreakdown.map((category) => `
+              <div class="bills-category-row">
+                <div class="bills-category-row-label"><span>${escapeHtml(category.name)}</span><span class="muted">${money.format(category.total)}</span></div>
+                <div class="bills-category-bar-track"><div class="bills-category-bar-fill" style="width:${Math.round((category.total / maxCategory) * 100)}%; background:${category.color}"></div></div>
+              </div>`).join("") : `<div class="empty-inline">No recurring bills yet.</div>`}
+          </div>
+        </section>
+        <section class="card">
+          <div class="card-label">Manage</div>
+          <h3>Add or edit a bill</h3>
+          <p class="muted">Bills are the lines in your Budget with a due date set - open Budget to add a new one or change an amount.</p>
+          <button class="ghost" type="button" data-goto-view="budget">Open Budget →</button>
         </section>
       </aside>
     </section>`;
@@ -7615,6 +7750,18 @@ function bindViewEvents() {
       const key = el.dataset.sankeyLines;
       reportsExpandedSankeyLineKey = reportsExpandedSankeyLineKey === key ? null : key;
       render();
+    });
+  });
+
+  document.querySelectorAll("[data-bills-filter]").forEach((button) => {
+    button.addEventListener("click", () => {
+      billsFilter = button.dataset.billsFilter;
+      render();
+    });
+  });
+  document.querySelectorAll("[data-bills-mark-paid]").forEach((button) => {
+    button.addEventListener("click", () => {
+      dismissBudgetReminder(`bill:${button.dataset.billsMarkPaid}`);
     });
   });
 

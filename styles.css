@@ -3313,6 +3313,92 @@ main {
   color: white;
 }
 
+.bills-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+}
+
+.bills-row {
+  display: flex;
+  align-items: center;
+  gap: 0.8rem;
+  padding: 0.7rem 0.9rem;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--panel);
+}
+
+.bills-row.paid {
+  opacity: 0.65;
+}
+
+.bills-row-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 999px;
+  flex-shrink: 0;
+}
+
+.bills-row-main {
+  flex: 1;
+  min-width: 0;
+}
+
+.bills-row-name {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-weight: 800;
+}
+
+.bills-row-amount {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 0.15rem;
+  text-align: right;
+}
+
+.bills-due-danger { color: var(--coral); font-weight: 800; }
+.bills-due-warning { color: var(--gold); font-weight: 800; }
+.bills-due-good { color: var(--green); font-weight: 800; }
+.bills-due-neutral { color: var(--muted); }
+
+.bills-paid-check {
+  color: var(--green);
+  font-weight: 800;
+  font-size: 0.85rem;
+  white-space: nowrap;
+}
+
+.bills-category-breakdown {
+  display: flex;
+  flex-direction: column;
+  gap: 0.7rem;
+  margin-top: 0.6rem;
+}
+
+.bills-category-row-label {
+  display: flex;
+  justify-content: space-between;
+  font-size: 0.85rem;
+  font-weight: 700;
+  margin-bottom: 0.25rem;
+}
+
+.bills-category-bar-track {
+  height: 8px;
+  border-radius: 999px;
+  background: var(--soft-blue);
+  overflow: hidden;
+}
+
+.bills-category-bar-fill {
+  height: 100%;
+  border-radius: 999px;
+}
+
 .reports-appearance-row {
   display: flex;
   flex-wrap: wrap;

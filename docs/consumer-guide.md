@@ -74,6 +74,22 @@ more convenient.
   marking as recurring so FamilyLoop sets aside savings for them every month
   instead of one big hit when the bill lands.
 
+## Bills
+
+1. Bills is a dedicated view over the same budget lines that have a due day
+   set in Budget — it's not a second place to enter anything. Give a line a
+   due day (see Budget above) and it shows up here automatically.
+2. Use the **All / Due soon / Overdue** pills to narrow the list.
+3. Select **Mark paid** once you've paid a bill by hand, or it clears itself
+   automatically once a transaction is assigned to that line for at least
+   the planned amount.
+4. Marking a bill paid here also clears it from Home's **Bills & Goals**
+   card, and vice versa — they're the same underlying reminder.
+5. **By category** on the right totals your monthly recurring bills by
+   budget category, so you can see at a glance where the money's going.
+6. Need to add a new bill or change an amount? Select **Open Budget** —
+   that's still where bills are created and edited.
+
 ## Transactions
 
 ![A Bank Stream refund row with a Refund match pill and Subcategory pre-filled to the matched purchase's budget line](../assets/mockup-bank-stream.svg)
