@@ -309,8 +309,25 @@ function api(path, options = {}) {
 // single keystroke.
 let viewOnlyToastShownAt = 0;
 
+// Set for the duration of a household switch (app.js's #householdPicker
+// change handler) so a stray edit/poll on the still-visible previous
+// household's screen can't schedule a save that lands after the cookie has
+// already flipped to the new household - see currentHouseholdId() below.
+let householdSwitchInProgress = false;
+
+function currentHouseholdId() {
+  return households.find((household) => household.selected)?.id || null;
+}
+
+// The debounce/flush below exist to survive a household switch (or a second
+// browser tab switching households, since hh_household is one cookie shared
+// by the whole browser) without silently overwriting the *other* household's
+// data: household id is captured at schedule time, re-checked at send time,
+// and sent as a header the server double-checks against the session's
+// current household before writing (server/index.js's PUT /api/state).
 function autosaveState() {
   if (!state) return;
+  if (householdSwitchInProgress) return;
   if (sessionUser?.accessLevel === "view") {
     if (Date.now() - viewOnlyToastShownAt > 10000) {
       viewOnlyToastShownAt = Date.now();
@@ -318,9 +335,15 @@ function autosaveState() {
     }
     return;
   }
+  const householdIdAtSchedule = currentHouseholdId();
   clearTimeout(autosaveTimer);
   autosaveTimer = setTimeout(() => {
-    api("/api/state", { method: "PUT", body: JSON.stringify(state) }).catch((error) => {
+    if (currentHouseholdId() !== householdIdAtSchedule) return;
+    api("/api/state", {
+      method: "PUT",
+      headers: { "X-Household-Id": householdIdAtSchedule || "" },
+      body: JSON.stringify(state)
+    }).catch((error) => {
       console.warn("Autosave failed", error);
     });
   }, 350);
@@ -328,8 +351,13 @@ function autosaveState() {
 
 async function saveStateNow() {
   if (!state) return;
+  const householdIdAtCall = currentHouseholdId();
   clearTimeout(autosaveTimer);
-  await api("/api/state", { method: "PUT", body: JSON.stringify(state) });
+  await api("/api/state", {
+    method: "PUT",
+    headers: { "X-Household-Id": householdIdAtCall || "" },
+    body: JSON.stringify(state)
+  });
 }
 
 function showToast(message, { type = "error" } = {}) {
@@ -11880,6 +11908,7 @@ $("#householdPicker").addEventListener("change", async (event) => {
   const previousValue = households.find((household) => household.selected)?.id || "";
   if (message) message.textContent = "";
   picker.disabled = true;
+  householdSwitchInProgress = true;
   try {
     await saveStateNow();
     await api("/api/households/select", {
@@ -11893,6 +11922,7 @@ $("#householdPicker").addEventListener("change", async (event) => {
     if (message) message.textContent = error.message;
   } finally {
     picker.disabled = false;
+    householdSwitchInProgress = false;
   }
 });
 

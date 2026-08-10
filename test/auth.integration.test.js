@@ -313,6 +313,65 @@ test("a user cannot create multiple households with the same currency", async ()
   assert.equal(restoreDefault.status, 200);
 });
 
+test("PUT /api/state rejects a save stamped with a household the session has since switched away from", async () => {
+  const signin = await request("/api/auth/signin", {
+    method: "POST",
+    body: JSON.stringify({ email: adminEmail, password: initialPassword })
+  });
+  assert.equal(signin.status, 200);
+
+  const householdList = await request("/api/households", { headers: { cookie: signin.cookie } });
+  const usdHousehold = householdList.body.find((household) => household.currency === "USD");
+  const inrHousehold = householdList.body.find((household) => household.currency === "INR");
+  assert.equal(householdList.body.find((household) => household.selected).id, usdHousehold.id);
+
+  // Simulates the household-switch race: a save that was scheduled while the
+  // USD household was still selected (stamped with its id) actually reaches
+  // the server after a switch to the INR household has already flipped the
+  // session's hh_household cookie.
+  const selectInr = await request("/api/households/select", {
+    method: "POST",
+    headers: { cookie: signin.cookie },
+    body: JSON.stringify({ householdId: inrHousehold.id })
+  });
+  assert.equal(selectInr.status, 200);
+  const postSwitchCookie = combineCookies(signin.cookie, selectInr.cookie);
+
+  const inrStateBefore = await request("/api/state", { headers: { cookie: postSwitchCookie } });
+  const staleSave = await request("/api/state", {
+    method: "PUT",
+    headers: { cookie: postSwitchCookie, "X-Household-Id": usdHousehold.id },
+    body: JSON.stringify({ ...inrStateBefore.body, notes: { ...inrStateBefore.body.notes, entries: [{ id: "stale-note", title: "Should never land", items: [] }] } })
+  });
+  assert.equal(staleSave.status, 409);
+
+  const inrStateAfter = await request("/api/state", { headers: { cookie: postSwitchCookie } });
+  assert.equal(inrStateAfter.body.notes.entries.some((entry) => entry.id === "stale-note"), false);
+
+  // A save correctly stamped with the now-current household still goes through.
+  const freshSave = await request("/api/state", {
+    method: "PUT",
+    headers: { cookie: postSwitchCookie, "X-Household-Id": inrHousehold.id },
+    body: JSON.stringify({ ...inrStateBefore.body, notes: { ...inrStateBefore.body.notes, entries: [{ id: "fresh-note", title: "Should land", items: [] }] } })
+  });
+  assert.equal(freshSave.status, 200);
+
+  // Omitting the header entirely (any caller besides autosaveState/saveStateNow) stays backward compatible.
+  const noHeaderSave = await request("/api/state", {
+    method: "PUT",
+    headers: { cookie: postSwitchCookie },
+    body: JSON.stringify(inrStateBefore.body)
+  });
+  assert.equal(noHeaderSave.status, 200);
+
+  const restoreDefault = await request("/api/households/default", {
+    method: "POST",
+    headers: { cookie: postSwitchCookie },
+    body: JSON.stringify({ householdId: usdHousehold.id })
+  });
+  assert.equal(restoreDefault.status, 200);
+});
+
 test("an existing user cannot accept an invitation for a duplicate currency", async () => {
   const signup = await request("/api/auth/signup", {
     method: "POST",

@@ -2962,6 +2962,16 @@ app.get("/api/state", requireSession, async (req, res, next) => {
 
 app.put("/api/state", requireSession, requireEditAccess, async (req, res, next) => {
   try {
+    // The client stamps every save with the household id it believed it was
+    // editing when the save was scheduled. hh_household is one cookie shared
+    // by the whole browser, so a household switch in one tab (or in this same
+    // tab, mid-transition) can flip req.sessionUser.household_id out from
+    // under a save that was queued for the previous household - reject rather
+    // than silently writing one household's state into another's row.
+    const declaredHouseholdId = req.get("X-Household-Id");
+    if (declaredHouseholdId && declaredHouseholdId !== req.sessionUser.household_id) {
+      return res.status(409).json({ error: "Household changed before this save could complete" });
+    }
     if (MEMORY_DB) {
       const household = memoryDb.households.find((item) => item.id === req.sessionUser.household_id);
       household.app_state = req.body;
