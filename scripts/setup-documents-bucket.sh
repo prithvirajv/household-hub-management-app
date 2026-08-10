@@ -16,7 +16,7 @@ PROJECT_ID="${PROJECT_ID:?Set PROJECT_ID}"
 REGION="${REGION:-us-central1}"
 BUCKET="${GCS_BUCKET:?Set GCS_BUCKET to the bucket name}"
 SERVICE_ACCOUNT="${GCS_SERVICE_ACCOUNT:?Set GCS_SERVICE_ACCOUNT to the Cloud Run runtime service account email}"
-ALLOWED_ORIGINS="${GCS_CORS_ORIGINS:-https://familyloop.net}"
+ALLOWED_ORIGINS="${GCS_CORS_ORIGINS:-https://familyloop.net,https://www.familyloop.net,https://famelo.net,https://www.famelo.net}"
 
 gcloud services enable storage.googleapis.com iamcredentials.googleapis.com --project "${PROJECT_ID}"
 
