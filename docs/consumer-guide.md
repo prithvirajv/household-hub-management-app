@@ -41,6 +41,9 @@ more convenient.
    yet sees a short **Getting started** overlay pointing at linking an
    account, inviting the household, and setting a first budget. Skip it or
    step through it — it won't come back once dismissed.
+10. On a phone-width screen, the sidebar becomes a bottom tab bar (Home,
+    Budget, Activity, Wealth, and More) — **More** slides in the full menu,
+    including every other section and the household switcher.
 
 ## Households
 

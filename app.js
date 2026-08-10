@@ -283,6 +283,8 @@ async function handleAuthExpired() {
   $("#householdWorkspaceControl").hidden = true;
   $("#workspace").hidden = true;
   $("#authPanel").hidden = false;
+  $("#mobileTabBar").hidden = true;
+  document.body.classList.remove("mobile-sidebar-open");
   showSigninForm();
   setAuthMessage("Your session expired. Please sign in again.");
 }
@@ -1519,13 +1521,32 @@ function renderNotificationBell() {
 function renderNav() {
   const badgeCounts = navBadgeCounts();
   nav.innerHTML = views.filter(([key]) => key !== "admin" || sessionUser?.isAdmin).map(([key, label, icon]) => {
-    const badge = badgeCounts[key] ? `<span class="nav-badge">${badgeCounts[key] > 99 ? "99+" : badgeCounts[key]}</span>` : "";
+    // Bills' count is genuinely urgent (unpaid money owed), so it keeps the
+    // coral/red treatment; transactions' count is just "items to review" -
+    // informational, not a problem - so it gets a neutral gray badge instead
+    // of reading as an alarm.
+    const badge = badgeCounts[key] ? `<span class="nav-badge${key === "transactions" ? " nav-badge-neutral" : ""}">${badgeCounts[key] > 99 ? "99+" : badgeCounts[key]}</span>` : "";
     return `
     <button class="nav-button ${key === currentView ? "active" : ""}" data-view="${key}" type="button">
       <span>${key === "calendar" ? calendarNavIconHtml() : icon}</span>${label}${badge}
     </button>
   `;
   }).join("");
+}
+
+// Mirrors #nav's active-state logic for the fixed bottom tab bar shown on
+// narrow viewports (see styles.css's 760px breakpoint) - "More" opens the
+// existing sidebar as a slide-in drawer instead of duplicating its full nav
+// list, so it lights up whenever the current view isn't one of the 4 tabs
+// that got their own direct button.
+function renderMobileTabBar() {
+  const tabBar = $("#mobileTabBar");
+  tabBar.hidden = false;
+  const primaryViews = ["home", "budget", "transactions", "wealth"];
+  tabBar.querySelectorAll("[data-view]").forEach((button) => {
+    button.classList.toggle("active", button.dataset.view === currentView);
+  });
+  $("#mobileMoreButton").classList.toggle("active", !primaryViews.includes(currentView));
 }
 
 function renderShell() {
@@ -1609,6 +1630,7 @@ function renderShell() {
   $("#syncButton").hidden = isAdminView || isHelpView;
   $("#downloadCsvButton").hidden = isAdminView || isNotesView || isHelpView || isJournalView || isPlanView || isDocumentsView || isDecisionsView || isIousView || isProfileView || isHomeView;
   renderNav();
+  renderMobileTabBar();
   renderNotificationBell();
   const metrics = metricsForView();
   $("#metrics").hidden = metrics.length === 0;
@@ -9850,8 +9872,12 @@ function bindViewEvents() {
   });
 
   document.querySelectorAll("[data-delete-asset]").forEach((button) => {
-    button.addEventListener("click", () => {
-      const [asset] = state.goals.netWorth.assets.splice(Number(button.dataset.deleteAsset), 1);
+    button.addEventListener("click", async () => {
+      const index = Number(button.dataset.deleteAsset);
+      const target = state.goals.netWorth.assets[index];
+      if (!target) return;
+      if (!(await showConfirm(`Delete "${target.name}"? This cannot be undone.`, { confirmLabel: "Delete" }))) return;
+      const [asset] = state.goals.netWorth.assets.splice(index, 1);
       if (asset) {
         state.goals.debts.forEach((debt) => {
           if (debt.assetId === asset.id) debt.assetId = "";
@@ -9863,8 +9889,12 @@ function bindViewEvents() {
   });
 
   document.querySelectorAll("[data-delete-liability]").forEach((button) => {
-    button.addEventListener("click", () => {
-      const [liability] = state.goals.netWorth.liabilities.splice(Number(button.dataset.deleteLiability), 1);
+    button.addEventListener("click", async () => {
+      const index = Number(button.dataset.deleteLiability);
+      const target = state.goals.netWorth.liabilities[index];
+      if (!target) return;
+      if (!(await showConfirm(`Delete "${target.name}"? This cannot be undone.`, { confirmLabel: "Delete" }))) return;
+      const [liability] = state.goals.netWorth.liabilities.splice(index, 1);
       if (liability) state.goals.debts = state.goals.debts.filter((debt) => debt.id !== liability.id);
       autosaveState();
       render();
@@ -11531,7 +11561,24 @@ nav.addEventListener("click", async (event) => {
     }
   }
   currentView = button.dataset.view;
+  document.body.classList.remove("mobile-sidebar-open");
   render();
+});
+
+$("#mobileTabBar").addEventListener("click", (event) => {
+  if (event.target.closest("#mobileMoreButton")) {
+    document.body.classList.toggle("mobile-sidebar-open");
+    return;
+  }
+  const button = event.target.closest("[data-view]");
+  if (!button) return;
+  currentView = button.dataset.view;
+  document.body.classList.remove("mobile-sidebar-open");
+  render();
+});
+
+$("#mobileSidebarBackdrop").addEventListener("click", () => {
+  document.body.classList.remove("mobile-sidebar-open");
 });
 
 view.addEventListener("click", (event) => {
@@ -11776,6 +11823,8 @@ $("#signOutButton").addEventListener("click", async () => {
   $("#householdWorkspaceControl").hidden = true;
   $("#workspace").hidden = true;
   $("#authPanel").hidden = false;
+  $("#mobileTabBar").hidden = true;
+  document.body.classList.remove("mobile-sidebar-open");
   showSigninForm();
 });
 
