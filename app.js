@@ -78,6 +78,14 @@ let expandedDecisionId = null;
 // Bills page's own filter pill (all/due/overdue) - session-local display
 // state, same convention as Reports' reportsScope/reportsDensity.
 let billsFilter = "all";
+// "all" or a member key (assigneeKey) - narrows the Budget page's category
+// table to just that member's subcategories, same session-local convention
+// as billsFilter/reportsScope.
+let budgetMemberFilter = "all";
+// Indices (into state.transactions) checked via the Ledger's row checkboxes
+// for bulk categorize - session-local, cleared after every apply/render of
+// a different month so a stale selection never silently reapplies.
+let ledgerSelectedIndices = new Set();
 let splitBillType = "equal";
 let splitBillRows = [];
 // The payer's own row in the Split-a-bill card, shown alongside the friend
@@ -282,8 +290,21 @@ function api(path, options = {}) {
   });
 }
 
+// The server rejects a view-only member's writes regardless (requireEditAccess
+// on PUT /api/state) - this just skips the doomed round-trip client-side and
+// tells them once why, instead of a silent failed save or a toast on every
+// single keystroke.
+let viewOnlyToastShownAt = 0;
+
 function autosaveState() {
   if (!state) return;
+  if (sessionUser?.accessLevel === "view") {
+    if (Date.now() - viewOnlyToastShownAt > 10000) {
+      viewOnlyToastShownAt = Date.now();
+      showToast("You have view-only access - changes here won't be saved.", { type: "info" });
+    }
+    return;
+  }
   clearTimeout(autosaveTimer);
   autosaveTimer = setTimeout(() => {
     api("/api/state", { method: "PUT", body: JSON.stringify(state) }).catch((error) => {
@@ -1183,15 +1204,28 @@ function ensureUnifiedBudgetTaxonomy() {
 // the picker.
 function switchBudgetMonth(newMonth) {
   if (!newMonth || newMonth === state.budget.month) return;
+  const previousMonth = state.budget.month;
   rememberCurrentBudgetSnapshot();
   state.budget.month = newMonth;
   state.budget.monthPreferenceSet = true;
   const existing = (state.budgetHistory || []).find((budget) => budget.month === newMonth);
   const carryForwardSource = existing || availablePreviousBudgets()[0];
   const plannedByLineId = plannedByLineIdFromSnapshot(carryForwardSource);
+  // Rollover only applies the first time a new month is actually opened
+  // (no snapshot yet, i.e. this isn't just re-visiting a month whose plan
+  // was already saved/edited) - otherwise switching away and back would
+  // silently keep adding the same leftover in again on every revisit.
+  const isFreshMonth = !existing && carryForwardSource?.month === previousMonth;
   state.budget.categories = state.budget.categories.map((category) => ({
     ...category,
-    lines: category.lines.map((line) => ({ ...line, planned: plannedByLineId.get(line.id) ?? 0 }))
+    lines: category.lines.map((line) => {
+      const carriedPlanned = plannedByLineId.get(line.id) ?? 0;
+      if (!isFreshMonth || !line.rolloverEnabled) return { ...line, planned: carriedPlanned, rolloverAmount: 0 };
+      const previousPlanned = Number(carryForwardSource.categories.flatMap((c) => c.lines).find((l) => l.id === line.id)?.planned || 0);
+      const previousSpent = spentByLineInMonth(state.transactions, line.id, previousMonth);
+      const leftover = Math.max(0, Math.round((previousPlanned - previousSpent) * 100) / 100);
+      return { ...line, planned: carriedPlanned + leftover, rolloverAmount: leftover };
+    })
   }));
   state.budget.income = existing ? Number(existing.income || 0) : 0;
 }
@@ -1251,6 +1285,23 @@ function addMonthsToDateKey(value, months) {
   if (!date) return "";
   const targetMonthIndex = date.getMonth() + months;
   return dateKeyFromParts(date.getFullYear(), targetMonthIndex, date.getDate());
+}
+
+// A recurring reminder doesn't track a parallel per-occurrence completion
+// map the way chores do - it just self-advances to its next due date and
+// resets to not-done, the same one-shot-then-renew pattern recurring budget
+// bills already use (nextRecurringBudgetDueDate) - simpler, and there's only
+// ever one live occurrence of a reminder to show at a time anyway.
+function advanceReminderDate(value, recurrence) {
+  if (recurrence === "weekly") {
+    const date = dateFromDateKey(value);
+    if (!date) return value;
+    date.setDate(date.getDate() + 7);
+    return dateKey(date);
+  }
+  if (recurrence === "monthly") return addMonthsToDateKey(value, 1) || value;
+  if (recurrence === "yearly") return addMonthsToDateKey(value, 12) || value;
+  return value;
 }
 
 function nextRecurringBudgetDueDate(bill, selectedMonth = state.budget.month) {
@@ -1403,6 +1454,7 @@ function renderShell() {
           : `${monthLabel()} plan`;
   $("#householdName").textContent = title.toUpperCase();
   $("#homeStatusLine").hidden = !isHomeView;
+  $("#viewOnlyBanner").hidden = sessionUser?.accessLevel !== "view";
   if (isHomeView) {
     const firstName = (sessionUser?.name || "there").trim().split(" ")[0];
     const hour = new Date().getHours();
@@ -1531,6 +1583,7 @@ function render() {
   ensureRecurringBudgetBills();
   ensurePaycheckRecurrenceData();
   ensurePaycheckOccurrencesGenerated();
+  ensureGoalAutoContributions();
   ensureIOUsData();
   ensureFriendsData();
   state.budget.income = budgetIncomeFromPaychecks();
@@ -1706,6 +1759,7 @@ function renderBudget() {
   ensurePaycheckRecurrenceData();
   ensureAccountsData();
   ensureCategoryColors();
+  const budgetMembers = calendarAssigneeOptions();
   const setupStarted = state.budget.setupStarted ?? (state.paychecks.length > 0 || state.budget.categories.length > 0);
   if (!setupStarted) {
     return `<section class="onboarding-empty budget-onboarding">
@@ -1769,27 +1823,37 @@ function renderBudget() {
             <button id="deleteCategoryByNameButton" class="danger-button" type="button">Delete selected</button>
           </div>
           <p class="muted">Bills like HOA, insurance, property tax, subscriptions, or memberships can be made recurring to automatically set aside savings each month.</p>
+          ${budgetMembers.length ? `<div class="reports-scope-pills budget-member-pills" role="group" aria-label="Filter by member">
+            <button type="button" class="${budgetMemberFilter === "all" ? "active" : ""}" data-budget-member-filter="all">Everyone</button>
+            ${budgetMembers.map((member) => `<button type="button" class="${budgetMemberFilter === assigneeKey(member) ? "active" : ""}" data-budget-member-filter="${escapeHtml(assigneeKey(member))}">${escapeHtml(member.name)}</button>`).join("")}
+          </div>` : ""}
           <div class="budget-table">
-            ${state.budget.categories.map((category, categoryIndex) => `
+            ${state.budget.categories.map((category, categoryIndex) => {
+              const visibleEntries = category.lines
+                .map((line, lineIndex) => ({ line, lineIndex }))
+                .filter(({ line }) => budgetMemberFilter === "all" || (line.ownerId || "") === budgetMemberFilter);
+              if (budgetMemberFilter !== "all" && !visibleEntries.length) return "";
+              return `
               <div class="category-row">
                 <div class="category-title">
                   <i style="background:${category.color}"></i>
-                  <div class="category-name"><input class="category-name-input" data-budget-category-name="${categoryIndex}" value="${escapeHtml(category.name)}" aria-label="Category name"><small data-category-left="${categoryIndex}">${money.format(category.lines.reduce((sum, line) => sum + Number(line.planned) - spentByLine(line.id), 0))} left</small></div>
-                  <b class="category-planned" data-category-planned="${categoryIndex}">${money.format(category.lines.reduce((sum, line) => sum + Number(line.planned), 0))} planned</b>
-                  <span class="category-spent" data-category-spent="${categoryIndex}">${money.format(category.lines.reduce((sum, line) => sum + spentByLine(line.id), 0))} spent</span>
+                  <div class="category-name"><input class="category-name-input" data-budget-category-name="${categoryIndex}" value="${escapeHtml(category.name)}" aria-label="Category name"><small data-category-left="${categoryIndex}">${money.format(visibleEntries.reduce((sum, { line }) => sum + Number(line.planned) - spentByLine(line.id), 0))} left</small></div>
+                  <b class="category-planned" data-category-planned="${categoryIndex}">${money.format(visibleEntries.reduce((sum, { line }) => sum + Number(line.planned), 0))} planned</b>
+                  <span class="category-spent" data-category-spent="${categoryIndex}">${money.format(visibleEntries.reduce((sum, { line }) => sum + spentByLine(line.id), 0))} spent</span>
                   <button class="category-add-line" data-add-line-category="${categoryIndex}" type="button">+ Add subcategory</button>
                   <button class="icon-button danger-button" data-delete-category="${categoryIndex}" type="button" aria-label="Remove ${category.name}">×</button>
                 </div>
               </div>
-              ${category.lines.length ? `<div class="budget-line-head">
+              ${visibleEntries.length ? `<div class="budget-line-head">
                 <span>Subcategory</span>
                 <span>Due date</span>
                 <span>Planned</span>
                 <span>Spent</span>
                 <span>Remaining</span>
+                <span>Owner</span>
                 <span></span>
               </div>` : ""}
-              ${category.lines.map((line, lineIndex) => {
+              ${visibleEntries.map(({ line, lineIndex }) => {
                 const recurring = line.recurringBill?.enabled ? recurringBudgetSetAside(line.recurringBill) : null;
                 const spent = spentByLine(line.id);
                 const remaining = Number(line.planned) - spent;
@@ -1800,8 +1864,13 @@ function renderBudget() {
                     : `<input data-budget-due-date="${categoryIndex}:${lineIndex}" type="date" min="${monthDateMin()}" max="${monthDateMax()}" value="${dueDateValue(line.dueDay)}" aria-label="Due date for ${line.name}">`}
                   <input class="money-input" data-budget-line="${categoryIndex}:${lineIndex}" type="number" step="0.01" value="${line.planned}" min="0" ${recurring ? "readonly" : ""} aria-label="Planned amount for ${line.name}">
                   <span>${exactMoney.format(spent)}</span>
-                  <b data-line-remaining="${categoryIndex}:${lineIndex}" class="${remaining < 0 ? "danger" : ""}">${exactMoney.format(remaining)}</b>
+                  <b data-line-remaining="${categoryIndex}:${lineIndex}" class="${remaining < 0 ? "danger" : ""}">${exactMoney.format(remaining)}${line.rolloverAmount > 0 ? `<small class="budget-rollover-badge" title="Unspent from last month, carried into this month's planned amount">+${exactMoney.format(line.rolloverAmount)} rolled over</small>` : ""}</b>
+                  <select class="budget-line-owner-select" data-budget-line-owner="${categoryIndex}:${lineIndex}" aria-label="Owner for ${line.name}">
+                    <option value="">Household</option>
+                    ${budgetMembers.map((member) => `<option value="${escapeHtml(assigneeKey(member))}" ${(line.ownerId || "") === assigneeKey(member) ? "selected" : ""}>${escapeHtml(member.name)}</option>`).join("")}
+                  </select>
                   <div class="budget-line-actions">
+                    <button class="icon-button rollover-toggle ${line.rolloverEnabled ? "active" : ""}" data-toggle-rollover="${categoryIndex}:${lineIndex}" type="button" title="${line.rolloverEnabled ? "Rollover on: next month's leftover carries forward" : "Carry next month's unspent balance into this line automatically"}" aria-pressed="${Boolean(line.rolloverEnabled)}" aria-label="${line.rolloverEnabled ? "Turn off rollover" : "Turn on rollover"} for ${line.name}">⤴</button>
                     ${recurring ? "" : `<button class="icon-button recurring-budget-toggle" data-enable-recurring-budget="${categoryIndex}:${lineIndex}" type="button" title="Automatically set aside savings each month for bills like HOA, insurance, property tax, subscriptions, or memberships." aria-label="Make ${line.name} recurring">↻</button>`}
                     <button class="icon-button danger-button" data-delete-line="${categoryIndex}:${lineIndex}" type="button" aria-label="Remove ${line.name}">×</button>
                   </div>
@@ -1814,7 +1883,8 @@ function renderBudget() {
                   </div>` : ""}
                 </div>`;
               }).join("")}
-            `).join("")}
+            `;
+            }).join("")}
           </div>
         </section>
       </div>
@@ -1866,6 +1936,7 @@ function ledgerEntryRow(transaction, index, transferMatch) {
   const lineOptions = (transaction.lineId ? "" : `<option value="" disabled selected>Choose a subcategory…</option>`) + allLines().map((line) => `<option value="${line.id}" ${line.id === transaction.lineId ? "selected" : ""}>${line.category} - ${line.name}</option>`).join("");
   return `
     <div class="ledger-entry-row ${state.accounts.length ? "has-accounts" : ""}">
+      <input type="checkbox" aria-label="Select ${escapeHtml(transaction.payee)} for bulk categorize" data-ledger-entry-select="${index}" ${ledgerSelectedIndices.has(index) ? "checked" : ""}>
       <input class="line-name-input" aria-label="Payee" data-ledger-entry-payee="${index}" value="${escapeHtml(transaction.payee)}">
       <input class="money-input" aria-label="Amount" type="number" step="0.01" data-ledger-entry-amount="${index}" value="${transaction.amount}">
       <input aria-label="Date" type="date" data-ledger-entry-date="${index}" value="${transaction.date}">
@@ -2060,8 +2131,20 @@ function renderTransactions() {
               .filter(({ transaction }) => transaction.date?.slice(0, 7) === state.budget.month);
             if (!monthTransactions.length) return `<div class="empty-inline">No transactions yet</div>`;
             const sorted = sortByTransactionField(monthTransactions, transactionSort.field, transactionSort.direction);
-            return `<div class="ledger-entry-scroll">
+            const visibleIndices = sorted.map(({ index }) => index);
+            const allVisibleSelected = visibleIndices.length > 0 && visibleIndices.every((index) => ledgerSelectedIndices.has(index));
+            return `${ledgerSelectedIndices.size ? `<div class="ledger-bulk-bar">
+                <strong>${ledgerSelectedIndices.size} selected</strong>
+                <select id="ledgerBulkLineSelect" aria-label="Subcategory to apply to selected transactions">
+                  <option value="" disabled selected>Choose a subcategory…</option>
+                  ${allLines().map((line) => `<option value="${line.id}">${line.category} - ${line.name}</option>`).join("")}
+                </select>
+                <button id="ledgerBulkApplyButton" type="button">Apply to selected</button>
+                <button id="ledgerBulkClearButton" class="ghost" type="button">Clear selection</button>
+              </div>` : ""}
+              <div class="ledger-entry-scroll">
               <div class="ledger-entry-head ${state.accounts.length ? "has-accounts" : ""}">
+                <input type="checkbox" aria-label="Select all transactions" id="ledgerSelectAllCheckbox" ${allVisibleSelected ? "checked" : ""}>
                 <button type="button" data-sort-transactions="payee">Payee${transactionSortIndicator("payee")}</button>
                 <button type="button" data-sort-transactions="amount">Amount${transactionSortIndicator("amount")}</button>
                 <button type="button" data-sort-transactions="date">Date${transactionSortIndicator("date")}</button>
@@ -2392,6 +2475,7 @@ function renderCalendar() {
             <label data-annual-time-field hidden>Remind me at<input name="annualTime" type="text" inputmode="numeric" class="time24-input" placeholder="HH:MM" maxlength="5" value="09:00"></label>
             <label data-plain-reminder-field hidden>Remind me on<input name="reminderAtDate" type="date"></label>
             <label data-plain-reminder-field hidden>at<input name="reminderAtTime" type="text" inputmode="numeric" class="time24-input" placeholder="HH:MM" maxlength="5"></label>
+            <label data-plain-reminder-field hidden>Repeat<select name="reminderRecurrence"><option value="once">Once</option><option value="weekly">Weekly</option><option value="monthly">Monthly</option><option value="yearly">Yearly</option></select></label>
             <div class="assign-to-field custom-combobox">
               <span class="assign-to-label">Assign to</span>
               <button type="button" id="assigneeComboTrigger" class="assignee-combo-trigger"></button>
@@ -2416,7 +2500,18 @@ function renderCalendar() {
             ${calendarCells().map((cell) => `
             <div class="day-cell ${cell.muted ? "muted-cell" : ""} ${cell.currentMonth ? "" : "outside-month"} ${cell.dateKey === dateKey(new Date()) ? "today-cell" : ""}" data-calendar-day="${cell.dateKey}" role="button" tabindex="0" aria-label="Add an item on ${cell.dateKey}">
               <b>${cell.day}</b>
-              ${cell.items.map((item) => `<button class="event ${item.eventType || item.type}" style="border-left:3px solid ${memberColor(item.assignees?.[0]?.key)}" data-edit-calendar-item="${item.sourceKind}:${item.sourceId}" type="button" title="Edit ${escapeHtml(item.title)}${assigneeNames(item.assignees) ? ` · ${escapeHtml(assigneeNames(item.assignees))}` : ""}">${escapeHtml(item.title)}</button>`).join("")}
+              ${cell.items.map((item) => {
+                // Escalation only makes sense for chores/reminders, which
+                // track an ongoing "still not done" state - an annual
+                // birthday/anniversary chip has its own separate "wished"
+                // tracking and isn't meant to look alarming once its date
+                // has simply passed within the visible month grid.
+                const escalates = item.sourceKind === "chore" || item.type === "reminder";
+                const itemDateKey = `${state.budget.month}-${item.date.slice(3)}`;
+                const daysOverdue = escalates && itemDateKey < today ? Math.round((new Date(`${today}T00:00:00`) - new Date(`${itemDateKey}T00:00:00`)) / 86400000) : 0;
+                const overdueClass = daysOverdue > 7 ? "overdue-severe" : daysOverdue > 2 ? "overdue-moderate" : daysOverdue > 0 ? "overdue-mild" : "";
+                return `<button class="event ${item.eventType || item.type} ${overdueClass}" style="border-left:3px solid ${memberColor(item.assignees?.[0]?.key)}" data-edit-calendar-item="${item.sourceKind}:${item.sourceId}" type="button" title="Edit ${escapeHtml(item.title)}${assigneeNames(item.assignees) ? ` · ${escapeHtml(assigneeNames(item.assignees))}` : ""}${daysOverdue ? ` · ${daysOverdue}d overdue` : ""}">${item.recurring ? `<span class="event-recurring-badge" aria-hidden="true">🔁</span> ` : ""}${daysOverdue ? `<span class="event-overdue-badge" aria-hidden="true">⚠${daysOverdue}d</span> ` : ""}${escapeHtml(item.title)}</button>`;
+              }).join("")}
             </div>
           `).join("")}</div>
         </section>
@@ -2648,6 +2743,33 @@ function renderNoteLabelPicker(note = null, compact = false) {
   </details>`;
 }
 
+// Same details/radio-picker convention as Documents' note-link picker
+// (renderDocumentNoteLinkPicker), just pointed the other way: here the
+// bill link lives on the note, keyed to a real budget-line id from
+// billsRows() so it survives a bill being renamed.
+function renderNoteBillLinkPicker(note) {
+  const bills = billsRows();
+  return `<details class="note-label-picker note-bill-link-picker">
+    <summary title="Link to a bill" aria-label="${note.billLineId ? "Linked to a bill" : "Link to a bill"}">🧾</summary>
+    <div class="note-label-picker-options">
+      <label>
+        <input type="radio" name="note-bill-${note.id}" data-note-bill-link="${note.id}" value="" ${!note.billLineId ? "checked" : ""}>
+        <span>No linked bill</span>
+      </label>
+      ${bills.length ? bills.map((bill) => `<label>
+        <input type="radio" name="note-bill-${note.id}" data-note-bill-link="${note.id}" value="${bill.id}" ${note.billLineId === bill.id ? "checked" : ""}>
+        <span>${escapeHtml(bill.name)}</span>
+      </label>`).join("") : `<small>No bills yet</small>`}
+    </div>
+  </details>`;
+}
+
+function linkedBillName(note) {
+  if (!note.billLineId) return null;
+  const bill = billsRows().find((item) => item.id === note.billLineId);
+  return bill ? bill.name : null;
+}
+
 function renderNoteCard(note) {
   const { open, completed } = bucketChecklistItems(note.checklist);
   const checklistRow = (item) => `<div class="note-check-row ${item.done ? "done" : ""} ${item.parentId ? "child-item" : ""}" draggable="true" data-drag-checklist-item="${note.id}:${item.id}">
@@ -2668,6 +2790,7 @@ function renderNoteCard(note) {
     </div>
     <textarea class="note-body-input" data-note-body="${note.id}" rows="${note.body ? "2" : "1"}" placeholder="Take a note..." aria-label="Note body">${escapeHtml(note.body || "")}</textarea>
     ${note.reminder ? `<div class="note-reminder">Reminder · ${formatDateTime(note.reminder)}</div>` : ""}
+    ${linkedBillName(note) ? `<div class="note-reminder note-linked-bill">🧾 Linked to ${escapeHtml(linkedBillName(note))}</div>` : ""}
     ${note.showChecklist ? open.map(checklistRow).join("") : ""}
     ${note.showChecklist ? `<form class="note-add-item-form" data-add-note-item="${note.id}">
       <div class="note-item-combobox">
@@ -2681,6 +2804,7 @@ function renderNoteCard(note) {
       <label class="note-color-control" title="Change color"><span aria-hidden="true">◉</span><select data-note-color="${note.id}" aria-label="Change note color"><option value="#ffffff" ${note.color === "#ffffff" ? "selected" : ""}>White</option><option value="#fff7d6" ${note.color === "#fff7d6" ? "selected" : ""}>Yellow</option><option value="#eef7ff" ${note.color === "#eef7ff" ? "selected" : ""}>Blue</option><option value="#eaf8ef" ${note.color === "#eaf8ef" ? "selected" : ""}>Green</option><option value="#fff0ee" ${note.color === "#fff0ee" ? "selected" : ""}>Coral</option></select></label>
       <details class="note-toolbar-popover"><summary title="Set reminder" aria-label="Set reminder">◷</summary><div class="note-toolbar-popover-panel"><label>Reminder date<input type="date" data-note-reminder-date="${note.id}" value="${escapeHtml((note.reminder || "").slice(0, 10))}"></label><label>Time<input type="text" inputmode="numeric" class="time24-input" placeholder="HH:MM" maxlength="5" data-note-reminder-time="${note.id}" value="${escapeHtml((note.reminder || "").slice(11, 16))}"></label></div></details>
       <div class="note-toolbar-labels">${renderNoteLabelPicker(note, true)}</div>
+      ${renderNoteBillLinkPicker(note)}
       <button data-archive-note="${note.id}" type="button" title="${note.archived ? "Unarchive" : "Archive"}" aria-label="${note.archived ? "Unarchive note" : "Archive note"}">↓</button>
       <details class="note-more-menu"><summary title="More actions" aria-label="More actions">⋮</summary><div class="note-more-menu-panel">
         <button data-duplicate-note="${note.id}" type="button">Make a copy</button>
@@ -2982,8 +3106,12 @@ function renderPlanTask(task) {
     <input type="checkbox" data-plan-task-check="${task.id}" ${task.done ? "checked" : ""} aria-label="Complete ${escapeHtml(task.title)}">
     <div class="plan-task-copy">
       <input class="plan-task-title" data-plan-task-title="${task.id}" value="${escapeHtml(task.title)}" aria-label="Task title">
-      <small>${escapeHtml(formatPlanAnchorDate(task))}</small>
+      <small>${escapeHtml(formatPlanAnchorDate(task))}${task.goalName ? ` · 🎯 ${escapeHtml(task.goalName)}` : ""}</small>
     </div>
+    <select class="plan-task-goal-select" data-plan-task-goal="${task.id}" aria-label="Link ${escapeHtml(task.title)} to a goal">
+      <option value="">No goal</option>
+      ${state.goals.sinkingFunds.map((fund) => `<option value="${escapeHtml(fund.name)}" ${task.goalName === fund.name ? "selected" : ""}>${escapeHtml(fund.name)}</option>`).join("")}
+    </select>
     <button class="icon-button danger-button" data-delete-plan-task="${task.id}" type="button" aria-label="Delete task">×</button>
   </div>${renderSubtasks(task)}`;
 }
@@ -3266,6 +3394,7 @@ async function uploadDocumentFile(file, folderId) {
     if (!uploadResponse.ok) throw new Error("Upload to storage failed");
   }
   await api(`/api/documents/${documentId}/confirm`, { method: "POST" });
+  return documentId;
 }
 
 function readAllDirectoryEntries(directoryReader) {
@@ -4007,6 +4136,9 @@ function iouRow(iou) {
     <div class="compact-row-line">
       ${state.accounts.length ? `<select class="income-recurrence-select" data-iou-account="${iou.id}" aria-label="Account for ${escapeHtml(iou.person)}"><option value="">Not linked</option>${accountOptions(iou.accountId || "", { excludeType: "credit_card" })}</select>` : ""}
       <div class="compact-row-actions">
+        ${iou.receiptDocumentId
+          ? `<button class="icon-button" data-documents-open-file="${iou.receiptDocumentId}" type="button" aria-label="View receipt for ${escapeHtml(iou.person)}" title="View receipt">📎</button>`
+          : `<label class="icon-button iou-receipt-upload" title="Attach a receipt photo" aria-label="Attach a receipt photo for ${escapeHtml(iou.person)}">📷<input type="file" accept="image/*,application/pdf" data-iou-receipt-upload="${iou.id}" hidden></label>`}
         ${iou.settled ? "" : `<button class="icon-button" data-settle-iou="${iou.id}" type="button" aria-label="Mark settled with ${escapeHtml(iou.person)}">✓</button>`}
         <button class="icon-button danger-button" data-delete-iou="${iou.id}" type="button" aria-label="Delete IOU with ${escapeHtml(iou.person)}">×</button>
       </div>
@@ -4349,6 +4481,17 @@ function renderGoals() {
               <input type="number" min="0" step="0.01" placeholder="Add a contribution" data-goal-contribution-input="${index}" aria-label="Contribution amount for ${escapeHtml(fund.name || "this goal")}">
               <button type="button" class="ghost" data-goal-contribution-add="${index}">+ Add</button>
             </div>
+            <div class="goal-auto-contribute-row">
+              <label class="row-field row-select"><small>Auto-contribute</small>
+                <select data-goal-auto-mode="${index}">
+                  <option value="off" ${!fund.autoContribute?.enabled ? "selected" : ""}>Off</option>
+                  <option value="roundup" ${fund.autoContribute?.enabled && fund.autoContribute.mode === "roundup" ? "selected" : ""}>Round-up purchases</option>
+                  <option value="percent" ${fund.autoContribute?.enabled && fund.autoContribute.mode === "percent" ? "selected" : ""}>% of each paycheck</option>
+                </select>
+              </label>
+              ${fund.autoContribute?.enabled && fund.autoContribute.mode === "percent" ? `<label class="row-field row-select"><small>Percent</small><input type="number" min="0" max="100" step="1" value="${Number(fund.autoContribute.percent || 0)}" data-goal-auto-percent="${index}" aria-label="Percent of each paycheck for ${escapeHtml(fund.name || "this goal")}"></label>` : ""}
+              ${fund.autoContribute?.enabled ? `<small class="muted">${fund.autoContribute.mode === "roundup" ? "Rounds every purchase up to the next dollar" : `Sets aside ${Number(fund.autoContribute.percent || 0)}% of every paycheck`} automatically.</small>` : ""}
+            </div>
           </article>
         `;
         }).join("") : `<div class="onboarding-empty compact-onboarding"><div class="empty-symbol" aria-hidden="true">◎</div><h3>Create your first goal</h3><p>Give it a target amount and date, then update the saved balance as you make progress.</p><button id="emptyAddGoalButton" type="button">Add a goal</button></div>`}
@@ -4575,6 +4718,12 @@ function renderSharing() {
               return `<div class="sharing-member-row">
               <div><strong>${escapeHtml(member.name)}</strong><small>${escapeHtml(member.email)}</small></div>
               <span class="pill">${escapeHtml(member.role)} · ${member.status === "pending" ? "Invited" : "Active"}${member.isOwner ? " · Owner" : ""}</span>
+              ${sharingAccess?.canManage && !member.isOwner && member.status === "active"
+                ? `<select class="sharing-access-level-select" data-member-access-level="${escapeHtml(member.email)}" aria-label="Permission level for ${escapeHtml(member.name)}">
+                    <option value="edit" ${(member.accessLevel || "edit") === "edit" ? "selected" : ""}>Can edit</option>
+                    <option value="view" ${member.accessLevel === "view" ? "selected" : ""}>View only</option>
+                  </select>`
+                : member.isOwner ? `<span class="pill">Can edit</span>` : ""}
               <div class="sharing-member-actions">
                 ${canAddHousehold ? `<details class="member-add-household-picker">
                   <summary class="ghost-summary">+ Add household</summary>
@@ -5272,7 +5421,7 @@ function scheduleItems() {
   const selectedMonth = state.budget.month;
   const oneTimeEvents = state.calendar.events
     .filter((event) => !ANNUAL_EVENT_TYPES.includes(event.type) && event.date?.startsWith(selectedMonth) && !isReminderComplete(event))
-    .map((event) => ({ title: event.title, date: event.date.slice(5), displayDate: `${event.date.slice(5)}${event.dateTime ? ` · ${formatReminderTime(event.dateTime)}` : ""}`, type: event.type, sourceKind: "event", sourceId: event.id, assignees: event.assignees || [] }));
+    .map((event) => ({ title: event.title, date: event.date.slice(5), displayDate: `${event.date.slice(5)}${event.dateTime ? ` · ${formatReminderTime(event.dateTime)}` : ""}`, type: event.type, sourceKind: "event", sourceId: event.id, assignees: event.assignees || [], recurring: Boolean(event.recurrence && event.recurrence !== "once") }));
   const chores = state.calendar.chores.flatMap((chore) =>
     choreOccurrencesForMonth(chore).map((occurrence) => ({
       title: chore.title,
@@ -5282,7 +5431,8 @@ function scheduleItems() {
       eventType: "chore",
       sourceKind: "chore",
       sourceId: chore.id,
-      assignees: chore.assignees || []
+      assignees: chore.assignees || [],
+      recurring: Boolean(chore.recurrence && chore.recurrence !== "once")
     }))
   );
   const annualEvents = annualEventScheduleItems();
@@ -5356,6 +5506,59 @@ function ensurePaycheckOccurrencesGenerated() {
     }
     paycheck.generatedThroughDate = capKey;
   });
+}
+
+// Runs on every render (same convention as ensurePaycheckOccurrencesGenerated
+// just above) so a goal with auto-contribute enabled keeps accumulating even
+// when nobody's actually looking at the Goals page.
+//
+// Round-up tracks a watermark - how many transactions have already been
+// accounted for - rather than a set of processed transaction ids, because
+// transactions have no stable id of their own anywhere else in this app
+// (they're addressed by array index). Percent-of-paycheck tracks processed
+// paycheck-OCCURRENCE ids instead, since those do have a real id
+// (ensurePaycheckOccurrencesGenerated already mints one per occurrence).
+//
+// Both are safe to call every render: once a transaction/occurrence has been
+// counted, the watermark/id list rules it out next time, so nothing is ever
+// double-credited just because render() ran again.
+function ensureGoalAutoContributions() {
+  let changed = false;
+  state.goals.sinkingFunds.forEach((fund) => {
+    const auto = fund.autoContribute;
+    if (!auto?.enabled) return;
+    if (auto.mode === "roundup") {
+      fund.roundupProcessedCount ||= 0;
+      const alreadySeen = fund.roundupProcessedCount;
+      if (state.transactions.length <= alreadySeen) return;
+      const newTransactions = state.transactions.slice(alreadySeen);
+      const roundup = newTransactions.reduce((sum, transaction) => {
+        const amount = Number(transaction.amount || 0);
+        // Only positive (expense) amounts round up - a refund/income row
+        // has nothing to "round" toward a purchase.
+        return amount > 0 ? sum + (Math.ceil(amount) - amount) : sum;
+      }, 0);
+      fund.roundupProcessedCount = state.transactions.length;
+      if (roundup > 0.004) {
+        fund.saved = Math.round((Number(fund.saved || 0) + roundup) * 100) / 100;
+        changed = true;
+      }
+    } else if (auto.mode === "percent") {
+      const percent = Number(auto.percent || 0);
+      if (percent <= 0) return;
+      fund.percentProcessedOccurrenceIds ||= [];
+      const today = dateKey(new Date());
+      const newlyReceived = (state.paycheckOccurrences || []).filter((occurrence) => occurrence.date <= today && !fund.percentProcessedOccurrenceIds.includes(occurrence.id));
+      if (!newlyReceived.length) return;
+      const contribution = newlyReceived.reduce((sum, occurrence) => sum + Number(occurrence.amount || 0) * (percent / 100), 0);
+      fund.percentProcessedOccurrenceIds.push(...newlyReceived.map((occurrence) => occurrence.id));
+      if (contribution > 0.004) {
+        fund.saved = Math.round((Number(fund.saved || 0) + contribution) * 100) / 100;
+        changed = true;
+      }
+    }
+  });
+  if (changed) autosaveState();
 }
 
 // A recurring bill surfaces each elapsed period as a Bank stream draft for
@@ -6724,6 +6927,17 @@ function bindViewEvents() {
     });
   });
 
+  document.querySelectorAll("[data-note-bill-link]").forEach((input) => {
+    input.addEventListener("change", () => {
+      if (!input.checked) return;
+      const note = state.notes.entries.find((item) => item.id === input.dataset.noteBillLink);
+      if (!note) return;
+      note.billLineId = input.value || null;
+      autosaveState();
+      render();
+    });
+  });
+
   document.querySelectorAll("[data-duplicate-note]").forEach((button) => {
     button.addEventListener("click", () => {
       const note = state.notes.entries.find((item) => item.id === button.dataset.duplicateNote);
@@ -7121,6 +7335,16 @@ function bindViewEvents() {
     });
   });
 
+  document.querySelectorAll("[data-plan-task-goal]").forEach((select) => {
+    select.addEventListener("change", () => {
+      const task = privateData.plans.tasks.find((item) => item.id === select.dataset.planTaskGoal);
+      if (!task) return;
+      task.goalName = select.value || null;
+      autosavePlans();
+      render();
+    });
+  });
+
   document.querySelectorAll("[data-add-plan-subtask]").forEach((form) => {
     form.addEventListener("submit", (event) => {
       event.preventDefault();
@@ -7252,6 +7476,16 @@ function bindViewEvents() {
     });
   });
 
+  document.querySelectorAll("[data-toggle-rollover]").forEach((button) => {
+    button.addEventListener("click", () => {
+      const [categoryIndex, lineIndex] = button.dataset.toggleRollover.split(":").map(Number);
+      const line = state.budget.categories[categoryIndex].lines[lineIndex];
+      line.rolloverEnabled = !line.rolloverEnabled;
+      autosaveState();
+      render();
+    });
+  });
+
   document.querySelectorAll("[data-enable-recurring-budget]").forEach((button) => {
     button.addEventListener("click", () => {
       const [categoryIndex, lineIndex] = button.dataset.enableRecurringBudget.split(":").map(Number);
@@ -7357,6 +7591,21 @@ function bindViewEvents() {
       autosaveState();
     });
     input.addEventListener("change", () => {
+      render();
+    });
+  });
+
+  document.querySelectorAll("[data-budget-line-owner]").forEach((select) => {
+    select.addEventListener("change", () => {
+      const [categoryIndex, lineIndex] = select.dataset.budgetLineOwner.split(":").map(Number);
+      state.budget.categories[categoryIndex].lines[lineIndex].ownerId = select.value || null;
+      autosaveState();
+    });
+  });
+
+  document.querySelectorAll("[data-budget-member-filter]").forEach((button) => {
+    button.addEventListener("click", () => {
+      budgetMemberFilter = button.dataset.budgetMemberFilter;
       render();
     });
   });
@@ -8157,6 +8406,42 @@ function bindViewEvents() {
     });
   });
 
+  document.querySelectorAll("[data-ledger-entry-select]").forEach((checkbox) => {
+    checkbox.addEventListener("change", () => {
+      const index = Number(checkbox.dataset.ledgerEntrySelect);
+      if (checkbox.checked) ledgerSelectedIndices.add(index);
+      else ledgerSelectedIndices.delete(index);
+      render();
+    });
+  });
+
+  $("#ledgerSelectAllCheckbox")?.addEventListener("change", (event) => {
+    document.querySelectorAll("[data-ledger-entry-select]").forEach((checkbox) => {
+      const index = Number(checkbox.dataset.ledgerEntrySelect);
+      if (event.currentTarget.checked) ledgerSelectedIndices.add(index);
+      else ledgerSelectedIndices.delete(index);
+    });
+    render();
+  });
+
+  $("#ledgerBulkClearButton")?.addEventListener("click", () => {
+    ledgerSelectedIndices.clear();
+    render();
+  });
+
+  $("#ledgerBulkApplyButton")?.addEventListener("click", () => {
+    const lineId = $("#ledgerBulkLineSelect")?.value;
+    if (!lineId) return;
+    const snapshot = lineSnapshot(lineId);
+    ledgerSelectedIndices.forEach((index) => {
+      const transaction = state.transactions[index];
+      if (transaction) Object.assign(transaction, { lineId }, snapshot);
+    });
+    ledgerSelectedIndices.clear();
+    autosaveState();
+    render();
+  });
+
   document.querySelectorAll("[data-split-transaction-edit]").forEach((button) => {
     button.addEventListener("click", () => {
       const index = Number(button.dataset.splitTransactionEdit);
@@ -8743,6 +9028,30 @@ function bindViewEvents() {
   document.querySelectorAll("[data-delete-goal]").forEach((button) => {
     button.addEventListener("click", () => {
       state.goals.sinkingFunds.splice(Number(button.dataset.deleteGoal), 1);
+      autosaveState();
+      render();
+    });
+  });
+
+  document.querySelectorAll("[data-goal-auto-mode]").forEach((select) => {
+    select.addEventListener("change", () => {
+      const fund = state.goals.sinkingFunds[Number(select.dataset.goalAutoMode)];
+      if (!fund) return;
+      if (select.value === "off") {
+        fund.autoContribute = { enabled: false };
+      } else {
+        fund.autoContribute = { enabled: true, mode: select.value, percent: fund.autoContribute?.percent || 5 };
+      }
+      autosaveState();
+      render();
+    });
+  });
+
+  document.querySelectorAll("[data-goal-auto-percent]").forEach((input) => {
+    input.addEventListener("change", () => {
+      const fund = state.goals.sinkingFunds[Number(input.dataset.goalAutoPercent)];
+      if (!fund?.autoContribute) return;
+      fund.autoContribute.percent = Math.min(100, Math.max(0, Number(input.value || 0)));
       autosaveState();
       render();
     });
@@ -9454,6 +9763,7 @@ function bindViewEvents() {
         annual: isAnnual,
         location: isAnnual ? "" : String(data.location || "").trim(),
         reminderDays,
+        recurrence: isAnnual ? undefined : (data.reminderRecurrence || "once"),
         assignees
       };
       if (existing) {
@@ -9529,6 +9839,21 @@ function bindViewEvents() {
       event.completedBy = already
         ? event.completedBy.filter((item) => item !== key)
         : [...event.completedBy, key];
+      // Only a genuinely completing action (not un-checking) advances a
+      // recurring reminder - otherwise clicking "Mark done" then "Undo"
+      // would leave it silently jumped ahead to the wrong next date.
+      if (!already && event.type === "reminder" && event.recurrence && event.recurrence !== "once" && isReminderComplete(event)) {
+        const nextDate = advanceReminderDate(event.date, event.recurrence);
+        event.date = nextDate;
+        event.dateTime = `${nextDate}T${(event.dateTime || "09:00").slice(11, 16) || "09:00"}`;
+        if (event.reminderAt) {
+          const reminderTime = event.reminderAt.slice(11, 16) || "09:00";
+          const nextReminderDate = advanceReminderDate(event.reminderAt.slice(0, 10), event.recurrence);
+          event.reminderAt = `${nextReminderDate}T${reminderTime}`;
+          event.notifyAt = new Date(event.reminderAt).toISOString();
+        }
+        event.completedBy = [];
+      }
       autosaveState();
       render();
     });
@@ -9711,6 +10036,24 @@ function bindViewEvents() {
       $("#inviteEmailStatus").textContent = inviteEmailStatus;
       submitButton.disabled = false;
     }
+  });
+
+  document.querySelectorAll("[data-member-access-level]").forEach((select) => {
+    select.addEventListener("change", async () => {
+      const email = select.dataset.memberAccessLevel;
+      select.disabled = true;
+      try {
+        await api("/api/households/access", { method: "PATCH", body: JSON.stringify({ email, accessLevel: select.value }) });
+        state.household.activity.unshift(`${select.value === "view" ? "View-only" : "Edit"} access set for ${email}`);
+        await saveStateNow();
+        sharingAccess = null;
+        await loadSharingAccess(false);
+        render();
+      } catch (error) {
+        showToast(error.message);
+        select.disabled = false;
+      }
+    });
   });
 
   document.querySelectorAll("[data-revoke-household-access]").forEach((button) => {
@@ -10227,6 +10570,27 @@ function bindViewEvents() {
     });
   });
 
+  document.querySelectorAll("[data-iou-receipt-upload]").forEach((input) => {
+    input.addEventListener("change", async () => {
+      const file = input.files?.[0];
+      if (!file) return;
+      const iou = state.ious.find((item) => item.id === input.dataset.iouReceiptUpload);
+      if (!iou) return;
+      try {
+        // Receipts go through the same Documents upload pipeline as any
+        // other file (upload-url -> PUT -> confirm) - just parked at the
+        // household's document root rather than a chosen folder, since an
+        // IOU has no folder of its own to file it under.
+        const documentId = await uploadDocumentFile(file, null);
+        iou.receiptDocumentId = documentId;
+        autosaveState();
+        render();
+      } catch (error) {
+        showToast(error.message);
+      }
+    });
+  });
+
   document.querySelectorAll("[data-settle-iou]").forEach((button) => {
     button.addEventListener("click", () => {
       const iou = state.ious.find((item) => item.id === button.dataset.settleIou);
@@ -10498,6 +10862,7 @@ function editCalendarItem(reference) {
     : "";
   form.reminderAtDate.value = reminderAtValue ? reminderAtValue.slice(0, 10) : "";
   form.reminderAtTime.value = reminderAtValue ? reminderAtValue.slice(11, 16) : "";
+  form.reminderRecurrence.value = kind === "event" && item.type === "reminder" ? item.recurrence || "once" : "once";
   form.location.value = item.location || "";
   updateLocationDirectionsPreview();
   form.querySelector("[data-calendar-submit]").textContent = "Save changes";

@@ -49,6 +49,12 @@ CREATE TABLE IF NOT EXISTS household_memberships (
 ALTER TABLE household_memberships
   ADD COLUMN IF NOT EXISTS scopes JSONB NOT NULL DEFAULT '[]'::jsonb;
 
+-- 'edit' (default) or 'view' - a view-only member can see the whole
+-- household's data but every mutating request is rejected server-side (see
+-- requireEditAccess in server/index.js), not just hidden/disabled in the UI.
+ALTER TABLE household_memberships
+  ADD COLUMN IF NOT EXISTS access_level TEXT NOT NULL DEFAULT 'edit';
+
 UPDATE users u
 SET default_household_id = (
   SELECT hm.household_id

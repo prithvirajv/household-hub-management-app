@@ -855,3 +855,107 @@ test("a Google sign-in account is verified immediately since Google already conf
   assert.equal(signin.status, 201);
   assert.equal(signin.body.user.emailVerified, true);
 });
+
+test("a view-only member's writes are rejected server-side, and the owner can toggle access levels", async () => {
+  const ownerEmail = "access-level-owner@example.com";
+  const ownerSignup = await request("/api/auth/signup", {
+    method: "POST",
+    body: JSON.stringify({
+      email: ownerEmail, password: "Access-Owner-Password-123!", name: "Access Owner",
+      householdName: "Access Level Household", country: "US"
+    })
+  });
+  assert.equal(ownerSignup.status, 201);
+
+  const memberEmail = "access-level-member@example.com";
+  const invitation = await request("/api/households/invitations", {
+    method: "POST",
+    headers: { cookie: ownerSignup.cookie },
+    body: JSON.stringify({ email: memberEmail, name: "Access Member", role: "Member", scopes: ["Budget"] })
+  });
+  assert.equal(invitation.status, 201);
+  const accepted = await request("/api/auth/invitations/accept", {
+    method: "POST",
+    body: JSON.stringify({
+      email: memberEmail,
+      inviteCode: invitation.body.invitation.inviteCode,
+      password: "Access-Member-Password-123!"
+    })
+  });
+  assert.equal(accepted.status, 200);
+  const memberCookie = accepted.cookie;
+
+  // Defaults to "edit" - a freshly-invited member can write until told otherwise.
+  const stateBeforeGet = await request("/api/state", { headers: { cookie: memberCookie } });
+  assert.equal(stateBeforeGet.status, 200);
+  const editBeforeRestriction = await request("/api/state", {
+    method: "PUT",
+    headers: { cookie: memberCookie },
+    body: JSON.stringify(stateBeforeGet.body)
+  });
+  assert.equal(editBeforeRestriction.status, 200);
+
+  // A non-owner can't change anyone's access level.
+  const blockedChange = await request("/api/households/access", {
+    method: "PATCH",
+    headers: { cookie: memberCookie },
+    body: JSON.stringify({ email: memberEmail, accessLevel: "view" })
+  });
+  assert.equal(blockedChange.status, 403);
+
+  // The owner sets the member to view-only.
+  const setView = await request("/api/households/access", {
+    method: "PATCH",
+    headers: { cookie: ownerSignup.cookie },
+    body: JSON.stringify({ email: memberEmail, accessLevel: "view" })
+  });
+  assert.equal(setView.status, 200);
+  assert.equal(setView.body.accessLevel, "view");
+
+  // The owner's own access level can never be changed, even by themselves.
+  const changeOwnerAccess = await request("/api/households/access", {
+    method: "PATCH",
+    headers: { cookie: ownerSignup.cookie },
+    body: JSON.stringify({ email: ownerEmail, accessLevel: "view" })
+  });
+  assert.equal(changeOwnerAccess.status, 400);
+
+  // The member's session was established before the change - access level is
+  // read fresh from the membership on every request, not cached in the
+  // session cookie, so the very next request already reflects it.
+  const stateGetStillWorks = await request("/api/state", { headers: { cookie: memberCookie } });
+  assert.equal(stateGetStillWorks.status, 200, "a view-only member can still read");
+  const blockedWrite = await request("/api/state", {
+    method: "PUT",
+    headers: { cookie: memberCookie },
+    body: JSON.stringify(stateGetStillWorks.body)
+  });
+  assert.equal(blockedWrite.status, 403);
+
+  // Documents mutations are blocked too, not just the main state blob.
+  const blockedFolder = await request("/api/documents/folders", {
+    method: "POST",
+    headers: { cookie: memberCookie },
+    body: JSON.stringify({ name: "Should not be created" })
+  });
+  assert.equal(blockedFolder.status, 403);
+
+  const sharingList = await request("/api/households/access", { headers: { cookie: ownerSignup.cookie } });
+  const memberRow = sharingList.body.members.find((item) => item.email === memberEmail);
+  assert.equal(memberRow.accessLevel, "view");
+
+  // The owner restores edit access.
+  const setEdit = await request("/api/households/access", {
+    method: "PATCH",
+    headers: { cookie: ownerSignup.cookie },
+    body: JSON.stringify({ email: memberEmail, accessLevel: "edit" })
+  });
+  assert.equal(setEdit.status, 200);
+  const stateAfterRestore = await request("/api/state", { headers: { cookie: memberCookie } });
+  const editAfterRestore = await request("/api/state", {
+    method: "PUT",
+    headers: { cookie: memberCookie },
+    body: JSON.stringify(stateAfterRestore.body)
+  });
+  assert.equal(editAfterRestore.status, 200);
+});

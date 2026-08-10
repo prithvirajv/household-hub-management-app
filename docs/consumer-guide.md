@@ -73,6 +73,12 @@ more convenient.
 - Recurring bills (HOA, insurance, property tax, subscriptions) are worth
   marking as recurring so FamilyLoop sets aside savings for them every month
   instead of one big hit when the bill lands.
+- Select the **⤴ rollover** icon on a line to carry that line's unspent
+  balance into next month's planned amount automatically the first time you
+  open that new month — off by default, so it's opt-in per line.
+- Use the **Owner** dropdown on a line and the member pills above the table
+  to assign a subcategory to one person and filter the whole page down to
+  just their lines.
 
 ## Bills
 
@@ -112,6 +118,10 @@ more convenient.
    category.
 
 **Get the most out of it**
+- Check off a batch of rows using the checkbox in the Ledger's left column
+  (or the header checkbox for everything currently shown), pick a
+  subcategory from the bar that appears, and select **Apply to selected** to
+  categorize them all in one action.
 - A refund or return is auto-matched to its original purchase by payee,
   amount, and date, and pre-filled with that purchase's budget line — always
   double-check the suggested line before accepting, especially if it wasn't
@@ -191,6 +201,12 @@ more convenient.
   disappearing, so you can see what actually got done.
 - Assign chores to different household members and rotate fairly —
   everyone sees only their own past-due items highlighted on Home.
+- A plain Reminder can repeat too — set **Repeat** to weekly, monthly, or
+  yearly and it advances itself to the next date once marked done, instead
+  of only ever firing once.
+- A 🔁 badge marks any recurring chore or reminder chip; the longer one goes
+  unaddressed the deeper red its ⚠ overdue badge gets, so a week-old past-due
+  chore stands out more than one from yesterday.
 
 ## Notes
 
@@ -206,6 +222,9 @@ more convenient.
 **Get the most out of it**
 - Drag checklist items to reorder them — handy for turning a note into a
   step-by-step list.
+- Select the 🧾 icon on a note's toolbar to link it to a bill (any budget
+  line with a due day) — handy for keeping a note like "call the insurance
+  company" attached to the actual bill it's about.
 
 ## Journal
 
@@ -230,6 +249,9 @@ more convenient.
 **Get the most out of it**
 - Like Journal, Plan is private to you alone — a personal planner, not a
   shared household calendar.
+- On the Weekly/Monthly/Yearly tabs, link a task to a goal using the
+  dropdown on its row — useful for a task like "transfer to vacation fund"
+  that's really in service of a specific savings goal.
 
 ## Documents
 
@@ -249,6 +271,10 @@ more convenient.
 - Deleting a folder deletes everything inside it — subfolders and their
   documents included — after one confirmation. There's no need to empty a
   folder by hand first.
+- Open a file's information panel and set an **Expires** date (insurance,
+  a lease, a warranty) to get a color-coded "Expires in Nd" badge on the
+  card, both in the grid and the info panel — coral inside 30 days, gold
+  inside 90.
 
 ## Decisions
 
@@ -287,6 +313,9 @@ more convenient.
 - Assign a Ledger transaction directly to an IOU split (via the 👥 icon)
   when you're entering the original purchase, instead of creating the
   split separately afterward.
+- Attach a receipt photo or PDF to an IOU with the 📷 icon on its row — it's
+  uploaded through the same Documents pipeline, so it's private to your
+  household like any other file; select the 📎 icon afterward to view it.
 
 ## Meals and Recipes
 
@@ -313,6 +342,13 @@ more convenient.
 **Get the most out of it**
 - Use Goals for anything you're saving toward outside a monthly bill —
   vacations, a big purchase, an emergency fund.
+- Turn on **Auto-contribute** to fund a goal without remembering to add to
+  it: **Round up purchases** sweeps the spare change from every new
+  transaction (a $4.35 charge rounds up to a nickel toward the goal), and
+  **% of each paycheck** skims a percentage off every paycheck the moment
+  it lands. Both run automatically every time you open the app — no manual
+  step required — and pick up only new transactions/paychecks since it was
+  turned on.
 
 ## Wealth
 
@@ -370,6 +406,11 @@ more convenient.
 - Pick "exact areas to share" instead of a preset role for anyone who
   should only see, say, Calendar and Chores and nothing about the
   household's money.
+- Set a member's access to **View only** to let them see everything without
+  risking a change — their edits just won't save, and they'll see a banner
+  reminding them of that. Switch it back to **Can edit** any time from the
+  same row; it takes effect on their very next action. The owner's own
+  access is always **Can edit** and can't be changed.
 
 ## Reports and Export
 

@@ -385,6 +385,10 @@ main {
   place-items: center;
 }
 
+.iou-receipt-upload {
+  cursor: pointer;
+}
+
 .icon-button.is-loading {
   animation: button-spin 0.8s linear infinite;
 }
@@ -969,6 +973,14 @@ main {
   min-width: 0;
 }
 
+.goal-auto-contribute-row {
+  display: flex;
+  align-items: flex-end;
+  flex-wrap: wrap;
+  gap: 0.6rem;
+  margin-top: 0.6rem;
+}
+
 .help-topic h3,
 .help-columns h3,
 .help-footer h3 {
@@ -1416,7 +1428,7 @@ main {
    the same grid columns so values line up underneath their header. */
 .budget-line-head {
   display: grid;
-  grid-template-columns: minmax(140px, 1fr) minmax(120px, 130px) minmax(90px, 110px) minmax(80px, 100px) minmax(80px, 100px) 80px;
+  grid-template-columns: minmax(140px, 1fr) minmax(120px, 130px) minmax(90px, 110px) minmax(80px, 100px) minmax(80px, 100px) minmax(90px, 110px) 80px;
   gap: 0.5rem;
   padding: 0.3rem 0.6rem 0.15rem;
   color: var(--muted);
@@ -1428,7 +1440,7 @@ main {
 
 .budget-line {
   display: grid;
-  grid-template-columns: minmax(140px, 1fr) minmax(120px, 130px) minmax(90px, 110px) minmax(80px, 100px) minmax(80px, 100px) 80px;
+  grid-template-columns: minmax(140px, 1fr) minmax(120px, 130px) minmax(90px, 110px) minmax(80px, 100px) minmax(80px, 100px) minmax(90px, 110px) 80px;
   gap: 0.5rem;
   align-items: center;
   padding: 0.55rem 0.6rem;
@@ -1456,6 +1468,32 @@ main {
   height: 32px;
   min-height: 32px;
   font-size: 0.85rem;
+}
+
+.budget-line-owner-select {
+  font-size: 0.78rem;
+  padding: 0.35rem 0.4rem;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--panel);
+  color: var(--text);
+}
+
+.budget-member-pills {
+  margin: 0.7rem 0 0.4rem;
+}
+
+.rollover-toggle.active {
+  background: var(--green-soft);
+  color: var(--green);
+}
+
+.budget-rollover-badge {
+  display: block;
+  color: var(--green);
+  font-weight: 700;
+  font-size: 0.66rem;
+  white-space: nowrap;
 }
 
 /* Inline per-line progress bar - reuses .bar/.report-bar's shape but as its
@@ -1857,12 +1895,21 @@ main {
 
 .sharing-member-row {
   display: grid;
-  grid-template-columns: minmax(180px, 1fr) auto auto;
+  grid-template-columns: minmax(180px, 1fr) auto auto auto;
   align-items: center;
   gap: 12px;
   padding: 14px 16px;
   border-radius: 6px;
   background: var(--soft-blue);
+}
+
+.sharing-access-level-select {
+  font-size: 0.82rem;
+  padding: 0.4rem 0.5rem;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--panel);
+  color: var(--text);
 }
 
 .sharing-member-row strong,
@@ -2183,7 +2230,7 @@ main {
    repeating Payee/Amount/Date/etc. labels on every row — is safe here. */
 .ledger-entry-head {
   display: grid;
-  grid-template-columns: minmax(120px, 1fr) minmax(80px, 100px) minmax(120px, 130px) minmax(140px, 1fr) 48px 48px 48px;
+  grid-template-columns: 24px minmax(120px, 1fr) minmax(80px, 100px) minmax(120px, 130px) minmax(140px, 1fr) 48px 48px 48px;
   gap: 0.5rem;
   padding: 0.3rem 0.6rem 0.15rem;
   color: var(--muted);
@@ -2194,7 +2241,7 @@ main {
 }
 
 .ledger-entry-head.has-accounts {
-  grid-template-columns: minmax(120px, 1fr) minmax(80px, 100px) minmax(120px, 130px) minmax(140px, 1fr) minmax(120px, 140px) 48px 48px 48px;
+  grid-template-columns: 24px minmax(120px, 1fr) minmax(80px, 100px) minmax(120px, 130px) minmax(140px, 1fr) minmax(120px, 140px) 48px 48px 48px;
 }
 
 .ledger-entry-head button {
@@ -2216,7 +2263,7 @@ main {
 
 .ledger-entry-row {
   display: grid;
-  grid-template-columns: minmax(120px, 1fr) minmax(80px, 100px) minmax(120px, 130px) minmax(140px, 1fr) 48px 48px 48px;
+  grid-template-columns: 24px minmax(120px, 1fr) minmax(80px, 100px) minmax(120px, 130px) minmax(140px, 1fr) 48px 48px 48px;
   gap: 0.5rem;
   align-items: center;
   padding: 0.4rem 0.6rem;
@@ -2224,7 +2271,22 @@ main {
 }
 
 .ledger-entry-row.has-accounts {
-  grid-template-columns: minmax(120px, 1fr) minmax(80px, 100px) minmax(120px, 130px) minmax(140px, 1fr) minmax(120px, 140px) 48px 48px 48px;
+  grid-template-columns: 24px minmax(120px, 1fr) minmax(80px, 100px) minmax(120px, 130px) minmax(140px, 1fr) minmax(120px, 140px) 48px 48px 48px;
+}
+
+.ledger-bulk-bar {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  padding: 0.5rem 0.6rem;
+  margin-bottom: 0.5rem;
+  background: var(--green-soft);
+  border-radius: 8px;
+  font-size: 0.85rem;
+}
+
+.ledger-bulk-bar select {
+  font-size: 0.85rem;
 }
 
 /* Flags a Bank stream or Ledger row whose amount/date/account combination
@@ -2878,6 +2940,32 @@ main {
 .event:focus-visible {
   outline: 2px solid currentColor;
   outline-offset: 1px;
+}
+
+.event-recurring-badge,
+.event-overdue-badge {
+  font-size: 0.62rem;
+}
+
+/* Escalating urgency the longer a chore/reminder has gone unaddressed - a
+   deeper coral the further overdue, same signal-by-intensity idea as the
+   Bills page's due-date coloring, just with three visible steps here since
+   a calendar chip stays visible for potentially weeks past due. */
+.event.overdue-mild {
+  background: color-mix(in srgb, var(--coral) 12%, white);
+  color: var(--coral);
+}
+
+.event.overdue-moderate {
+  background: color-mix(in srgb, var(--coral) 22%, white);
+  color: var(--coral);
+  font-weight: 900;
+}
+
+.event.overdue-severe {
+  background: color-mix(in srgb, var(--coral) 34%, white);
+  color: #7a1f1f;
+  font-weight: 900;
 }
 
 .event.birthday {
@@ -6154,13 +6242,22 @@ input.holdings-modal-market-value-input {
 
 .plan-task-row {
   display: grid;
-  grid-template-columns: auto minmax(0, 1fr) 34px;
+  grid-template-columns: auto minmax(0, 1fr) minmax(110px, 140px) 34px;
   gap: 0.6rem;
   align-items: center;
   padding: 0.6rem 0.75rem;
   border: 1px solid var(--line);
   border-radius: 8px;
   background: var(--panel);
+}
+
+.plan-task-goal-select {
+  font-size: 0.78rem;
+  padding: 0.35rem 0.4rem;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--soft-blue);
+  color: var(--text);
 }
 
 .plan-task-row-daily {
@@ -7473,6 +7570,13 @@ input.holdings-modal-market-value-input {
   margin: 0.35rem 0 0;
   font-size: 0.95rem;
   color: var(--muted);
+}
+
+.view-only-banner {
+  margin: 0.35rem 0 0;
+  font-size: 0.8rem;
+  font-weight: 700;
+  color: var(--gold);
 }
 
 .metric-danger strong {

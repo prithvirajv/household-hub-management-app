@@ -677,7 +677,7 @@ async function databasePrimaryOwnerId(client, householdId) {
 }
 
 function publicUser(row) {
-  return row ? { id: row.id, email: row.email, name: row.name, isAdmin: isPlatformAdminEmail(row.email), phone: row.phone || "", carrier: row.carrier || "", emailVerified: Boolean(row.email_verified_at) } : null;
+  return row ? { id: row.id, email: row.email, name: row.name, isAdmin: isPlatformAdminEmail(row.email), phone: row.phone || "", carrier: row.carrier || "", emailVerified: Boolean(row.email_verified_at), accessLevel: row.access_level || "edit" } : null;
 }
 
 function normalizePhoneAndCarrier(rawPhone, rawCarrier) {
@@ -1144,12 +1144,12 @@ async function getSession(req) {
       || memberships[0];
     const household = memoryDb.households.find((item) => item.id === membership?.household_id);
     if (!user || !household) return null;
-    return { ...user, household_id: household.id, household_name: household.name };
+    return { ...user, household_id: household.id, household_name: household.name, access_level: membership?.access_level || "edit" };
   }
 
   const result = await pool.query(
     `SELECT u.id, u.email, u.name, u.is_admin, u.disabled_at, u.default_household_id, u.email_verified_at,
-            h.id AS household_id, h.name AS household_name
+            h.id AS household_id, h.name AS household_name, hm.access_level
      FROM users u
      JOIN household_memberships hm ON hm.user_id = u.id
      JOIN households h ON h.id = hm.household_id
@@ -1237,6 +1237,17 @@ async function requireSession(req, res, next) {
   } catch (error) {
     return next(error);
   }
+}
+
+// Chained after requireSession on every route that actually mutates
+// household data. A "view only" member (household_memberships.access_level)
+// can still read everything - this only blocks the write, so a viewer isn't
+// silently locked out of pages, just their attempts to change something.
+function requireEditAccess(req, res, next) {
+  if (req.sessionUser?.access_level === "view") {
+    return res.status(403).json({ error: "You have view-only access to this household" });
+  }
+  next();
 }
 
 app.get("/healthz", (_req, res) => {
@@ -2600,7 +2611,8 @@ app.get("/api/households/access", requireSession, async (req, res, next) => {
             email: user?.email || "",
             role: membership.role,
             status: "active",
-            isOwner: membership.user_id === ownerId
+            isOwner: membership.user_id === ownerId,
+            accessLevel: membership.user_id === ownerId ? "edit" : (membership.access_level || "edit")
           };
         });
       const activeEmails = new Set(activeMembers.map((member) => member.email));
@@ -2613,7 +2625,7 @@ app.get("/api/households/access", requireSession, async (req, res, next) => {
     const ownerId = await databasePrimaryOwnerId(pool, req.sessionUser.household_id);
     const [activeResult, pendingResult] = await Promise.all([
       pool.query(
-        `SELECT u.name, u.email, hm.role, hm.user_id
+        `SELECT u.name, u.email, hm.role, hm.user_id, hm.access_level
          FROM household_memberships hm
          JOIN users u ON u.id = hm.user_id
          WHERE hm.household_id = $1
@@ -2636,8 +2648,8 @@ app.get("/api/households/access", requireSession, async (req, res, next) => {
     res.json({
       canManage: req.sessionUser.id === ownerId,
       members: [
-        ...activeResult.rows.map((item) => ({ ...item, status: "active", isOwner: item.user_id === ownerId })),
-        ...pendingResult.rows.map((item) => ({ ...item, status: "pending", isOwner: false }))
+        ...activeResult.rows.map((item) => ({ ...item, status: "active", isOwner: item.user_id === ownerId, accessLevel: item.user_id === ownerId ? "edit" : (item.access_level || "edit") })),
+        ...pendingResult.rows.map((item) => ({ ...item, status: "pending", isOwner: false, accessLevel: "edit" }))
       ]
     });
   } catch (error) {
@@ -2670,6 +2682,47 @@ app.get("/api/calendar/members", requireSession, async (req, res, next) => {
       [req.sessionUser.id]
     );
     res.json(result.rows.map((user) => ({ ...user, status: "active" })));
+  } catch (error) {
+    next(error);
+  }
+});
+
+// Owner-only, same as the DELETE right below - sets a member's access
+// level to "edit" or "view". A view-only member keeps seeing everything
+// (this never touches read routes) but every mutating request they make
+// gets rejected by requireEditAccess, not just hidden client-side.
+app.patch("/api/households/access", requireSession, async (req, res, next) => {
+  try {
+    const email = String(req.body.email || "").trim().toLowerCase();
+    const accessLevel = String(req.body.accessLevel || "").trim();
+    if (!isValidEmail(email)) return res.status(400).json({ error: "Enter a valid email" });
+    if (!["edit", "view"].includes(accessLevel)) return res.status(400).json({ error: "Access level must be 'edit' or 'view'" });
+
+    if (MEMORY_DB) {
+      const ownerId = memoryPrimaryOwnerId(req.sessionUser.household_id);
+      if (req.sessionUser.id !== ownerId) return res.status(403).json({ error: "Only the household owner can change access levels" });
+      const targetUser = memoryDb.users.find((item) => item.email === email);
+      if (targetUser?.id === ownerId) return res.status(400).json({ error: "The household owner's access level can't be changed" });
+      const membership = targetUser
+        ? memoryDb.memberships.find((item) => item.user_id === targetUser.id && item.household_id === req.sessionUser.household_id)
+        : null;
+      if (!membership) return res.status(404).json({ error: "Household member not found" });
+      membership.access_level = accessLevel;
+      return res.json({ ok: true, email, accessLevel });
+    }
+
+    const ownerId = await databasePrimaryOwnerId(pool, req.sessionUser.household_id);
+    if (req.sessionUser.id !== ownerId) return res.status(403).json({ error: "Only the household owner can change access levels" });
+    const userResult = await pool.query("SELECT id FROM users WHERE lower(email) = $1", [email]);
+    const targetUser = userResult.rows[0];
+    if (!targetUser) return res.status(404).json({ error: "Household member not found" });
+    if (targetUser.id === ownerId) return res.status(400).json({ error: "The household owner's access level can't be changed" });
+    const updateResult = await pool.query(
+      "UPDATE household_memberships SET access_level = $1 WHERE user_id = $2 AND household_id = $3",
+      [accessLevel, targetUser.id, req.sessionUser.household_id]
+    );
+    if (!updateResult.rowCount) return res.status(404).json({ error: "Household member not found" });
+    res.json({ ok: true, email, accessLevel });
   } catch (error) {
     next(error);
   }
@@ -2884,7 +2937,7 @@ app.get("/api/state", requireSession, async (req, res, next) => {
   }
 });
 
-app.put("/api/state", requireSession, async (req, res, next) => {
+app.put("/api/state", requireSession, requireEditAccess, async (req, res, next) => {
   try {
     if (MEMORY_DB) {
       const household = memoryDb.households.find((item) => item.id === req.sessionUser.household_id);
@@ -3161,7 +3214,7 @@ app.get("/api/documents", requireSession, async (req, res, next) => {
   }
 });
 
-app.post("/api/documents/folders", requireSession, async (req, res, next) => {
+app.post("/api/documents/folders", requireSession, requireEditAccess, async (req, res, next) => {
   try {
     const name = String(req.body?.name || "").trim();
     const parentId = req.body?.parentId || null;
@@ -3189,7 +3242,7 @@ app.post("/api/documents/folders", requireSession, async (req, res, next) => {
   }
 });
 
-app.patch("/api/documents/folders/:id", requireSession, async (req, res, next) => {
+app.patch("/api/documents/folders/:id", requireSession, requireEditAccess, async (req, res, next) => {
   try {
     const ownerId = await resolveOwnerId(req);
     const folders = await loadOwnerFolders(ownerId);
@@ -3238,7 +3291,7 @@ app.patch("/api/documents/folders/:id", requireSession, async (req, res, next) =
 // confirms this once up front ("delete this folder and everything inside
 // it?") rather than requiring a household to empty a folder by hand first,
 // which was the previous behavior (409 "must be empty").
-app.delete("/api/documents/folders/:id", requireSession, async (req, res, next) => {
+app.delete("/api/documents/folders/:id", requireSession, requireEditAccess, async (req, res, next) => {
   try {
     const ownerId = await resolveOwnerId(req);
     const folders = await loadOwnerFolders(ownerId);
@@ -3273,7 +3326,7 @@ app.delete("/api/documents/folders/:id", requireSession, async (req, res, next) 
   }
 });
 
-app.post("/api/documents/upload-url", requireSession, async (req, res, next) => {
+app.post("/api/documents/upload-url", requireSession, requireEditAccess, async (req, res, next) => {
   try {
     const name = String(req.body?.name || "").trim();
     const contentType = String(req.body?.contentType || "").trim();
@@ -3319,7 +3372,7 @@ app.post("/api/documents/upload-url", requireSession, async (req, res, next) => 
   }
 });
 
-app.post("/api/documents/:id/confirm", requireSession, async (req, res, next) => {
+app.post("/api/documents/:id/confirm", requireSession, requireEditAccess, async (req, res, next) => {
   try {
     const ownerId = await resolveOwnerId(req);
     const documents = await loadOwnerDocuments(ownerId);
@@ -3385,7 +3438,7 @@ app.post("/api/documents/:id/open", requireSession, async (req, res, next) => {
   }
 });
 
-app.post("/api/documents/:id/copy", requireSession, async (req, res, next) => {
+app.post("/api/documents/:id/copy", requireSession, requireEditAccess, async (req, res, next) => {
   try {
     const ownerId = await resolveOwnerId(req);
     const documents = await loadOwnerDocuments(ownerId);
@@ -3424,7 +3477,7 @@ app.post("/api/documents/:id/copy", requireSession, async (req, res, next) => {
   }
 });
 
-app.delete("/api/documents/:id", requireSession, async (req, res, next) => {
+app.delete("/api/documents/:id", requireSession, requireEditAccess, async (req, res, next) => {
   try {
     const ownerId = await resolveOwnerId(req);
     const documents = await loadOwnerDocuments(ownerId);
@@ -3578,7 +3631,7 @@ app.post("/api/reports/export", requireSession, async (req, res, next) => {
   }
 });
 
-app.patch("/api/documents/:id", requireSession, async (req, res, next) => {
+app.patch("/api/documents/:id", requireSession, requireEditAccess, async (req, res, next) => {
   try {
     const ownerId = await resolveOwnerId(req);
     const documents = await loadOwnerDocuments(ownerId);
