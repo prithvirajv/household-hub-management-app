@@ -7,7 +7,13 @@
     <title>FamilyLoop</title>
     <link rel="icon" type="image/svg+xml" href="/assets/favicon.svg">
     <link rel="apple-touch-icon" href="/assets/apple-touch-icon.png">
-    <link rel="stylesheet" href="/styles.css?v=20260810-6">
+    <link rel="stylesheet" href="/styles.css?v=20260810-7">
+    <script>
+      (function () {
+        var saved = localStorage.getItem("familyloop-theme");
+        if (saved === "dark" || saved === "light") document.documentElement.setAttribute("data-theme", saved);
+      })();
+    </script>
     <script src="https://accounts.google.com/gsi/client" async defer></script>
   </head>
   <body>
@@ -44,6 +50,7 @@
             <label class="month-control">Month<input id="monthPicker" type="month" value="2026-05"></label>
             <label id="mealWeekHeaderControl" class="week-control" hidden>Week<select id="mealWeekHeaderSelect"></select></label>
             <button id="syncButton" class="icon-button ghost" type="button" aria-label="Refresh household data" title="Refresh household data">↻</button>
+            <button id="themeToggleButton" class="icon-button ghost" type="button" aria-label="Toggle dark mode" title="Toggle dark mode">🌙</button>
             <div class="notification-bell-wrap">
               <button id="notificationBellButton" class="icon-button ghost" type="button" aria-label="Notifications" title="Notifications">🔔<span id="notificationBellDot" class="notification-bell-dot" hidden></span></button>
               <div id="notificationBellDropdown" class="notification-bell-dropdown" hidden></div>
@@ -354,6 +361,6 @@
     <script src="https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/build/pdf.min.js"></script>
     <script>if (window.pdfjsLib) pdfjsLib.GlobalWorkerOptions.workerSrc = "https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/build/pdf.worker.min.js";</script>
     <script src="/lib/shared-logic.js?v=20260810-2"></script>
-    <script src="/app.js?v=20260810-6"></script>
+    <script src="/app.js?v=20260810-7"></script>
   </body>
 </html>

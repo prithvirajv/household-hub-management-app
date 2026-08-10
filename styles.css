@@ -27,6 +27,29 @@
   --sidebar-muted: oklch(75% 0.015 75);
 }
 
+/* Dark mode - same semantic colors (green/blue/gold/coral untouched), only
+   the surface/text tokens flip. Everything already themed through var()
+   picks this up automatically; the sidebar stays visually similar since
+   it was already dark-toned in light mode. A handful of literal hex/rgba
+   colors elsewhere in this file (chart palettes, one-off gradients) are
+   NOT covered by this pass and may not fully adapt - a disclosed, smaller
+   scope than a pixel-perfect dark mode across every decorative color. */
+html[data-theme="dark"] {
+  --navy: oklch(16% 0.014 65);
+  --navy-2: oklch(22% 0.014 65);
+  --bg: oklch(19% 0.012 65);
+  --panel: oklch(23% 0.012 65);
+  --soft: oklch(27% 0.012 65);
+  --soft-blue: oklch(29% 0.012 65);
+  --line: oklch(33% 0.012 65);
+  --text: oklch(93% 0.008 75);
+  --muted: oklch(70% 0.012 70);
+  --green-soft: color-mix(in srgb, var(--green) 22%, var(--panel));
+  --shadow: 0 14px 34px rgba(0, 0, 0, 0.35);
+  --sidebar-text: oklch(90% 0.01 75);
+  --sidebar-muted: oklch(72% 0.012 75);
+}
+
 * {
   box-sizing: border-box;
 }
@@ -220,7 +243,7 @@ nav {
 
 .sidebar-household .household-control select {
   height: 38px;
-  background: #f8fafc;
+  background: var(--panel);
   color: var(--text);
 }
 
@@ -967,9 +990,9 @@ main {
   height: 68px;
   display: grid;
   place-items: center;
-  border: 2px solid #cbd5e1;
+  border: 2px solid var(--line);
   border-radius: 7px;
-  background: #f8fafc;
+  background: var(--soft);
   color: var(--muted);
   font-weight: 900;
 }
@@ -1196,7 +1219,7 @@ main {
   min-height: 74px;
   padding: 0.75rem;
   box-shadow: none;
-  background: linear-gradient(180deg, #ffffff, #f7fbf8);
+  background: linear-gradient(180deg, var(--panel), var(--soft));
 }
 
 .metric span,
@@ -1218,7 +1241,7 @@ main {
 }
 
 .metric:first-child {
-  background: linear-gradient(90deg, #f5fff9, #fff);
+  background: linear-gradient(90deg, color-mix(in srgb, var(--green) 8%, var(--panel)), var(--panel));
 }
 
 .view {
@@ -1303,7 +1326,7 @@ main {
   display: grid;
   place-items: center;
   color: var(--muted);
-  background: linear-gradient(90deg, white, #f5f8fc);
+  background: linear-gradient(90deg, var(--panel), var(--soft));
   border-radius: 6px;
 }
 
@@ -3048,7 +3071,7 @@ main {
 }
 
 .muted-cell {
-  background: #f0f4fa;
+  background: var(--soft);
 }
 
 .outside-month {
@@ -3949,7 +3972,7 @@ main {
   display: grid;
   gap: 0.2rem;
   border-radius: 8px;
-  background: linear-gradient(90deg, #eafbf3, #fdf6ec);
+  background: linear-gradient(90deg, color-mix(in srgb, var(--green) 10%, var(--panel)), color-mix(in srgb, var(--gold) 10%, var(--panel)));
   padding: 0.85rem;
 }
 
@@ -6756,12 +6779,12 @@ input.holdings-modal-market-value-input {
 
 .plan-actual-block.deviated {
   border-left-color: var(--coral);
-  background: #fdf1ee;
+  background: color-mix(in srgb, var(--coral) 10%, var(--panel));
 }
 
 .plan-actual-block.unplanned {
   border-left-color: var(--muted);
-  background: #f2f3f5;
+  background: var(--soft);
 }
 
 .plan-actual-title {

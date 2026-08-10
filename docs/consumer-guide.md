@@ -29,6 +29,8 @@ more convenient.
 4. Add transactions and assign each one to a budget line.
 5. Add calendar events, recurring chores, birthdays, meals, and goals as
    needed.
+6. Select the 🌙 icon in the top bar any time to switch to dark mode — it
+   remembers your choice on this device.
 
 ## Households
 
@@ -205,6 +207,11 @@ more convenient.
    earlier.
 6. Use the member chips above the grid to filter the whole calendar down to
    one person.
+7. The **Upcoming schedule**, **Chore rotation**, and **Remember** panels on
+   the right only look 7 days ahead — anything due further out stays off
+   those lists until it's within a week, so they read as "what needs
+   attention now," not the whole month. Anything already overdue keeps
+   showing regardless of age.
 
 **Get the most out of it**
 - Completed chores stay visible on the calendar grid instead of

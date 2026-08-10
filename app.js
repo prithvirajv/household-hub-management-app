@@ -2579,9 +2579,14 @@ function renderCalendar() {
   // they've marked their own part done, it drops off their view even if
   // other assignees on the same chore/birthday haven't finished theirs yet.
   const viewerKey = sessionUser?.email || "";
+  // Overdue items stay visible no matter how old (they still need doing),
+  // but anything not yet due is capped to the next 7 days - a chore due in
+  // three weeks shouldn't crowd out this week's actual to-dos just because
+  // fewer than UPCOMING_LIST_LIMIT items happen to be due soon.
+  const sevenDaysAhead = dateKey(new Date(Date.now() + 7 * 24 * 60 * 60 * 1000));
   const choreRows = state.calendar.chores
     .map((chore, index) => ({ chore, index, occurrence: nextPendingChoreOccurrence(chore, viewerKey) }))
-    .filter((row) => row.occurrence)
+    .filter((row) => row.occurrence && row.occurrence.date <= sevenDaysAhead)
     .sort((a, b) => a.occurrence.date.localeCompare(b.occurrence.date))
     .slice(0, UPCOMING_LIST_LIMIT);
   const annualRows = state.calendar.events
@@ -2592,7 +2597,7 @@ function renderCalendar() {
     // someone else shouldn't nag a viewer who has no part in wishing it.
     .filter((event) => isRelevantToViewer(event.assignees, viewerKey))
     .map((event) => ({ event, occurrence: nextPendingAnnualEventOccurrence(event, new Date(), viewerKey) }))
-    .filter((row) => row.occurrence)
+    .filter((row) => row.occurrence && row.occurrence.date <= sevenDaysAhead)
     .sort((a, b) => a.occurrence.date.localeCompare(b.occurrence.date))
     .slice(0, UPCOMING_LIST_LIMIT);
   return `
@@ -2662,7 +2667,7 @@ function renderCalendar() {
         </section>
       </div>
       <aside class="side-stack">
-        <section class="card"><div class="card-label">Daily planner</div><h3>Upcoming schedule</h3>${upcomingScheduleItems().length ? upcomingScheduleItems().map((item) => calendarManageRow(item)).join("") : `<div class="empty-inline">No events scheduled this month</div>`}</section>
+        <section class="card"><div class="card-label">Daily planner</div><h3>Upcoming schedule</h3>${upcomingScheduleItems().length ? upcomingScheduleItems().map((item) => calendarManageRow(item)).join("") : `<div class="empty-inline">Nothing scheduled in the next 7 days</div>`}</section>
         <section class="card">
           <div class="section-head"><div><span class="card-label">What to do</span><h3>Chore rotation</h3></div><div class="button-row"><button id="sideAddChoreButton" class="ghost" type="button">Add chore</button><button id="sideAddReminderButton" class="ghost" type="button">Add reminder</button></div></div>
           ${choreRows.length ? choreRows.map(({ chore, index, occurrence }) => {
@@ -6245,7 +6250,11 @@ function visibleScheduleItems() {
 // panels are for.
 function upcomingScheduleItems() {
   const today = dateKey(new Date());
-  return visibleScheduleItems().filter((item) => `${state.budget.month}-${item.date.slice(3)}` >= today);
+  const sevenDaysAhead = dateKey(new Date(Date.now() + 7 * 24 * 60 * 60 * 1000));
+  return visibleScheduleItems().filter((item) => {
+    const fullDate = `${state.budget.month}-${item.date.slice(3)}`;
+    return fullDate >= today && fullDate <= sevenDaysAhead;
+  });
 }
 
 function calendarCells() {
@@ -11604,6 +11613,21 @@ document.addEventListener("click", (event) => {
   if ($("#notificationBellDropdown").hidden) return;
   if (event.target.closest(".notification-bell-wrap")) return;
   $("#notificationBellDropdown").hidden = true;
+});
+
+function applyThemeButtonIcon() {
+  const isDark = document.documentElement.getAttribute("data-theme") === "dark";
+  const button = $("#themeToggleButton");
+  if (button) button.textContent = isDark ? "☀️" : "🌙";
+}
+applyThemeButtonIcon();
+
+$("#themeToggleButton").addEventListener("click", () => {
+  const isDark = document.documentElement.getAttribute("data-theme") === "dark";
+  const next = isDark ? "light" : "dark";
+  document.documentElement.setAttribute("data-theme", next);
+  localStorage.setItem("familyloop-theme", next);
+  applyThemeButtonIcon();
 });
 
 $("#monthPicker").addEventListener("change", (event) => {
