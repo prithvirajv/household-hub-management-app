@@ -4145,7 +4145,7 @@ function renderWealth() {
           </article>`).join("") : `<div class="onboarding-empty compact-onboarding"><div class="empty-symbol" aria-hidden="true">↓</div><h3>Add a debt when you are ready</h3><p>Track its balance, rate, payment, and the asset it secures.</p></div>`}
         </section>
       </div>
-      <section class="card wealth-holdings"><div class="section-head"><div><span class="card-label">Net worth</span><h3>Assets, investments and liabilities</h3></div><button id="addNetWorthItemButton" type="button">+ Add holding</button><button id="addNetWorthBulkButton" class="ghost" type="button">+ Add multiple</button></div><div class="net-worth-strip"><strong data-net-worth-total>${money.format(netWorth().total)}</strong><span>Assets <b data-net-worth-assets>${money.format(netWorth().assets)}</b> Liabilities <b data-net-worth-liabilities>${money.format(netWorth().liabilities)}</b></span></div><div class="net-worth-items">${groupStockHoldings(state.goals.netWorth.assets).map((group) => netWorthStockGroupCard(group)).join("")}${state.goals.netWorth.assets.map((asset, index) => ({ asset, index })).filter(({ asset }) => !isHoldingAssetClass(asset.assetClass)).map(({ asset, index }) => netWorthItemRow(asset, "asset", index)).join("")}${state.goals.netWorth.liabilities.map((item, index) => netWorthItemRow(item, "liability", index)).join("")}</div>${state.goals.netWorth.assets.length || state.goals.netWorth.liabilities.length ? "" : `<div class="empty-inline">No assets, investments or liabilities yet</div>`}</section>
+      <section class="card wealth-holdings"><div class="section-head"><div><span class="card-label">Net worth</span><h3>Assets, investments and liabilities</h3></div><button id="addNetWorthItemButton" type="button">+ Add holding</button></div><div class="net-worth-strip"><strong data-net-worth-total>${money.format(netWorth().total)}</strong><span>Assets <b data-net-worth-assets>${money.format(netWorth().assets)}</b> Liabilities <b data-net-worth-liabilities>${money.format(netWorth().liabilities)}</b></span></div><div class="net-worth-items">${groupStockHoldings(state.goals.netWorth.assets).map((group) => netWorthStockGroupCard(group)).join("")}${state.goals.netWorth.assets.map((asset, index) => ({ asset, index })).filter(({ asset }) => !isHoldingAssetClass(asset.assetClass)).map(({ asset, index }) => netWorthItemRow(asset, "asset", index)).join("")}${state.goals.netWorth.liabilities.map((item, index) => netWorthItemRow(item, "liability", index)).join("")}</div>${state.goals.netWorth.assets.length || state.goals.netWorth.liabilities.length ? "" : `<div class="empty-inline">No assets, investments or liabilities yet</div>`}</section>
     </section>`;
 }
 
@@ -4166,7 +4166,8 @@ function netWorthStockGroupCard(group) {
   const holdingsLabel = `${group.items.length} holding${group.items.length === 1 ? "" : "s"}`;
   const gainLoss = groupGainLoss(group.items);
   const liveCaption = stockGroupRefreshedFeedback[group.groupId] ? "Live pricing • updated just now" : `Live pricing across ${holdingsLabel}`;
-  return `<article class="account-item stock-group-card">
+  return `<article class="account-item stock-group-card" draggable="true" data-drag-networth-asset="${group.groupId}">
+    <span class="net-worth-drag-handle" aria-hidden="true" title="Drag to reorder">⠿</span>
     <div class="stock-group-main">
       <div class="stock-group-grid">
         <div class="name-field"><span>Name</span><strong>${escapeHtml(group.groupName)}</strong></div>
@@ -4224,7 +4225,8 @@ function netWorthItemRow(item, type, index) {
   const isStock = !isLiability && item.assetClass === "stock";
   const wealthKey = `${type}:${item.id}`;
   const linkedDocuments = documentsLinkedToWealthItem(type, item.id);
-  return `<div class="net-worth-item ${isLiability ? "liability" : ""} ${isStock ? "stock" : ""}">
+  return `<div class="net-worth-item ${isLiability ? "liability" : ""} ${isStock ? "stock" : ""}" draggable="true" ${isLiability ? `data-drag-networth-liability="${item.id}"` : `data-drag-networth-asset="${item.id}"`}>
+    <span class="net-worth-drag-handle" aria-hidden="true" title="Drag to reorder">⠿</span>
     <label class="net-worth-name">Name<input data-net-worth-name="${type}:${index}" value="${escapeHtml(item.name)}" aria-label="${isLiability ? "Liability" : "Asset"} name"></label>
     <label>Type<select data-net-worth-type="${type}:${index}" aria-label="Item type"><option value="asset" ${isLiability ? "" : "selected"}>Asset</option><option value="liability" ${isLiability ? "selected" : ""}>Liability</option></select></label>
     ${isLiability ? "" : `<label>Asset class<select data-asset-class="${index}" aria-label="Asset class for ${escapeHtml(item.name)}"><option value="other" ${item.assetClass === "other" ? "selected" : ""}>Other asset</option><option value="cash" ${item.assetClass === "cash" ? "selected" : ""}>Cash</option><option value="property" ${item.assetClass === "property" ? "selected" : ""}>Property</option><option value="retirement" ${item.assetClass === "retirement" ? "selected" : ""}>Retirement</option><option value="stock" ${isStock ? "selected" : ""}>Stock</option></select></label>`}
@@ -4737,9 +4739,10 @@ function renderHelp() {
       ],
       tips: [
         "Move an account-to-account payment (like paying a credit card from checking) to a Transfer instead of leaving it as a regular expense/income pair — the ⇄ icon on a matched transaction does this in one step.",
-        "Drag an account by its ⠿ handle to reorder the <strong>Accounts</strong> list - useful for putting the ones you check most often at the top.",
-        "Under Net worth, a brokerage or retirement account with several stocks or mutual funds shows as one card - use <strong>+ Add multiple</strong> to create it, or switch an item's Asset class to Stock or Retirement to convert it. <strong>Manage list</strong> on the card is where you add, edit, or remove individual holdings.",
-        "Enter each holding's <strong>Avg. cost</strong> in Manage list to see gain/loss in dollars and percent, per holding and totaled on the card - holdings with no cost basis entered are left out of the total rather than counted as break-even."
+        "Drag an account or net worth item by its ⠿ handle to reorder its list - useful for putting the ones you check most often at the top.",
+        "Under Net worth, a brokerage or retirement account with several stocks or mutual funds shows as one card - add a holding, then set its Asset class to Stock or Retirement to turn it into one. <strong>Manage list</strong> on the card is where you add, edit, or remove individual holdings.",
+        "Enter each holding's <strong>Avg. cost</strong> in Manage list to see gain/loss in dollars and percent, per holding and totaled on the card - holdings with no cost basis entered are left out of the total rather than counted as break-even.",
+        "No real ticker for a holding (like a proprietary 401(k) fund)? Type its dollar value straight into <strong>Market value</strong> in Manage list instead of shares × price - shares default to 1 and price adjusts to match."
       ] },
     { icon: "♙", title: "Sharing", id: "sharing",
       steps: [
@@ -8562,8 +8565,6 @@ function bindViewEvents() {
     render();
   });
 
-  $("#addNetWorthBulkButton")?.addEventListener("click", openNewHoldingsGroupModal);
-
   document.querySelectorAll("[data-net-worth-name]").forEach((input) => {
     input.addEventListener("input", () => {
       const [type, indexValue] = input.dataset.netWorthName.split(":");
@@ -8955,6 +8956,64 @@ function bindViewEvents() {
       render();
     });
   });
+
+  // Net worth's drag-to-reorder covers two separate lists sharing the same
+  // wiring shape as the accounts block above: assets (grouped holdings
+  // cards and plain asset rows together, moved as a block via
+  // moveNetWorthAssetBlock so a group's several holdings travel as one
+  // unit) and liabilities (plain rows only, so the existing single-item
+  // moveArrayItemById applies unchanged). Both class-name pairs are toggled
+  // on every row regardless of which element type it is - a stock-group
+  // card only matches the .account-item-* selectors and a plain
+  // .net-worth-item only matches the .net-worth-item-* ones, so the unused
+  // pair is simply inert rather than needing a per-row type check.
+  const wireNetWorthDragReorder = (attribute, getList, setList, reorder) => {
+    let draggedKey = null;
+    const clearOverClasses = () => {
+      document.querySelectorAll(".account-item-drag-over-top, .account-item-drag-over-bottom, .net-worth-item-drag-over-top, .net-worth-item-drag-over-bottom").forEach((row) => {
+        row.classList.remove("account-item-drag-over-top", "account-item-drag-over-bottom", "net-worth-item-drag-over-top", "net-worth-item-drag-over-bottom");
+      });
+    };
+    document.querySelectorAll(`[${attribute}]`).forEach((row) => {
+      row.addEventListener("dragstart", (event) => {
+        draggedKey = row.getAttribute(attribute);
+        event.dataTransfer.effectAllowed = "move";
+        event.dataTransfer.setData("text/plain", draggedKey);
+        row.classList.add("dragging");
+      });
+      row.addEventListener("dragend", () => {
+        row.classList.remove("dragging");
+        clearOverClasses();
+        draggedKey = null;
+      });
+      row.addEventListener("dragover", (event) => {
+        if (!draggedKey) return;
+        event.preventDefault();
+        event.dataTransfer.dropEffect = "move";
+        const isAfter = event.clientY - row.getBoundingClientRect().top > row.getBoundingClientRect().height / 2;
+        row.classList.toggle("account-item-drag-over-bottom", isAfter);
+        row.classList.toggle("account-item-drag-over-top", !isAfter);
+        row.classList.toggle("net-worth-item-drag-over-bottom", isAfter);
+        row.classList.toggle("net-worth-item-drag-over-top", !isAfter);
+      });
+      row.addEventListener("dragleave", () => {
+        row.classList.remove("account-item-drag-over-top", "account-item-drag-over-bottom", "net-worth-item-drag-over-top", "net-worth-item-drag-over-bottom");
+      });
+      row.addEventListener("drop", (event) => {
+        event.preventDefault();
+        clearOverClasses();
+        if (!draggedKey) return;
+        const targetKey = row.getAttribute(attribute);
+        if (targetKey === draggedKey) return;
+        const insertAfter = event.clientY - row.getBoundingClientRect().top > row.getBoundingClientRect().height / 2;
+        setList(reorder(getList(), draggedKey, targetKey, insertAfter));
+        autosaveState();
+        render();
+      });
+    });
+  };
+  wireNetWorthDragReorder("data-drag-networth-asset", () => state.goals.netWorth.assets, (list) => { state.goals.netWorth.assets = list; }, moveNetWorthAssetBlock);
+  wireNetWorthDragReorder("data-drag-networth-liability", () => state.goals.netWorth.liabilities, (list) => { state.goals.netWorth.liabilities = list; }, moveArrayItemById);
 
   $("#transferForm")?.addEventListener("submit", (event) => {
     event.preventDefault();
@@ -10851,7 +10910,7 @@ function recomputeHoldingsModalRow(assetId) {
   if (!asset) return;
   asset.value = assetValue(asset);
   const marketValueEl = document.querySelector(`[data-holding-market-value="${assetId}"]`);
-  if (marketValueEl) marketValueEl.textContent = money.format(asset.value);
+  if (marketValueEl && marketValueEl !== document.activeElement) marketValueEl.value = asset.value.toFixed(2);
   const gainEl = document.querySelector(`[data-holding-gain-loss="${assetId}"]`);
   if (gainEl) {
     const gain = holdingGainLossMarkup(asset);
@@ -10880,7 +10939,7 @@ function holdingsModalRowHtml(item) {
       </div>
       <small class="${feedback?.isError ? "stock-price-error" : ""}">${feedback ? feedback.message : "Not refreshed yet"}</small>
     </div>
-    <div class="holdings-modal-market-value" data-holding-market-value="${item.id}">${money.format(assetValue(item))}</div>
+    <input type="number" min="0" step="0.01" inputmode="decimal" class="holdings-modal-market-value-input" value="${assetValue(item).toFixed(2)}" data-holding-market-value="${item.id}" aria-label="Market value" title="Type a dollar amount directly for holdings with no live-priceable ticker (e.g. a 401(k) fund) - shares/price adjust to match">
     <div class="${gain.className}" data-holding-gain-loss="${item.id}">${gain.text}</div>
     <button type="button" class="holdings-modal-remove" data-holding-remove="${item.id}" aria-label="Remove ${escapeHtml(item.symbol || "this holding")}">×</button>
   </div>`;
@@ -10931,6 +10990,37 @@ function wireHoldingsModalRowEvents() {
       if (!asset) return;
       asset.price = Math.max(0, Number(input.value || 0));
       recomputeHoldingsModalRow(asset.id);
+    });
+  });
+  // Lets a holding with no real live-priceable ticker (a proprietary 401(k)
+  // fund, for instance) get its dollar value entered directly, since shares
+  // x price - the only other way assetValue() computes a stock-class item's
+  // value - isn't always something the household actually knows. Shares
+  // default to 1 if unset so price = the entered value outright; if shares
+  // is already set, price is back-derived (value / shares) so a later share-
+  // count correction still scales the value sensibly instead of orphaning it.
+  container.querySelectorAll("[data-holding-market-value]").forEach((input) => {
+    input.addEventListener("input", () => {
+      const asset = findAsset(input.dataset.holdingMarketValue);
+      if (!asset) return;
+      const value = Math.max(0, Number(input.value || 0));
+      if (!asset.shares) {
+        asset.shares = 1;
+        const sharesInput = document.querySelector(`[data-holding-shares="${asset.id}"]`);
+        if (sharesInput) sharesInput.value = asset.shares;
+      }
+      asset.price = value / asset.shares;
+      asset.value = value;
+      const priceInput = document.querySelector(`[data-holding-price="${asset.id}"]`);
+      if (priceInput) priceInput.value = asset.price.toFixed(2);
+      const gainEl = document.querySelector(`[data-holding-gain-loss="${asset.id}"]`);
+      if (gainEl) {
+        const gain = holdingGainLossMarkup(asset);
+        gainEl.className = gain.className;
+        gainEl.textContent = gain.text;
+      }
+      autosaveState();
+      updateHoldingsModalTotal();
     });
   });
   container.querySelectorAll("[data-holding-refresh]").forEach((button) => {
@@ -10991,19 +11081,6 @@ function openHoldingsModal(groupId) {
   $("#holdingsModalDialog").showModal();
 }
 
-function openNewHoldingsGroupModal() {
-  const groupId = uniqueId("account");
-  const asset = { id: uniqueId(`${groupId}-1`), name: "", value: 0, assetClass: "stock", symbol: "", holdingType: "stock", shares: 0, price: 0, costBasis: 0, groupId, groupName: "" };
-  state.goals.netWorth.assets.push(asset);
-  autosaveState();
-  currentHoldingsModalGroupId = groupId;
-  $("#holdingsModalAccountName").value = "";
-  renderHoldingsModalRows();
-  updateHoldingsModalTotal();
-  $("#holdingsModalMessage").textContent = "";
-  $("#holdingsModalDialog").showModal();
-}
-
 $("#holdingsModalAccountName").addEventListener("input", (event) => {
   const name = event.target.value;
   holdingsModalItems().forEach((asset) => {
@@ -11056,14 +11133,19 @@ $("#closeHoldingsModalButton").addEventListener("click", () => $("#holdingsModal
 $("#holdingsModalDoneButton").addEventListener("click", () => $("#holdingsModalDialog").close());
 
 // Fires for every close path (Done, ×, Esc) - purges any row still mid-
-// composition (blank symbol, never finished) so an abandoned "+ Add
-// multiple" or a cleared-out row never leaves an empty asset behind.
+// composition (blank symbol AND no value entered, never finished) so an
+// abandoned "+ Add holding"-then-convert-to-Stock or a cleared-out row
+// never leaves an empty asset behind. A blank symbol alone isn't enough to
+// call a row abandoned now that Market value can be typed directly for a
+// holding with no real ticker (a 401(k) fund, say) - assetValue(asset) > 0
+// covers that path too, since typing a market value always leaves shares
+// >= 1 and a derived price behind.
 $("#holdingsModalDialog").addEventListener("close", () => {
   if (!currentHoldingsModalGroupId) return;
   const groupId = currentHoldingsModalGroupId;
   state.goals.netWorth.assets = state.goals.netWorth.assets.filter((asset) => {
     const inThisGroup = isHoldingAssetClass(asset.assetClass) && asset.groupId === groupId;
-    return !inThisGroup || (asset.symbol || "").trim();
+    return !inThisGroup || (asset.symbol || "").trim() || assetValue(asset) > 0;
   });
   currentHoldingsModalGroupId = null;
   autosaveState();

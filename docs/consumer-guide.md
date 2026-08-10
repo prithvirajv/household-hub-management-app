@@ -307,17 +307,24 @@ more convenient.
 - Move an account-to-account payment (like paying a credit card from
   checking) to a Transfer instead of leaving it as a regular expense/income
   pair — the ⇄ icon on a matched transaction does this in one step.
-- Drag an account by its ⠿ handle to reorder the **Accounts** list — useful
-  for putting the ones you check most often at the top.
+- Drag an account, or a Net worth asset/liability, by its ⠿ handle to
+  reorder its list — useful for putting the ones you check most often at
+  the top. A grouped holdings card drags as one unit, moving every holding
+  inside it together.
 - Under **Net worth**, a brokerage or retirement account (401(k), IRA) with
   several stocks or mutual funds shows as one card, not one row per symbol:
-  use **+ Add multiple** to create it, or switch an existing item's Asset
-  class to **Stock** or **Retirement** to convert it into one. The card
-  shows a chip per holding, an Asset class label that updates automatically
-  (Stocks / Mutual Funds / Mixed), and a combined market value. Select
-  **Manage list** on the card any time you need to add, edit, or remove
-  individual holdings — clearing a row's symbol removes just that one
-  holding, and a blank new row is skipped rather than erroring.
+  select **+ Add holding**, then switch its Asset class to **Stock** or
+  **Retirement** to turn it into one. The card shows a chip per holding, an
+  Asset class label that updates automatically (Stocks / Mutual Funds /
+  Mixed), and a combined market value. Select **Manage list** on the card
+  any time you need to add, edit, or remove individual holdings — clearing
+  a row's symbol removes just that one holding, and a blank new row is
+  skipped rather than erroring.
+- No real ticker for a holding — a proprietary 401(k) fund, say, with no
+  live price to pull? Type its dollar amount straight into **Market value**
+  in Manage list instead of working out shares × price yourself; shares
+  default to 1 and price adjusts to match, so it still totals correctly on
+  the card.
 - Enter each holding's **Avg. cost** (what you paid per share) in Manage
   list to see its gain or loss in dollars and percent, both per holding and
   totaled on the card — holdings with no cost basis entered are left out of

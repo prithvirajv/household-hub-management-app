@@ -3654,7 +3654,51 @@ main {
   border-left: 5px solid var(--green);
   border-radius: 7px;
   background: var(--soft-blue);
-  padding: 0.7rem;
+  padding: 0.7rem 0.7rem 0.7rem 1.8rem;
+  position: relative;
+}
+
+/* Drag-to-reorder for Net worth rows and grouped holdings cards, same
+   thin-edge-highlight convention as the Accounts list's own drag-reorder
+   (see .account-item.dragging / .account-item-drag-over-top/bottom) - a
+   stock/retirement group card already carries the .account-item class so
+   those rules apply to it for free; .net-worth-item needs its own copy
+   since it isn't part of that class. */
+.net-worth-item.dragging {
+  opacity: 0.4;
+}
+
+.net-worth-item.net-worth-item-drag-over-top::before,
+.net-worth-item.net-worth-item-drag-over-bottom::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  height: 2px;
+  background: var(--blue);
+  border-radius: 1px;
+}
+
+.net-worth-item.net-worth-item-drag-over-top::before {
+  top: -3px;
+}
+
+.net-worth-item.net-worth-item-drag-over-bottom::after {
+  bottom: -3px;
+}
+
+.net-worth-drag-handle {
+  position: absolute;
+  left: 0.55rem;
+  top: 0.85rem;
+  cursor: grab;
+  color: var(--muted);
+  font-size: 0.95rem;
+  z-index: 1;
+}
+
+.account-item.stock-group-card {
+  padding-left: 1.9rem;
 }
 
 .net-worth-item:not(.liability):not(.stock) {
@@ -3952,11 +3996,9 @@ main {
   color: var(--coral);
 }
 
-.holdings-modal-market-value {
-  font-size: 0.85rem;
+input.holdings-modal-market-value-input {
   font-weight: 800;
   color: var(--green);
-  padding-top: 0.5rem;
 }
 
 .holdings-modal-gain-loss {
@@ -5633,7 +5675,7 @@ main {
   .holdings-modal-row [data-holding-shares] { grid-area: shares; }
   .holdings-modal-row [data-holding-cost-basis] { grid-area: costbasis; }
   .holdings-modal-row .holdings-modal-price-cell { grid-area: price; }
-  .holdings-modal-row .holdings-modal-market-value { grid-area: marketvalue; }
+  .holdings-modal-row [data-holding-market-value] { grid-area: marketvalue; }
   .holdings-modal-row .holdings-modal-gain-loss { grid-area: gainloss; }
   .holdings-modal-row .holdings-modal-remove { grid-area: remove; width: 100%; }
 }

@@ -1,7 +1,7 @@
 const assert = require("node:assert/strict");
 const test = require("node:test");
 const {
-  applyChecklistToggle, bucketChecklistItems, findChecklistDuplicate, moveChecklistItem, moveArrayItemById, groupStockHoldings, isHoldingAssetClass, assetClassLabelForHoldings, holdingGainLoss, groupGainLoss, debtPayoffProgressPercent, mealWeeksForMonth, groupPlanTasksByBucket, validateJournalPayload,
+  applyChecklistToggle, bucketChecklistItems, findChecklistDuplicate, moveChecklistItem, moveArrayItemById, moveNetWorthAssetBlock, groupStockHoldings, isHoldingAssetClass, assetClassLabelForHoldings, holdingGainLoss, groupGainLoss, debtPayoffProgressPercent, mealWeeksForMonth, groupPlanTasksByBucket, validateJournalPayload,
   dailyTaskOccursOnDate, isDailyTaskDoneOnDate, toggleDailyTaskDoneOnDate,
   timeToMinutes, minutesToTime, snapMinutes, layoutTimelineBlocks, comparePlannedToActual,
   sanitizeFilename, buildDocumentObjectPath, wouldCreateFolderCycle, buildFolderTree,
@@ -252,6 +252,40 @@ test("moveArrayItemById is a no-op when dropped on itself or a missing id", () =
   assert.equal(moveArrayItemById(accounts, "a", "a", false), accounts);
   assert.equal(moveArrayItemById(accounts, "missing", "a", false), accounts);
   assert.equal(moveArrayItemById(accounts, "a", "missing", false), accounts);
+});
+
+test("moveNetWorthAssetBlock moves a plain (single-item) asset like moveArrayItemById", () => {
+  const assets = [{ id: "a" }, { id: "b" }, { id: "c" }];
+  const result = moveNetWorthAssetBlock(assets, "c", "a", false);
+  assert.deepEqual(result.map((item) => item.id), ["c", "a", "b"]);
+});
+
+test("moveNetWorthAssetBlock moves every item sharing the dragged group's groupId together, before the target", () => {
+  const assets = [
+    { id: "g1-a", groupId: "g1" },
+    { id: "g1-b", groupId: "g1" },
+    { id: "plain", value: 100 },
+    { id: "g2-a", groupId: "g2" }
+  ];
+  const result = moveNetWorthAssetBlock(assets, "g1", "g2", false);
+  assert.deepEqual(result.map((item) => item.id), ["plain", "g1-a", "g1-b", "g2-a"]);
+});
+
+test("moveNetWorthAssetBlock dropped after a multi-item target group lands past its last item, not mid-group", () => {
+  const assets = [
+    { id: "plain", value: 100 },
+    { id: "g1-a", groupId: "g1" },
+    { id: "g1-b", groupId: "g1" }
+  ];
+  const result = moveNetWorthAssetBlock(assets, "plain", "g1", true);
+  assert.deepEqual(result.map((item) => item.id), ["g1-a", "g1-b", "plain"]);
+});
+
+test("moveNetWorthAssetBlock is a no-op when dropped on itself or a missing key", () => {
+  const assets = [{ id: "a" }, { id: "b", groupId: "g1" }];
+  assert.equal(moveNetWorthAssetBlock(assets, "a", "a", false), assets);
+  assert.equal(moveNetWorthAssetBlock(assets, "missing", "a", false), assets);
+  assert.equal(moveNetWorthAssetBlock(assets, "a", "missing", false), assets);
 });
 
 test("groupStockHoldings groups holdings that share a groupId into one card, in first-seen order", () => {
