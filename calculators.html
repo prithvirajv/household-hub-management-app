@@ -1,0 +1,658 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="description" content="Free financial calculators from FamilyLoop — SIP, lumpsum, CAGR, XIRR, EMI, and FD. No sign-in required, every calculation runs in your browser.">
+    <title>Financial Calculators — FamilyLoop</title>
+    <link rel="icon" type="image/svg+xml" href="/assets/favicon.svg">
+    <link rel="apple-touch-icon" href="/assets/apple-touch-icon.png">
+    <style>
+      :root {
+        --navy: oklch(24% 0.02 65);
+        --navy-2: oklch(30% 0.02 65);
+        --bg: oklch(97% 0.014 75);
+        --panel: oklch(99% 0.006 75);
+        --soft-blue: oklch(93% 0.01 75);
+        --line: oklch(90% 0.012 75);
+        --text: oklch(23% 0.02 55);
+        --muted: oklch(52% 0.02 60);
+        --green: #13936d;
+        --green-soft: #e6f6ef;
+        --blue: #3569d4;
+        --gold: #d99a24;
+        --coral: #e05252;
+        --shadow: 0 16px 40px rgba(80, 60, 30, 0.14);
+      }
+
+      * { box-sizing: border-box; }
+
+      body {
+        margin: 0;
+        background: var(--bg);
+        color: var(--text);
+        font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+        line-height: 1.5;
+      }
+
+      a { color: inherit; }
+
+      .wrap {
+        max-width: 1180px;
+        margin: 0 auto;
+        padding: 0 1.5rem;
+      }
+
+      header.site-nav {
+        position: sticky;
+        top: 0;
+        z-index: 10;
+        background: color-mix(in srgb, var(--panel) 92%, transparent);
+        backdrop-filter: blur(6px);
+        border-bottom: 1px solid var(--line);
+      }
+
+      .site-nav .wrap {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 1rem;
+        min-height: 68px;
+      }
+
+      .site-brand {
+        display: flex;
+        align-items: center;
+        gap: 0.6rem;
+        font-weight: 900;
+        font-size: 1.1rem;
+        text-decoration: none;
+        color: var(--navy);
+      }
+
+      .site-brand img {
+        width: 32px;
+        height: 32px;
+        border-radius: 8px;
+      }
+
+      .site-nav-links {
+        display: flex;
+        align-items: center;
+        gap: 1.75rem;
+        font-weight: 700;
+        font-size: 0.92rem;
+      }
+
+      .site-nav-links a {
+        text-decoration: none;
+        color: var(--navy-2);
+      }
+
+      .site-nav-links a:hover { color: var(--green); }
+
+      .btn {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        gap: 0.4rem;
+        padding: 0.65rem 1.15rem;
+        border-radius: 999px;
+        font-weight: 800;
+        font-size: 0.92rem;
+        text-decoration: none;
+        border: 1px solid transparent;
+        cursor: pointer;
+      }
+
+      .btn-primary { background: var(--green); color: #fff; }
+      .btn-primary:hover { background: #0f7d5c; }
+      .btn-ghost { background: transparent; border-color: var(--line); color: var(--navy-2); }
+      .btn-ghost:hover { border-color: var(--green); color: var(--green); }
+
+      .page-head {
+        padding: 3rem 0 2rem;
+        text-align: center;
+      }
+
+      .page-head .eyebrow {
+        text-transform: uppercase;
+        letter-spacing: 0.08em;
+        font-weight: 800;
+        font-size: 0.78rem;
+        color: var(--green);
+      }
+
+      .page-head h1 {
+        font-size: clamp(1.9rem, 3.2vw, 2.6rem);
+        margin: 0.4rem 0 0.6rem;
+        color: var(--navy);
+      }
+
+      .page-head p {
+        color: var(--muted);
+        max-width: 620px;
+        margin: 0 auto;
+        font-size: 1.02rem;
+      }
+
+      main { padding-bottom: 4rem; }
+
+      .calc-section {
+        margin-top: 2.4rem;
+      }
+
+      .calc-section h2 {
+        font-size: 1.2rem;
+        color: var(--navy);
+        margin: 0 0 1rem;
+      }
+
+      .calc-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+        gap: 1.1rem;
+      }
+
+      .calc-card {
+        background: var(--panel);
+        border: 1px solid var(--line);
+        border-radius: 16px;
+        box-shadow: var(--shadow);
+        overflow: hidden;
+      }
+
+      .calc-card > summary {
+        list-style: none;
+        cursor: pointer;
+        padding: 1.2rem 1.3rem;
+        display: flex;
+        align-items: center;
+        gap: 0.8rem;
+      }
+
+      .calc-card > summary::-webkit-details-marker { display: none; }
+
+      .calc-icon {
+        width: 42px;
+        height: 42px;
+        flex-shrink: 0;
+        border-radius: 12px;
+        background: var(--green-soft);
+        color: var(--green);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 1.3rem;
+      }
+
+      .calc-card-title { font-weight: 800; color: var(--navy); }
+      .calc-card-desc { color: var(--muted); font-size: 0.88rem; margin-top: 0.15rem; }
+
+      .calc-card summary .chevron {
+        margin-left: auto;
+        color: var(--muted);
+        transition: transform 0.15s ease;
+      }
+
+      .calc-card[open] summary .chevron { transform: rotate(180deg); }
+
+      .calc-body {
+        padding: 0 1.3rem 1.3rem;
+        border-top: 1px solid var(--line);
+      }
+
+      .calc-fields {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+        gap: 0.8rem;
+        margin-top: 1rem;
+      }
+
+      .calc-fields label {
+        display: flex;
+        flex-direction: column;
+        gap: 0.3rem;
+        font-size: 0.82rem;
+        font-weight: 700;
+        color: var(--navy-2);
+      }
+
+      .calc-fields input, .calc-fields select {
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        padding: 0.55rem 0.6rem;
+        font-size: 0.92rem;
+        background: #fff;
+        color: var(--text);
+        font-family: inherit;
+      }
+
+      .calc-result {
+        margin-top: 1rem;
+        background: var(--soft-blue);
+        border-radius: 10px;
+        padding: 0.9rem 1rem;
+        display: flex;
+        flex-wrap: wrap;
+        gap: 1.4rem;
+      }
+
+      .calc-result-item strong {
+        display: block;
+        font-size: 1.15rem;
+        color: var(--navy);
+      }
+
+      .calc-result-item span {
+        font-size: 0.78rem;
+        color: var(--muted);
+        font-weight: 700;
+        text-transform: uppercase;
+        letter-spacing: 0.03em;
+      }
+
+      .xirr-rows { margin-top: 1rem; display: flex; flex-direction: column; gap: 0.5rem; }
+      .xirr-row { display: grid; grid-template-columns: 1fr 1fr auto; gap: 0.6rem; align-items: center; }
+      .xirr-row input { border: 1px solid var(--line); border-radius: 8px; padding: 0.5rem 0.6rem; font-family: inherit; }
+      .xirr-row button { background: transparent; border: none; color: var(--coral); font-weight: 800; cursor: pointer; font-size: 1rem; }
+      .xirr-actions { margin-top: 0.7rem; display: flex; gap: 0.6rem; }
+      .xirr-hint { font-size: 0.78rem; color: var(--muted); margin-top: 0.5rem; }
+
+      footer.site-footer {
+        border-top: 1px solid var(--line);
+        padding: 2rem 0;
+        text-align: center;
+        color: var(--muted);
+        font-size: 0.85rem;
+      }
+
+      footer.site-footer a { color: var(--green); text-decoration: none; font-weight: 700; }
+
+      @media (max-width: 720px) {
+        .site-nav-links { display: none; }
+      }
+    </style>
+  </head>
+  <body>
+    <header class="site-nav">
+      <div class="wrap">
+        <a class="site-brand" href="/welcome.html">
+          <img src="/assets/favicon.svg" alt="">
+          FamilyLoop
+        </a>
+        <nav class="site-nav-links">
+          <a href="/welcome.html#features">Features</a>
+          <a href="/calculators.html">Calculators</a>
+          <a href="/index.html#help">Help</a>
+        </nav>
+        <div>
+          <a class="btn btn-ghost" href="/index.html">Sign in</a>
+          <a class="btn btn-primary" href="/index.html">Try the demo</a>
+        </div>
+      </div>
+    </header>
+
+    <main>
+      <div class="wrap">
+        <div class="page-head">
+          <div class="eyebrow">Free tools · no sign-in</div>
+          <h1>Financial calculators</h1>
+          <p>Every calculation below runs entirely in your browser. Nothing you enter is saved or sent anywhere — use them as much as you like, with or without a FamilyLoop account.</p>
+        </div>
+
+        <section class="calc-section">
+          <h2>Returns</h2>
+          <div class="calc-grid">
+
+            <details class="calc-card" id="calc-sip">
+              <summary>
+                <div class="calc-icon">📈</div>
+                <div>
+                  <div class="calc-card-title">SIP Calculator</div>
+                  <div class="calc-card-desc">Future value of a monthly SIP, with optional step-up</div>
+                </div>
+                <span class="chevron">▼</span>
+              </summary>
+              <div class="calc-body">
+                <div class="calc-fields">
+                  <label>Monthly investment ($)<input type="number" id="sipAmount" value="500" min="0" step="10"></label>
+                  <label>Expected annual return (%)<input type="number" id="sipRate" value="10" min="0" step="0.1"></label>
+                  <label>Duration (years)<input type="number" id="sipYears" value="10" min="1" step="1"></label>
+                  <label>Annual step-up (%)<input type="number" id="sipStepUp" value="0" min="0" step="1"></label>
+                </div>
+                <div class="calc-result">
+                  <div class="calc-result-item"><span>Invested amount</span><strong id="sipInvested">$0</strong></div>
+                  <div class="calc-result-item"><span>Est. returns</span><strong id="sipReturns">$0</strong></div>
+                  <div class="calc-result-item"><span>Future value</span><strong id="sipFv">$0</strong></div>
+                </div>
+              </div>
+            </details>
+
+            <details class="calc-card" id="calc-lumpsum">
+              <summary>
+                <div class="calc-icon">💰</div>
+                <div>
+                  <div class="calc-card-title">Lumpsum Calculator</div>
+                  <div class="calc-card-desc">Growth from a one-time investment over time</div>
+                </div>
+                <span class="chevron">▼</span>
+              </summary>
+              <div class="calc-body">
+                <div class="calc-fields">
+                  <label>Investment amount ($)<input type="number" id="lumpPrincipal" value="10000" min="0" step="100"></label>
+                  <label>Expected annual return (%)<input type="number" id="lumpRate" value="10" min="0" step="0.1"></label>
+                  <label>Duration (years)<input type="number" id="lumpYears" value="10" min="1" step="1"></label>
+                  <label>Compounding
+                    <select id="lumpCompounding">
+                      <option value="1">Annually</option>
+                      <option value="4">Quarterly</option>
+                      <option value="12">Monthly</option>
+                    </select>
+                  </label>
+                </div>
+                <div class="calc-result">
+                  <div class="calc-result-item"><span>Invested amount</span><strong id="lumpInvested">$0</strong></div>
+                  <div class="calc-result-item"><span>Est. returns</span><strong id="lumpReturns">$0</strong></div>
+                  <div class="calc-result-item"><span>Future value</span><strong id="lumpFv">$0</strong></div>
+                </div>
+              </div>
+            </details>
+
+            <details class="calc-card" id="calc-cagr">
+              <summary>
+                <div class="calc-icon">📊</div>
+                <div>
+                  <div class="calc-card-title">CAGR Calculator</div>
+                  <div class="calc-card-desc">Compound annual growth rate between two values</div>
+                </div>
+                <span class="chevron">▼</span>
+              </summary>
+              <div class="calc-body">
+                <div class="calc-fields">
+                  <label>Beginning value ($)<input type="number" id="cagrBegin" value="10000" min="0.01" step="100"></label>
+                  <label>Ending value ($)<input type="number" id="cagrEnd" value="18000" min="0" step="100"></label>
+                  <label>Duration (years)<input type="number" id="cagrYears" value="5" min="0.1" step="0.5"></label>
+                </div>
+                <div class="calc-result">
+                  <div class="calc-result-item"><span>CAGR</span><strong id="cagrResult">0%</strong></div>
+                  <div class="calc-result-item"><span>Total growth</span><strong id="cagrTotal">0%</strong></div>
+                </div>
+              </div>
+            </details>
+
+            <details class="calc-card" id="calc-xirr">
+              <summary>
+                <div class="calc-icon">🔀</div>
+                <div>
+                  <div class="calc-card-title">XIRR Calculator</div>
+                  <div class="calc-card-desc">Annualized return on SIPs and irregular investments</div>
+                </div>
+                <span class="chevron">▼</span>
+              </summary>
+              <div class="calc-body">
+                <div class="xirr-hint">Enter every cash flow: negative amounts for money you put in, positive for money you took out (include today's holding value as a final positive entry).</div>
+                <div class="xirr-rows" id="xirrRows"></div>
+                <div class="xirr-actions">
+                  <button class="btn btn-ghost" type="button" id="xirrAddRow">+ Add cash flow</button>
+                </div>
+                <div class="calc-result">
+                  <div class="calc-result-item"><span>XIRR</span><strong id="xirrResult">—</strong></div>
+                </div>
+              </div>
+            </details>
+
+          </div>
+        </section>
+
+        <section class="calc-section">
+          <h2>Loans</h2>
+          <div class="calc-grid">
+
+            <details class="calc-card" id="calc-emi">
+              <summary>
+                <div class="calc-icon">🏦</div>
+                <div>
+                  <div class="calc-card-title">EMI Calculator</div>
+                  <div class="calc-card-desc">Monthly instalment, total interest, and principal breakup</div>
+                </div>
+                <span class="chevron">▼</span>
+              </summary>
+              <div class="calc-body">
+                <div class="calc-fields">
+                  <label>Loan amount ($)<input type="number" id="emiPrincipal" value="20000" min="0" step="500"></label>
+                  <label>Annual interest rate (%)<input type="number" id="emiRate" value="9" min="0" step="0.1"></label>
+                  <label>Tenure (months)<input type="number" id="emiMonths" value="48" min="1" step="1"></label>
+                </div>
+                <div class="calc-result">
+                  <div class="calc-result-item"><span>Monthly EMI</span><strong id="emiAmount">$0</strong></div>
+                  <div class="calc-result-item"><span>Total interest</span><strong id="emiInterest">$0</strong></div>
+                  <div class="calc-result-item"><span>Total payment</span><strong id="emiTotal">$0</strong></div>
+                </div>
+              </div>
+            </details>
+
+          </div>
+        </section>
+
+        <section class="calc-section">
+          <h2>Planning</h2>
+          <div class="calc-grid">
+
+            <details class="calc-card" id="calc-fd">
+              <summary>
+                <div class="calc-icon">🔒</div>
+                <div>
+                  <div class="calc-card-title">FD Calculator</div>
+                  <div class="calc-card-desc">Maturity value of a fixed deposit</div>
+                </div>
+                <span class="chevron">▼</span>
+              </summary>
+              <div class="calc-body">
+                <div class="calc-fields">
+                  <label>Deposit amount ($)<input type="number" id="fdPrincipal" value="10000" min="0" step="100"></label>
+                  <label>Annual interest rate (%)<input type="number" id="fdRate" value="7" min="0" step="0.1"></label>
+                  <label>Duration (years)<input type="number" id="fdYears" value="5" min="0.1" step="0.5"></label>
+                  <label>Compounding
+                    <select id="fdCompounding">
+                      <option value="4" selected>Quarterly</option>
+                      <option value="12">Monthly</option>
+                      <option value="1">Annually</option>
+                    </select>
+                  </label>
+                </div>
+                <div class="calc-result">
+                  <div class="calc-result-item"><span>Deposit amount</span><strong id="fdInvested">$0</strong></div>
+                  <div class="calc-result-item"><span>Est. interest</span><strong id="fdReturns">$0</strong></div>
+                  <div class="calc-result-item"><span>Maturity value</span><strong id="fdMaturity">$0</strong></div>
+                </div>
+              </div>
+            </details>
+
+          </div>
+        </section>
+      </div>
+    </main>
+
+    <footer class="site-footer">
+      <div class="wrap">
+        Part of <a href="/welcome.html">FamilyLoop</a> — free to use, calculations never leave your browser.
+      </div>
+    </footer>
+
+    <script>
+      const money = new Intl.NumberFormat("en-US", { style: "currency", currency: "USD", maximumFractionDigits: 0 });
+      const pct = (value) => `${value.toFixed(2)}%`;
+
+      function num(id) { return Number(document.getElementById(id).value || 0); }
+
+      // --- SIP ---
+      function sipFutureValue(monthly, annualRatePct, years, stepUpPct) {
+        const monthlyRate = annualRatePct / 100 / 12;
+        let fv = 0;
+        let invested = 0;
+        let currentMonthly = monthly;
+        for (let year = 0; year < years; year++) {
+          for (let m = 0; m < 12; m++) {
+            const monthsFromStart = year * 12 + m;
+            const monthsRemaining = years * 12 - monthsFromStart;
+            fv += currentMonthly * Math.pow(1 + monthlyRate, monthsRemaining);
+            invested += currentMonthly;
+          }
+          currentMonthly *= 1 + stepUpPct / 100;
+        }
+        return { fv, invested };
+      }
+
+      function updateSip() {
+        const { fv, invested } = sipFutureValue(num("sipAmount"), num("sipRate"), num("sipYears"), num("sipStepUp"));
+        document.getElementById("sipInvested").textContent = money.format(invested);
+        document.getElementById("sipReturns").textContent = money.format(Math.max(0, fv - invested));
+        document.getElementById("sipFv").textContent = money.format(fv);
+      }
+      ["sipAmount", "sipRate", "sipYears", "sipStepUp"].forEach((id) => document.getElementById(id).addEventListener("input", updateSip));
+
+      // --- Lumpsum ---
+      function updateLumpsum() {
+        const principal = num("lumpPrincipal");
+        const rate = num("lumpRate") / 100;
+        const years = num("lumpYears");
+        const n = num("lumpCompounding") || 1;
+        const fv = principal * Math.pow(1 + rate / n, n * years);
+        document.getElementById("lumpInvested").textContent = money.format(principal);
+        document.getElementById("lumpReturns").textContent = money.format(Math.max(0, fv - principal));
+        document.getElementById("lumpFv").textContent = money.format(fv);
+      }
+      ["lumpPrincipal", "lumpRate", "lumpYears", "lumpCompounding"].forEach((id) => document.getElementById(id).addEventListener("input", updateLumpsum));
+
+      // --- CAGR ---
+      function updateCagr() {
+        const begin = num("cagrBegin");
+        const end = num("cagrEnd");
+        const years = num("cagrYears");
+        const cagrResult = document.getElementById("cagrResult");
+        const totalResult = document.getElementById("cagrTotal");
+        if (begin <= 0 || years <= 0) {
+          cagrResult.textContent = "—";
+          totalResult.textContent = "—";
+          return;
+        }
+        const cagrValue = (Math.pow(end / begin, 1 / years) - 1) * 100;
+        cagrResult.textContent = pct(cagrValue);
+        totalResult.textContent = pct(((end - begin) / begin) * 100);
+      }
+      ["cagrBegin", "cagrEnd", "cagrYears"].forEach((id) => document.getElementById(id).addEventListener("input", updateCagr));
+
+      // --- EMI ---
+      function updateEmi() {
+        const principal = num("emiPrincipal");
+        const months = num("emiMonths");
+        const monthlyRate = num("emiRate") / 100 / 12;
+        if (months <= 0) return;
+        let emiValue;
+        if (monthlyRate === 0) {
+          emiValue = principal / months;
+        } else {
+          const factor = Math.pow(1 + monthlyRate, months);
+          emiValue = (principal * monthlyRate * factor) / (factor - 1);
+        }
+        const total = emiValue * months;
+        document.getElementById("emiAmount").textContent = money.format(emiValue);
+        document.getElementById("emiInterest").textContent = money.format(Math.max(0, total - principal));
+        document.getElementById("emiTotal").textContent = money.format(total);
+      }
+      ["emiPrincipal", "emiRate", "emiMonths"].forEach((id) => document.getElementById(id).addEventListener("input", updateEmi));
+
+      // --- FD ---
+      function updateFd() {
+        const principal = num("fdPrincipal");
+        const rate = num("fdRate") / 100;
+        const years = num("fdYears");
+        const n = num("fdCompounding") || 1;
+        const maturity = principal * Math.pow(1 + rate / n, n * years);
+        document.getElementById("fdInvested").textContent = money.format(principal);
+        document.getElementById("fdReturns").textContent = money.format(Math.max(0, maturity - principal));
+        document.getElementById("fdMaturity").textContent = money.format(maturity);
+      }
+      ["fdPrincipal", "fdRate", "fdYears", "fdCompounding"].forEach((id) => document.getElementById(id).addEventListener("input", updateFd));
+
+      // --- XIRR ---
+      const xirrRowsEl = document.getElementById("xirrRows");
+      function addXirrRow(date, amount) {
+        const row = document.createElement("div");
+        row.className = "xirr-row";
+        row.innerHTML = `
+          <input type="date" class="xirr-date" value="${date}">
+          <input type="number" class="xirr-amount" value="${amount}" step="100" placeholder="Amount (- invest / + withdraw)">
+          <button type="button" aria-label="Remove row">×</button>
+        `;
+        row.querySelector("button").addEventListener("click", () => { row.remove(); updateXirr(); });
+        row.querySelectorAll("input").forEach((input) => input.addEventListener("input", updateXirr));
+        xirrRowsEl.appendChild(row);
+      }
+      document.getElementById("xirrAddRow").addEventListener("click", () => {
+        addXirrRow(new Date().toISOString().slice(0, 10), 0);
+        updateXirr();
+      });
+
+      function computeXirr(cashflows) {
+        if (cashflows.length < 2) return null;
+        const d0 = cashflows[0].date;
+        const dayMs = 86400000;
+        const xnpv = (rate) => cashflows.reduce((sum, cf) => {
+          const t = (cf.date - d0) / dayMs / 365;
+          return sum + cf.amount / Math.pow(1 + rate, t);
+        }, 0);
+        const xnpvDerivative = (rate) => cashflows.reduce((sum, cf) => {
+          const t = (cf.date - d0) / dayMs / 365;
+          if (t === 0) return sum;
+          return sum - (t * cf.amount) / Math.pow(1 + rate, t + 1);
+        }, 0);
+        let rate = 0.1;
+        for (let i = 0; i < 100; i++) {
+          const f = xnpv(rate);
+          const fPrime = xnpvDerivative(rate);
+          if (Math.abs(fPrime) < 1e-10) return null;
+          const nextRate = rate - f / fPrime;
+          if (!Number.isFinite(nextRate)) return null;
+          if (Math.abs(nextRate - rate) < 1e-7) return nextRate;
+          rate = nextRate;
+        }
+        return rate;
+      }
+
+      function updateXirr() {
+        const rows = [...xirrRowsEl.querySelectorAll(".xirr-row")];
+        const cashflows = rows
+          .map((row) => ({
+            date: new Date(row.querySelector(".xirr-date").value),
+            amount: Number(row.querySelector(".xirr-amount").value || 0)
+          }))
+          .filter((cf) => !Number.isNaN(cf.date.getTime()) && cf.amount !== 0)
+          .sort((a, b) => a.date - b.date);
+        const hasNegative = cashflows.some((cf) => cf.amount < 0);
+        const hasPositive = cashflows.some((cf) => cf.amount > 0);
+        const result = document.getElementById("xirrResult");
+        if (!hasNegative || !hasPositive) {
+          result.textContent = "—";
+          return;
+        }
+        const rate = computeXirr(cashflows);
+        result.textContent = rate === null ? "Could not solve" : pct(rate * 100);
+      }
+
+      const today = new Date();
+      const yearAgo = new Date(today);
+      yearAgo.setFullYear(yearAgo.getFullYear() - 1);
+      addXirrRow(yearAgo.toISOString().slice(0, 10), -10000);
+      addXirrRow(today.toISOString().slice(0, 10), 11200);
+
+      updateSip();
+      updateLumpsum();
+      updateCagr();
+      updateEmi();
+      updateFd();
+      updateXirr();
+    </script>
+  </body>
+</html>
