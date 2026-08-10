@@ -136,6 +136,11 @@ app.use("/api/reports", express.json({ limit: "20mb" }));
 app.use(express.json({ limit: "1mb" }));
 app.use(cookieParser(SESSION_SECRET));
 app.use(express.static(path.join(__dirname, ".."), {
+  // Without this, express.static's own default-index behavior serves
+  // index.html for "/" before the explicit welcome.html route below ever
+  // runs - "index" only affects directory requests, so /index.html itself
+  // is unaffected and still serves normally.
+  index: false,
   setHeaders(res, filePath) {
     if (/\.(html|css|js)$/.test(filePath)) {
       res.setHeader("Cache-Control", "no-store");
@@ -3778,7 +3783,7 @@ if (TEST_EXPOSE_NOTIFICATIONS) {
 }
 
 app.get("/", (_req, res) => {
-  res.sendFile(path.join(__dirname, "..", "index.html"));
+  res.sendFile(path.join(__dirname, "..", "welcome.html"));
 });
 
 app.use((error, _req, res, _next) => {

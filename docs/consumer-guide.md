@@ -63,6 +63,10 @@ more convenient.
 6. Starting a new month? Use **Use previous budget** at the top of
    Categories and subcategories to copy last month's categories and amounts
    instead of rebuilding from scratch.
+7. The **Flow** card shows this month's income split into an Unallocated
+   envelope plus one envelope per category with something planned in it — a
+   quick visual for where every dollar is headed, alongside the detailed
+   table below it.
 
 **Get the most out of it**
 - Build out every category before you start assigning transactions — an

@@ -3957,6 +3957,83 @@ main {
   margin-bottom: 0.6rem;
 }
 
+.envelope-flow-row {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  overflow-x: auto;
+  padding-bottom: 0.25rem;
+}
+
+.envelope {
+  flex: 0 0 auto;
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  min-width: 120px;
+  padding: 0.7rem 0.85rem;
+  border-radius: 10px;
+  border: 1.5px solid var(--line);
+  background: var(--panel);
+}
+
+.envelope i {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  margin-bottom: 0.1rem;
+}
+
+.envelope-unallocated {
+  border-color: var(--green);
+  background: var(--green-soft);
+}
+
+.envelope-unallocated.danger {
+  border-color: var(--coral);
+  background: rgba(224, 82, 82, 0.1);
+}
+
+.envelope-label {
+  font-size: 0.68rem;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  color: var(--muted);
+}
+
+.envelope strong {
+  font-size: 1.05rem;
+}
+
+.envelope-flow-arrows {
+  flex: 0 0 auto;
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  width: 36px;
+}
+
+.envelope-flow-arrow {
+  height: 2px;
+  border-radius: 999px;
+  background: linear-gradient(90deg, var(--green) 0%, var(--green) 50%, transparent 50%, transparent 100%);
+  background-size: 200% 100%;
+  animation: envelope-flow-move 1.6s linear infinite;
+}
+
+@keyframes envelope-flow-move {
+  from { background-position: 0% 0; }
+  to { background-position: -200% 0; }
+}
+
+.envelope-flow-targets {
+  flex: 1;
+  display: flex;
+  gap: 0.6rem;
+  overflow-x: auto;
+}
+
 .net-worth-strip strong {
   font-size: 1.8rem;
 }

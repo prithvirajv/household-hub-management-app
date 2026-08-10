@@ -1803,6 +1803,41 @@ function renderBills() {
     </section>`;
 }
 
+// A visual companion to the flat category bars below it - same planned
+// totals, just framed as "where did this month's income get allocated"
+// instead of a spreadsheet-style list. Categories with nothing planned yet
+// are left out entirely rather than shown as empty envelopes.
+function budgetEnvelopeFlowHtml() {
+  const unallocated = state.budget.income - plannedTotal();
+  const categories = state.budget.categories
+    .map((category) => ({ name: category.name, color: category.color, planned: category.lines.reduce((sum, line) => sum + Number(line.planned || 0), 0) }))
+    .filter((category) => category.planned > 0)
+    .sort((a, b) => b.planned - a.planned);
+  if (!categories.length) return "";
+  return `
+    <section class="card budget-envelope-flow">
+      <div class="section-head"><div><span class="card-label">Flow</span><h3>Where this month's income is allocated</h3></div></div>
+      <div class="envelope-flow-row">
+        <div class="envelope envelope-unallocated ${unallocated < 0 ? "danger" : ""}">
+          <span class="envelope-label">Unallocated</span>
+          <strong>${money.format(unallocated)}</strong>
+        </div>
+        <div class="envelope-flow-arrows" aria-hidden="true">
+          ${categories.map(() => `<span class="envelope-flow-arrow"></span>`).join("")}
+        </div>
+        <div class="envelope-flow-targets">
+          ${categories.map((category) => `
+            <div class="envelope" style="border-color:${category.color}">
+              <i style="background:${category.color}"></i>
+              <span class="envelope-label">${escapeHtml(category.name)}</span>
+              <strong>${money.format(category.planned)}</strong>
+            </div>
+          `).join("")}
+        </div>
+      </div>
+    </section>`;
+}
+
 function renderBudget() {
   ensurePaycheckRecurrenceData();
   ensureAccountsData();
@@ -1824,6 +1859,7 @@ function renderBudget() {
   return `
     <section class="work-grid transactions-grid">
       <div class="main-stack">
+        ${budgetEnvelopeFlowHtml()}
         <section class="budget-ledger-card card">
           <div class="net-worth-strip budget-left-strip">
             <strong data-income-left>${money.format(state.budget.income - plannedTotal())}</strong>
