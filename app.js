@@ -70,6 +70,11 @@ let reportsCompareLastYear = false;
 let wealthCurrency = "USD";
 let wealthFxRates = null;
 let wealthFxLoading = false;
+// A guided-navigation overlay, not a form of its own - each step hands off
+// to the real screen/button that already does the work (Add account,
+// Invite, Start planning), rather than duplicating that logic here.
+let onboardingStep = 1;
+let onboardingAutoShown = false;
 // Three full curated palettes (accent + negative color + a 5-color chart
 // palette) a viewer can swap between on the Reports page - independent of
 // each category's own stored .color (that's the app-wide Budget-page
@@ -1682,6 +1687,12 @@ function render() {
   if (["documents", "wealth"].includes(currentView) && !documentsData) loadDocumentsData();
   if (["sharing", "calendar"].includes(currentView) && !sharingAccess) loadSharingAccess();
   if (currentView === "calendar" && sharedCalendarMembers.length === 0) loadCalendarMembers();
+  if (!onboardingAutoShown && shouldShowOnboarding()) {
+    onboardingAutoShown = true;
+    onboardingStep = 1;
+    renderOnboardingWizard();
+    $("#onboardingWizardDialog").showModal();
+  }
   autosaveState();
 }
 
@@ -1773,6 +1784,83 @@ function homeRecentActivity(limit = 8) {
   return [...notesActivity, ...decisionsActivity, ...iouActivity]
     .sort((a, b) => String(b.at).localeCompare(String(a.at)))
     .slice(0, limit);
+}
+
+// Global search - combines transactions, notes, documents, and decisions
+// into one flat list, each result carrying just enough to jump to the
+// right screen. Documents are searched only if already loaded (see
+// loadDocumentsData) - the search dialog triggers that load on open so
+// results are complete even if the viewer hasn't visited Documents yet.
+function globalSearchResults(query) {
+  const normalized = String(query || "").trim().toLowerCase();
+  if (normalized.length < 2) return [];
+  const results = [];
+
+  state.transactions.forEach((transaction) => {
+    if (String(transaction.payee || "").toLowerCase().includes(normalized)) {
+      results.push({ type: "Transaction", icon: "💳", title: transaction.payee, detail: `${money.format(transaction.amount)} · ${formatShortDate(transaction.date)}`, view: "transactions" });
+    }
+  });
+
+  (state.notes?.entries || []).forEach((note) => {
+    if (note.trashed) return;
+    const haystack = `${note.title || ""} ${note.body || ""}`.toLowerCase();
+    if (haystack.includes(normalized)) {
+      results.push({ type: "Note", icon: "📝", title: note.title || "Untitled note", detail: (note.body || "").slice(0, 60), view: "notes" });
+    }
+  });
+
+  (documentsData?.documents || []).forEach((document) => {
+    if (String(document.name || "").toLowerCase().includes(normalized)) {
+      results.push({ type: "Document", icon: "📁", title: document.name, detail: "Document", view: "documents" });
+    }
+  });
+
+  (state.decisions || []).forEach((decision) => {
+    if (String(decision.title || "").toLowerCase().includes(normalized)) {
+      results.push({ type: "Decision", icon: "⚖️", title: decision.title, detail: decision.decidedAt ? "Decided" : "Open", view: "decisions" });
+    }
+  });
+
+  return results.slice(0, 40);
+}
+
+// Only a genuinely fresh household (no accounts, no budget, no income) is
+// offered the wizard automatically - an established household that simply
+// has zero accounts by choice (cash-only) won't see it pop up on every
+// visit, since state.onboarding.dismissed sticks once set.
+function shouldShowOnboarding() {
+  if (state.onboarding?.dismissed) return false;
+  return state.accounts.length === 0 && state.budget.categories.length === 0 && state.paychecks.length === 0;
+}
+
+function dismissOnboarding() {
+  state.onboarding = { dismissed: true };
+  autosaveState();
+  $("#onboardingWizardDialog").close();
+}
+
+const ONBOARDING_STEPS = [
+  { title: "Link an account", body: "Add a real bank or credit-card account so balances update themselves as you go, instead of tracking everything by hand.", goto: "wealth", cta: "Add an account" },
+  { title: "Invite your household", body: "Bring in the rest of the household - everyone sees the same budget, calendar, and shared expenses.", goto: "sharing", cta: "Invite someone" },
+  { title: "Set a starting budget", body: "Add your income and a first category or two - you can always add more later.", goto: "budget", cta: "Start planning" },
+  { title: "You're set", body: "That's the basics - explore the rest of FamilyLoop whenever you're ready.", goto: "home", cta: "Go to Home" }
+];
+
+function renderOnboardingWizard() {
+  const step = ONBOARDING_STEPS[onboardingStep - 1];
+  $("#onboardingWizardContent").innerHTML = `
+    <div class="section-head">
+      <div><span class="card-label">Getting started · Step ${onboardingStep} of ${ONBOARDING_STEPS.length}</span><h2>${escapeHtml(step.title)}</h2></div>
+      <button id="closeOnboardingWizardButton" class="icon-button ghost" type="button" aria-label="Close">×</button>
+    </div>
+    <p class="muted">${escapeHtml(step.body)}</p>
+    <div class="dialog-actions">
+      ${onboardingStep > 1 ? `<button id="onboardingBackButton" class="ghost" type="button">Back</button>` : ""}
+      <button id="onboardingSkipButton" class="ghost" type="button">${onboardingStep === ONBOARDING_STEPS.length ? "Close" : "Skip for now"}</button>
+      <button data-onboarding-goto="${step.goto}" type="button">${escapeHtml(step.cta)}</button>
+    </div>
+  `;
 }
 
 function renderHome() {
@@ -11711,6 +11799,66 @@ $("#themeToggleButton").addEventListener("click", () => {
   document.documentElement.setAttribute("data-theme", next);
   localStorage.setItem("familyloop-theme", next);
   applyThemeButtonIcon();
+});
+
+function renderGlobalSearchResults() {
+  const results = globalSearchResults($("#globalSearchInput").value);
+  const query = $("#globalSearchInput").value.trim();
+  $("#globalSearchResults").innerHTML = query.length < 2
+    ? `<div class="empty-inline">Type at least 2 characters to search.</div>`
+    : results.length
+      ? results.map((result) => `
+        <button type="button" class="global-search-result" data-global-search-goto="${result.view}">
+          <span class="global-search-result-icon">${result.icon}</span>
+          <span class="global-search-result-text"><strong>${escapeHtml(result.title)}</strong><small>${result.type} · ${escapeHtml(result.detail)}</small></span>
+        </button>
+      `).join("")
+      : `<div class="empty-inline">No matches for "${escapeHtml(query)}".</div>`;
+}
+
+$("#onboardingWizardDialog").addEventListener("click", (event) => {
+  if (event.target.closest("#closeOnboardingWizardButton") || event.target.closest("#onboardingSkipButton")) {
+    dismissOnboarding();
+    return;
+  }
+  if (event.target.closest("#onboardingBackButton")) {
+    onboardingStep = Math.max(1, onboardingStep - 1);
+    renderOnboardingWizard();
+    return;
+  }
+  const gotoButton = event.target.closest("[data-onboarding-goto]");
+  if (gotoButton) {
+    if (onboardingStep < ONBOARDING_STEPS.length) {
+      currentView = gotoButton.dataset.onboardingGoto;
+      onboardingStep += 1;
+      $("#onboardingWizardDialog").close();
+      render();
+    } else {
+      dismissOnboarding();
+      currentView = "home";
+      render();
+    }
+  }
+});
+
+$("#globalSearchButton").addEventListener("click", () => {
+  if (!documentsData) loadDocumentsData(false);
+  $("#globalSearchInput").value = "";
+  renderGlobalSearchResults();
+  $("#globalSearchDialog").showModal();
+  $("#globalSearchInput").focus();
+});
+
+$("#closeGlobalSearchDialogButton").addEventListener("click", () => $("#globalSearchDialog").close());
+
+$("#globalSearchInput").addEventListener("input", renderGlobalSearchResults);
+
+$("#globalSearchResults").addEventListener("click", (event) => {
+  const button = event.target.closest("[data-global-search-goto]");
+  if (!button) return;
+  currentView = button.dataset.globalSearchGoto;
+  $("#globalSearchDialog").close();
+  render();
 });
 
 $("#monthPicker").addEventListener("change", (event) => {

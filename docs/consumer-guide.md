@@ -34,6 +34,13 @@ more convenient.
 7. Home's **This week** strip merges chores, bills, birthdays, and reminders
    into one 7-day view, and **Recent activity** lists notes, decisions, and
    settled IOUs as they happen, newest first.
+8. Select the 🔍 icon in the top bar to search transactions, notes,
+   documents, and decisions at once — type at least 2 characters, then
+   select a result to jump straight to it.
+9. A brand-new household with no accounts, budget categories, or paychecks
+   yet sees a short **Getting started** overlay pointing at linking an
+   account, inviting the household, and setting a first budget. Skip it or
+   step through it — it won't come back once dismissed.
 
 ## Households
 

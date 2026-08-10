@@ -388,6 +388,10 @@ main {
   display: none;
 }
 
+.muted {
+  color: var(--muted);
+}
+
 .eyebrow,
 .card-label {
   color: var(--muted);
@@ -4736,6 +4740,45 @@ input.holdings-modal-market-value-input {
   display: grid;
   gap: 0.85rem;
   padding: 1.1rem;
+}
+
+.global-search-results {
+  max-height: 22rem;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+}
+
+.global-search-result {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  text-align: left;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  padding: 0.55rem 0.6rem;
+}
+
+.global-search-result:hover {
+  background: var(--soft);
+  border-color: var(--line);
+}
+
+.global-search-result-icon {
+  font-size: 1.1rem;
+}
+
+.global-search-result-text {
+  display: flex;
+  flex-direction: column;
+  gap: 0.1rem;
+  min-width: 0;
+}
+
+.global-search-result-text small {
+  color: var(--muted);
 }
 
 .delete-budget-line-impact {

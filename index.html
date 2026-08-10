@@ -7,7 +7,7 @@
     <title>FamilyLoop</title>
     <link rel="icon" type="image/svg+xml" href="/assets/favicon.svg">
     <link rel="apple-touch-icon" href="/assets/apple-touch-icon.png">
-    <link rel="stylesheet" href="/styles.css?v=20260810-8">
+    <link rel="stylesheet" href="/styles.css?v=20260810-9">
     <script>
       (function () {
         var saved = localStorage.getItem("familyloop-theme");
@@ -51,6 +51,7 @@
             <label id="mealWeekHeaderControl" class="week-control" hidden>Week<select id="mealWeekHeaderSelect"></select></label>
             <button id="syncButton" class="icon-button ghost" type="button" aria-label="Refresh household data" title="Refresh household data">↻</button>
             <button id="themeToggleButton" class="icon-button ghost" type="button" aria-label="Toggle dark mode" title="Toggle dark mode">🌙</button>
+            <button id="globalSearchButton" class="icon-button ghost" type="button" aria-label="Search" title="Search">🔍</button>
             <div class="notification-bell-wrap">
               <button id="notificationBellButton" class="icon-button ghost" type="button" aria-label="Notifications" title="Notifications">🔔<span id="notificationBellDot" class="notification-bell-dot" hidden></span></button>
               <div id="notificationBellDropdown" class="notification-bell-dropdown" hidden></div>
@@ -133,6 +134,21 @@
         </section>
       </main>
     </div>
+
+    <dialog id="onboardingWizardDialog" class="app-dialog onboarding-wizard-dialog">
+      <div class="delete-budget-line-dialog-content" id="onboardingWizardContent"></div>
+    </dialog>
+
+    <dialog id="globalSearchDialog" class="app-dialog">
+      <div class="delete-budget-line-dialog-content">
+        <div class="section-head">
+          <div><span class="card-label">Search</span><h2>Find anything</h2></div>
+          <button id="closeGlobalSearchDialogButton" class="icon-button ghost" type="button" aria-label="Close">×</button>
+        </div>
+        <input id="globalSearchInput" type="text" placeholder="Search transactions, notes, documents, decisions…" autocomplete="off">
+        <div id="globalSearchResults" class="global-search-results"></div>
+      </div>
+    </dialog>
 
     <dialog id="householdDialog" class="app-dialog">
       <form id="householdForm">
@@ -361,6 +377,6 @@
     <script src="https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/build/pdf.min.js"></script>
     <script>if (window.pdfjsLib) pdfjsLib.GlobalWorkerOptions.workerSrc = "https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/build/pdf.worker.min.js";</script>
     <script src="/lib/shared-logic.js?v=20260810-2"></script>
-    <script src="/app.js?v=20260810-8"></script>
+    <script src="/app.js?v=20260810-9"></script>
   </body>
 </html>
