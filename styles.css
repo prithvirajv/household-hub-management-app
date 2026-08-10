@@ -541,6 +541,11 @@ main {
   border: 1px solid var(--line);
   border-radius: 8px;
   padding: 0;
+  /* <dialog> isn't part of the normal flow, so `background` (not an
+     inherited property) falls back to the browser's own UA default -
+     plain white - unless set explicitly here, regardless of every other
+     surface on the page already using var(--panel). */
+  background: var(--panel);
   color: var(--text);
   box-shadow: 0 24px 70px rgba(40, 30, 20, 0.28);
 }

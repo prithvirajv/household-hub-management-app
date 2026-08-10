@@ -4,7 +4,7 @@ const {
   applyChecklistToggle, bucketChecklistItems, findChecklistDuplicate, moveChecklistItem, moveArrayItemById, moveNetWorthAssetBlock, groupStockHoldings, isHoldingAssetClass, assetClassLabelForHoldings, holdingGainLoss, groupGainLoss, debtPayoffProgressPercent, mealWeeksForMonth, groupPlanTasksByBucket, validateJournalPayload,
   dailyTaskOccursOnDate, isDailyTaskDoneOnDate, toggleDailyTaskDoneOnDate,
   timeToMinutes, minutesToTime, snapMinutes, layoutTimelineBlocks, comparePlannedToActual,
-  sanitizeFilename, buildDocumentObjectPath, wouldCreateFolderCycle, buildFolderTree,
+  sanitizeFilename, buildDocumentObjectPath, wouldCreateFolderCycle, buildFolderTree, collectDescendantFolderIds,
   smsGatewayAddress, paycheckOccurrencesSince, paycheckOccurrencesInRange, paycheckAllOccurrenceDatesInRange, recurringExpenseOccurrenceDates, accountBalance, accountsWithBalances,
   monthEndDateKey, assetValue, computeTrailingMonthKeys, computeReportCategoriesForScope, computeNetWorthAtDate, computeNetWorthTrend, computeCashFlowByMonth, sankeyFlowSegments,
   splitAmountEvenly, splitBillByPercentages, splitBillByShares, netBalancesByPerson, computeBillSplitAmounts, settleUpPersonIous, isValidEmail,
@@ -128,6 +128,24 @@ test("buildFolderTree nests folders by parentId", () => {
   assert.equal(tree[0].id, "a");
   assert.equal(tree[0].children[0].id, "b");
   assert.equal(tree[0].children[0].children[0].id, "c");
+});
+
+test("collectDescendantFolderIds returns just the root id when it has no children", () => {
+  const folders = [{ id: "a", parentId: null }, { id: "sibling", parentId: null }];
+  assert.deepEqual(collectDescendantFolderIds(folders, "a"), ["a"]);
+});
+
+test("collectDescendantFolderIds returns the root plus every descendant at any depth, siblings excluded", () => {
+  const folders = [
+    { id: "a", parentId: null },
+    { id: "b", parentId: "a" },
+    { id: "c", parentId: "b" },
+    { id: "d", parentId: "a" },
+    { id: "sibling", parentId: null }
+  ];
+  const ids = collectDescendantFolderIds(folders, "a");
+  assert.deepEqual(new Set(ids), new Set(["a", "b", "c", "d"]));
+  assert.equal(ids.includes("sibling"), false);
 });
 
 test("bucketChecklistItems keeps a checked child in the open bucket while its siblings are still open", () => {

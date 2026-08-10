@@ -224,6 +224,9 @@ more convenient.
 **Get the most out of it**
 - Documents are shared across every household you own, not just the one
   currently selected — so they don't disappear when you switch households.
+- Deleting a folder deletes everything inside it — subfolders and their
+  documents included — after one confirmation. There's no need to empty a
+  folder by hand first.
 
 ## Decisions
 

@@ -3421,7 +3421,7 @@ function renderDocuments() {
     ${documentsUploadProgress ? `<p class="documents-upload-progress">Uploading ${documentsUploadProgress.done + 1} of ${documentsUploadProgress.total}: ${escapeHtml(documentsUploadProgress.currentName)}</p>` : ""}
     ${subfolders.length ? `<div class="documents-folder-grid">
       ${subfolders.map((folder) => `<div class="documents-folder-card" draggable="true" data-drag-type="folder" data-drag-id="${folder.id}" data-documents-drop-target="${folder.id}">
-        <button type="button" class="documents-folder-open" data-documents-open-folder="${folder.id}" title="${escapeHtml(folder.name)}">▢ ${escapeHtml(folder.name)}</button>
+        <button type="button" class="documents-folder-open" data-documents-open-folder="${folder.id}" title="${escapeHtml(folder.name)}">📁 ${escapeHtml(folder.name)}</button>
         <div class="documents-folder-card-actions">
           <button type="button" class="documents-icon-btn" data-documents-rename-folder="${folder.id}" title="Rename folder" aria-label="Rename ${escapeHtml(folder.name)} folder">✎</button>
           ${renderFolderWealthLinkPicker(folder)}
@@ -4690,7 +4690,7 @@ function renderHelp() {
         "Break a task into subtasks for anything with multiple steps."
       ],
       tips: ["Like Journal, Plan is private to you alone — a personal planner, not a shared household calendar."] },
-    { icon: "▢", title: "Documents", id: "documents",
+    { icon: "📁", title: "Documents", id: "documents",
       image: { src: "assets/mockup-documents.svg", alt: "A folder card and two file cards in a grid, with a file information panel below" },
       steps: [
         "Select <strong>+ New folder</strong> to organize files, or drag files/whole folders straight onto the page to upload.",
@@ -9481,7 +9481,12 @@ function bindViewEvents() {
 
   document.querySelectorAll("[data-documents-delete-folder]").forEach((button) => {
     button.addEventListener("click", async () => {
-      if (!(await showConfirm("Delete this folder? It must be empty.", { confirmLabel: "Delete" }))) return;
+      const folderId = button.dataset.documentsDeleteFolder;
+      const hasContents = documentsData.folders.some((item) => item.parentId === folderId) || documentsData.documents.some((item) => item.folderId === folderId);
+      const message = hasContents
+        ? "Delete this folder and everything inside it - subfolders and documents included? This can't be undone."
+        : "Delete this folder? This can't be undone.";
+      if (!(await showConfirm(message, { confirmLabel: "Delete" }))) return;
       try {
         await api(`/api/documents/folders/${button.dataset.documentsDeleteFolder}`, { method: "DELETE" });
         await loadDocumentsData(false);

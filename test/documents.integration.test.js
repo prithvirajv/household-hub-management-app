@@ -240,11 +240,19 @@ test("folder move rejects creating a cycle", async () => {
   assert.equal(intoChild.status, 400);
 });
 
-test("deleting a non-empty folder is rejected with 409", async () => {
+test("deleting a folder cascades to its subfolders and every document inside them", async () => {
   const cookie = await signUp("documents-nonempty@example.com", "Documents Nonempty Household");
-  const folder = await server.request("/api/documents/folders", { method: "POST", headers: { cookie }, body: JSON.stringify({ name: "Has stuff" }) });
-  await server.request("/api/documents/upload-url", { method: "POST", headers: { cookie }, body: JSON.stringify({ name: "a.pdf", contentType: "application/pdf", folderId: folder.body.id }) });
+  const root = await server.request("/api/documents/folders", { method: "POST", headers: { cookie }, body: JSON.stringify({ name: "Has stuff" }) });
+  const child = await server.request("/api/documents/folders", { method: "POST", headers: { cookie }, body: JSON.stringify({ name: "Nested", parentId: root.body.id }) });
+  const rootDoc = await server.request("/api/documents/upload-url", { method: "POST", headers: { cookie }, body: JSON.stringify({ name: "a.pdf", contentType: "application/pdf", folderId: root.body.id }) });
+  const childDoc = await server.request("/api/documents/upload-url", { method: "POST", headers: { cookie }, body: JSON.stringify({ name: "b.pdf", contentType: "application/pdf", folderId: child.body.id }) });
 
-  const remove = await server.request(`/api/documents/folders/${folder.body.id}`, { method: "DELETE", headers: { cookie } });
-  assert.equal(remove.status, 409);
+  const remove = await server.request(`/api/documents/folders/${root.body.id}`, { method: "DELETE", headers: { cookie } });
+  assert.equal(remove.status, 200);
+  assert.deepEqual(new Set(remove.body.deletedFolderIds), new Set([root.body.id, child.body.id]));
+  assert.equal(remove.body.deletedDocumentCount, 2);
+
+  const remaining = await server.request("/api/documents", { headers: { cookie } });
+  assert.equal(remaining.body.folders.some((item) => item.id === root.body.id || item.id === child.body.id), false);
+  assert.equal(remaining.body.documents.some((item) => item.id === rootDoc.body.documentId || item.id === childDoc.body.documentId), false);
 });

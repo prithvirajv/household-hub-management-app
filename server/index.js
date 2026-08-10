@@ -14,7 +14,7 @@ const { Pool } = require("pg");
 const { OAuth2Client } = require("google-auth-library");
 const { countries } = require("countries-list");
 const { defaultState } = require("./default-state");
-const { validateJournalPayload, buildDocumentObjectPath, wouldCreateFolderCycle, SMS_CARRIERS, smsGatewayAddress, rollAnnualNotifyAtForward, choreNotifyAt, parseBankStatementPdfText, extractAccountActivityLabel, isValidEmail } = require("../lib/shared-logic");
+const { validateJournalPayload, buildDocumentObjectPath, wouldCreateFolderCycle, collectDescendantFolderIds, SMS_CARRIERS, smsGatewayAddress, rollAnnualNotifyAtForward, choreNotifyAt, parseBankStatementPdfText, extractAccountActivityLabel, isValidEmail } = require("../lib/shared-logic");
 const pdfParse = require("pdf-parse");
 const ExcelJS = require("exceljs");
 
@@ -3010,26 +3010,32 @@ app.post("/api/push-devices", requireSession, async (req, res, next) => {
   }
 });
 
-const ALLOWED_DOCUMENT_CONTENT_TYPES = new Set([
-  "application/pdf",
-  "image/jpeg",
-  "image/png",
-  "image/heic",
-  "image/webp",
-  "image/gif",
-  "application/msword",
-  "application/vnd.ms-excel",
-  "text/plain",
-  "text/csv",
-  "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-  "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-  "application/vnd.openxmlformats-officedocument.presentationml.presentation",
-  // The browser reports this whenever it can't sniff a real MIME type for a
-  // file - routine for a "+ Upload folder" pick (webkitdirectory), which
-  // hits far more unusual/unrecognized file extensions than a household
-  // deliberately hand-picking individual files one at a time. Without this,
-  // every such file was rejected outright with no way to override it.
-  "application/octet-stream"
+// Documents are private per-household storage - session-gated signed URLs,
+// served from a different origin (storage.googleapis.com) than the app
+// itself - not public file hosting, so this blocks only the narrow set of
+// types a browser could actually execute if a household member opened one
+// directly (HTML/script/executable) rather than maintaining an allowlist.
+// An allowlist kept failing real "+ Upload folder" picks (webkitdirectory,
+// or an OS folder drag-and-drop) one new extension at a time - a design-
+// handoff folder alone can carry zips, SVGs, and half a dozen other types
+// a household has every reason to expect just work, and the allowlist
+// rejected each one with the same opaque "Unsupported file type" until
+// added by hand. See docs/consumer-guide.md and this file's earlier
+// "application/octet-stream" addition for the same private-storage
+// reasoning this generalizes.
+const BLOCKED_DOCUMENT_CONTENT_TYPES = new Set([
+  "text/html",
+  "application/xhtml+xml",
+  "text/javascript",
+  "application/javascript",
+  "application/x-javascript",
+  "application/x-msdownload",
+  "application/x-msdos-program",
+  "application/x-executable",
+  "application/vnd.microsoft.portable-executable",
+  "application/x-sh",
+  "application/x-bat",
+  "application/x-msi"
 ]);
 const MAX_DOCUMENT_SIZE_BYTES = 500 * 1024 * 1024;
 
@@ -3226,6 +3232,11 @@ app.patch("/api/documents/folders/:id", requireSession, async (req, res, next) =
   }
 });
 
+// Cascades: deletes the folder, every subfolder nested inside it at any
+// depth, and every document filed anywhere in that subtree - the client
+// confirms this once up front ("delete this folder and everything inside
+// it?") rather than requiring a household to empty a folder by hand first,
+// which was the previous behavior (409 "must be empty").
 app.delete("/api/documents/folders/:id", requireSession, async (req, res, next) => {
   try {
     const ownerId = await resolveOwnerId(req);
@@ -3233,20 +3244,29 @@ app.delete("/api/documents/folders/:id", requireSession, async (req, res, next) 
     const folder = folders.find((item) => item.id === req.params.id);
     if (!folder) return res.status(404).json({ error: "Folder not found" });
 
+    const folderIdsToDelete = collectDescendantFolderIds(
+      folders.map((item) => ({ id: item.id, parentId: item.parent_id })),
+      folder.id
+    );
     const documents = await loadOwnerDocuments(ownerId);
-    const hasChildFolder = folders.some((item) => item.parent_id === folder.id);
-    const hasDocument = documents.some((item) => item.folder_id === folder.id);
-    if (hasChildFolder || hasDocument) {
-      return res.status(409).json({ error: "Folder must be empty before it can be deleted" });
+    const documentsToDelete = documents.filter((item) => folderIdsToDelete.includes(item.folder_id));
+
+    for (const document of documentsToDelete) {
+      await deleteObject(document.storage_object);
     }
 
     if (MEMORY_DB) {
-      memoryDb.documentFolders = memoryDb.documentFolders.filter((item) => item.id !== folder.id);
-      return res.json({ ok: true });
+      const documentIdsToDelete = new Set(documentsToDelete.map((item) => item.id));
+      memoryDb.documents = memoryDb.documents.filter((item) => !documentIdsToDelete.has(item.id));
+      memoryDb.documentFolders = memoryDb.documentFolders.filter((item) => !folderIdsToDelete.includes(item.id));
+      return res.json({ ok: true, deletedFolderIds: folderIdsToDelete, deletedDocumentCount: documentsToDelete.length });
     }
 
-    await pool.query("DELETE FROM document_folders WHERE id = $1 AND owner_user_id = $2", [folder.id, ownerId]);
-    res.json({ ok: true });
+    if (documentsToDelete.length) {
+      await pool.query("DELETE FROM documents WHERE id = ANY($1) AND owner_user_id = $2", [documentsToDelete.map((item) => item.id), ownerId]);
+    }
+    await pool.query("DELETE FROM document_folders WHERE id = ANY($1) AND owner_user_id = $2", [folderIdsToDelete, ownerId]);
+    res.json({ ok: true, deletedFolderIds: folderIdsToDelete, deletedDocumentCount: documentsToDelete.length });
   } catch (error) {
     next(error);
   }
@@ -3260,7 +3280,7 @@ app.post("/api/documents/upload-url", requireSession, async (req, res, next) => 
     const folderId = req.body?.folderId || null;
     const noteId = req.body?.noteId || null;
     if (!name) return res.status(400).json({ error: "A document name is required" });
-    if (!ALLOWED_DOCUMENT_CONTENT_TYPES.has(contentType)) return res.status(400).json({ error: "Unsupported file type" });
+    if (BLOCKED_DOCUMENT_CONTENT_TYPES.has(contentType)) return res.status(400).json({ error: "Unsupported file type" });
     if (sizeBytes && sizeBytes > MAX_DOCUMENT_SIZE_BYTES) return res.status(400).json({ error: "File exceeds the 500MB limit" });
 
     const ownerId = await resolveOwnerId(req);
