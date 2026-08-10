@@ -3120,6 +3120,7 @@ function toClientDocument(document) {
     lastOpenedBy: document.last_opened_by || null,
     lastOpenedByName: document.last_opened_by_name || null,
     lastOpenedAt: document.last_opened_at || null,
+    expiryDate: document.expiry_date || null,
     createdAt: document.created_at,
     updatedAt: document.updated_at
   };
@@ -3593,6 +3594,7 @@ app.patch("/api/documents/:id", requireSession, async (req, res, next) => {
     const nextWealthItemType = nextWealthItemId
       ? (req.body?.wealthItemId !== undefined ? req.body.wealthItemType : document.wealth_item_type)
       : null;
+    const nextExpiryDate = req.body?.expiryDate !== undefined ? (req.body.expiryDate || null) : (document.expiry_date || null);
 
     if (nextFolderId) {
       const folders = await loadOwnerFolders(ownerId);
@@ -3614,13 +3616,14 @@ app.patch("/api/documents/:id", requireSession, async (req, res, next) => {
       document.note_id = nextNoteId;
       document.wealth_item_type = nextWealthItemType;
       document.wealth_item_id = nextWealthItemId;
+      document.expiry_date = nextExpiryDate;
       document.updated_at = new Date().toISOString();
       return res.json(toClientDocument(document));
     }
 
     const result = await pool.query(
-      `UPDATE documents SET name = $1, description = $2, folder_id = $3, note_id = $4, wealth_item_type = $5, wealth_item_id = $6, updated_at = now() WHERE id = $7 AND owner_user_id = $8 RETURNING *`,
-      [nextName, nextDescription, nextFolderId, nextNoteId, nextWealthItemType, nextWealthItemId, document.id, ownerId]
+      `UPDATE documents SET name = $1, description = $2, folder_id = $3, note_id = $4, wealth_item_type = $5, wealth_item_id = $6, expiry_date = $7, updated_at = now() WHERE id = $8 AND owner_user_id = $9 RETURNING *`,
+      [nextName, nextDescription, nextFolderId, nextNoteId, nextWealthItemType, nextWealthItemId, nextExpiryDate, document.id, ownerId]
     );
     res.json(toClientDocument(result.rows[0]));
   } catch (error) {

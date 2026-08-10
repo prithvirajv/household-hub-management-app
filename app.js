@@ -112,10 +112,59 @@ let profileVerifyFeedbackIsError = false;
 // Keyed by asset id (not index, since rows can reorder/delete) so a stale
 // "Refresh price" result never gets attributed to the wrong stock row.
 let stockPriceFeedback = {};
-// Keyed by groupId - whether a grouped holding card's "Live price" batch
-// refresh has fired at least once this session, so its caption can switch
-// from a static holdings count to "updated just now".
-let stockGroupRefreshedFeedback = {};
+// Fetches a fresh quote for every symbol-bearing holding in the list,
+// mutating price/value in place. A single bad symbol or rate limit only
+// drops that one holding's update, never aborts the batch - used by the
+// per-group "Live price" button, the holdings modal's "Refresh all", and
+// the background auto-poll below, so all three share one failure behavior.
+async function refreshHoldingQuotes(items) {
+  await Promise.all(items.map(async (asset) => {
+    const symbol = (asset.symbol || "").trim().toUpperCase();
+    if (!symbol) return;
+    try {
+      const result = await api(`/api/stock-quote?symbol=${encodeURIComponent(symbol)}`);
+      asset.price = result.price;
+      asset.value = assetValue(asset);
+    } catch {
+      // leave this one holding's price as-is
+    }
+  }));
+}
+
+// Real wall-clock timestamps (not a session-local "did this fire yet?"
+// flag) so a grouped holding card's caption survives a reload and can show
+// an actual age instead of a permanent "just now" after the first click.
+function markStockGroupRefreshed(groupId) {
+  state.goals.netWorth.priceLastUpdated = state.goals.netWorth.priceLastUpdated || {};
+  state.goals.netWorth.priceLastUpdated[groupId] = new Date().toISOString();
+}
+
+function formatRelativeTime(isoString) {
+  if (!isoString) return null;
+  const elapsedMs = Date.now() - new Date(isoString).getTime();
+  if (elapsedMs < 60000) return "just now";
+  const minutes = Math.floor(elapsedMs / 60000);
+  if (minutes < 60) return `${minutes}m ago`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${hours}h ago`;
+  const days = Math.floor(hours / 24);
+  return `${days}d ago`;
+}
+
+// Runs every few minutes while the Wealth page is open (see the setInterval
+// near the bottom of this file) so live-price captions stay fresh without
+// the household needing to click "Live price" on every visit.
+async function refreshAllStockGroupPrices() {
+  const groups = groupStockHoldings(state.goals.netWorth.assets);
+  const groupsWithSymbols = groups.filter((group) => group.items.some((item) => (item.symbol || "").trim()));
+  if (!groupsWithSymbols.length) return;
+  await Promise.all(groupsWithSymbols.map(async (group) => {
+    await refreshHoldingQuotes(group.items);
+    markStockGroupRefreshed(group.groupId);
+  }));
+  autosaveState();
+  render();
+}
 // Which stock/retirement group the Manage holdings modal currently has
 // open, if any - every field in that modal writes straight to the matching
 // asset in state.goals.netWorth.assets (autosaved immediately), so this is
@@ -413,10 +462,20 @@ function lineSnapshot(lineId) {
 }
 
 function transactionAssignmentLabel(transaction) {
+  if (transaction.splits?.length) return `Split (${transaction.splits.length} categories)`;
   const liveLine = allLines().find((line) => line.id === transaction.lineId);
   const category = liveLine?.category || transaction.categoryName || "Deleted category";
   const subcategory = liveLine?.name || transaction.subcategoryName || transaction.lineId || "Deleted subcategory";
   return `${category} - ${subcategory}`;
+}
+
+// A split transaction has no single lineId of its own - each of its splits
+// carries its own lineId instead - so anywhere that filters transactions "on
+// line X" (Sankey drill-down, category report drill-down) needs to check
+// every split's lineId, not just the transaction's own (empty) one.
+function transactionHasLine(transaction, lineIds) {
+  if (transaction.splits?.length) return transaction.splits.some((split) => lineIds.includes(split.lineId));
+  return lineIds.includes(transaction.lineId);
 }
 
 function makeTransaction({ date, payee, amount, lineId, memo, accountId = "", orderNumber = "", tags = [] }) {
@@ -1791,24 +1850,64 @@ function renderBudget() {
   `;
 }
 
+// Draft rows for whichever ledger transaction's split editor is currently
+// open (index into state.transactions, or null when closed) - a scratch
+// copy so typing amounts/lines doesn't touch the real transaction until
+// "Save split", and "Cancel" just discards it.
+let splitEditorLedgerIndex = null;
+let splitEditorRows = [];
+
 function ledgerEntryRow(transaction, index, transferMatch) {
   // Same placeholder as Bank Stream's own lineOptions - without it, a
   // genuinely-unassigned transaction (lineId: "") has no matching "selected"
   // option and the browser silently displays whichever line sorts first
   // alphabetically, indistinguishable from a real choice.
+  const isSplit = transaction.splits?.length > 0;
   const lineOptions = (transaction.lineId ? "" : `<option value="" disabled selected>Choose a subcategory…</option>`) + allLines().map((line) => `<option value="${line.id}" ${line.id === transaction.lineId ? "selected" : ""}>${line.category} - ${line.name}</option>`).join("");
   return `
     <div class="ledger-entry-row ${state.accounts.length ? "has-accounts" : ""}">
       <input class="line-name-input" aria-label="Payee" data-ledger-entry-payee="${index}" value="${escapeHtml(transaction.payee)}">
       <input class="money-input" aria-label="Amount" type="number" step="0.01" data-ledger-entry-amount="${index}" value="${transaction.amount}">
       <input aria-label="Date" type="date" data-ledger-entry-date="${index}" value="${transaction.date}">
-      <select class="income-recurrence-select" aria-label="Subcategory" data-ledger-entry-line="${index}">${lineOptions}</select>
+      ${isSplit
+        ? `<button type="button" class="split-transaction-badge" data-split-transaction-edit="${index}">✂ Split (${transaction.splits.length})</button>`
+        : `<select class="income-recurrence-select" aria-label="Subcategory" data-ledger-entry-line="${index}">${lineOptions}</select>`}
       ${state.accounts.length ? `<select class="income-recurrence-select" aria-label="Account" data-ledger-entry-account="${index}"><option value="">Not linked</option>${accountOptions(transaction.accountId || "")}</select>` : ""}
+      <button class="icon-button ${isSplit ? "has-transfer-match" : ""}" data-split-transaction-edit="${index}" type="button" aria-label="Split ${escapeHtml(transaction.payee)} across categories" title="Split across categories">✂</button>
       <button class="icon-button" data-assign-iou-ledger="${index}" type="button" aria-label="Split with a friend ${escapeHtml(transaction.payee)}">👥</button>
       <button class="icon-button ${transferMatch ? "has-transfer-match" : ""}" data-move-to-transfer-ledger="${index}" type="button" aria-label="Move ${escapeHtml(transaction.payee)} to Transfers" title="${transferMatch ? `Matches ${escapeHtml(accountName(transferMatch.accountId))}'s ${exactMoney.format(Math.abs(transferMatch.amount))} on ${formatShortDate(transferMatch.date)}` : "Move to Transfers (account-to-account movement)"}">⇄</button>
       <button class="icon-button danger-button" data-delete-transaction="${index}" type="button" aria-label="Delete ${escapeHtml(transaction.payee)}">×</button>
       ${tagChipsHtml(transaction.tags, "data-remove-ledger-tag", "data-add-ledger-tag", index)}
+      ${splitEditorHtml(transaction, index)}
     </div>`;
+}
+
+function splitEditorHtml(transaction, index) {
+  if (splitEditorLedgerIndex !== index) return "";
+  const allocated = splitEditorRows.reduce((sum, row) => sum + Number(row.amount || 0), 0);
+  const remaining = Math.round((Number(transaction.amount || 0) - allocated) * 100) / 100;
+  const isBalanced = Math.abs(remaining) < 0.005;
+  const lineOptionsFor = (selectedId) => (selectedId ? "" : `<option value="" disabled selected>Choose a subcategory…</option>`) + allLines().map((line) => `<option value="${line.id}" ${line.id === selectedId ? "selected" : ""}>${line.category} - ${line.name}</option>`).join("");
+  return `<div class="split-editor">
+    <div class="split-editor-rows">
+      ${splitEditorRows.map((row, rowIndex) => `
+        <div class="split-editor-row">
+          <select data-split-editor-line="${rowIndex}">${lineOptionsFor(row.lineId)}</select>
+          <input type="number" step="0.01" data-split-editor-amount="${rowIndex}" value="${row.amount}" placeholder="Amount">
+          <button type="button" class="icon-button danger-button" data-split-editor-remove="${rowIndex}" aria-label="Remove split row">×</button>
+        </div>
+      `).join("")}
+    </div>
+    <div class="split-editor-actions">
+      <button type="button" class="ghost" data-split-editor-add-row>+ Add split</button>
+      <span class="split-editor-remaining ${isBalanced ? "good" : "danger"}">${isBalanced ? "Fully allocated" : `${money.format(remaining)} remaining`}</span>
+    </div>
+    <div class="split-editor-actions">
+      <button type="button" class="ghost" data-split-editor-cancel>Cancel</button>
+      ${transaction.splits?.length ? `<button type="button" class="ghost danger-button" data-split-editor-undo="${index}">Remove split</button>` : ""}
+      <button type="button" data-split-editor-save="${index}" ${!isBalanced || splitEditorRows.length < 2 ? "disabled" : ""}>Save split</button>
+    </div>
+  </div>`;
 }
 
 function recurringExpenseRow(recurring, index) {
@@ -3361,6 +3460,19 @@ function formatDocumentOpenedDate(iso) {
   return new Date(iso).toLocaleDateString(undefined, { month: "short", day: "numeric" });
 }
 
+// Color-coded the same way a bill's due-date label is (see billRow): the
+// closer the expiration, the more urgent the color, so a household scanning
+// the Documents grid can spot an about-to-lapse insurance policy or lease
+// without opening each file.
+function documentExpiryBadge(item) {
+  if (!item.expiryDate) return null;
+  const days = Math.ceil((new Date(`${item.expiryDate}T00:00:00`) - new Date(dateKey(new Date()) + "T00:00:00")) / 86400000);
+  if (days < 0) return { label: `Expired ${Math.abs(days)}d ago`, className: "danger" };
+  if (days <= 30) return { label: `Expires in ${days}d`, className: "danger" };
+  if (days <= 90) return { label: `Expires in ${days}d`, className: "warning" };
+  return { label: `Expires ${formatShortDate(item.expiryDate)}`, className: "neutral" };
+}
+
 function documentOpenedLine(item) {
   if (!item.lastOpenedAt) return `<small class="documents-opened-meta muted">Not opened yet</small>`;
   const isYou = item.lastOpenedByName && item.lastOpenedByName === sessionUser?.name;
@@ -3483,15 +3595,21 @@ function documentInfoPanelHtml(item) {
   ];
   return `<div class="documents-file-info-panel">
     ${rows.map(([label, value]) => `<div class="documents-file-info-row"><span>${escapeHtml(label)}</span><strong>${escapeHtml(String(value))}</strong></div>`).join("")}
+    <div class="documents-file-info-row">
+      <span>Expires</span>
+      <input type="date" class="documents-expiry-input" data-documents-expiry="${item.id}" value="${item.expiryDate || ""}" aria-label="Expiration date for ${escapeHtml(item.name)}">
+    </div>
   </div>`;
 }
 
 function renderDocumentCard(item) {
   const linkedNote = item.noteId ? state.notes.entries.find((note) => note.id === item.noteId) : null;
   const wealthLabel = documentsWealthItemLabel(item);
+  const expiryBadge = documentExpiryBadge(item);
   return `<div class="documents-file-card" data-document-id="${item.id}" draggable="true" data-drag-type="document" data-drag-id="${item.id}">
     <div class="documents-file-card-header">
       <strong class="documents-file-name" title="${escapeHtml(item.name)}">${escapeHtml(item.name)}</strong>
+      ${expiryBadge ? `<span class="documents-expiry-badge documents-expiry-${expiryBadge.className}">${escapeHtml(expiryBadge.label)}</span>` : ""}
       <details class="documents-item-menu">
         <summary class="documents-icon-btn" aria-label="More actions for ${escapeHtml(item.name)}">⋮</summary>
         <div class="documents-item-menu-options">
@@ -4241,9 +4359,16 @@ function renderGoals() {
 function renderWealth() {
   if (ensureDebtNetWorthSync()) autosaveState();
   ensureAccountsData();
+  const wealthTrend = netWorthTrend(trailingMonthKeys(6));
+  const wealthNetWorthChange = wealthTrend.length ? netWorth().total - (wealthTrend[0]?.value || 0) : 0;
   return `
     <section class="work-grid wealth-layout">
       <div class="main-stack">
+        <section class="card">
+          <div class="section-head"><div><span class="card-label">Trend</span><h3>Net worth history</h3></div><b class="${wealthNetWorthChange < 0 ? "danger" : ""}">${wealthNetWorthChange >= 0 ? "+" : ""}${money.format(wealthNetWorthChange)} over ${wealthTrend.length} months</b></div>
+          ${netWorthTrendSvg(wealthTrend)}
+          <div class="networth-chart-labels">${wealthTrend.map((point) => `<span>${formatMonth(point.month).split(" ")[0].slice(0, 3)}</span>`).join("")}</div>
+        </section>
         <section class="card">
           <div class="section-head"><div><span class="card-label">Cash flow</span><h3>Accounts</h3></div><button id="addAccountButton" type="button">+ Add account</button></div>
           ${state.accounts.length ? state.accounts.map((account, index) => accountItemRow(account, index)).join("") : `<div class="onboarding-empty compact-onboarding"><div class="empty-symbol" aria-hidden="true">▥</div><h3>Add your first account</h3><p>Track a checking account your paycheck deposits into, and a credit card whose purchases it pays off.</p></div>`}
@@ -4300,7 +4425,8 @@ function netWorthStockGroupCard(group) {
   const totalValue = group.items.reduce((sum, item) => sum + assetValue(item), 0);
   const holdingsLabel = `${group.items.length} holding${group.items.length === 1 ? "" : "s"}`;
   const gainLoss = groupGainLoss(group.items);
-  const liveCaption = stockGroupRefreshedFeedback[group.groupId] ? "Live pricing • updated just now" : `Live pricing across ${holdingsLabel}`;
+  const lastUpdated = formatRelativeTime(state.goals.netWorth.priceLastUpdated?.[group.groupId]);
+  const liveCaption = lastUpdated ? `Live pricing • updated ${lastUpdated}` : `Live pricing across ${holdingsLabel}`;
   return `<article class="account-item stock-group-card" draggable="true" data-drag-networth-asset="${group.groupId}">
     <span class="net-worth-drag-handle" aria-hidden="true" title="Drag to reorder">⠿</span>
     <div class="stock-group-main">
@@ -4498,7 +4624,7 @@ function renderReports() {
   const reportsTagGroups = groupTransactionsByTag(rangeTransactions).sort((a, b) => b.total - a.total);
   const selectedReportsTagGroup = reportsTagGroups.find((group) => group.key === reportsSelectedTag) || null;
   const expandedSankeySegment = reportsExpandedSankeyLineKey ? sankeySegments.find((segment) => segment.lineIds.length && segment.lineIds.join(",") === reportsExpandedSankeyLineKey) || null : null;
-  const expandedSankeyTransactions = expandedSankeySegment ? rangeTransactions.filter((transaction) => expandedSankeySegment.lineIds.includes(transaction.lineId)) : [];
+  const expandedSankeyTransactions = expandedSankeySegment ? rangeTransactions.filter((transaction) => transactionHasLine(transaction, expandedSankeySegment.lineIds)) : [];
   // reportsSelectedCategoryLine is "cat:<lineId>,<lineId>,..." (every
   // subcategory under that category, joined - categories have no id of their
   // own) or "line:<lineId>" (one specific subcategory).
@@ -4513,7 +4639,7 @@ function renderReports() {
         const lineIds = category.lines.map((line) => line.id);
         categoryLineLabel = category.name;
         categoryLineTotal = category.value;
-        categoryLineTransactions = rangeTransactions.filter((transaction) => lineIds.includes(transaction.lineId));
+        categoryLineTransactions = rangeTransactions.filter((transaction) => transactionHasLine(transaction, lineIds));
       }
     } else if (kind === "line") {
       const category = categories.find((item) => item.lines.some((line) => line.id === targetId));
@@ -4521,7 +4647,7 @@ function renderReports() {
       if (category && line) {
         categoryLineLabel = `${category.name} · ${line.name}`;
         categoryLineTotal = line.value;
-        categoryLineTransactions = rangeTransactions.filter((transaction) => transaction.lineId === targetId);
+        categoryLineTransactions = rangeTransactions.filter((transaction) => transactionHasLine(transaction, [targetId]));
       }
     }
   }
@@ -8031,6 +8157,84 @@ function bindViewEvents() {
     });
   });
 
+  document.querySelectorAll("[data-split-transaction-edit]").forEach((button) => {
+    button.addEventListener("click", () => {
+      const index = Number(button.dataset.splitTransactionEdit);
+      const transaction = state.transactions[index];
+      if (!transaction) return;
+      splitEditorLedgerIndex = index;
+      splitEditorRows = transaction.splits?.length
+        ? transaction.splits.map((split) => ({ lineId: split.lineId, amount: split.amount }))
+        : [{ lineId: transaction.lineId || "", amount: Number(transaction.amount || 0) }, { lineId: "", amount: 0 }];
+      render();
+    });
+  });
+
+  document.querySelectorAll("[data-split-editor-line]").forEach((select) => {
+    select.addEventListener("change", () => {
+      const row = splitEditorRows[Number(select.dataset.splitEditorLine)];
+      if (row) row.lineId = select.value;
+      render();
+    });
+  });
+
+  document.querySelectorAll("[data-split-editor-amount]").forEach((input) => {
+    input.addEventListener("input", () => {
+      const row = splitEditorRows[Number(input.dataset.splitEditorAmount)];
+      if (row) row.amount = Number(input.value || 0);
+      render();
+    });
+  });
+
+  document.querySelectorAll("[data-split-editor-remove]").forEach((button) => {
+    button.addEventListener("click", () => {
+      splitEditorRows.splice(Number(button.dataset.splitEditorRemove), 1);
+      render();
+    });
+  });
+
+  document.querySelector("[data-split-editor-add-row]")?.addEventListener("click", () => {
+    splitEditorRows.push({ lineId: "", amount: 0 });
+    render();
+  });
+
+  document.querySelector("[data-split-editor-cancel]")?.addEventListener("click", () => {
+    splitEditorLedgerIndex = null;
+    splitEditorRows = [];
+    render();
+  });
+
+  document.querySelectorAll("[data-split-editor-undo]").forEach((button) => {
+    button.addEventListener("click", () => {
+      const transaction = state.transactions[Number(button.dataset.splitEditorUndo)];
+      if (!transaction) return;
+      const firstSplit = transaction.splits?.[0];
+      transaction.splits = undefined;
+      Object.assign(transaction, { lineId: firstSplit?.lineId || "" }, lineSnapshot(firstSplit?.lineId || ""));
+      splitEditorLedgerIndex = null;
+      splitEditorRows = [];
+      autosaveState();
+      render();
+    });
+  });
+
+  document.querySelectorAll("[data-split-editor-save]").forEach((button) => {
+    button.addEventListener("click", () => {
+      const transaction = state.transactions[Number(button.dataset.splitEditorSave)];
+      if (!transaction) return;
+      const rows = splitEditorRows.filter((row) => row.lineId).map((row) => ({ lineId: row.lineId, amount: Number(row.amount || 0) }));
+      if (rows.length < 2) return;
+      transaction.splits = rows;
+      transaction.lineId = "";
+      transaction.categoryName = "";
+      transaction.subcategoryName = "";
+      splitEditorLedgerIndex = null;
+      splitEditorRows = [];
+      autosaveState();
+      render();
+    });
+  });
+
   document.querySelectorAll("[data-ledger-entry-account]").forEach((select) => {
     select.addEventListener("change", () => {
       const transaction = state.transactions[Number(select.dataset.ledgerEntryAccount)];
@@ -8832,22 +9036,10 @@ function bindViewEvents() {
 
   document.querySelectorAll("[data-refresh-stock-group]").forEach((button) => {
     button.addEventListener("click", async () => {
-      const items = stockGroupAssets(button.dataset.refreshStockGroup);
+      const groupId = button.dataset.refreshStockGroup;
       button.disabled = true;
-      await Promise.all(items.map(async (asset) => {
-        const symbol = (asset.symbol || "").trim().toUpperCase();
-        if (!symbol) return;
-        try {
-          const result = await api(`/api/stock-quote?symbol=${encodeURIComponent(symbol)}`);
-          asset.price = result.price;
-          asset.value = assetValue(asset);
-        } catch {
-          // A single symbol failing (bad ticker, rate limit) shouldn't block
-          // the rest of the group from refreshing - leave that one holding's
-          // price as-is rather than aborting the whole batch.
-        }
-      }));
-      stockGroupRefreshedFeedback[button.dataset.refreshStockGroup] = true;
+      await refreshHoldingQuotes(stockGroupAssets(groupId));
+      markStockGroupRefreshed(groupId);
       autosaveState();
       render();
     });
@@ -9768,6 +9960,19 @@ function bindViewEvents() {
       if (!name || !name.trim()) return;
       try {
         await api(`/api/documents/${button.dataset.documentsRename}`, { method: "PATCH", body: JSON.stringify({ name: name.trim() }) });
+        await loadDocumentsData(false);
+        render();
+      } catch (error) {
+        showToast(error.message);
+      }
+    });
+  });
+
+  document.querySelectorAll("[data-documents-expiry]").forEach((input) => {
+    input.addEventListener("change", async () => {
+      const documentId = input.dataset.documentsExpiry;
+      try {
+        await api(`/api/documents/${documentId}`, { method: "PATCH", body: JSON.stringify({ expiryDate: input.value || null }) });
         await loadDocumentsData(false);
         render();
       } catch (error) {
@@ -11274,7 +11479,7 @@ $("#holdingsModalRefreshAllButton").addEventListener("click", async (event) => {
       stockPriceFeedback[asset.id] = { message: error.message, isError: true };
     }
   }));
-  stockGroupRefreshedFeedback[currentHoldingsModalGroupId] = true;
+  markStockGroupRefreshed(currentHoldingsModalGroupId);
   autosaveState();
   renderHoldingsModalRows();
   updateHoldingsModalTotal();
@@ -12339,6 +12544,12 @@ async function initializeApp() {
 initializeApp().catch((error) => {
   setAuthMessage(error.message);
 });
+
+// Keeps Wealth's live-price captions from going stale on a long-open tab,
+// without polling a page nobody is looking at.
+setInterval(() => {
+  if (currentView === "wealth") refreshAllStockGroupPrices();
+}, 5 * 60 * 1000);
 
 window.addEventListener("popstate", (event) => {
   const view = event.state?.view;

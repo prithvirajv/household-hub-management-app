@@ -2247,6 +2247,58 @@ main {
   grid-column: 1 / -1;
 }
 
+.ledger-entry-row .split-editor {
+  grid-column: 1 / -1;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  padding: 0.6rem;
+  margin-top: 0.3rem;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--soft-blue);
+}
+
+.split-editor-rows {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+
+.split-editor-row {
+  display: grid;
+  grid-template-columns: minmax(160px, 1fr) minmax(90px, 110px) 32px;
+  gap: 0.4rem;
+  align-items: center;
+}
+
+.split-editor-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+}
+
+.split-editor-remaining {
+  font-weight: 800;
+  font-size: 0.82rem;
+}
+
+.split-editor-remaining.good { color: var(--green); }
+.split-editor-remaining.danger { color: var(--coral); }
+
+.split-transaction-badge {
+  background: var(--green-soft);
+  color: var(--green);
+  border: 1px solid transparent;
+  border-radius: 6px;
+  padding: 0.4rem 0.5rem;
+  font-weight: 800;
+  font-size: 0.85rem;
+  text-align: left;
+  cursor: pointer;
+}
+
 /* The head + row grids share fixed per-column minimums (e.g. 48px per
    icon action) that can add up to more than a narrow main-stack column
    actually has to offer - rather than letting that blow out the whole
@@ -6769,6 +6821,31 @@ input.holdings-modal-market-value-input {
 
 .documents-linked-note {
   color: var(--blue);
+}
+
+.documents-expiry-badge {
+  display: inline-flex;
+  align-items: center;
+  border-radius: 999px;
+  padding: 0.15rem 0.5rem;
+  font-size: 0.68rem;
+  font-weight: 800;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.documents-expiry-danger { background: color-mix(in srgb, var(--coral) 16%, white); color: var(--coral); }
+.documents-expiry-warning { background: color-mix(in srgb, var(--gold) 18%, white); color: var(--gold); }
+.documents-expiry-neutral { background: var(--soft-blue); color: var(--muted); }
+
+.documents-expiry-input {
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 0.2rem 0.4rem;
+  font-size: 0.78rem;
+  font-family: inherit;
+  color: var(--text);
+  background: var(--panel);
 }
 
 .documents-file-info-panel {

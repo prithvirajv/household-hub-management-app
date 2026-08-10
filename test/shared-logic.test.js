@@ -1622,6 +1622,16 @@ test("spentByLineInMonth sums only the given line's transactions dated within th
   assert.equal(spentByLineInMonth(transactions, "groceries", "2026-05"), 0);
 });
 
+test("spentByLineInMonth credits each of a split transaction's lines its own share, not the whole amount", () => {
+  const transactions = [
+    { lineId: "", date: "2026-03-05", amount: 120, splits: [{ lineId: "groceries", amount: 80 }, { lineId: "household", amount: 40 }] },
+    { lineId: "groceries", date: "2026-03-06", amount: 30 }
+  ];
+  assert.equal(spentByLineInMonth(transactions, "groceries", "2026-03"), 110);
+  assert.equal(spentByLineInMonth(transactions, "household", "2026-03"), 40);
+  assert.equal(spentByLineInMonth(transactions, "gas", "2026-03"), 0);
+});
+
 test("recurringBudgetSetAside divides a yearly bill across only the months remaining before it is due", () => {
   const bill = { amount: 1200, frequency: "yearly", dueDate: "2026-12-15" };
   assert.equal(nextRecurringBudgetDueDate(bill, "2026-07"), "2026-12-15");

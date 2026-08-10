@@ -104,6 +104,12 @@ more convenient.
    to that account so its running balance stays accurate.
 5. Select the ✓ to accept a Bank Stream row into the ledger, or × to
    dismiss it.
+6. One charge covers more than one category (a Target run with groceries
+   and household items)? Select the ✂ icon on that ledger row to split it —
+   add a line per category, type each one's share, and Save once the
+   amounts add up to the full charge. Each share counts toward its own
+   category's Spent total. Select **Remove split** to undo it back to one
+   category.
 
 **Get the most out of it**
 - A refund or return is auto-matched to its original purchase by payee,

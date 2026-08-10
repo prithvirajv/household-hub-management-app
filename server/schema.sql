@@ -256,3 +256,11 @@ ALTER TABLE documents ADD CONSTRAINT documents_household_id_fkey
 ALTER TABLE documents
   ADD COLUMN IF NOT EXISTS last_opened_by UUID REFERENCES users(id) ON DELETE SET NULL,
   ADD COLUMN IF NOT EXISTS last_opened_at TIMESTAMPTZ;
+
+-- Plain "YYYY-MM-DD" text, not a real DATE column: every other user-entered
+-- date in this app (transaction dates, account close dates, debt payment
+-- dates) lives inside the JSONB app_state blob as a plain string, and
+-- keeping this one the same type avoids node-pg's DATE column parsing (it
+-- returns a JS Date object, which round-trips through JSON as a full
+-- UTC-midnight timestamp instead of the plain date the client sent).
+ALTER TABLE documents ADD COLUMN IF NOT EXISTS expiry_date TEXT;

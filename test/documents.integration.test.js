@@ -102,6 +102,25 @@ test("PATCH /api/documents/:id moves a document into a different folder", async 
   assert.equal(moveToInvalidFolder.status, 404);
 });
 
+test("PATCH /api/documents/:id sets and clears an expiration date", async () => {
+  const cookie = await signUp("documents-expiry@example.com", "Documents Expiry Household");
+  const upload = await server.request("/api/documents/upload-url", { method: "POST", headers: { cookie }, body: JSON.stringify({ name: "insurance.pdf", contentType: "application/pdf" }) });
+
+  const listBefore = await server.request("/api/documents", { headers: { cookie } });
+  assert.equal(listBefore.body.documents.find((item) => item.id === upload.body.documentId).expiryDate, null);
+
+  const setExpiry = await server.request(`/api/documents/${upload.body.documentId}`, { method: "PATCH", headers: { cookie }, body: JSON.stringify({ expiryDate: "2027-03-15" }) });
+  assert.equal(setExpiry.status, 200);
+  assert.equal(setExpiry.body.expiryDate, "2027-03-15");
+
+  const listAfter = await server.request("/api/documents", { headers: { cookie } });
+  assert.equal(listAfter.body.documents.find((item) => item.id === upload.body.documentId).expiryDate, "2027-03-15");
+
+  const clearExpiry = await server.request(`/api/documents/${upload.body.documentId}`, { method: "PATCH", headers: { cookie }, body: JSON.stringify({ expiryDate: null }) });
+  assert.equal(clearExpiry.status, 200);
+  assert.equal(clearExpiry.body.expiryDate, null);
+});
+
 test("PATCH /api/documents/folders/:id renames a folder without disturbing its parent or wealth tag", async () => {
   const cookie = await signUp("documents-rename@example.com", "Documents Rename Household");
   await addWealthItem(cookie, "asset", "asset-rename", "Rename Test Asset");
