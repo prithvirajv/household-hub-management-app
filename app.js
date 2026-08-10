@@ -63,6 +63,13 @@ let reportsColorTheme = "fresh";
 let reportsCategoryStyle = "bars";
 let reportsExpandedRingCategory = null;
 let reportsCompareLastYear = false;
+// Wealth's own display currency - a per-viewer preference, not household
+// data, so it stays session-local like reportsDensity above. Rates are
+// fetched once per session from a real FX API (see /api/fx-rates) and
+// cached client-side; never a fabricated conversion rate.
+let wealthCurrency = "USD";
+let wealthFxRates = null;
+let wealthFxLoading = false;
 // Three full curated palettes (accent + negative color + a 5-color chart
 // palette) a viewer can swap between on the Reports page - independent of
 // each category's own stored .color (that's the app-wide Budget-page
@@ -769,14 +776,45 @@ function netWorth() {
   return { assets, liabilities, total: assets - liabilities };
 }
 
+// Converts using a real fetched rate (see /api/fx-rates) - falls back to
+// the plain USD formatter whenever a rate isn't loaded yet, rather than
+// guessing at a conversion. This only reformats the Wealth net-worth
+// strip's headline numbers, not every dollar amount on the page - a
+// deliberately smaller scope than converting every account/holding row.
+function wealthMoney(amount) {
+  if (wealthCurrency === "USD" || !wealthFxRates?.[wealthCurrency]) return money.format(amount);
+  const converted = amount * wealthFxRates[wealthCurrency];
+  try {
+    return new Intl.NumberFormat(undefined, { style: "currency", currency: wealthCurrency }).format(converted);
+  } catch (_error) {
+    return money.format(amount);
+  }
+}
+
+async function setWealthCurrency(currency) {
+  wealthCurrency = currency;
+  if (currency !== "USD" && !wealthFxRates && !wealthFxLoading) {
+    wealthFxLoading = true;
+    try {
+      const response = await api("/api/fx-rates");
+      wealthFxRates = response.rates;
+    } catch (error) {
+      console.warn("Failed to load exchange rates", error);
+    } finally {
+      wealthFxLoading = false;
+    }
+  }
+  if (currentView === "wealth") render();
+}
+
 function refreshNetWorthTotals() {
   const totals = netWorth();
   const total = document.querySelector("[data-net-worth-total]");
   const assets = document.querySelector("[data-net-worth-assets]");
   const liabilities = document.querySelector("[data-net-worth-liabilities]");
-  if (total) total.textContent = money.format(totals.total);
-  if (assets) assets.textContent = money.format(totals.assets);
-  if (liabilities) liabilities.textContent = money.format(totals.liabilities);
+  if (total) total.textContent = wealthMoney(totals.total);
+  if (assets) assets.textContent = wealthMoney(totals.assets);
+  if (liabilities) liabilities.textContent = wealthMoney(totals.liabilities);
 
   const metrics = $("#metrics");
   if (metrics) {
@@ -4694,7 +4732,7 @@ function renderWealth() {
           </article>`).join("") : `<div class="onboarding-empty compact-onboarding"><div class="empty-symbol" aria-hidden="true">↓</div><h3>Add a debt when you are ready</h3><p>Track its balance, rate, payment, and the asset it secures.</p></div>`}
         </section>
       </div>
-      <section class="card wealth-holdings"><div class="section-head"><div><span class="card-label">Net worth</span><h3>Assets, investments and liabilities</h3></div><button id="addNetWorthItemButton" type="button">+ Add holding</button></div><div class="net-worth-strip"><strong data-net-worth-total>${money.format(netWorth().total)}</strong><span>Assets <b data-net-worth-assets>${money.format(netWorth().assets)}</b> Liabilities <b data-net-worth-liabilities>${money.format(netWorth().liabilities)}</b></span></div><div class="net-worth-items">${groupStockHoldings(state.goals.netWorth.assets).map((group) => netWorthStockGroupCard(group)).join("")}${state.goals.netWorth.assets.map((asset, index) => ({ asset, index })).filter(({ asset }) => !isHoldingAssetClass(asset.assetClass)).map(({ asset, index }) => netWorthItemRow(asset, "asset", index)).join("")}${state.goals.netWorth.liabilities.map((item, index) => netWorthItemRow(item, "liability", index)).join("")}</div>${state.goals.netWorth.assets.length || state.goals.netWorth.liabilities.length ? "" : `<div class="empty-inline">No assets, investments or liabilities yet</div>`}</section>
+      <section class="card wealth-holdings"><div class="section-head"><div><span class="card-label">Net worth</span><h3>Assets, investments and liabilities</h3></div><div class="wealth-currency-row"><select id="wealthCurrencySelect" aria-label="Display currency"><option value="USD" ${wealthCurrency === "USD" ? "selected" : ""}>USD</option><option value="EUR" ${wealthCurrency === "EUR" ? "selected" : ""}>EUR</option><option value="GBP" ${wealthCurrency === "GBP" ? "selected" : ""}>GBP</option></select><button id="addNetWorthItemButton" type="button">+ Add holding</button></div></div><div class="net-worth-strip"><strong data-net-worth-total>${wealthMoney(netWorth().total)}</strong><span>Assets <b data-net-worth-assets>${wealthMoney(netWorth().assets)}</b> Liabilities <b data-net-worth-liabilities>${wealthMoney(netWorth().liabilities)}</b></span></div>${wealthCurrency !== "USD" ? `<p class="muted wealth-currency-note">Converted from USD using real exchange rates${wealthFxRates ? "" : " — loading…"}. Individual accounts and holdings below still show USD.</p>` : ""}<div class="net-worth-items">${groupStockHoldings(state.goals.netWorth.assets).map((group) => netWorthStockGroupCard(group)).join("")}${state.goals.netWorth.assets.map((asset, index) => ({ asset, index })).filter(({ asset }) => !isHoldingAssetClass(asset.assetClass)).map(({ asset, index }) => netWorthItemRow(asset, "asset", index)).join("")}${state.goals.netWorth.liabilities.map((item, index) => netWorthItemRow(item, "liability", index)).join("")}</div>${state.goals.netWorth.assets.length || state.goals.netWorth.liabilities.length ? "" : `<div class="empty-inline">No assets, investments or liabilities yet</div>`}</section>
     </section>`;
 }
 
@@ -9421,6 +9459,10 @@ function bindViewEvents() {
       autosaveState();
       render();
     });
+  });
+
+  $("#wealthCurrencySelect")?.addEventListener("change", (event) => {
+    setWealthCurrency(event.target.value);
   });
 
   $("#addNetWorthItemButton")?.addEventListener("click", () => {

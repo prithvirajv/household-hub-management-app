@@ -376,6 +376,10 @@ more convenient.
 5. The **Asset allocation** card breaks your net worth down into Cash,
    Stocks & funds, Property, and Other, with a ring chart and a dollar/percent
    legend — computed automatically from every asset's class, no setup needed.
+6. Switch the currency selector next to **+ Add holding** to EUR or GBP to
+   see the net worth summary (Assets/Liabilities/Net worth) converted using
+   real, live exchange rates. This only reformats that summary strip —
+   individual accounts and holdings underneath still show USD.
 
 **Get the most out of it**
 - Move an account-to-account payment (like paying a credit card from

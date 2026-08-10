@@ -70,6 +70,9 @@ const NOTIFICATION_MAX_ATTEMPTS = Math.max(1, Number(process.env.NOTIFICATION_MA
 const EXPO_PUSH_URL = String(process.env.NOTIFICATION_TEST_EXPO_URL || "").trim() || "https://exp.host/--/api/v2/push/send";
 const FINNHUB_API_KEY = String(process.env.FINNHUB_API_KEY || "").trim();
 const FINNHUB_QUOTE_URL = String(process.env.FINNHUB_QUOTE_URL || "").trim() || "https://finnhub.io/api/v1/quote";
+const FX_RATES_URL = String(process.env.FX_RATES_URL || "").trim() || "https://api.exchangerate-api.com/v4/latest/USD";
+let fxRatesCache = null;
+const FX_RATES_CACHE_MS = 60 * 60 * 1000;
 const GEMINI_API_KEY = String(process.env.GEMINI_API_KEY || "").trim();
 const GEMINI_API_BASE_URL = String(process.env.GEMINI_API_BASE_URL || "").trim() || "https://generativelanguage.googleapis.com";
 // gemini-2.5-flash-lite is listed by the Models API but returns 404 "no
@@ -1401,6 +1404,21 @@ app.get("/api/stock-quote", requireSession, async (req, res, next) => {
       return res.status(404).json({ error: `No live price found for ${symbol}` });
     }
     res.json({ symbol, price });
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.get("/api/fx-rates", requireSession, async (_req, res, next) => {
+  try {
+    if (fxRatesCache && Date.now() - fxRatesCache.fetchedAt < FX_RATES_CACHE_MS) {
+      return res.json({ base: "USD", rates: fxRatesCache.rates, date: fxRatesCache.date });
+    }
+    const response = await fetch(FX_RATES_URL);
+    const body = await response.json().catch(() => ({}));
+    if (!response.ok || !body.rates) return res.status(502).json({ error: "Exchange rates are unavailable right now" });
+    fxRatesCache = { rates: body.rates, date: body.date || "", fetchedAt: Date.now() };
+    res.json({ base: "USD", rates: fxRatesCache.rates, date: fxRatesCache.date });
   } catch (error) {
     next(error);
   }

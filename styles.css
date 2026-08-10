@@ -4047,6 +4047,21 @@ main {
   color: inherit;
 }
 
+.wealth-currency-row {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.wealth-currency-row select {
+  width: auto;
+}
+
+.wealth-currency-note {
+  margin: -0.4rem 0 0.6rem;
+  font-size: 0.78rem;
+}
+
 .debt-edit-grid {
   display: grid;
   grid-template-columns: minmax(180px, 1.35fr) repeat(4, minmax(120px, 0.75fr));
