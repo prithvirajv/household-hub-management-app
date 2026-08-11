@@ -227,6 +227,7 @@ test("a user cannot create multiple households with the same currency", async ()
   assert.equal(starterState.body.notes.labels.length, 0);
   assert.equal(starterState.body.meals.recipes.length, 0);
   assert.equal(starterState.body.goals.sinkingFunds.length, 0);
+  assert.equal(starterState.body.ious.length, 0);
   assert.equal(starterState.body.goals.debts.length, 0);
   assert.equal(starterState.body.goals.netWorth.assets.length, 0);
   assert.equal(starterState.body.goals.netWorth.liabilities.length, 0);

@@ -8,6 +8,7 @@
     "preview": "PORT=4173 MEMORY_DB=true node server/index.js",
     "check": "node --check server/index.js && node --check server/default-state.js && node --check app.js && node --check test/auth.integration.test.js",
     "test": "node --test --test-concurrency=1 test/*.test.js",
+    "test:ui": "playwright test",
     "coverage": "node --test --experimental-test-coverage --test-concurrency=1 test/*.test.js"
   },
   "dependencies": {
@@ -22,5 +23,8 @@
     "nodemailer": "^9.0.1",
     "pdf-parse": "^1.1.1",
     "pg": "^8.11.3"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.48.2"
   }
 }

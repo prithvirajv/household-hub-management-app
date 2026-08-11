@@ -252,6 +252,17 @@
         letter-spacing: 0.03em;
       }
 
+      .calc-note {
+        margin: 0.8rem 0 0;
+        font-size: 0.82rem;
+        color: var(--muted);
+      }
+
+      .calc-note.calc-note-strong {
+        color: var(--navy);
+        font-weight: 700;
+      }
+
       .xirr-rows { margin-top: 1rem; display: flex; flex-direction: column; gap: 0.5rem; }
       .xirr-row { display: grid; grid-template-columns: 1fr 1fr auto; gap: 0.6rem; align-items: center; }
       .xirr-row input { border: 1px solid var(--line); border-radius: 8px; padding: 0.5rem 0.6rem; font-family: inherit; }
@@ -437,6 +448,92 @@
         </section>
 
         <section class="calc-section">
+          <h2>Housing</h2>
+          <div class="calc-grid">
+
+            <details class="calc-card" id="calc-mortgage">
+              <summary>
+                <div class="calc-icon">🏠</div>
+                <div>
+                  <div class="calc-card-title">Mortgage Payment Calculator</div>
+                  <div class="calc-card-desc">Monthly payment breakdown: principal, interest, tax, insurance</div>
+                </div>
+                <span class="chevron">▼</span>
+              </summary>
+              <div class="calc-body">
+                <div class="calc-fields">
+                  <label>Home price ($)<input type="number" id="mortPrice" value="400000" min="0" step="1000"></label>
+                  <label>Down payment ($)<input type="number" id="mortDown" value="80000" min="0" step="1000"></label>
+                  <label>Loan term (years)
+                    <select id="mortTerm">
+                      <option value="30" selected>30</option>
+                      <option value="20">20</option>
+                      <option value="15">15</option>
+                      <option value="10">10</option>
+                    </select>
+                  </label>
+                  <label>Interest rate (%)<input type="number" id="mortRate" value="6.5" min="0" step="0.05"></label>
+                  <label>Property tax ($/year)<input type="number" id="mortTax" value="4400" min="0" step="50"></label>
+                  <label>Home insurance ($/year)<input type="number" id="mortInsurance" value="1600" min="0" step="50"></label>
+                  <label>HOA dues ($/month)<input type="number" id="mortHoa" value="0" min="0" step="10"></label>
+                  <label>PMI (%/year)<input type="number" id="mortPmi" value="0.5" min="0" step="0.05"></label>
+                </div>
+                <div class="calc-result">
+                  <div class="calc-result-item"><span>Loan amount</span><strong id="mortLoanAmount">$0</strong></div>
+                  <div class="calc-result-item"><span>Principal &amp; interest</span><strong id="mortPandI">$0</strong></div>
+                  <div class="calc-result-item"><span>Tax + insurance + PMI + HOA</span><strong id="mortExtras">$0</strong></div>
+                  <div class="calc-result-item"><span>Total monthly payment</span><strong id="mortTotal">$0</strong></div>
+                </div>
+                <p class="calc-note" id="mortPmiNote" hidden>PMI is included because your down payment is below 20% of the home price. It typically drops off once you reach 20% equity.</p>
+              </div>
+            </details>
+
+            <details class="calc-card" id="calc-rentbuy">
+              <summary>
+                <div class="calc-icon">⚖️</div>
+                <div>
+                  <div class="calc-card-title">Rent vs Buy Calculator</div>
+                  <div class="calc-card-desc">Compare the net cost of renting vs buying over time</div>
+                </div>
+                <span class="chevron">▼</span>
+              </summary>
+              <div class="calc-body">
+                <div class="calc-fields">
+                  <label>Home price ($)<input type="number" id="rbPrice" value="400000" min="0" step="1000"></label>
+                  <label>Down payment ($)<input type="number" id="rbDown" value="80000" min="0" step="1000"></label>
+                  <label>Mortgage rate (%)<input type="number" id="rbRate" value="6.5" min="0" step="0.05"></label>
+                  <label>Loan term (years)
+                    <select id="rbTerm">
+                      <option value="30" selected>30</option>
+                      <option value="20">20</option>
+                      <option value="15">15</option>
+                    </select>
+                  </label>
+                  <label>Property tax ($/year)<input type="number" id="rbTax" value="4400" min="0" step="50"></label>
+                  <label>Home insurance ($/year)<input type="number" id="rbInsurance" value="1600" min="0" step="50"></label>
+                  <label>Maintenance (%/year of value)<input type="number" id="rbMaintenance" value="1" min="0" step="0.1"></label>
+                  <label>HOA dues ($/month)<input type="number" id="rbHoa" value="0" min="0" step="10"></label>
+                  <label>Home appreciation (%/year)<input type="number" id="rbAppreciation" value="3" step="0.1"></label>
+                  <label>Closing costs (% of price)<input type="number" id="rbClosing" value="3" min="0" step="0.1"></label>
+                  <label>Selling costs (% of sale price)<input type="number" id="rbSelling" value="6" min="0" step="0.1"></label>
+                  <label>Monthly rent ($)<input type="number" id="rbRent" value="2200" min="0" step="50"></label>
+                  <label>Annual rent increase (%)<input type="number" id="rbRentIncrease" value="3" min="0" step="0.1"></label>
+                  <label>Investment return (%/year)<input type="number" id="rbInvestReturn" value="6" min="0" step="0.1"></label>
+                  <label>Years you'll stay<input type="number" id="rbYears" value="7" min="1" step="1"></label>
+                </div>
+                <div class="calc-result">
+                  <div class="calc-result-item"><span>Net cost of buying</span><strong id="rbBuyCost">$0</strong></div>
+                  <div class="calc-result-item"><span>Net cost of renting</span><strong id="rbRentCost">$0</strong></div>
+                  <div class="calc-result-item"><span>Difference</span><strong id="rbDifference">$0</strong></div>
+                </div>
+                <p class="calc-note" id="rbVerdict"></p>
+              </div>
+            </details>
+
+          </div>
+        </section>
+
+        <section class="calc-section">
           <h2>Planning</h2>
           <div class="calc-grid">
 
@@ -564,6 +661,103 @@
       }
       ["emiPrincipal", "emiRate", "emiMonths"].forEach((id) => document.getElementById(id).addEventListener("input", updateEmi));
 
+      // --- Mortgage payment ---
+      function monthlyPI(loanAmount, annualRatePct, years) {
+        const monthlyRate = annualRatePct / 100 / 12;
+        const months = years * 12;
+        if (months <= 0) return 0;
+        if (monthlyRate === 0) return loanAmount / months;
+        const factor = Math.pow(1 + monthlyRate, months);
+        return (loanAmount * monthlyRate * factor) / (factor - 1);
+      }
+
+      function updateMortgage() {
+        const price = num("mortPrice");
+        const down = Math.min(num("mortDown"), price);
+        const loanAmount = Math.max(0, price - down);
+        const years = num("mortTerm") || 30;
+        const pAndI = monthlyPI(loanAmount, num("mortRate"), years);
+        const tax = num("mortTax") / 12;
+        const insurance = num("mortInsurance") / 12;
+        const hoa = num("mortHoa");
+        const downPct = price > 0 ? down / price : 1;
+        const pmi = downPct < 0.2 ? (loanAmount * num("mortPmi")) / 100 / 12 : 0;
+        const extras = tax + insurance + hoa + pmi;
+        document.getElementById("mortLoanAmount").textContent = money.format(loanAmount);
+        document.getElementById("mortPandI").textContent = money.format(pAndI);
+        document.getElementById("mortExtras").textContent = money.format(extras);
+        document.getElementById("mortTotal").textContent = money.format(pAndI + extras);
+        document.getElementById("mortPmiNote").hidden = downPct >= 0.2 || num("mortPmi") <= 0;
+      }
+      ["mortPrice", "mortDown", "mortTerm", "mortRate", "mortTax", "mortInsurance", "mortHoa", "mortPmi"]
+        .forEach((id) => document.getElementById(id).addEventListener("input", updateMortgage));
+
+      // --- Rent vs buy ---
+      // Buy: total cash paid out (down payment + closing costs + every monthly
+      // housing cost) minus the equity recovered at sale (home value at year N,
+      // less the remaining loan balance and selling costs).
+      // Rent: total rent paid, minus what the down payment + closing costs would
+      // have grown to if invested instead (the opportunity cost a renter keeps
+      // that a buyer gives up by putting that cash into the house).
+      function updateRentBuy() {
+        const price = num("rbPrice");
+        const down = Math.min(num("rbDown"), price);
+        const loanAmount = Math.max(0, price - down);
+        const rate = num("rbRate");
+        const termYears = num("rbTerm") || 30;
+        const years = Math.max(1, num("rbYears"));
+        const months = years * 12;
+        const pAndI = monthlyPI(loanAmount, rate, termYears);
+        const monthlyRate = rate / 100 / 12;
+
+        let balance = loanAmount;
+        for (let m = 0; m < Math.min(months, termYears * 12); m++) {
+          const interest = balance * monthlyRate;
+          const principalPaid = Math.min(balance, pAndI - interest);
+          balance = Math.max(0, balance - principalPaid);
+        }
+
+        const closingCosts = (price * num("rbClosing")) / 100;
+        const homeValueAtEnd = price * Math.pow(1 + num("rbAppreciation") / 100, years);
+        const sellingCosts = (homeValueAtEnd * num("rbSelling")) / 100;
+        const equityAtEnd = Math.max(0, homeValueAtEnd - balance - sellingCosts);
+
+        let totalHousingPayments = 0;
+        const monthlyTax = num("rbTax") / 12;
+        const monthlyInsurance = num("rbInsurance") / 12;
+        const monthlyMaintenance = (price * (num("rbMaintenance") / 100)) / 12;
+        const hoa = num("rbHoa");
+        for (let m = 0; m < months; m++) {
+          const loanMonth = m < termYears * 12;
+          totalHousingPayments += (loanMonth ? pAndI : 0) + monthlyTax + monthlyInsurance + monthlyMaintenance + hoa;
+        }
+
+        const buyCost = down + closingCosts + totalHousingPayments - equityAtEnd;
+
+        let totalRent = 0;
+        let rent = num("rbRent");
+        for (let year = 0; year < years; year++) {
+          for (let m = 0; m < 12 && year * 12 + m < months; m++) totalRent += rent;
+          rent *= 1 + num("rbRentIncrease") / 100;
+        }
+        const investedGrowth = (down + closingCosts) * (Math.pow(1 + num("rbInvestReturn") / 100, years) - 1);
+        const rentCost = totalRent - investedGrowth;
+
+        document.getElementById("rbBuyCost").textContent = money.format(Math.max(0, buyCost));
+        document.getElementById("rbRentCost").textContent = money.format(Math.max(0, rentCost));
+        const diff = rentCost - buyCost;
+        document.getElementById("rbDifference").textContent = money.format(Math.abs(diff));
+        const verdict = document.getElementById("rbVerdict");
+        verdict.className = "calc-note calc-note-strong";
+        verdict.textContent = diff >= 0
+          ? `Buying is cheaper by ${money.format(Math.abs(diff))} over ${years} year${years === 1 ? "" : "s"}.`
+          : `Renting is cheaper by ${money.format(Math.abs(diff))} over ${years} year${years === 1 ? "" : "s"}.`;
+      }
+      [
+        "rbPrice", "rbDown", "rbRate", "rbTerm", "rbTax", "rbInsurance", "rbMaintenance", "rbHoa",
+        "rbAppreciation", "rbClosing", "rbSelling", "rbRent", "rbRentIncrease", "rbInvestReturn", "rbYears"
+      ].forEach((id) => document.getElementById(id).addEventListener("input", updateRentBuy));
+
       // --- FD ---
       function updateFd() {
         const principal = num("fdPrincipal");
@@ -652,6 +846,8 @@
       updateLumpsum();
       updateCagr();
       updateEmi();
+      updateMortgage();
+      updateRentBuy();
       updateFd();
       updateXirr();
     </script>
