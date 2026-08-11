@@ -354,6 +354,14 @@ function autosaveState() {
   clearTimeout(autosaveTimer);
   autosaveTimer = setTimeout(() => {
     if (currentHouseholdId() !== householdIdAtSchedule) return;
+    // Re-check at fire time, not just at schedule time above - `state` is a
+    // mutable global and 350ms is long enough for something else (a
+    // household reload, a stale reference from a prior render) to have
+    // reassigned it to something incomplete in between.
+    if (!looksLikeCompleteState(state)) {
+      console.error("Refusing to autosave - state looks incomplete at fire time", state);
+      return;
+    }
     api("/api/state", {
       method: "PUT",
       headers: { "X-Household-Id": householdIdAtSchedule || "" },
