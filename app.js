@@ -291,9 +291,9 @@ async function handleAuthExpired() {
 
 function api(path, options = {}) {
   return fetch(path, {
+    ...options,
     headers: { "Content-Type": "application/json", ...(options.headers || {}) },
-    credentials: "same-origin",
-    ...options
+    credentials: "same-origin"
   }).then(async (response) => {
     const contentType = response.headers.get("content-type") || "";
     const body = contentType.includes("application/json") ? await response.json() : await response.text();
