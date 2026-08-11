@@ -331,9 +331,20 @@ function currentHouseholdId() {
 // the server rejects the same shape too (see PUT /api/state), but catching
 // it here avoids even sending the doomed request, and protects the also
 // affected in-memory `state` from being blindly trusted downstream.
+// Mirrors the server's REQUIRED_STATE_KEYS (derived from defaultState) -
+// every one of these must be present, not just the handful that happen to
+// crash loudest. A save missing only `notes`/`meals` used to slip past a
+// narrower check here and silently corrupt user_shared_modules with an
+// empty {} for those fields, which then clobbered good household data on
+// every subsequent load via applySharedModules().
+const REQUIRED_STATE_KEYS = [
+  "household", "budget", "budgetHistory", "transactions", "paychecks",
+  "calendar", "notes", "decisions", "ious", "meals", "goals", "accounts",
+  "transfers", "recurringExpenses"
+];
+
 function looksLikeCompleteState(candidate) {
-  return Boolean(candidate && candidate.household && candidate.budget && candidate.calendar
-    && Array.isArray(candidate.transactions) && Array.isArray(candidate.accounts) && candidate.goals);
+  return Boolean(candidate) && REQUIRED_STATE_KEYS.every((key) => key in candidate);
 }
 
 function autosaveState() {

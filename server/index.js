@@ -2972,14 +2972,17 @@ app.put("/api/state", requireSession, requireEditAccess, async (req, res, next) 
     if (declaredHouseholdId && declaredHouseholdId !== req.sessionUser.household_id) {
       return res.status(409).json({ error: "Household changed before this save could complete" });
     }
-    // A real household state always has these top-level keys (see
-    // householdState()/defaultState) - reject anything else outright rather
-    // than overwrite a household's row with a malformed/incomplete payload.
-    // This is the backstop against any client-side bug (a bad render(), a
-    // race during a household switch, manual testing against the wrong
-    // tab) that could otherwise silently wipe real budget/account/
-    // transaction data with no way to recover it.
-    const REQUIRED_STATE_KEYS = ["household", "budget", "transactions", "accounts", "goals", "calendar"];
+    // A real household state always has every one of defaultState's
+    // top-level keys (see householdState()) - reject anything else outright
+    // rather than overwrite a household's row with a malformed/incomplete
+    // payload. Deriving the required set from defaultState itself (rather
+    // than hand-picking a few "important" ones) closes exactly the gap that
+    // let a save missing only `notes`/`meals` slip through and silently
+    // corrupt user_shared_modules with an empty {} for those fields - this
+    // is the backstop against any client-side bug (a bad render(), a race
+    // during a household switch, manual testing against the wrong tab)
+    // that could otherwise silently wipe real data with no way to recover.
+    const REQUIRED_STATE_KEYS = Object.keys(defaultState);
     const missingKeys = REQUIRED_STATE_KEYS.filter((key) => !req.body || !(key in req.body));
     if (missingKeys.length > 0) {
       return res.status(400).json({ error: `Save rejected: state is missing required field(s) ${missingKeys.join(", ")}` });
