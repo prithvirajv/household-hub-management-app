@@ -565,6 +565,12 @@ main {
   gap: 1rem;
 }
 
+.public-help-nav {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
 .auth-form,
 .card,
 .metric {
@@ -2119,13 +2125,18 @@ main {
 }
 
 .sharing-member-row {
-  display: grid;
-  grid-template-columns: minmax(180px, 1fr) auto auto auto;
+  display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 12px;
   padding: 14px 16px;
   border-radius: 6px;
   background: var(--soft-blue);
+}
+
+.sharing-member-row > div:first-child {
+  flex: 1 1 180px;
+  min-width: 0;
 }
 
 .sharing-access-level-select {
@@ -2154,6 +2165,7 @@ main {
 
 .sharing-member-actions {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 8px;
   position: relative;
@@ -2203,13 +2215,13 @@ main {
 
 @media (max-width: 720px) {
   .sharing-member-row {
-    grid-template-columns: minmax(0, 1fr);
+    flex-direction: column;
     align-items: stretch;
   }
 
   .sharing-member-row .pill,
   .sharing-member-actions {
-    justify-self: start;
+    align-self: start;
   }
 
   .member-add-household-panel {
@@ -2657,14 +2669,25 @@ main {
 }
 
 .transaction-subcategory-adder {
-  grid-template-columns: minmax(140px, 0.8fr) minmax(200px, 1.2fr) minmax(135px, auto) minmax(120px, auto);
+  display: flex;
+  flex-wrap: wrap;
   align-items: end;
   border-radius: 8px;
   background: var(--soft-blue);
   padding: 0.7rem;
 }
 
+.transaction-subcategory-adder label {
+  flex: 1 1 140px;
+  min-width: 0;
+}
+
+.transaction-subcategory-adder label.custom-combobox {
+  flex: 1.4 1 180px;
+}
+
 .transaction-subcategory-adder button {
+  flex: 0 0 auto;
   white-space: nowrap;
 }
 
@@ -4763,6 +4786,7 @@ input.holdings-modal-market-value-input {
   gap: 0.6rem;
   text-align: left;
   background: transparent;
+  color: var(--text);
   border: 1px solid transparent;
   border-radius: 8px;
   padding: 0.55rem 0.6rem;
@@ -6032,7 +6056,6 @@ input.holdings-modal-market-value-input {
   .recipe-builder,
   .invite-form,
   .calendar-quick-add,
-  .transaction-subcategory-adder,
   .payment-row,
   .category-adder,
   .budget-ledger-head,
@@ -6044,6 +6067,17 @@ input.holdings-modal-market-value-input {
   .report-row,
   .category-spend-row {
     grid-template-columns: 1fr;
+  }
+
+  .transaction-subcategory-adder {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .transaction-subcategory-adder label,
+  .transaction-subcategory-adder button {
+    flex-basis: auto;
+    width: 100%;
   }
 
   .help-journey,

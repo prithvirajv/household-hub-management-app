@@ -5755,8 +5755,18 @@ function showPublicHelp() {
   $("#authPanel").hidden = true;
   const panel = $("#publicHelpPanel");
   panel.hidden = false;
-  panel.innerHTML = `<button id="closePublicHelpButton" class="ghost" type="button">← Back to sign in</button>${renderHelp()}`;
+  panel.innerHTML = `
+    <div class="public-help-nav">
+      <button id="closePublicHelpButton" class="ghost" type="button">← Back to sign in</button>
+      <button class="ghost" type="button" data-public-help-goto="/welcome.html">Home</button>
+      <button class="ghost" type="button" data-public-help-goto="/calculators.html">Calculators</button>
+      <button class="ghost" type="button" data-public-help-goto="/welcome.html#privacy">Privacy</button>
+    </div>
+    ${renderHelp()}`;
   $("#closePublicHelpButton").addEventListener("click", hidePublicHelp);
+  panel.querySelectorAll("[data-public-help-goto]").forEach((button) => {
+    button.addEventListener("click", () => { window.location.href = button.dataset.publicHelpGoto; });
+  });
   history.replaceState({}, "", "#help");
 }
 
