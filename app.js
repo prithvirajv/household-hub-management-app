@@ -327,9 +327,22 @@ function currentHouseholdId() {
 // data: household id is captured at schedule time, re-checked at send time,
 // and sent as a header the server double-checks against the session's
 // current household before writing (server/index.js's PUT /api/state).
+// First line of defense against ever saving a malformed/incomplete state -
+// the server rejects the same shape too (see PUT /api/state), but catching
+// it here avoids even sending the doomed request, and protects the also
+// affected in-memory `state` from being blindly trusted downstream.
+function looksLikeCompleteState(candidate) {
+  return Boolean(candidate && candidate.household && candidate.budget && candidate.calendar
+    && Array.isArray(candidate.transactions) && Array.isArray(candidate.accounts) && candidate.goals);
+}
+
 function autosaveState() {
   if (!state) return;
   if (householdSwitchInProgress) return;
+  if (!looksLikeCompleteState(state)) {
+    console.error("Refusing to autosave - state looks incomplete", state);
+    return;
+  }
   if (sessionUser?.accessLevel === "view") {
     if (Date.now() - viewOnlyToastShownAt > 10000) {
       viewOnlyToastShownAt = Date.now();
@@ -353,6 +366,10 @@ function autosaveState() {
 
 async function saveStateNow() {
   if (!state) return;
+  if (!looksLikeCompleteState(state)) {
+    console.error("Refusing to save - state looks incomplete", state);
+    return;
+  }
   const householdIdAtCall = currentHouseholdId();
   clearTimeout(autosaveTimer);
   await api("/api/state", {
