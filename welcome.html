@@ -565,117 +565,11 @@
         gap: 1.5rem;
       }
 
-      /* Sign-in modal */
-      .signin-modal-backdrop {
-        display: none;
-        position: fixed;
-        inset: 0;
-        background: rgba(30, 24, 18, 0.48);
-        align-items: center;
-        justify-content: center;
-        padding: 1.5rem;
-        z-index: 50;
-      }
-
-      .signin-modal-backdrop[data-open="true"] {
-        display: flex;
-      }
-
-      .signin-modal {
-        width: min(380px, 100%);
-        background: var(--panel);
-        border: 1px solid var(--line);
-        border-radius: 16px;
-        box-shadow: var(--shadow);
-        padding: 1.75rem;
-      }
-
-      .signin-modal-head {
-        display: flex;
-        align-items: center;
-        justify-content: space-between;
-        margin-bottom: 1.1rem;
-      }
-
-      .signin-modal-head h2 {
-        margin: 0;
-        font-size: 1.2rem;
-        color: var(--navy);
-      }
-
-      .signin-modal-close {
-        background: none;
-        border: none;
-        font-size: 1.2rem;
-        line-height: 1;
-        color: var(--muted);
-        cursor: pointer;
-        padding: 0.2rem;
-      }
-
-      .signin-modal-close:hover {
-        color: var(--text);
-      }
-
-      .signin-modal-form {
-        display: grid;
-        gap: 0.85rem;
-      }
-
-      .signin-modal-form label {
-        display: grid;
-        gap: 0.3rem;
-        font-weight: 700;
-        font-size: 0.85rem;
-        color: var(--navy-2);
-      }
-
-      .signin-modal-form input {
-        border: 1px solid var(--line);
-        border-radius: 8px;
-        padding: 0.6rem 0.7rem;
-        font: inherit;
-        color: var(--text);
-        background: var(--panel);
-      }
-
-      .signin-modal-form input:focus {
-        outline: 2px solid var(--green);
-        outline-offset: 1px;
-      }
-
-      .signin-modal-form .btn {
-        width: 100%;
-        padding: 0.7rem 1rem;
-      }
-
-      .signin-modal-message {
-        margin: 0;
-        min-height: 1.1em;
-        font-size: 0.85rem;
-        color: var(--coral);
-      }
-
-      .signin-modal-divider {
-        text-align: center;
-        color: var(--muted);
-        font-size: 0.8rem;
-        margin: 0.15rem 0;
-      }
-
-      .signin-modal-forgot {
-        text-align: center;
-        background: none;
-        border: none;
-        color: var(--blue);
-        font-weight: 700;
-        font-size: 0.85rem;
-        cursor: pointer;
-        padding: 0.15rem;
-      }
-
-      .signin-modal-forgot:hover {
-        text-decoration: underline;
+      /* "Try the demo" buttons show a brief loading state while the real
+         demo endpoint (the same one index.html's own button calls) responds. */
+      .btn[data-try-demo][disabled] {
+        opacity: 0.7;
+        cursor: default;
       }
 
       @media (max-width: 860px) {
@@ -806,8 +700,8 @@
           <a href="/index.html#help">Help</a>
         </nav>
         <div class="site-nav-cta">
-          <button class="btn btn-ghost" type="button" data-open-signin>Sign in</button>
-          <button class="btn btn-primary" type="button" data-open-signin>Try the demo</button>
+          <a class="btn btn-ghost" href="/index.html">Sign in</a>
+          <button class="btn btn-primary" type="button" data-try-demo>Try the demo</button>
         </div>
         <button class="nav-toggle" id="mobileNavToggle" type="button" aria-expanded="false" aria-label="Open menu">
           <span></span>
@@ -828,8 +722,8 @@
           <a href="#privacy">Privacy</a>
           <a href="/index.html#help">Help</a>
           <div class="mobile-nav-cta">
-            <button class="btn btn-ghost" type="button" data-open-signin>Sign in</button>
-            <button class="btn btn-primary" type="button" data-open-signin>Try the demo</button>
+            <a class="btn btn-ghost" href="/index.html">Sign in</a>
+            <button class="btn btn-primary" type="button" data-try-demo>Try the demo</button>
           </div>
         </div>
       </div>
@@ -842,7 +736,7 @@
           <h1>Your household, working together.</h1>
           <p class="lede">Zero-based budgeting, shared calendars, meal planning, documents, and shared expenses — all in one place your whole family can actually use.</p>
           <div class="hero-actions">
-            <button class="btn btn-primary" type="button" data-open-signin>Try the demo</button>
+            <button class="btn btn-primary" type="button" data-try-demo>Try the demo</button>
             <a class="btn btn-ghost" href="/index.html">Create your household</a>
           </div>
           <p class="hero-note">No credit card. The demo never gets administrator access, and nothing you type in it is kept.</p>
@@ -946,7 +840,7 @@
         <h2>Bring your household into one place.</h2>
         <p>Start with the demo, or create your own household in a couple of minutes.</p>
         <div class="hero-actions">
-          <button class="btn btn-primary" type="button" data-open-signin>Try the demo</button>
+          <button class="btn btn-primary" type="button" data-try-demo>Try the demo</button>
           <a class="btn btn-ghost" href="/index.html">Create your household</a>
         </div>
       </div>
@@ -957,101 +851,34 @@
         <span>© 2026 FamilyLoop</span>
         <div class="footer-links">
           <a href="/index.html#help">Help</a>
-          <button class="footer-signin-button" type="button" data-open-signin>Sign in</button>
+          <a class="footer-signin-button" href="/index.html">Sign in</a>
         </div>
       </div>
     </footer>
 
-    <div class="signin-modal-backdrop" id="signinModalBackdrop">
-      <div class="signin-modal" role="dialog" aria-modal="true" aria-labelledby="signinModalTitle">
-        <div class="signin-modal-head">
-          <h2 id="signinModalTitle">Sign in</h2>
-          <button class="signin-modal-close" id="signinModalClose" type="button" aria-label="Close">×</button>
-        </div>
-        <form class="signin-modal-form" id="signinModalForm">
-          <label>Email<input name="email" type="email" autocomplete="username" required></label>
-          <label>Password<input name="password" type="password" autocomplete="current-password" required></label>
-          <button class="btn btn-primary" type="submit">Open household</button>
-          <div class="signin-modal-divider">or</div>
-          <button class="btn btn-ghost" id="signinModalDemoButton" type="button">Try the demo instead</button>
-          <button class="signin-modal-forgot" id="signinModalForgotButton" type="button">Forgot password?</button>
-          <p class="signin-modal-message" id="signinModalMessage"></p>
-        </form>
-      </div>
-    </div>
-
     <script>
+      // "Try the demo" calls the same /api/auth/demo endpoint index.html's own
+      // demo button calls, then hands off to the real app. Sign-in, signup,
+      // Google auth, and password reset all live in index.html's #authPanel -
+      // this page deliberately doesn't reimplement any of that.
       (function () {
-        const backdrop = document.getElementById("signinModalBackdrop");
-        const form = document.getElementById("signinModalForm");
-        const message = document.getElementById("signinModalMessage");
-        const demoButton = document.getElementById("signinModalDemoButton");
-        const closeButton = document.getElementById("signinModalClose");
-        const forgotButton = document.getElementById("signinModalForgotButton");
-
-        function openModal() {
-          backdrop.dataset.open = "true";
-          message.textContent = "";
-          form.querySelector("[name=email]").focus();
-        }
-
-        function closeModal() {
-          backdrop.dataset.open = "false";
-        }
-
-        document.querySelectorAll("[data-open-signin]").forEach((button) => {
-          button.addEventListener("click", openModal);
-        });
-
-        closeButton.addEventListener("click", closeModal);
-        backdrop.addEventListener("click", (event) => {
-          if (event.target === backdrop) closeModal();
-        });
-        document.addEventListener("keydown", (event) => {
-          if (event.key === "Escape" && backdrop.dataset.open === "true") closeModal();
-        });
-
-        async function submitAuth(path, body) {
-          const response = await fetch(path, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            credentials: "same-origin",
-            body: JSON.stringify(body)
+        document.querySelectorAll("[data-try-demo]").forEach((button) => {
+          button.addEventListener("click", async () => {
+            button.disabled = true;
+            try {
+              const response = await fetch("/api/auth/demo", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                credentials: "same-origin",
+                body: JSON.stringify({})
+              });
+              if (!response.ok) throw new Error("Demo login failed");
+              window.location.href = "/index.html";
+            } catch (error) {
+              button.disabled = false;
+              window.location.href = "/index.html";
+            }
           });
-          const contentType = response.headers.get("content-type") || "";
-          const responseBody = contentType.includes("application/json") ? await response.json() : await response.text();
-          if (!response.ok) throw new Error(responseBody.error || responseBody || "Something went wrong.");
-          return responseBody;
-        }
-
-        form.addEventListener("submit", async (event) => {
-          event.preventDefault();
-          message.textContent = "";
-          const submitButton = form.querySelector("button[type=submit]");
-          submitButton.disabled = true;
-          try {
-            await submitAuth("/api/auth/signin", Object.fromEntries(new FormData(form)));
-            window.location.href = "/index.html";
-          } catch (error) {
-            message.textContent = error.message;
-            submitButton.disabled = false;
-          }
-        });
-
-        demoButton.addEventListener("click", async () => {
-          message.textContent = "";
-          demoButton.disabled = true;
-          try {
-            await submitAuth("/api/auth/demo", {});
-            window.location.href = "/index.html";
-          } catch (error) {
-            message.textContent = error.message;
-            demoButton.disabled = false;
-          }
-        });
-
-        forgotButton.addEventListener("click", () => {
-          window.location.href = "/index.html";
         });
       })();
     </script>
