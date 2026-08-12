@@ -267,6 +267,10 @@ more convenient.
 **Get the most out of it**
 - This is private to you — never shared with other household members, even
   ones with full access to everything else.
+- The mood-trend strip and writing streak at the top track your last dozen
+  entries automatically — no setup needed, just keep writing.
+- Search or filter by tag to find a past entry instead of scrolling
+  through every month.
 
 ## Plan
 
@@ -361,6 +365,11 @@ more convenient.
 **Get the most out of it**
 - Build a small library of go-to recipes once — planning a week becomes
   picking from a list instead of starting from zero.
+- Search, sort (by name, protein, or calories), or filter to "In this
+  week" / "Not planned" once your library grows past a handful of
+  recipes.
+- Meals opens on the current week automatically, so you're never staring
+  at a stub week from the start or end of the month by default.
 
 ## Goals
 

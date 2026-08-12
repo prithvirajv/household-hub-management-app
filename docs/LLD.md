@@ -157,8 +157,10 @@ byte-for-byte between the browser, the server, and the test suite.
   `holdingType` — a different axis than `assetClass`, see
   [§6.5](#65-wealth-holdings-valuation-assetvalue)), `holdingGainLoss`,
   `groupGainLoss`, `debtPayoffProgressPercent`.
-- **Meal/plan**: `mealWeeksForMonth`, `groupPlanTasksByBucket`,
-  `validateJournalPayload`.
+- **Meal/plan**: `mealWeeksForMonth`, `currentMealWeekNumber` (which week
+  contains today's date, so the Meals week selector opens on the current
+  week instead of always defaulting to week 1 of the viewed month),
+  `groupPlanTasksByBucket`, `validateJournalPayload`.
 - **Daily recurring tasks**: `dailyTaskOccursOnDate`,
   `isDailyTaskDoneOnDate`, `toggleDailyTaskDoneOnDate`.
 - **Timeline math**: `timeToMinutes`, `minutesToTime`, `snapMinutes`,

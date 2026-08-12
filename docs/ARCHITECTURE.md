@@ -59,7 +59,7 @@ flowchart LR
 | Compute | **Cloud Run** (current) | Scale-to-zero: `min-instances=0`, `max-instances=1`, 1 vCPU / 512Mi |
 | Secrets | GCP Secret Manager | One enabled version kept per secret; billed per enabled version/month |
 | Scheduled jobs | Cloud Scheduler → `POST /api/internal/notifications/process` | Guarded by a shared secret (`NOTIFICATION_SECRET`), not a user session |
-| Tests | Node's built-in `node --test` + Playwright | 306 `node --test` tests across unit (`shared-logic.test.js`) + integration (`test/*.integration.test.js`), an in-memory `MEMORY_DB=true` mode stands in for Postgres; plus a Playwright browser-level UI suite (`test/ui/`, `npm run test:ui`) that logs in as the demo user and loads every authenticated screen, failing on any console/page error — the only layer that catches a `render()`-time client-side crash |
+| Tests | Node's built-in `node --test` + Playwright | 308 `node --test` tests across unit (`shared-logic.test.js`) + integration (`test/*.integration.test.js`), an in-memory `MEMORY_DB=true` mode stands in for Postgres; plus a Playwright browser-level UI suite (`test/ui/`, `npm run test:ui`) that logs in as the demo user and loads every authenticated screen, failing on any console/page error — the only layer that catches a `render()`-time client-side crash |
 
 ## 3. Deployment topology — current vs legacy
 
