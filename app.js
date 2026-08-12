@@ -3050,6 +3050,22 @@ function ensureNotesData() {
   });
 }
 
+// Maps a note's stored hex color to a CSS class instead of writing the hex
+// straight into an inline style - the classes below have dark-mode
+// variants (a pale pastel would otherwise stay exactly as bright in dark
+// mode, since an inline style can't respond to the theme toggle).
+const NOTE_COLOR_CLASS = {
+  "#ffffff": "note-color-white",
+  "#fff7d6": "note-color-yellow",
+  "#eef7ff": "note-color-blue",
+  "#eaf8ef": "note-color-green",
+  "#fff0ee": "note-color-coral"
+};
+
+function noteColorClass(color) {
+  return NOTE_COLOR_CLASS[color] || "note-color-white";
+}
+
 function visibleNotes() {
   ensureNotesData();
   const query = String(state.notes.search || "").trim().toLowerCase();
@@ -3254,7 +3270,7 @@ function renderNoteCard(note) {
     <button class="note-check-plan" data-add-checklist-to-plan="${note.id}:${item.id}" type="button" aria-label="Add to today's Plan" title="Add to today's Plan">◫</button>
     <button class="note-check-delete" data-delete-note-item="${note.id}:${item.id}" type="button" aria-label="Delete checklist item">×</button>
   </div>`;
-  return `<article class="note-card" data-note-id="${note.id}" style="background:${note.color}">
+  return `<article class="note-card ${noteColorClass(note.color)}" data-note-id="${note.id}">
     <div class="note-card-head">
       <input class="note-title-input" data-note-title="${note.id}" value="${escapeHtml(note.title || "")}" placeholder="Untitled note" aria-label="Note title">
       <button class="note-icon-button ${note.pinned ? "active" : ""}" data-pin-note="${note.id}" type="button" aria-label="${note.pinned ? "Unpin note" : "Pin note"}">⌖</button>

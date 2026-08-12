@@ -4896,7 +4896,7 @@ input.holdings-modal-market-value-input {
 }
 
 .notes-filter-panel button.active {
-  background: #fff1b9;
+  background: color-mix(in srgb, var(--gold) 22%, var(--panel));
 }
 
 .notes-filter-label,
@@ -5359,7 +5359,7 @@ input.holdings-modal-market-value-input {
 }
 
 .note-composer-row .note-pin-toggle.active {
-  background: #fff1b9;
+  background: color-mix(in srgb, var(--gold) 22%, var(--panel));
   color: var(--text);
 }
 
@@ -5471,6 +5471,20 @@ input.holdings-modal-market-value-input {
   border-radius: 8px;
   box-shadow: 0 2px 8px rgba(80, 60, 30, 0.06);
 }
+
+/* Sticky-note color picker, applied via class instead of an inline hex
+   style so dark mode can tint each one down instead of leaving a bright
+   pastel card sitting on a dark page. */
+.note-color-white { background: var(--panel); }
+.note-color-yellow { background: #fff7d6; }
+.note-color-blue { background: #eef7ff; }
+.note-color-green { background: #eaf8ef; }
+.note-color-coral { background: #fff0ee; }
+
+html[data-theme="dark"] .note-color-yellow { background: color-mix(in srgb, #fff7d6 20%, var(--panel)); }
+html[data-theme="dark"] .note-color-blue { background: color-mix(in srgb, #eef7ff 20%, var(--panel)); }
+html[data-theme="dark"] .note-color-green { background: color-mix(in srgb, #eaf8ef 20%, var(--panel)); }
+html[data-theme="dark"] .note-color-coral { background: color-mix(in srgb, #fff0ee 20%, var(--panel)); }
 
 .note-card-toolbar {
   position: relative;
@@ -5837,7 +5851,7 @@ input.holdings-modal-market-value-input {
 
 .note-icon-button.active {
   color: var(--gold);
-  background: #fff1b9;
+  background: color-mix(in srgb, var(--gold) 22%, var(--panel));
 }
 
 .note-reminder {
@@ -6071,8 +6085,8 @@ input.holdings-modal-market-value-input {
 .note-labels span {
   padding: 0.25rem 0.55rem;
   border-radius: 999px;
-  background: #e2f6ee;
-  color: #087453;
+  background: var(--green-soft);
+  color: var(--green);
   font-size: 0.75rem;
   font-weight: 900;
 }
