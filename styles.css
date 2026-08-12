@@ -4506,7 +4506,18 @@ main {
   overflow-y: auto;
 }
 
-.holdings-modal-body > label {
+.holdings-modal-header-row {
+  display: flex;
+  gap: 1rem;
+}
+
+.holdings-modal-header-row > label {
+  flex: 1;
+  min-width: 0;
+}
+
+.holdings-modal-body > label,
+.holdings-modal-header-row > label {
   display: block;
   color: var(--muted);
   font-size: 0.7rem;
@@ -4515,7 +4526,9 @@ main {
   margin-bottom: 1rem;
 }
 
-.holdings-modal-body > label input {
+.holdings-modal-body > label input,
+.holdings-modal-header-row > label input,
+.holdings-modal-header-row > label select {
   margin-top: 0.25rem;
   width: 100%;
   min-height: 36px;

@@ -12444,6 +12444,7 @@ function openHoldingsModal(groupId) {
   items.forEach((item) => { item.groupId = groupId; });
   currentHoldingsModalGroupId = groupId;
   $("#holdingsModalAccountName").value = items[0].groupName || items[0].name || "";
+  $("#holdingsModalAssetClass").value = items[0].assetClass || "stock";
   renderHoldingsModalRows();
   updateHoldingsModalTotal();
   $("#holdingsModalMessage").textContent = "";
@@ -12457,6 +12458,31 @@ $("#holdingsModalAccountName").addEventListener("input", (event) => {
     asset.name = asset.symbol ? `${name} - ${asset.symbol}` : name;
   });
   autosaveState();
+});
+
+// Moving an account off Stock/Retirement drops every one of its holdings
+// out of isHoldingAssetClass, so this is the only place a misclassified
+// account (a bank account someone picked Stock for by mistake) can ever
+// become a normal Cash/Property/Other row again - there's no such control
+// on the read-only group card itself. Snapshotting shares * price into
+// .value before flipping the class is what keeps the dollar amount from
+// reading as $0 the moment it lands on the flat row, since that row only
+// ever reads .value, never shares/price.
+$("#holdingsModalAssetClass").addEventListener("change", (event) => {
+  if (!currentHoldingsModalGroupId) return;
+  const newClass = event.target.value;
+  const leavingHoldings = !isHoldingAssetClass(newClass);
+  holdingsModalItems().forEach((asset) => {
+    if (leavingHoldings) asset.value = assetValue(asset);
+    asset.assetClass = newClass;
+  });
+  autosaveState();
+  if (leavingHoldings) {
+    $("#holdingsModalDialog").close();
+  } else {
+    renderHoldingsModalRows();
+    updateHoldingsModalTotal();
+  }
 });
 
 $("#addHoldingsModalRowButton").addEventListener("click", () => {

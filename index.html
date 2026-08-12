@@ -7,7 +7,7 @@
     <title>FamilyLoop</title>
     <link rel="icon" type="image/svg+xml" href="/assets/favicon.svg">
     <link rel="apple-touch-icon" href="/assets/apple-touch-icon.png">
-    <link rel="stylesheet" href="/styles.css?v=20260810-13">
+    <link rel="stylesheet" href="/styles.css?v=20260811-2">
     <script>
       (function () {
         var saved = localStorage.getItem("familyloop-theme");
@@ -341,7 +341,10 @@
           <button id="closeHoldingsModalButton" class="icon-button ghost" type="button" aria-label="Close">×</button>
         </div>
         <div class="holdings-modal-body">
-          <label>Account name<input id="holdingsModalAccountName" placeholder="Brokerage M2" aria-label="Account name"></label>
+          <div class="holdings-modal-header-row">
+            <label>Account name<input id="holdingsModalAccountName" placeholder="Brokerage M2" aria-label="Account name"></label>
+            <label>Account type<select id="holdingsModalAssetClass" aria-label="Account type"><option value="other">Other asset</option><option value="cash">Cash</option><option value="property">Property</option><option value="retirement">Retirement</option><option value="stock">Stock</option></select></label>
+          </div>
           <div class="holdings-modal-table-head">
             <div>Symbol</div><div>Asset class</div><div>Shares</div><div>Avg. cost</div><div>Price per share</div><div>Market value</div><div>Gain/loss</div><div></div>
           </div>
@@ -387,6 +390,6 @@
     <script src="https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/build/pdf.min.js"></script>
     <script>if (window.pdfjsLib) pdfjsLib.GlobalWorkerOptions.workerSrc = "https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/build/pdf.worker.min.js";</script>
     <script src="/lib/shared-logic.js?v=20260811-1"></script>
-    <script src="/app.js?v=20260810-16"></script>
+    <script src="/app.js?v=20260811-2"></script>
   </body>
 </html>
