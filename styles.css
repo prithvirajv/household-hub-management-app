@@ -6867,6 +6867,190 @@ input.holdings-modal-market-value-input {
   font-size: 0.95rem;
 }
 
+/* Journal needs real width for its sticky-composer + entry-timeline split
+   (.journal-layout's own 760px cap, shared with .plan-layout, is fine for
+   the old single-column form-then-list shape but leaves most of a wide
+   viewport empty once there's a second column). */
+.journal-layout-wide {
+  max-width: none;
+}
+
+.journal-layout-grid {
+  display: grid;
+  grid-template-columns: minmax(280px, 360px) minmax(0, 1fr);
+  gap: 0.85rem;
+  align-items: start;
+}
+
+.journal-composer-sticky {
+  display: grid;
+  gap: 0.85rem;
+  position: sticky;
+  top: 1rem;
+}
+
+.journal-timeline {
+  display: grid;
+  gap: 0.6rem;
+  min-width: 0;
+}
+
+.journal-stats-row {
+  display: flex;
+  gap: 1rem;
+}
+
+.journal-stats-row > div {
+  display: grid;
+  gap: 0.1rem;
+}
+
+.journal-stats-row strong {
+  font-size: 1.3rem;
+}
+
+.journal-stats-row span {
+  color: var(--muted);
+  font-size: 0.7rem;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.journal-mood-trend-bars {
+  display: flex;
+  align-items: flex-end;
+  gap: 0.25rem;
+  height: 56px;
+  margin-top: 0.5rem;
+}
+
+.journal-mood-trend-bar {
+  flex: 1 1 0;
+  min-width: 4px;
+  border-radius: 3px 3px 0 0;
+}
+
+.journal-filter-row {
+  display: grid;
+  gap: 0.5rem;
+}
+
+.journal-filter-row input[type="search"] {
+  width: 100%;
+  min-height: 36px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  padding: 0 0.9rem;
+  background: var(--panel);
+  color: var(--text);
+  font-size: 0.85rem;
+}
+
+.journal-tag-filter-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+}
+
+.journal-tag-chip {
+  padding: 0.25rem 0.65rem;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  background: var(--panel);
+  color: var(--muted);
+  font-size: 0.72rem;
+  font-weight: 800;
+}
+
+.journal-tag-chip.active {
+  border-color: var(--green);
+  background: var(--green-soft);
+  color: var(--text);
+}
+
+.journal-month-group h4 {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  margin: 0.4rem 0 0.5rem;
+  font-size: 0.8rem;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+.journal-month-count {
+  padding: 0.05rem 0.45rem;
+  border-radius: 999px;
+  background: var(--soft-blue);
+  color: var(--blue);
+  font-size: 0.68rem;
+  font-weight: 800;
+}
+
+.journal-entry-card {
+  display: grid;
+  gap: 0.5rem;
+}
+
+.journal-entry-card-head {
+  display: flex;
+  align-items: stretch;
+  gap: 0.6rem;
+}
+
+.journal-entry-card-heading {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: grid;
+  gap: 0.15rem;
+}
+
+.journal-entry-card-heading h3 {
+  margin: 0;
+  font-size: 1.05rem;
+}
+
+.journal-entry-card-heading small {
+  color: var(--muted);
+  font-size: 0.76rem;
+  font-weight: 700;
+}
+
+.journal-entry-card-head > button {
+  align-self: flex-start;
+}
+
+.journal-gratitude-callout {
+  margin: 0;
+  padding: 0.5rem 0.7rem;
+  border-radius: 8px;
+  background: var(--green-soft);
+  font-size: 0.85rem;
+}
+
+.journal-entry-body-text {
+  margin: 0;
+  white-space: pre-wrap;
+  font-size: 0.9rem;
+  line-height: 1.5;
+}
+
+.journal-photo-picker.disabled {
+  opacity: 0.5;
+  pointer-events: none;
+}
+
+@media (max-width: 760px) {
+  .journal-layout-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .journal-composer-sticky {
+    position: static;
+  }
+}
+
 .plan-bucket-tabs {
   display: flex;
   gap: 0.4rem;

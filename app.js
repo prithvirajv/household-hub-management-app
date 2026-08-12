@@ -3312,6 +3312,16 @@ function setupNoteComposerChecklist() {
 const journalMoods = ["Happy", "Calm", "Neutral", "Stressed", "Sad", "Grateful", "Excited"];
 const journalMoodEmoji = { Happy: "😊", Calm: "😌", Neutral: "😐", Stressed: "😖", Sad: "😢", Grateful: "🙏", Excited: "🤩" };
 const journalMoodColor = { Happy: "#f59e0b", Calm: "#38bdf8", Neutral: "#94a3b8", Stressed: "#ef4444", Sad: "#6366f1", Grateful: "#10b981", Excited: "#ec4899" };
+// Relative positivity, used only to set a mood-trend bar's height (1-5) -
+// not shown anywhere as a number, so the exact values are a judgment call,
+// not a fact users can dispute.
+const journalMoodValence = { Excited: 5, Happy: 5, Grateful: 4, Calm: 4, Neutral: 3, Stressed: 2, Sad: 1 };
+// Which saved entry (if any) is showing its editable fields instead of its
+// read-only card - only one at a time, matching the picker/rail pattern
+// used elsewhere (Meals' activeMealSlot, Plan's editingTask).
+let journalEditingEntryId = null;
+let journalSearchQuery = "";
+let journalActiveTagFilter = "";
 
 function ensureJournalData() {
   privateData.journal ||= { entries: [] };
@@ -3337,6 +3347,97 @@ function moodPickerChips({ selected, namePrefix, compact }) {
     <button type="button" class="mood-chip ${compact ? "mood-chip-compact" : ""} ${selected === mood ? "active" : ""}" data-mood-choice="${namePrefix}:${mood}" style="--mood-color:${journalMoodColor[mood]}" aria-pressed="${selected === mood}" title="${mood}">
       <span class="mood-emoji">${journalMoodEmoji[mood]}</span>${compact ? "" : `<small>${mood}</small>`}
     </button>`).join("");
+}
+
+function journalEntryFullDateLabel(entryDate) {
+  if (!entryDate) return "Undated";
+  return new Date(`${entryDate}T00:00:00`).toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric", year: "numeric" });
+}
+
+// Consecutive calendar days with at least one entry, counting back from
+// the most recent entry's date (not necessarily today - a streak that
+// ended yesterday still reads as "3 days", not silently reset to 0 just
+// because nothing's been written yet today).
+function journalWritingStreak(entries) {
+  const dates = new Set(entries.map((entry) => entry.entryDate).filter(Boolean));
+  if (!dates.size) return 0;
+  const cursor = new Date(`${[...dates].sort().pop()}T00:00:00`);
+  let streak = 0;
+  while (dates.has(dateKey(cursor))) {
+    streak += 1;
+    cursor.setDate(cursor.getDate() - 1);
+  }
+  return streak;
+}
+
+function journalEntriesThisYear(entries) {
+  const year = String(new Date().getFullYear());
+  return entries.filter((entry) => (entry.entryDate || "").startsWith(year)).length;
+}
+
+function journalAllTags(entries) {
+  return [...new Set(entries.flatMap((entry) => entry.tags || []))].sort();
+}
+
+function journalFilteredEntries(entries) {
+  const query = journalSearchQuery.trim().toLowerCase();
+  return entries.filter((entry) => {
+    if (journalActiveTagFilter && !(entry.tags || []).includes(journalActiveTagFilter)) return false;
+    if (!query) return true;
+    return `${entry.title || ""} ${entry.body || ""} ${(entry.tags || []).join(" ")}`.toLowerCase().includes(query);
+  });
+}
+
+// entries is expected pre-sorted newest-first (sortedJournalEntries) - Map
+// insertion order then naturally keeps groups newest-month-first too.
+function journalEntriesByMonth(entries) {
+  const groups = [];
+  const byKey = new Map();
+  entries.forEach((entry) => {
+    const monthKey = (entry.entryDate || "").slice(0, 7) || "undated";
+    if (!byKey.has(monthKey)) {
+      const label = monthKey === "undated" ? "Undated" : new Date(`${monthKey}-01T00:00:00`).toLocaleDateString("en-US", { month: "long", year: "numeric" });
+      const group = { monthKey, label, items: [] };
+      byKey.set(monthKey, group);
+      groups.push(group);
+    }
+    byKey.get(monthKey).items.push(entry);
+  });
+  return groups;
+}
+
+function renderJournalStats(entries) {
+  return `<section class="card journal-stats-card">
+    <div class="journal-stats-row">
+      <div><strong>${journalWritingStreak(entries)}</strong><span>day streak</span></div>
+      <div><strong>${journalEntriesThisYear(entries)}</strong><span>entries this year</span></div>
+    </div>
+  </section>`;
+}
+
+function renderJournalMoodTrend(entries) {
+  const recent = entries.slice(0, 12).slice().reverse();
+  if (!recent.length) return "";
+  return `<section class="card journal-mood-trend">
+    <div class="card-label">Mood</div><h3>How you've felt lately</h3>
+    <div class="journal-mood-trend-bars">${recent.map((entry) => {
+      const valence = journalMoodValence[entry.mood] || 0;
+      const heightPct = valence ? Math.round((valence / 5) * 100) : 10;
+      const color = entry.mood ? journalMoodColor[entry.mood] : "var(--line)";
+      return `<span class="journal-mood-trend-bar" style="height:${heightPct}%; background:${color}" title="${escapeHtml(journalEntryDateLabel(entry.entryDate))}${entry.mood ? ` · ${entry.mood}` : ""}"></span>`;
+    }).join("")}</div>
+  </section>`;
+}
+
+function renderJournalFilters(entries) {
+  const tags = journalAllTags(entries);
+  return `<div class="journal-filter-row">
+    <input type="search" id="journalSearchInput" placeholder="Search title, body, tags…" value="${escapeHtml(journalSearchQuery)}" aria-label="Search journal entries">
+    ${tags.length ? `<div class="journal-tag-filter-chips">
+      <button type="button" class="journal-tag-chip ${journalActiveTagFilter === "" ? "active" : ""}" data-journal-tag-filter="">All</button>
+      ${tags.map((tag) => `<button type="button" class="journal-tag-chip ${journalActiveTagFilter === tag ? "active" : ""}" data-journal-tag-filter="${escapeHtml(tag)}">#${escapeHtml(tag)}</button>`).join("")}
+    </div>` : ""}
+  </div>`;
 }
 
 // Builds the plain-text summary sent to the server for the Journal's
@@ -3377,49 +3478,86 @@ function todaysJournalContext() {
 function renderJournal() {
   if (!privateData) return "";
   ensureJournalData();
-  const entries = sortedJournalEntries();
+  const allEntries = sortedJournalEntries();
+  const groups = journalEntriesByMonth(journalFilteredEntries(allEntries));
   const draft = journalComposerDraft || {};
   return `
-    <section class="journal-layout">
+    <section class="journal-layout journal-layout-wide">
       <div class="section-head"><div><span class="card-label">Journal</span><h3>Your private journal</h3><p class="private-note">Private to you — never shared with other household members.</p></div></div>
-      <form id="journalComposer" class="journal-composer card">
-        <div class="journal-composer-head">
-          <span class="journal-composer-icon">📔</span>
-          <div><span class="card-label">New entry</span><h3>Capture today</h3></div>
+      <div class="journal-layout-grid">
+        <div class="journal-composer-sticky">
+          <form id="journalComposer" class="journal-composer card">
+            <div class="journal-composer-head">
+              <span class="journal-composer-icon">📔</span>
+              <div><span class="card-label">New entry</span><h3>Capture today</h3></div>
+            </div>
+            <div class="journal-composer-row">
+              <label>Date<input name="entryDate" type="date" value="${draft.entryDate || dateKey(new Date())}" required></label>
+              <label class="journal-title-field">Title<input name="title" placeholder="Give today a title" value="${escapeHtml(draft.title || "")}"></label>
+            </div>
+            <div class="journal-field-group">
+              <span class="journal-field-label">Mood</span>
+              <div class="mood-picker">${moodPickerChips({ selected: draft.mood || "", namePrefix: "composer" })}</div>
+              <input type="hidden" name="mood" id="journalComposerMoodValue" value="${escapeHtml(draft.mood || "")}">
+            </div>
+            <label>🙏 Grateful for<input name="gratitude" placeholder="One thing you're grateful for today" value="${escapeHtml(draft.gratitude || "")}"></label>
+            <label>Tags<input name="tags" placeholder="travel, family, work" value="${escapeHtml(draft.tags || "")}"></label>
+            <textarea name="body" rows="4" placeholder="What happened today? How are you feeling?">${escapeHtml(draft.body || "")}</textarea>
+            <div class="journal-composer-actions">
+              <label class="journal-photo-picker">📷 Add photos (<span id="journalComposerPhotoCount">0</span>/8)<input id="journalComposerPhotoInput" name="photos" type="file" accept="image/*" multiple></label>
+              <button type="button" id="journalReflectionButton" class="ghost" ${journalReflection?.loading ? "disabled" : ""}>${journalReflection?.loading ? "Thinking…" : "✨ Get a gentle reflection"}</button>
+              <button type="submit">Save entry</button>
+            </div>
+            ${journalReflection && !journalReflection.loading ? `
+              <div class="journal-reflection-preview ${journalReflection.isError ? "is-error" : ""}">
+                <p>${escapeHtml(journalReflection.text)}</p>
+                ${!journalReflection.isError ? `<button type="button" id="journalReflectionInsertButton" class="ghost">Use this</button>` : ""}
+                <button type="button" id="journalReflectionDismissButton" class="icon-button" aria-label="Dismiss">×</button>
+              </div>
+            ` : ""}
+          </form>
+          ${renderJournalStats(allEntries)}
+          ${renderJournalMoodTrend(allEntries)}
         </div>
-        <div class="journal-composer-row">
-          <label>Date<input name="entryDate" type="date" value="${draft.entryDate || dateKey(new Date())}" required></label>
-          <label class="journal-title-field">Title<input name="title" placeholder="Give today a title" value="${escapeHtml(draft.title || "")}"></label>
+        <div class="journal-timeline">
+          ${allEntries.length ? renderJournalFilters(allEntries) : ""}
+          ${!allEntries.length
+            ? `<div class="empty-inline journal-empty">📔 No journal entries yet — write your first one to the left.</div>`
+            : groups.length
+              ? groups.map((group) => `<div class="journal-month-group"><h4>${escapeHtml(group.label)} <span class="journal-month-count">${group.items.length}</span></h4><div class="journal-entries">${group.items.map(renderJournalEntryCard).join("")}</div></div>`).join("")
+              : `<div class="empty-inline">No entries match your search.</div>`}
         </div>
-        <div class="journal-field-group">
-          <span class="journal-field-label">Mood</span>
-          <div class="mood-picker">${moodPickerChips({ selected: draft.mood || "", namePrefix: "composer" })}</div>
-          <input type="hidden" name="mood" id="journalComposerMoodValue" value="${escapeHtml(draft.mood || "")}">
-        </div>
-        <label>🙏 Grateful for<input name="gratitude" placeholder="One thing you're grateful for today" value="${escapeHtml(draft.gratitude || "")}"></label>
-        <label>Tags<input name="tags" placeholder="travel, family, work" value="${escapeHtml(draft.tags || "")}"></label>
-        <textarea name="body" rows="4" placeholder="What happened today? How are you feeling?">${escapeHtml(draft.body || "")}</textarea>
-        <div class="journal-composer-actions">
-          <label class="journal-photo-picker">📷 Add photos<input name="photos" type="file" accept="image/*" multiple></label>
-          <button type="button" id="journalReflectionButton" class="ghost" ${journalReflection?.loading ? "disabled" : ""}>${journalReflection?.loading ? "Thinking…" : "✨ Get a gentle reflection"}</button>
-          <button type="submit">Save entry</button>
-        </div>
-        ${journalReflection && !journalReflection.loading ? `
-          <div class="journal-reflection-preview ${journalReflection.isError ? "is-error" : ""}">
-            <p>${escapeHtml(journalReflection.text)}</p>
-            ${!journalReflection.isError ? `<button type="button" id="journalReflectionInsertButton" class="ghost">Use this</button>` : ""}
-            <button type="button" id="journalReflectionDismissButton" class="icon-button" aria-label="Dismiss">×</button>
-          </div>
-        ` : ""}
-      </form>
-      <div class="journal-entries">
-        ${entries.length ? entries.map(renderJournalEntry).join("") : `<div class="empty-inline journal-empty">📔 No journal entries yet — write your first one above.</div>`}
       </div>
     </section>`;
 }
 
-function renderJournalEntry(entry) {
+// Saved entries render as read-only typographic cards - editing an entry
+// (identical to the shipped composer's live-input fields) only appears
+// for whichever one entry journalEditingEntryId points at, entered via
+// its own Edit button rather than every entry always looking like an
+// unfinished draft.
+function renderJournalEntryCard(entry) {
+  if (journalEditingEntryId === entry.id) return renderJournalEntryEditor(entry);
   const moodColor = journalMoodColor[entry.mood] || "var(--line)";
+  return `<article class="journal-entry-card card" style="--mood-color:${moodColor}">
+    <div class="journal-entry-card-head">
+      <i class="journal-mood-bar"></i>
+      <div class="journal-entry-card-heading">
+        <h3>${escapeHtml(entry.title || "Untitled entry")}</h3>
+        <small>${escapeHtml(journalEntryFullDateLabel(entry.entryDate))}${entry.mood ? ` · ${journalMoodEmoji[entry.mood]} ${entry.mood}` : ""}</small>
+      </div>
+      <button class="ghost" data-edit-journal-entry="${entry.id}" type="button">Edit</button>
+    </div>
+    ${entry.gratitude ? `<p class="journal-gratitude-callout">🙏 ${escapeHtml(entry.gratitude)}</p>` : ""}
+    ${entry.body ? `<p class="journal-entry-body-text">${escapeHtml(entry.body)}</p>` : ""}
+    ${entry.photos?.length ? `<div class="journal-photos">${entry.photos.map((photo) => `<div class="journal-photo"><img src="${photo.dataUrl}" alt="Journal photo"></div>`).join("")}</div>` : ""}
+    ${entry.tags?.length ? `<div class="journal-tags">${entry.tags.map((tag) => `<span>#${escapeHtml(tag)}</span>`).join("")}</div>` : ""}
+  </article>`;
+}
+
+function renderJournalEntryEditor(entry) {
+  const moodColor = journalMoodColor[entry.mood] || "var(--line)";
+  const photoCount = entry.photos?.length || 0;
   return `<article class="journal-entry card" data-journal-id="${entry.id}" style="--mood-color:${moodColor}">
     <div class="journal-entry-head">
       <i class="journal-mood-bar"></i>
@@ -3430,6 +3568,7 @@ function renderJournalEntry(entry) {
           <input class="journal-date-input" data-journal-date="${entry.id}" type="date" value="${entry.entryDate || ""}" aria-label="Entry date">
         </div>
       </div>
+      <button class="ghost" data-done-journal-entry="${entry.id}" type="button">Done</button>
       <button class="icon-button danger-button" data-delete-journal-entry="${entry.id}" type="button" aria-label="Delete entry">×</button>
     </div>
     <div class="mood-picker mood-picker-compact" data-journal-mood-entry="${entry.id}">${moodPickerChips({ selected: entry.mood || "", namePrefix: entry.id, compact: true })}</div>
@@ -3438,7 +3577,7 @@ function renderJournalEntry(entry) {
     <input class="journal-tags-input" data-journal-tags="${entry.id}" value="${escapeHtml((entry.tags || []).join(", "))}" placeholder="Tags (comma separated)" aria-label="Tags">
     ${entry.tags?.length ? `<div class="journal-tags">${entry.tags.map((tag) => `<span>#${escapeHtml(tag)}</span>`).join("")}</div>` : ""}
     ${entry.photos?.length ? `<div class="journal-photos">${entry.photos.map((photo) => `<div class="journal-photo"><img src="${photo.dataUrl}" alt="Journal photo"><button class="icon-button danger-button" data-delete-journal-photo="${entry.id}:${photo.id}" type="button" aria-label="Remove photo">×</button></div>`).join("")}</div>` : ""}
-    <label class="journal-photo-picker ghost">📷 Add photo<input data-journal-photo-input="${entry.id}" type="file" accept="image/*" multiple></label>
+    <label class="journal-photo-picker ghost ${photoCount >= 8 ? "disabled" : ""}">📷 Add photo (${photoCount}/8)<input data-journal-photo-input="${entry.id}" type="file" accept="image/*" multiple ${photoCount >= 8 ? "disabled" : ""}></label>
   </article>`;
 }
 
@@ -7740,6 +7879,16 @@ function bindViewEvents() {
     render();
   });
 
+  // Deliberately not a render() - a file input's selected files can't be
+  // restored from JS/HTML after a re-render (browsers won't let script set
+  // .value on a file input), so re-rendering here would silently drop the
+  // user's already-chosen photos. A direct textContent update is enough to
+  // keep the N/8 counter honest without touching the input itself.
+  $("#journalComposerPhotoInput")?.addEventListener("change", (event) => {
+    const counter = $("#journalComposerPhotoCount");
+    if (counter) counter.textContent = Math.min(8, event.target.files?.length || 0);
+  });
+
   function captureJournalComposerDraft() {
     const composerForm = document.getElementById("journalComposer");
     if (composerForm) journalComposerDraft = Object.fromEntries(new FormData(composerForm));
@@ -7877,11 +8026,54 @@ function bindViewEvents() {
   });
 
   document.querySelectorAll("[data-delete-journal-entry]").forEach((button) => {
-    button.addEventListener("click", () => {
-      privateData.journal.entries = privateData.journal.entries.filter((entry) => entry.id !== button.dataset.deleteJournalEntry);
+    button.addEventListener("click", async () => {
+      const entry = privateData.journal.entries.find((item) => item.id === button.dataset.deleteJournalEntry);
+      const confirmed = await showConfirm("This permanently deletes this journal entry.", {
+        title: `Delete "${entry?.title || "this entry"}"?`,
+        confirmLabel: "Delete"
+      });
+      if (!confirmed) return;
+      privateData.journal.entries = privateData.journal.entries.filter((item) => item.id !== button.dataset.deleteJournalEntry);
+      if (journalEditingEntryId === button.dataset.deleteJournalEntry) journalEditingEntryId = null;
       autosaveJournal();
       render();
     });
+  });
+
+  document.querySelectorAll("[data-edit-journal-entry]").forEach((button) => {
+    button.addEventListener("click", () => {
+      journalEditingEntryId = button.dataset.editJournalEntry;
+      render();
+    });
+  });
+
+  document.querySelectorAll("[data-done-journal-entry]").forEach((button) => {
+    button.addEventListener("click", () => {
+      journalEditingEntryId = null;
+      render();
+    });
+  });
+
+  document.querySelectorAll("[data-journal-tag-filter]").forEach((button) => {
+    button.addEventListener("click", () => {
+      journalActiveTagFilter = button.dataset.journalTagFilter;
+      render();
+    });
+  });
+
+  // Re-renders on every keystroke (unlike the composer photo counter above)
+  // since this actually needs to re-filter the entry list, not just relabel
+  // a counter - the trade-off is the cursor jumping to the end of the
+  // input after each character, acceptable for a short search term typed
+  // left-to-right.
+  $("#journalSearchInput")?.addEventListener("input", (event) => {
+    journalSearchQuery = event.target.value;
+    render();
+    const refocused = $("#journalSearchInput");
+    if (refocused) {
+      refocused.focus();
+      refocused.setSelectionRange(refocused.value.length, refocused.value.length);
+    }
   });
 
   document.querySelectorAll("[data-plan-bucket]").forEach((button) => {
