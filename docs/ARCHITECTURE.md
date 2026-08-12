@@ -27,8 +27,9 @@ flowchart LR
 
     Neon[("Neon serverless Postgres\n(direct/unpooled endpoint)")]
     SMTP["Brevo SMTP\n(transactional email)"]
-    Gemini["Gemini API\n(journal reflection)"]
+    Gemini["Gemini API\n(journal reflection,\ncategorization suggestions)"]
     Finnhub["Finnhub API\n(stock quotes)"]
+    ExchangeRate["exchangerate-api.com\n(FX rates, 1hr server-side cache)"]
     Google["Google OAuth\n(sign-in with Google)"]
 
     Browser <-- "HTTPS: familyloop.net / famelo.net" --> CloudRun
@@ -38,6 +39,7 @@ flowchart LR
     CloudRun -- "SMTP" --> SMTP
     CloudRun -- "optional" --> Gemini
     CloudRun -- "optional" --> Finnhub
+    CloudRun -- "optional, cached" --> ExchangeRate
     CloudRun -- "OAuth code exchange" --> Google
     Scheduler -- "POST /api/internal/notifications/process\n(shared-secret header)" --> CloudRun
 ```
@@ -57,7 +59,7 @@ flowchart LR
 | Compute | **Cloud Run** (current) | Scale-to-zero: `min-instances=0`, `max-instances=1`, 1 vCPU / 512Mi |
 | Secrets | GCP Secret Manager | One enabled version kept per secret; billed per enabled version/month |
 | Scheduled jobs | Cloud Scheduler → `POST /api/internal/notifications/process` | Guarded by a shared secret (`NOTIFICATION_SECRET`), not a user session |
-| Tests | Node's built-in `node --test` | 244 tests across unit (`shared-logic.test.js`) + integration (`test/*.integration.test.js`), an in-memory `MEMORY_DB=true` mode stands in for Postgres |
+| Tests | Node's built-in `node --test` + Playwright | 306 `node --test` tests across unit (`shared-logic.test.js`) + integration (`test/*.integration.test.js`), an in-memory `MEMORY_DB=true` mode stands in for Postgres; plus a Playwright browser-level UI suite (`test/ui/`, `npm run test:ui`) that logs in as the demo user and loads every authenticated screen, failing on any console/page error — the only layer that catches a `render()`-time client-side crash |
 
 ## 3. Deployment topology — current vs legacy
 

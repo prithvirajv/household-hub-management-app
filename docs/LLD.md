@@ -75,7 +75,9 @@ erDiagram
 | Misc | `GET /api/countries` | public |
 | AI | `POST /api/journal/reflection` (Gemini) | session |
 | | `POST /api/transactions/suggest-subcategory` (Gemini) | session |
+| | `POST /api/transactions/suggest-account` (Gemini) | session |
 | | `GET /api/stock-quote` (Finnhub) | session |
+| | `GET /api/fx-rates` (exchangerate-api.com, 1hr server-side cache — Wealth's multi-currency display) | session |
 | Auth | `GET /api/session` | public |
 | | `PATCH /api/auth/me` | session |
 | | `POST /api/auth/signup` | public |
@@ -141,7 +143,20 @@ mutation of its arguments) so it can be unit-tested directly and shared
 byte-for-byte between the browser, the server, and the test suite.
 
 - **Checklists/notes**: `applyChecklistToggle`, `bucketChecklistItems`,
-  `findChecklistDuplicate`, `moveChecklistItem`.
+  `findChecklistDuplicate`, `moveChecklistItem`, `moveArrayItemById` (generic
+  drag-reorder-by-id, used for note checklist items), `moveNetWorthAssetBlock`
+  (drag-reorder for Wealth's assets/liabilities list).
+- **Wealth/holdings**: `isHoldingAssetClass` (an asset is a grouped
+  stock/fund holdings card, not a flat row, when `assetClass` is `"stock"`
+  *or* `"retirement"` — a retirement account holds the same kind of
+  positions a brokerage does, so it goes through the identical UI),
+  `groupStockHoldings` (buckets holding-class assets into one card per
+  `groupId`, falling back to an item's own id for a legacy solo holding with
+  no group of its own), `assetClassLabelForHoldings` (derives a group
+  card's "Stocks"/"Mutual Funds"/"Mixed" label from each item's
+  `holdingType` — a different axis than `assetClass`, see
+  [§6.5](#65-wealth-holdings-valuation-assetvalue)), `holdingGainLoss`,
+  `groupGainLoss`, `debtPayoffProgressPercent`.
 - **Meal/plan**: `mealWeeksForMonth`, `groupPlanTasksByBucket`,
   `validateJournalPayload`.
 - **Daily recurring tasks**: `dailyTaskOccursOnDate`,
@@ -149,7 +164,7 @@ byte-for-byte between the browser, the server, and the test suite.
 - **Timeline math**: `timeToMinutes`, `minutesToTime`, `snapMinutes`,
   `layoutTimelineBlocks`, `comparePlannedToActual`.
 - **Documents**: `sanitizeFilename`, `buildDocumentObjectPath`,
-  `wouldCreateFolderCycle`, `buildFolderTree`.
+  `wouldCreateFolderCycle`, `buildFolderTree`, `collectDescendantFolderIds`.
 - **Notifications**: `SMS_CARRIERS`, `smsGatewayAddress`.
 - **Recurrence/dates**: `paycheckOccurrencesSince`,
   `paycheckOccurrencesInRange`, `paycheckAllOccurrenceDatesInRange`,

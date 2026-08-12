@@ -5412,6 +5412,111 @@ input.holdings-modal-market-value-input {
   font-weight: 800;
 }
 
+/* Out-of-month days still fill out the real Monday-Sunday grid (the grid
+   is never clamped to the month, only the week selector's label is), so
+   dimming rather than hiding keeps the full week visible while making the
+   boundary legible. */
+.meal-day-dim {
+  opacity: 0.5;
+}
+
+/* Dinner is the meal households actually plan around - a taller card with
+   a heavier title reads as "the important one" among four equal slots. */
+.meal-slot-dinner {
+  min-height: 96px;
+}
+
+.meal-slot-dinner strong {
+  font-size: 0.95rem;
+}
+
+.meal-slot-servings {
+  display: block;
+  margin-top: 0.3rem;
+  color: var(--muted);
+  font-size: 0.7rem;
+}
+
+.meal-empty-week {
+  grid-column: 1 / -1;
+  display: grid;
+  justify-items: center;
+  gap: 0.6rem;
+  padding: 2rem 1rem;
+  text-align: center;
+}
+
+.meal-empty-week p {
+  color: var(--muted);
+  font-weight: 700;
+  margin: 0;
+}
+
+.meal-slot-picker {
+  display: grid;
+  gap: 0.5rem;
+  min-height: 76px;
+}
+
+.meal-picker-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+}
+
+.meal-picker-chip {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.1rem;
+  padding: 0.3rem 0.5rem;
+  border-radius: 8px;
+  border: 1px solid var(--line);
+  background: var(--panel);
+  font-size: 0.72rem;
+  font-weight: 700;
+}
+
+.meal-picker-chip small {
+  color: var(--muted);
+  font-weight: 600;
+}
+
+.meal-picker-chip.selected {
+  border-color: var(--green);
+  background: var(--green-soft);
+  color: var(--text);
+}
+
+.meal-picker-custom {
+  width: 100%;
+  min-height: 32px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 0 0.5rem;
+  font-size: 0.78rem;
+  background: var(--panel);
+  color: var(--text);
+}
+
+.meal-picker-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.4rem;
+}
+
+.grocery-aisle-group h4 {
+  margin: 0.6rem 0 0.2rem;
+  color: var(--muted);
+  font-size: 0.68rem;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+
+.grocery-aisle-group:first-child h4 {
+  margin-top: 0;
+}
+
 .note-card-toolbar summary::-webkit-details-marker {
   display: none;
 }

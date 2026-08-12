@@ -112,6 +112,16 @@ let calendarFeedback = "";
 // Kept out of state (like calendarFeedback) so a confirmation message never
 // gets saved into the shared household blob and replayed for every login.
 let mealsFeedback = "";
+// "Day:Slot" key for whichever meal cell currently has its inline recipe
+// picker open - only one at a time, cleared on plan/clear/cancel/navigation.
+let activeMealSlot = null;
+// The picker's currently-chosen recipe chip (survives the picker's own
+// re-renders since typing in its free-text field doesn't re-render, but a
+// chip click does) - cleared alongside activeMealSlot.
+let mealsPickerSelectedRecipeId = "";
+// Snacks default hidden (the fourth, lowest-priority meal slot) so the grid
+// reads as three real meals instead of 28 equal-weight cells.
+let mealsShowSnacks = false;
 let bankImportFeedback = "";
 let ledgerAcceptFeedback = "";
 let transactionValidationFeedback = "";
@@ -4384,9 +4394,9 @@ function ensureFriendsData() {
   });
 }
 
-// A friend-picker combobox, generalized (not copy-pasted) from the existing
-// meal-recipe combobox pattern (see refreshMealRecipeMenu) so it can appear
-// an arbitrary number of times per form (Split-a-bill and the Assign IOU
+// A friend-picker combobox, generalized (not copy-pasted) from the same
+// search-as-you-type combobox pattern used elsewhere in the app so it can
+// appear an arbitrary number of times per form (Split-a-bill and the Assign IOU
 // dialog can each have several friend rows on screen at once, unlike the
 // single fixed recipe field). `rows` is whatever array holds this row's
 // data (a real dynamic-row array for split forms, or a one-element array
@@ -4754,65 +4764,105 @@ function renderIOUs() {
   `;
 }
 
+// A slot cell is one of three states: empty ("Open" button), planned (a
+// read-only summary card, click to edit), or actively picking (this
+// household's one open inline picker at a time - activeMealSlot). Clicking
+// a slot is the only way to plan or edit now; the old always-visible
+// Day/Meal/Recipe/Servings toolbar duplicated exactly this and is gone.
+function mealSlotHtml(day, meal) {
+  const slotKey = `${day}:${meal}`;
+  const planned = plannedMeals(day, meal)[0];
+  const dinnerClass = meal === "Dinner" ? "meal-slot-dinner" : "";
+  if (activeMealSlot === slotKey) return mealSlotPickerHtml(day, meal, planned);
+  if (planned) {
+    const plannedIndex = state.meals.plannedWeek.indexOf(planned);
+    return `<div class="meal-slot meal-slot-planned ${dinnerClass}" data-edit-meal-slot="${slotKey}" role="button" tabindex="0" aria-label="Edit ${escapeHtml(planned.meal)} for ${day} ${meal}">
+      <div class="meal-slot-head"><small>${meal}</small><button class="meal-remove-button" data-remove-planned-meal="${plannedIndex}" type="button" aria-label="Remove ${meal} from ${day}">×</button></div>
+      <strong>${escapeHtml(planned.meal)}</strong>
+      <em>${escapeHtml(recipeIngredients(planned.recipeId).slice(0, 2).join(", "))}</em>
+      <small class="meal-slot-servings">${planned.servings || 1} serving${(planned.servings || 1) === 1 ? "" : "s"}</small>
+    </div>`;
+  }
+  return `<button class="meal-slot meal-slot-open ${dinnerClass}" data-open-meal-slot="${slotKey}" type="button"><small>${meal}</small><strong>Open</strong></button>`;
+}
+
+function mealSlotPickerHtml(day, meal, planned) {
+  const slotKey = `${day}:${meal}`;
+  const customValue = planned && !planned.recipeId ? planned.meal : "";
+  return `<div class="meal-slot meal-slot-picker">
+    <div class="meal-slot-head"><small>${meal}</small><button class="meal-remove-button" data-cancel-meal-slot type="button" aria-label="Cancel">×</button></div>
+    <div class="meal-picker-chips">${state.meals.recipes.length
+      ? state.meals.recipes.map((recipe) => `<button type="button" class="meal-picker-chip ${recipe.id === mealsPickerSelectedRecipeId ? "selected" : ""}" data-meal-picker-recipe="${recipe.id}">${escapeHtml(recipe.name)}<small>${Number(recipe.calories || 0)} kcal</small></button>`).join("")
+      : `<small class="muted">No saved recipes yet — type a meal name below.</small>`}</div>
+    <input type="text" class="meal-picker-custom" placeholder="Or type any meal" value="${escapeHtml(customValue)}" data-meal-picker-name>
+    <label class="meal-servings-field">Servings<input type="number" min="1" max="99" step="1" value="${planned?.servings || 3}" data-meal-picker-servings></label>
+    <div class="meal-picker-actions">
+      ${planned ? `<button type="button" class="ghost danger-button" data-clear-meal-slot="${slotKey}">Clear</button>` : ""}
+      <button type="button" data-plan-meal-slot="${slotKey}">${planned ? "Update" : "Plan"}</button>
+    </div>
+  </div>`;
+}
+
+function mealDayHtml(day, dayDate, visibleMeals) {
+  const dayDateLabel = dayDate.toLocaleDateString("en-US", { month: "short", day: "numeric" });
+  // The grid always runs the real Monday-Sunday week (selectedWeekInfo.start
+  // is never clamped), but mealWeeksForMonth's own .label IS clamped to the
+  // selected month for the shell's week selector - so a day the grid shows
+  // can fall outside the month the selector claims. Dimming those days
+  // instead of hiding them keeps the real 7-day week intact while making
+  // the mismatch legible rather than silently contradictory.
+  const outOfMonth = `${dayDate.getFullYear()}-${String(dayDate.getMonth() + 1).padStart(2, "0")}` !== state.budget.month;
+  return `<div class="meal-day ${outOfMonth ? "meal-day-dim" : ""}"><h4><span>${day}</span></h4><div class="meal-day-date">${dayDateLabel}</div>${visibleMeals.map((meal) => mealSlotHtml(day, meal)).join("")}</div>`;
+}
+
 function renderMeals() {
-  const meals = ["Breakfast", "Lunch", "Dinner", "Snack"];
+  const allMeals = ["Breakfast", "Lunch", "Dinner", "Snack"];
   const days = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"];
   ensureMealWeekData();
   const weeks = mealWeeksForMonth(state.budget.month);
   const selectedWeek = selectedMealWeek();
   const selectedWeekInfo = weeks.find((week) => week.number === selectedWeek) || weeks[0];
-  const selectedRecipe = recipeById(state.meals.selectedRecipeId) || state.meals.recipes[0];
-  state.meals.selectedRecipeId = selectedRecipe?.id || "";
+  const weekEnd = new Date(selectedWeekInfo.start);
+  weekEnd.setDate(weekEnd.getDate() + 6);
+  const trueSpanLabel = `${selectedWeekInfo.start.toLocaleDateString("en-US", { month: "short", day: "numeric" })} – ${weekEnd.toLocaleDateString("en-US", { month: "short", day: "numeric" })}`;
+  const weekPlans = currentMealPlans();
+  const visibleMeals = mealsShowSnacks ? allMeals : allMeals.filter((meal) => meal !== "Snack");
+  const nutrition = mealNutritionTotals();
+  const groceryGroups = groceryListByAisle();
+
+  const dayGrid = weekPlans.length === 0 && !activeMealSlot
+    ? `<div class="empty-inline meal-empty-week"><p>Nothing planned for this week yet.</p><button type="button" data-open-meal-slot="Monday:Dinner">Plan Monday dinner</button></div>`
+    : `<div class="meal-grid">${days.map((day, dayIndex) => {
+        const dayDate = new Date(selectedWeekInfo.start);
+        dayDate.setDate(dayDate.getDate() + dayIndex);
+        return mealDayHtml(day, dayDate, visibleMeals);
+      }).join("")}</div>`;
+
   return `
     <section class="meal-layout">
       <div class="work-grid">
         <div class="main-stack">
           <section class="card">
-            <div class="section-head"><div><span class="card-label">Meal plan</span><h3>Household meal plan</h3></div><div class="button-row"><button id="saveMealWeekButton" class="ghost" type="button">Save week</button><button id="postGroceriesButton" class="ghost" type="button">Post groceries</button></div></div>
-            <p class="meal-feedback" role="status">${escapeHtml(mealsFeedback || "")}</p>
-            <form id="mealPlanForm" class="meal-toolbar">
-              <label>Day<select name="day">${days.map((day) => `<option value="${day}">${day}</option>`).join("")}</select></label>
-              <label>Meal<select name="slot">${meals.map((meal) => `<option value="${meal}">${meal}</option>`).join("")}</select></label>
-              <label class="custom-combobox meal-recipe-combobox">Recipe
-                <input id="mealRecipeName" autocomplete="off" placeholder="Search recipes or type any meal" value="${selectedRecipe?.name || ""}">
-                <input id="mealRecipeId" name="recipeId" type="hidden" value="${selectedRecipe?.id || ""}">
-                <div id="mealRecipeMenu" class="combo-menu" hidden>
-                  ${state.meals.recipes.map((recipe) => `<button type="button" data-meal-recipe-option="${recipe.id}">${recipe.name}</button>`).join("")}
-                </div>
-              </label>
-              <label>Servings<input name="servings" type="number" min="1" max="99" step="1" value="3" required></label>
-              <button id="addMealRecipeButton" class="ghost" type="button">Add recipe</button>
-              <button id="planMealButton" type="button">Plan meal</button>
-            </form>
-            <div class="meal-week-caption"><strong>Week ${selectedWeek}</strong><span>${selectedWeekInfo.label} · ${monthLabel()}</span></div>
-            <div class="meal-grid">
-              ${days.map((day, dayIndex) => {
-                const dayDate = new Date(selectedWeekInfo.start);
-                dayDate.setDate(dayDate.getDate() + dayIndex);
-                const dayDateLabel = dayDate.toLocaleDateString("en-US", { month: "short", day: "numeric" });
-                return `<div class="meal-day"><h4><span>${day}</span></h4><div class="meal-day-date">${dayDateLabel}</div>${meals.map((meal) => {
-                const plannedItems = plannedMeals(day, meal);
-                const slots = plannedItems.map((planned) => {
-                  const plannedIndex = state.meals.plannedWeek.indexOf(planned);
-                  return `<div class="meal-slot meal-slot-planned" data-edit-planned-meal="${plannedIndex}" role="button" tabindex="0" aria-label="Edit ${escapeHtml(planned.meal)} for ${day} ${meal}">
-                    <div class="meal-slot-head"><small>${meal}</small><button class="meal-remove-button" data-remove-planned-meal="${plannedIndex}" type="button" aria-label="Remove ${meal} from ${day}">×</button></div>
-                    <strong>${escapeHtml(planned.meal)}</strong>
-                    <em>${escapeHtml(recipeIngredients(planned.recipeId).slice(0, 2).join(", "))}</em>
-                    <label class="meal-servings-field">Servings<input data-meal-servings="${plannedIndex}" type="number" min="1" max="99" step="1" value="${planned.servings || 1}"></label>
-                  </div>`;
-                }).join("");
-                const openSlot = plannedItems.length === 0
-                  ? `<button class="meal-slot meal-slot-open" data-open-meal="${day}:${meal}" type="button"><small>${meal}</small><strong>Open</strong></button>`
-                  : "";
-                return `${slots}${openSlot}`;
-              }).join("")}</div>`;
-              }).join("")}
+            <div class="section-head">
+              <div><span class="card-label">Meal plan</span><h3>Household meal plan</h3></div>
+              <div class="button-row">
+                <button id="toggleSnacksButton" class="ghost" type="button">${mealsShowSnacks ? "Hide snacks" : "Show snacks"}</button>
+                <button id="saveMealWeekButton" class="ghost" type="button">Save week</button>
+                <button id="postGroceriesButton" class="ghost" type="button">Post groceries</button>
+              </div>
             </div>
+            <p class="meal-feedback" role="status">${escapeHtml(mealsFeedback || "")}</p>
+            <div class="meal-week-caption"><strong>Week ${selectedWeek}</strong><span>${trueSpanLabel} · ${monthLabel()}</span></div>
+            ${dayGrid}
           </section>
         </div>
         <aside class="side-stack">
-          <section class="card"><div class="card-label">Nutrition</div><h3>Calories and protein goals</h3>${progressNumberBlock("Daily calories", 1780, state.meals.nutritionGoals.calories, "kcal")}${progressNumberBlock("Daily protein", 130, state.meals.nutritionGoals.protein, "g")}</section>
-          <section class="card"><div class="card-label">Smart grocery list</div><h3>Auto-built from meals</h3>${groceryList().slice(0, 10).map((item) => compactRow(item, "from meal plan", "1x")).join("")}</section>
+          <section class="card"><div class="card-label">Nutrition</div><h3>Calories and protein goals</h3>${weekPlans.length
+            ? `${progressNumberBlock("Daily calories", nutrition.calories, state.meals.nutritionGoals.calories, "kcal")}${progressNumberBlock("Daily protein", nutrition.protein, state.meals.nutritionGoals.protein, "g")}`
+            : `<div class="empty-inline">Nothing planned to measure yet.</div>`}</section>
+          <section class="card"><div class="card-label">Smart grocery list</div><h3>Auto-built from meals</h3>${groceryGroups.length
+            ? groceryGroups.map((group) => `<div class="grocery-aisle-group"><h4>${group.aisle}</h4>${group.items.slice(0, 8).map((item) => compactRow(escapeHtml(item.ingredient), "from meal plan", item.count > 1 ? `×${item.count}` : "")).join("")}</div>`).join("")
+            : `<div class="empty-inline">Plan a meal to build your grocery list.</div>`}</section>
         </aside>
       </div>
     </section>`;
@@ -5873,7 +5923,8 @@ function calendarManageRow(item) {
 
 function progressNumberBlock(label, value, target, unit) {
   const pct = Math.min(100, Math.round((Number(value || 0) / Math.max(Number(target || 0), 1)) * 100));
-  return `<div class="progress-block"><div><span>${label}</span><b>${Number(value || 0).toLocaleString()}${unit ? ` ${unit}` : ""} / ${Number(target || 0).toLocaleString()}${unit ? ` ${unit}` : ""}</b></div><div class="bar"><span style="width:${pct}%"></span></div></div>`;
+  const over = Number(target || 0) > 0 && Number(value || 0) > Number(target);
+  return `<div class="progress-block"><div><span>${label}</span><b>${Number(value || 0).toLocaleString()}${unit ? ` ${unit}` : ""} / ${Number(target || 0).toLocaleString()}${unit ? ` ${unit}` : ""}</b></div><div class="bar"><span style="width:${pct}%; background:${over ? "var(--coral)" : "var(--green)"}"></span></div></div>`;
 }
 
 // Split into still-due and already-paid so the Paycheck page's Due-date flow
@@ -6567,6 +6618,63 @@ function groceryEstimateAmount() {
   return groceryList().length * GROCERY_ITEM_ESTIMATE;
 }
 
+// Best-effort aisle for a free-typed ingredient string, matched by keyword
+// (same convention as CATEGORY_ICON_KEYWORDS above) since there's no
+// category field in the data model. Falls back to "Other" for anything
+// that matches nothing, rather than leaving it ungrouped.
+const GROCERY_AISLE_KEYWORDS = [
+  [/lettuce|spinach|kale|tomato|onion|garlic|pepper|carrot|potato|broccoli|cucumber|avocado|mushroom|fruit|apple|banana|berr|lemon|lime|herb|cilantro|basil|parsley|produce|vegetable/i, "Produce"],
+  [/chicken|beef|pork|turkey|fish|salmon|shrimp|tofu|\begg/i, "Protein"],
+  [/milk|cheese|yogurt|butter|cream|dairy/i, "Dairy"],
+  [/rice|pasta|flour|sugar|oil|vinegar|sauce|spice|bread|cereal|noodle|bean|lentil|broth|stock/i, "Pantry"]
+];
+
+function groceryAisleFor(ingredient) {
+  const match = GROCERY_AISLE_KEYWORDS.find(([pattern]) => pattern.test(ingredient));
+  return match ? match[1] : "Other";
+}
+
+// Ingredients are unqualified free text with no quantity field, so there's
+// no real amount to show per item - "how many of this week's planned meals
+// need it" (a genuine count) stands in for a fabricated "1x" on every row.
+// Structured [name, category, qty] ingredient tuples would be the real fix
+// (see the design handoff README) but that's a data-model migration, not a
+// display change; grouping by keyword-inferred aisle doesn't require one.
+function groceryListByAisle() {
+  ensureMealWeekData();
+  const counts = new Map();
+  currentMealPlans().forEach((planned) => {
+    recipeIngredients(planned.recipeId).forEach((ingredient) => {
+      counts.set(ingredient, (counts.get(ingredient) || 0) + 1);
+    });
+  });
+  const groups = new Map();
+  counts.forEach((count, ingredient) => {
+    const aisle = groceryAisleFor(ingredient);
+    if (!groups.has(aisle)) groups.set(aisle, []);
+    groups.get(aisle).push({ ingredient, count });
+  });
+  return ["Produce", "Protein", "Dairy", "Pantry", "Other"]
+    .filter((aisle) => groups.has(aisle))
+    .map((aisle) => ({ aisle, items: groups.get(aisle).sort((a, b) => a.ingredient.localeCompare(b.ingredient)) }));
+}
+
+// Recipe calories/protein are authored per serving, so multiplying by a
+// planned meal's own servings and averaging across the week's plan gives a
+// real daily figure - replaces two numbers that never moved regardless of
+// what was actually planned.
+function mealNutritionTotals() {
+  const totals = currentMealPlans().reduce((acc, planned) => {
+    const recipe = recipeById(planned.recipeId);
+    if (!recipe) return acc;
+    const servings = Number(planned.servings || 1);
+    acc.calories += Number(recipe.calories || 0) * servings;
+    acc.protein += Number(recipe.protein || 0) * servings;
+    return acc;
+  }, { calories: 0, protein: 0 });
+  return { calories: Math.round(totals.calories / 7), protein: Math.round(totals.protein / 7) };
+}
+
 function plannedMeal(day, slot) {
   return plannedMeals(day, slot)[0];
 }
@@ -6600,36 +6708,6 @@ function currentMealPlans() {
 
 function plannedServingsTotal() {
   return currentMealPlans().reduce((sum, planned) => sum + Number(planned.servings || 1), 0);
-}
-
-function planMealFromCurrentForm() {
-  const form = $("#mealPlanForm");
-  if (!form) return;
-  const data = {
-    day: form.querySelector('[name="day"]')?.value || "Monday",
-    slot: form.querySelector('[name="slot"]')?.value || "Dinner",
-    servings: form.querySelector('[name="servings"]')?.value || "3",
-    recipeId: $("#mealRecipeId")?.value || ""
-  };
-  const recipe = recipeById(data.recipeId);
-  const mealName = recipe ? recipe.name : ($("#mealRecipeName")?.value || "").trim();
-  if (!mealName) {
-    mealsFeedback = "Enter a meal name or choose a saved recipe before planning the meal.";
-    render();
-    return;
-  }
-  const week = selectedMealWeek();
-  const existing = data.slot === "Snack" ? null : state.meals.plannedWeek.find((planned) =>
-    planned.month === state.budget.month
-    && Number(planned.week || 1) === week
-    && planned.day === data.day
-    && (planned.slot === data.slot || (!planned.slot && data.slot === "Dinner"))
-  );
-  const planned = { month: state.budget.month, week, day: data.day, slot: data.slot, meal: mealName, recipeId: recipe?.id || "", servings: Number(data.servings || 1) };
-  if (existing) Object.assign(existing, planned);
-  else state.meals.plannedWeek.push(planned);
-  mealsFeedback = `${mealName} planned for ${data.day} ${data.slot}.`;
-  render();
 }
 
 function recipeById(recipeId) {
@@ -9345,75 +9423,27 @@ function bindViewEvents() {
     render();
   });
 
-  $("#mealRecipeName")?.addEventListener("focus", () => {
-    refreshMealRecipeMenu();
-    $("#mealRecipeMenu").hidden = false;
-  });
-
-  $("#mealRecipeName")?.addEventListener("input", () => {
-    $("#mealRecipeId").value = "";
-    refreshMealRecipeMenu();
-    $("#mealRecipeMenu").hidden = false;
-  });
-
-  $("#mealRecipeMenu")?.addEventListener("click", (event) => {
-    const option = event.target.closest("[data-meal-recipe-option]");
-    if (!option) return;
-    const recipe = recipeById(option.dataset.mealRecipeOption);
-    if (!recipe) return;
-    state.meals.selectedRecipeId = recipe.id;
-    $("#mealRecipeName").value = recipe.name;
-    $("#mealRecipeId").value = recipe.id;
-    $("#mealRecipeMenu").hidden = true;
-    autosaveState();
-  });
-
-  $("#addMealRecipeButton")?.addEventListener("click", () => {
-    const name = ($("#mealRecipeName")?.value || "").trim();
-    if (!name) {
-      mealsFeedback = "Type a recipe name before adding it.";
-      render();
-      return;
-    }
-    const existing = state.meals.recipes.find((recipe) => recipe.name.toLowerCase() === name.toLowerCase());
-    const recipe = existing || {
-      id: uniqueId(name),
-      name,
-      ingredients: ["ingredient"],
-      calories: 400,
-      protein: 20
-    };
-    if (!existing) state.meals.recipes.push(recipe);
-    state.meals.selectedRecipeId = recipe.id;
-    mealsFeedback = existing
-      ? `${recipe.name} is already saved — selected it for this meal.`
-      : `${recipe.name} added to your recipes. Edit its ingredients and nutrition in the Recipes tab.`;
-    autosaveState();
+  $("#toggleSnacksButton")?.addEventListener("click", () => {
+    mealsShowSnacks = !mealsShowSnacks;
     render();
   });
 
-  document.querySelectorAll("[data-open-meal]").forEach((button) => {
-    button.addEventListener("click", () => {
-      const separator = button.dataset.openMeal.indexOf(":");
-      const form = $("#mealPlanForm");
-      form.day.value = button.dataset.openMeal.slice(0, separator);
-      form.slot.value = button.dataset.openMeal.slice(separator + 1);
-      form.scrollIntoView({ behavior: "smooth", block: "center" });
-    });
+  const openMealSlotPicker = (slotKey) => {
+    const [day, meal] = slotKey.split(":");
+    const planned = plannedMeals(day, meal)[0];
+    activeMealSlot = slotKey;
+    mealsPickerSelectedRecipeId = planned?.recipeId || "";
+    render();
+  };
+
+  document.querySelectorAll("[data-open-meal-slot]").forEach((button) => {
+    button.addEventListener("click", () => openMealSlotPicker(button.dataset.openMealSlot));
   });
 
-  document.querySelectorAll("[data-edit-planned-meal]").forEach((slot) => {
+  document.querySelectorAll("[data-edit-meal-slot]").forEach((slot) => {
     const openEditor = (event) => {
-      if (event.target.closest("button, input")) return;
-      const planned = state.meals.plannedWeek[Number(slot.dataset.editPlannedMeal)];
-      const form = $("#mealPlanForm");
-      if (!planned || !form) return;
-      form.day.value = planned.day;
-      form.slot.value = planned.slot || "Dinner";
-      form.servings.value = planned.servings || 3;
-      $("#mealRecipeId").value = planned.recipeId || "";
-      $("#mealRecipeName").value = planned.meal || "";
-      form.scrollIntoView({ behavior: "smooth", block: "center" });
+      if (event.target.closest("button")) return;
+      openMealSlotPicker(slot.dataset.editMealSlot);
     };
     slot.addEventListener("click", openEditor);
     slot.addEventListener("keydown", (event) => {
@@ -9431,13 +9461,66 @@ function bindViewEvents() {
     });
   });
 
-  document.querySelectorAll("[data-meal-servings]").forEach((input) => {
+  document.querySelectorAll("[data-cancel-meal-slot]").forEach((button) => {
+    button.addEventListener("click", () => {
+      activeMealSlot = null;
+      mealsPickerSelectedRecipeId = "";
+      render();
+    });
+  });
+
+  document.querySelectorAll("[data-meal-picker-recipe]").forEach((chip) => {
+    chip.addEventListener("click", () => {
+      mealsPickerSelectedRecipeId = chip.dataset.mealPickerRecipe;
+      render();
+    });
+  });
+
+  // Typing here must not re-render (it would blow away focus/cursor mid-
+  // keystroke) - it just clears a stale chip selection locally so Plan
+  // resolves to whatever's actually typed instead of an old chip pick.
+  document.querySelectorAll("[data-meal-picker-name]").forEach((input) => {
     input.addEventListener("input", () => {
-      const planned = state.meals.plannedWeek[Number(input.dataset.mealServings)];
-      if (!planned) return;
-      planned.servings = Math.max(1, Number(input.value || 1));
+      if (!mealsPickerSelectedRecipeId) return;
+      mealsPickerSelectedRecipeId = "";
+      document.querySelectorAll(".meal-picker-chip.selected").forEach((chip) => chip.classList.remove("selected"));
+    });
+  });
+
+  document.querySelectorAll("[data-clear-meal-slot]").forEach((button) => {
+    button.addEventListener("click", () => {
+      const [day, meal] = button.dataset.clearMealSlot.split(":");
+      const planned = plannedMeals(day, meal)[0];
+      if (planned) state.meals.plannedWeek.splice(state.meals.plannedWeek.indexOf(planned), 1);
+      activeMealSlot = null;
+      mealsPickerSelectedRecipeId = "";
       autosaveState();
-      refreshMealMetrics();
+      render();
+    });
+  });
+
+  document.querySelectorAll("[data-plan-meal-slot]").forEach((button) => {
+    button.addEventListener("click", () => {
+      const [day, meal] = button.dataset.planMealSlot.split(":");
+      const picker = button.closest(".meal-slot-picker");
+      const servings = Math.max(1, Number(picker?.querySelector("[data-meal-picker-servings]")?.value || 3));
+      const customName = (picker?.querySelector("[data-meal-picker-name]")?.value || "").trim();
+      const recipe = recipeById(mealsPickerSelectedRecipeId);
+      const mealName = recipe ? recipe.name : customName;
+      if (!mealName) {
+        mealsFeedback = "Pick a recipe or type a meal name before planning.";
+        render();
+        return;
+      }
+      const existing = plannedMeals(day, meal)[0];
+      const entry = { month: state.budget.month, week: selectedMealWeek(), day, slot: meal, meal: mealName, recipeId: recipe?.id || "", servings };
+      if (existing) Object.assign(existing, entry);
+      else state.meals.plannedWeek.push(entry);
+      mealsFeedback = `${mealName} planned for ${day} ${meal}.`;
+      activeMealSlot = null;
+      mealsPickerSelectedRecipeId = "";
+      autosaveState();
+      render();
     });
   });
 
@@ -9499,12 +9582,10 @@ function bindViewEvents() {
 
   document.querySelectorAll("[data-select-recipe]").forEach((button) => {
     button.addEventListener("click", () => {
-      const form = $("#mealPlanForm");
-      state.meals.selectedRecipeId = button.dataset.selectRecipe;
       currentView = "meals";
-      autosaveState();
+      mealsPickerSelectedRecipeId = button.dataset.selectRecipe;
+      activeMealSlot = "Monday:Dinner";
       render();
-      $("#mealPlanForm")?.day.focus();
     });
   });
 
@@ -11525,19 +11606,6 @@ function refreshIncomeTotals() {
   }
 }
 
-function refreshMealMetrics() {
-  if (currentView !== "meals") return;
-  const metrics = $("#metrics");
-  if (!metrics) return;
-  metrics.innerHTML = metricsForView().map(([label, value, note]) => `
-    <article class="metric">
-      <span>${label}</span>
-      <strong>${value}</strong>
-      ${note ? `<small>${note}</small>` : ""}
-    </article>
-  `).join("");
-}
-
 function refreshBudgetCategoryMenu() {
   const menu = $("#budgetCategoryMenu");
   const input = $("#newCategoryName");
@@ -11568,24 +11636,9 @@ function refreshTransactionSubcategoryMenu() {
     : `<div class="combo-empty">No matching subcategory</div>`;
 }
 
-function refreshMealRecipeMenu() {
-  const menu = $("#mealRecipeMenu");
-  const input = $("#mealRecipeName");
-  if (!menu || !input) return;
-  const query = input.value.trim().toLowerCase();
-  const matches = state.meals.recipes.filter((recipe) => recipe.name.toLowerCase().includes(query));
-  menu.innerHTML = matches.length
-    ? matches.map((recipe) => `<button type="button" data-meal-recipe-option="${recipe.id}">${recipe.name}</button>`).join("")
-    : `<div class="combo-empty">No matching recipe. Use Add recipe.</div>`;
-}
-
 function uniqueId(seed) {
   return String(seed || "item").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/(^-|-$)/g, "") + "-" + Math.random().toString(36).slice(2, 7);
 }
-
-view.addEventListener("click", (event) => {
-  if (event.target.closest("#planMealButton")) planMealFromCurrentForm();
-});
 
 nav.addEventListener("click", async (event) => {
   const button = event.target.closest("[data-view]");
