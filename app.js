@@ -12438,12 +12438,20 @@ function renderHoldingsModalRows() {
 function openHoldingsModal(groupId) {
   const items = state.goals.netWorth.assets.filter((asset) => isHoldingAssetClass(asset.assetClass) && (asset.groupId || asset.id) === groupId);
   if (!items.length) return;
-  // A legacy solo holding (no groupId of its own) is adopted into a real
-  // group as soon as it's opened here, so every subsequent lookup by
-  // groupId - including this same modal's own rows - works uniformly.
-  items.forEach((item) => { item.groupId = groupId; });
+  // A legacy solo holding (no groupId/groupName of its own, converted via
+  // the old flat Asset class dropdown rather than ever passing through
+  // this modal) is adopted into a real group as soon as it's opened here,
+  // so every subsequent lookup by groupId - including this same modal's
+  // own rows - works uniformly. groupName gets backfilled in the same
+  // pass, and specifically BEFORE any row edits happen: typing a symbol
+  // into a row rewrites that item's own .name to "Account - SYMBOL", and
+  // without a stable groupName already in place, reopening this modal
+  // later would fall back to that now-symbol-suffixed .name and the
+  // symbol would appear to "leak" into the account name on every reopen.
+  const accountName = items[0].groupName || items[0].name || "";
+  items.forEach((item) => { item.groupId = groupId; item.groupName = accountName; });
   currentHoldingsModalGroupId = groupId;
-  $("#holdingsModalAccountName").value = items[0].groupName || items[0].name || "";
+  $("#holdingsModalAccountName").value = accountName;
   $("#holdingsModalAssetClass").value = items[0].assetClass || "stock";
   renderHoldingsModalRows();
   updateHoldingsModalTotal();
