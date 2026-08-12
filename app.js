@@ -1770,11 +1770,12 @@ function metricsForView() {
     const monthlyTotal = bills.filter((bill) => bill.frequency === "monthly").reduce((sum, bill) => sum + bill.planned, 0);
     const totalDue = bills.reduce((sum, bill) => sum + bill.planned, 0);
     const paidCount = bills.length - unpaid.length;
+    const allPaid = bills.length > 0 && paidCount === bills.length;
     return [
-      ["Due this week", String(dueSoon.length), dueSoon.length ? dueSoon.map((bill) => bill.name).join(", ") : "nothing due soon"],
-      ["Monthly recurring", money.format(monthlyTotal), `${bills.filter((bill) => bill.frequency === "monthly").length} bills`],
-      ["Total due", money.format(totalDue), `${bills.length} bills this month`],
-      ["Paid this cycle", String(paidCount), `of ${bills.length} total`]
+      ["Due this week", String(dueSoon.length), dueSoon.length ? dueSoon.map((bill) => bill.name).join(", ") : "nothing due soon", dueSoon.length ? "warning" : "neutral"],
+      ["Monthly recurring", money.format(monthlyTotal), `${bills.filter((bill) => bill.frequency === "monthly").length} bills`, "neutral"],
+      ["Total due", money.format(totalDue), `${bills.length} bills this month`, "neutral"],
+      ["Paid this cycle", String(paidCount), `of ${bills.length} total`, allPaid ? "good" : "neutral"]
     ];
   }
   if (currentView === "goals") return [["Active goals", String(state.goals.sinkingFunds.length), "sinking funds"], ["Saved", money.format(state.goals.sinkingFunds.reduce((sum, fund) => sum + fund.saved, 0)), "across goals"], ["Remaining", money.format(state.goals.sinkingFunds.reduce((sum, fund) => sum + fund.target - fund.saved, 0)), "to targets"]];
