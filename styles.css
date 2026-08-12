@@ -3359,45 +3359,91 @@ main {
   gap: 0.45rem;
 }
 
-.recipe-grid {
-  display: grid;
-  grid-template-columns: repeat(5, minmax(180px, 1fr));
-  gap: 0.65rem;
-  overflow-x: auto;
+.recipe-filter-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.6rem;
 }
 
-.recipe-card {
-  min-width: 180px;
-  display: grid;
-  gap: 0.65rem;
+.recipe-filter-row input[type="search"] {
+  flex: 1 1 220px;
+  min-height: 36px;
   border: 1px solid var(--line);
-  border-radius: 8px;
+  border-radius: 999px;
+  padding: 0 0.9rem;
   background: var(--panel);
-  padding: 0.7rem;
+  color: var(--text);
+  font-size: 0.85rem;
 }
 
-.recipe-card .section-head {
-  align-items: flex-start;
+.recipe-sort-label {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  color: var(--muted);
+  font-size: 0.72rem;
+  font-weight: 800;
+  text-transform: uppercase;
 }
 
-.recipe-card .section-head > div {
-  min-width: 0;
+.recipe-sort-label select {
+  min-height: 34px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 0 0.5rem;
+  background: var(--panel);
+  color: var(--text);
+  font-size: 0.8rem;
+  text-transform: none;
+  font-weight: 700;
+}
+
+.recipe-card-grid {
   display: grid;
-  gap: 0.2rem;
+  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  gap: 0.7rem;
 }
 
-.recipe-card .section-head strong,
-.recipe-card .section-head small {
-  display: block;
+.recipe-card-v2 {
+  display: grid;
+  gap: 0;
+  padding: 0;
+  overflow: hidden;
 }
 
-.recipe-card .section-head strong {
+.recipe-card-thumb {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 96px;
+  font-size: 2.4rem;
+  color: white;
+}
+
+.recipe-card-planned-badge {
+  position: absolute;
+  top: 0.4rem;
+  right: 0.4rem;
+  padding: 0.1rem 0.4rem;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.9);
+  font-size: 0.8rem;
+}
+
+.recipe-card-body {
+  display: grid;
+  gap: 0.3rem;
+  padding: 0.65rem 0.7rem;
+}
+
+.recipe-card-body strong {
   overflow-wrap: anywhere;
 }
 
-.recipe-card .section-head small {
+.recipe-card-body small {
   color: var(--muted);
-  line-height: 1.35;
 }
 
 .recipe-actions {
@@ -3405,6 +3451,7 @@ main {
   grid-template-columns: minmax(0, 1fr) auto 34px;
   gap: 0.45rem;
   align-items: center;
+  padding: 0 0.7rem 0.7rem;
 }
 
 .progress-block {
@@ -6346,7 +6393,8 @@ input.holdings-modal-market-value-input {
     min-width: 0;
   }
 
-  .recipe-grid {
+  .recipe-grid,
+  .recipe-card-grid {
     grid-template-columns: 1fr;
   }
 

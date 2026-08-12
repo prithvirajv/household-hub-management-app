@@ -1749,7 +1749,18 @@ function metricsForView() {
     ensureMealWeekData();
     return [["Weekly meals", `${currentMealPlans().length}/28`, `occupied slots in Week ${selectedMealWeek()}`], ["Groceries estimate", money.format(groceryEstimateAmount()), "can post directly to budget"], ["Planned servings", String(plannedServingsTotal()), "people or portions planned"], ["Household plan", "Shared", "meals, recipes and grocery list"]];
   }
-  if (currentView === "recipes") return [["Saved recipes", String(state.meals.recipes.length), "available to meal plans"], ["Ingredients", String(new Set(state.meals.recipes.flatMap((recipe) => recipe.ingredients)).size), "unique grocery items"], ["Average protein", `${Math.round(state.meals.recipes.reduce((sum, recipe) => sum + Number(recipe.protein || 0), 0) / Math.max(state.meals.recipes.length, 1))}g`, "per recipe"], ["Household library", "Shared", "available to every member"]];
+  if (currentView === "recipes") {
+    const plannedIds = recipesPlannedThisWeek();
+    const plannedCount = state.meals.recipes.filter((recipe) => plannedIds.has(recipe.id)).length;
+    const notPlanned = state.meals.recipes.length - plannedCount;
+    const highestProtein = state.meals.recipes.reduce((best, recipe) => (Number(recipe.protein || 0) > Number(best?.protein || 0) ? recipe : best), null);
+    return [
+      ["Saved recipes", String(state.meals.recipes.length), "available to meal plans"],
+      ["In this week's plan", String(plannedCount), state.meals.recipes.length ? `${notPlanned} not yet planned` : "no recipes yet"],
+      ["Highest protein", highestProtein ? `${highestProtein.protein}g` : "—", highestProtein ? highestProtein.name : "no recipes yet"],
+      ["Household library", "Shared", "available to every member"]
+    ];
+  }
   if (currentView === "sharing") return [["Invite status", state.household.inviteCode || "Ready", "household invite"], ["Members", String(sharingAccess?.members.length ?? state.household.members.length), "active and invited users"], ["Shared scopes", String(state.household.sharedScopes.length), "workspace modules"], ["Activity", String(state.household.activity.length), "recent household changes"]];
   if (currentView === "reports") return [["Spending", money.format(spentTotal()), "posted transactions"], ["Budget health", money.format(margin), "zero balance target"], ["Net worth", money.format(netWorth().total), "current estimate"], ["Cash left", money.format(remainingTotal()), "after ledger"]];
   if (currentView === "bills") {
@@ -3322,6 +3333,14 @@ const journalMoodValence = { Excited: 5, Happy: 5, Grateful: 4, Calm: 4, Neutral
 let journalEditingEntryId = null;
 let journalSearchQuery = "";
 let journalActiveTagFilter = "";
+
+// The add/edit recipe form is collapsed by default (see recipeAddFormOpen)
+// - editing an existing recipe (state.meals.editingRecipeId) also reveals
+// it, independent of this flag.
+let recipeAddFormOpen = false;
+let recipesSearchQuery = "";
+let recipesSortBy = "name";
+let recipesFilterMode = "all";
 
 function ensureJournalData() {
   privateData.journal ||= { entries: [] };
@@ -5079,12 +5098,10 @@ function mealSlotPickerHtml(day, meal, planned) {
 
 function mealDayHtml(day, dayDate, visibleMeals) {
   const dayDateLabel = dayDate.toLocaleDateString("en-US", { month: "short", day: "numeric" });
-  // The grid always runs the real Monday-Sunday week (selectedWeekInfo.start
-  // is never clamped), but mealWeeksForMonth's own .label IS clamped to the
-  // selected month for the shell's week selector - so a day the grid shows
-  // can fall outside the month the selector claims. Dimming those days
-  // instead of hiding them keeps the real 7-day week intact while making
-  // the mismatch legible rather than silently contradictory.
+  // The grid always runs the real Monday-Sunday week - a boundary week's
+  // days can still spill into the adjacent month even though its label no
+  // longer clamps to hide that. Dimming those days instead of hiding them
+  // keeps the real 7-day week intact while making the spillover legible.
   const outOfMonth = `${dayDate.getFullYear()}-${String(dayDate.getMonth() + 1).padStart(2, "0")}` !== state.budget.month;
   return `<div class="meal-day ${outOfMonth ? "meal-day-dim" : ""}"><h4><span>${day}</span></h4><div class="meal-day-date">${dayDateLabel}</div>${visibleMeals.map((meal) => mealSlotHtml(day, meal)).join("")}</div>`;
 }
@@ -5096,9 +5113,6 @@ function renderMeals() {
   const weeks = mealWeeksForMonth(state.budget.month);
   const selectedWeek = selectedMealWeek();
   const selectedWeekInfo = weeks.find((week) => week.number === selectedWeek) || weeks[0];
-  const weekEnd = new Date(selectedWeekInfo.start);
-  weekEnd.setDate(weekEnd.getDate() + 6);
-  const trueSpanLabel = `${selectedWeekInfo.start.toLocaleDateString("en-US", { month: "short", day: "numeric" })} – ${weekEnd.toLocaleDateString("en-US", { month: "short", day: "numeric" })}`;
   const weekPlans = currentMealPlans();
   const visibleMeals = mealsShowSnacks ? allMeals : allMeals.filter((meal) => meal !== "Snack");
   const nutrition = mealNutritionTotals();
@@ -5126,7 +5140,7 @@ function renderMeals() {
               </div>
             </div>
             <p class="meal-feedback" role="status">${escapeHtml(mealsFeedback || "")}</p>
-            <div class="meal-week-caption"><strong>Week ${selectedWeek}</strong><span>${trueSpanLabel} · ${monthLabel()}</span></div>
+            <div class="meal-week-caption"><strong>Week ${selectedWeek}</strong><span>${selectedWeekInfo.label} · ${monthLabel()}</span></div>
             ${dayGrid}
           </section>
         </div>
@@ -5142,12 +5156,42 @@ function renderMeals() {
     </section>`;
 }
 
+function renderRecipeCard(recipe, plannedIds) {
+  const isPlanned = plannedIds.has(recipe.id);
+  const visibleIngredients = recipe.ingredients.slice(0, 4);
+  const extraCount = recipe.ingredients.length - visibleIngredients.length;
+  return `<article class="recipe-card-v2 card">
+    <div class="recipe-card-thumb" style="background:${recipeThumbColor(recipe.name)}">
+      <span>${recipeEmoji(recipe.name)}</span>
+      ${isPlanned ? `<span class="recipe-card-planned-badge" title="Planned this week">📅</span>` : ""}
+    </div>
+    <div class="recipe-card-body">
+      <strong>${escapeHtml(recipe.name)}</strong>
+      <small>${recipe.calories} cal · ${recipe.protein}g protein</small>
+      <div class="mini-tags">${visibleIngredients.map((ingredient) => `<span>${escapeHtml(ingredient)}</span>`).join("")}${extraCount > 0 ? `<span>+${extraCount}</span>` : ""}</div>
+    </div>
+    <div class="recipe-actions">
+      <button class="ghost" type="button" data-select-recipe="${recipe.id}">Use in Meals</button>
+      <button class="ghost" type="button" data-edit-recipe="${recipe.id}">Edit</button>
+      <button class="icon-button danger-button" data-delete-recipe="${recipe.id}" type="button" aria-label="Delete ${escapeHtml(recipe.name)}">×</button>
+    </div>
+  </article>`;
+}
+
 function renderRecipes() {
   const editingRecipe = recipeById(state.meals.editingRecipeId);
+  const plannedIds = recipesPlannedThisWeek();
+  const hasAnyRecipes = state.meals.recipes.length > 0;
+  const filtered = recipesFilteredSorted();
+  const showForm = recipeAddFormOpen || Boolean(editingRecipe);
   return `
     <section class="recipe-library">
       <section class="card">
-        <div class="section-head"><div><span class="card-label">Recipe setup</span><h3>${editingRecipe ? "Update recipe" : "Add a recipe"}</h3></div></div>
+        <div class="section-head">
+          <div><span class="card-label">Recipe setup</span><h3>Saved recipes</h3></div>
+          ${!showForm ? `<button id="openRecipeFormButton" type="button">+ Add recipe</button>` : ""}
+        </div>
+        ${showForm ? `
         <form id="recipeForm" class="recipe-builder">
           <input name="recipeId" type="hidden" value="${editingRecipe?.id || ""}">
           <label>Name<input name="name" placeholder="Vegetable curry" value="${editingRecipe?.name || ""}" required></label>
@@ -5155,31 +5199,29 @@ function renderRecipes() {
           <label>Calories<input name="calories" type="number" min="0" value="${editingRecipe?.calories ?? 400}"></label>
           <label>Protein (g)<input name="protein" type="number" min="0" value="${editingRecipe?.protein ?? 20}"></label>
           <div class="recipe-form-actions">
-            ${editingRecipe ? `<button id="cancelRecipeEditButton" class="ghost" type="button">Cancel</button>` : ""}
+            <button class="ghost" id="cancelRecipeEditButton" type="button">Cancel</button>
             <button type="submit">${editingRecipe ? "Update recipe" : "Add recipe"}</button>
           </div>
-        </form>
-      </section>
-      <section class="card">
-        <div class="section-head">
-          <div><span class="card-label">Saved recipes</span><h3>Recipes, ingredients and grocery-ready meals</h3></div>
-        </div>
-        <div class="recipe-grid">
-          ${state.meals.recipes.map((recipe) => `
-            <article class="recipe-card">
-              <div class="section-head">
-                <div><strong>${recipe.name}</strong><small>${recipe.calories} calories · ${recipe.protein}g protein</small></div>
-                <span class="pill">${recipe.ingredients.length} items</span>
-              </div>
-              <div class="mini-tags">${recipe.ingredients.map((ingredient) => `<span>${ingredient}</span>`).join("")}</div>
-              <div class="recipe-actions">
-                <button class="ghost" type="button" data-select-recipe="${recipe.id}">Use in Meals</button>
-                <button class="ghost" type="button" data-edit-recipe="${recipe.id}">Edit</button>
-                <button class="icon-button danger-button" data-delete-recipe="${recipe.id}" type="button">×</button>
-              </div>
-            </article>
-          `).join("")}
-        </div>
+        </form>` : ""}
+        ${hasAnyRecipes ? `
+        <div class="recipe-filter-row">
+          <input type="search" id="recipeSearchInput" placeholder="Search recipes or ingredients…" value="${escapeHtml(recipesSearchQuery)}" aria-label="Search recipes">
+          <label class="recipe-sort-label">Sort<select id="recipeSortSelect" aria-label="Sort recipes">
+            <option value="name" ${recipesSortBy === "name" ? "selected" : ""}>Name</option>
+            <option value="protein" ${recipesSortBy === "protein" ? "selected" : ""}>Highest protein</option>
+            <option value="calories" ${recipesSortBy === "calories" ? "selected" : ""}>Highest calories</option>
+          </select></label>
+          <div class="journal-tag-filter-chips">
+            <button type="button" class="journal-tag-chip ${recipesFilterMode === "all" ? "active" : ""}" data-recipe-filter="all">All</button>
+            <button type="button" class="journal-tag-chip ${recipesFilterMode === "planned" ? "active" : ""}" data-recipe-filter="planned">In this week</button>
+            <button type="button" class="journal-tag-chip ${recipesFilterMode === "unplanned" ? "active" : ""}" data-recipe-filter="unplanned">Not planned</button>
+          </div>
+        </div>` : ""}
+        ${!hasAnyRecipes
+          ? `<div class="empty-inline">🍽️ No recipes yet.${!showForm ? ` <button class="ghost" type="button" id="emptyAddRecipeButton">Add your first recipe</button>` : ""}</div>`
+          : filtered.length
+            ? `<div class="recipe-card-grid">${filtered.map((recipe) => renderRecipeCard(recipe, plannedIds)).join("")}</div>`
+            : `<div class="empty-inline">No recipes match. <button class="ghost" type="button" id="clearRecipeFiltersButton">Clear filters</button></div>`}
       </section>
     </section>`;
 }
@@ -6966,12 +7008,12 @@ function ensureMealWeekData() {
     planned.servings ||= 3;
   });
   const weeks = mealWeeksForMonth(state.budget.month);
-  const selected = Number(state.meals.selectedWeekByMonth[state.budget.month] || 1);
+  const selected = Number(state.meals.selectedWeekByMonth[state.budget.month] || currentMealWeekNumber(state.budget.month));
   state.meals.selectedWeekByMonth[state.budget.month] = Math.min(Math.max(selected, 1), weeks.length);
 }
 
 function selectedMealWeek() {
-  return Number(state.meals.selectedWeekByMonth?.[state.budget.month] || 1);
+  return Number(state.meals.selectedWeekByMonth?.[state.budget.month] || currentMealWeekNumber(state.budget.month));
 }
 
 function currentMealPlans() {
@@ -6990,6 +7032,61 @@ function recipeById(recipeId) {
 
 function recipeIngredients(recipeId) {
   return recipeById(recipeId)?.ingredients || [];
+}
+
+function recipesPlannedThisWeek() {
+  return new Set(currentMealPlans().map((planned) => planned.recipeId).filter(Boolean));
+}
+
+// Best-effort thumbnail for a recipe (there's no photo field in the data
+// model) - a keyword-matched emoji over a deterministic color, so the same
+// recipe always looks the same without needing a real image upload.
+const RECIPE_EMOJI_KEYWORDS = [
+  [/curry/i, "🍛"],
+  [/salad/i, "🥗"],
+  [/soup|stew|chili/i, "🍲"],
+  [/pizza/i, "🍕"],
+  [/pasta|noodle|spaghetti/i, "🍝"],
+  [/taco|burrito/i, "🌮"],
+  [/burger/i, "🍔"],
+  [/sandwich|wrap/i, "🥪"],
+  [/rice|bowl/i, "🍚"],
+  [/chicken/i, "🍗"],
+  [/fish|salmon|shrimp|seafood/i, "🐟"],
+  [/steak|beef/i, "🥩"],
+  [/egg|breakfast|pancake|waffle/i, "🍳"],
+  [/cake|dessert|cookie|sweet/i, "🍰"],
+  [/smoothie|shake|juice/i, "🥤"],
+  [/toast|bread/i, "🍞"]
+];
+
+function recipeEmoji(name) {
+  const match = RECIPE_EMOJI_KEYWORDS.find(([pattern]) => pattern.test(name));
+  return match ? match[1] : "🍽️";
+}
+
+function recipeThumbColor(name) {
+  let hash = 0;
+  for (let i = 0; i < name.length; i += 1) hash = (hash * 31 + name.charCodeAt(i)) >>> 0;
+  return categoryColorPalette[hash % categoryColorPalette.length];
+}
+
+function recipesFilteredSorted() {
+  const plannedIds = recipesPlannedThisWeek();
+  const query = recipesSearchQuery.trim().toLowerCase();
+  const sorters = {
+    name: (a, b) => a.name.localeCompare(b.name),
+    protein: (a, b) => Number(b.protein || 0) - Number(a.protein || 0),
+    calories: (a, b) => Number(b.calories || 0) - Number(a.calories || 0)
+  };
+  return state.meals.recipes
+    .filter((recipe) => {
+      if (recipesFilterMode === "planned" && !plannedIds.has(recipe.id)) return false;
+      if (recipesFilterMode === "unplanned" && plannedIds.has(recipe.id)) return false;
+      if (!query) return true;
+      return recipe.name.toLowerCase().includes(query) || recipe.ingredients.some((ingredient) => ingredient.toLowerCase().includes(query));
+    })
+    .sort(sorters[recipesSortBy] || sorters.name);
 }
 
 // Best-effort icon for a household's own free-typed category name (there's
@@ -9888,20 +9985,56 @@ function bindViewEvents() {
         protein: Number(data.protein || 0)
       });
     }
+    recipeAddFormOpen = false;
     autosaveState();
     render();
   });
 
   $("#cancelRecipeEditButton")?.addEventListener("click", () => {
     state.meals.editingRecipeId = "";
-    autosaveState();
+    recipeAddFormOpen = false;
+    render();
+  });
+
+  document.querySelectorAll("#openRecipeFormButton, #emptyAddRecipeButton").forEach((button) => {
+    button.addEventListener("click", () => {
+      recipeAddFormOpen = true;
+      render();
+      $("#recipeForm input[name='name']")?.focus();
+    });
+  });
+
+  $("#recipeSearchInput")?.addEventListener("input", (event) => {
+    recipesSearchQuery = event.target.value;
+    render();
+    const refocused = $("#recipeSearchInput");
+    if (refocused) {
+      refocused.focus();
+      refocused.setSelectionRange(refocused.value.length, refocused.value.length);
+    }
+  });
+
+  $("#recipeSortSelect")?.addEventListener("change", (event) => {
+    recipesSortBy = event.target.value;
+    render();
+  });
+
+  document.querySelectorAll("[data-recipe-filter]").forEach((button) => {
+    button.addEventListener("click", () => {
+      recipesFilterMode = button.dataset.recipeFilter;
+      render();
+    });
+  });
+
+  $("#clearRecipeFiltersButton")?.addEventListener("click", () => {
+    recipesSearchQuery = "";
+    recipesFilterMode = "all";
     render();
   });
 
   document.querySelectorAll("[data-edit-recipe]").forEach((button) => {
     button.addEventListener("click", () => {
       state.meals.editingRecipeId = button.dataset.editRecipe;
-      autosaveState();
       render();
       $("#recipeForm input[name='name']")?.focus();
     });
@@ -9917,12 +10050,15 @@ function bindViewEvents() {
   });
 
   document.querySelectorAll("[data-delete-recipe]").forEach((button) => {
-    button.addEventListener("click", () => {
-      state.meals.recipes = state.meals.recipes.filter((recipe) => recipe.id !== button.dataset.deleteRecipe);
+    button.addEventListener("click", async () => {
+      const recipe = state.meals.recipes.find((item) => item.id === button.dataset.deleteRecipe);
+      const confirmed = await showConfirm("This removes the recipe from your library. Any meals already planned with it keep their name but lose the link.", {
+        title: `Delete "${recipe?.name || "this recipe"}"?`,
+        confirmLabel: "Delete"
+      });
+      if (!confirmed) return;
+      state.meals.recipes = state.meals.recipes.filter((item) => item.id !== button.dataset.deleteRecipe);
       if (state.meals.editingRecipeId === button.dataset.deleteRecipe) state.meals.editingRecipeId = "";
-      if (state.meals.selectedRecipeId === button.dataset.deleteRecipe) {
-        state.meals.selectedRecipeId = state.meals.recipes[0]?.id || "";
-      }
       autosaveState();
       render();
     });

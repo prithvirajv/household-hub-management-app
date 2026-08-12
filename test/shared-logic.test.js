@@ -1,7 +1,7 @@
 const assert = require("node:assert/strict");
 const test = require("node:test");
 const {
-  applyChecklistToggle, bucketChecklistItems, findChecklistDuplicate, moveChecklistItem, moveArrayItemById, moveNetWorthAssetBlock, groupStockHoldings, isHoldingAssetClass, assetClassLabelForHoldings, holdingGainLoss, groupGainLoss, debtPayoffProgressPercent, mealWeeksForMonth, groupPlanTasksByBucket, validateJournalPayload,
+  applyChecklistToggle, bucketChecklistItems, findChecklistDuplicate, moveChecklistItem, moveArrayItemById, moveNetWorthAssetBlock, groupStockHoldings, isHoldingAssetClass, assetClassLabelForHoldings, holdingGainLoss, groupGainLoss, debtPayoffProgressPercent, mealWeeksForMonth, currentMealWeekNumber, groupPlanTasksByBucket, validateJournalPayload,
   dailyTaskOccursOnDate, isDailyTaskDoneOnDate, toggleDailyTaskDoneOnDate,
   timeToMinutes, minutesToTime, snapMinutes, layoutTimelineBlocks, comparePlannedToActual,
   sanitizeFilename, buildDocumentObjectPath, wouldCreateFolderCycle, buildFolderTree, collectDescendantFolderIds,
@@ -449,10 +449,14 @@ test("toggling an unknown item id returns the checklist unchanged", () => {
   assert.deepEqual(result.map((item) => ({ id: item.id, done: item.done })), [{ id: "solo", done: false }]);
 });
 
-test("mealWeeksForMonth splits a month into Monday-anchored weeks with correct labels", () => {
+test("mealWeeksForMonth splits a month into Monday-anchored weeks with unclamped real-span labels", () => {
   const weeks = mealWeeksForMonth("2026-07");
   assert.equal(weeks[0].number, 1);
-  assert.equal(weeks[0].label, "Jul 1–Jul 5");
+  // July 2026 starts on a Wednesday, so week 1's real Monday-Sunday span
+  // spills back into June - the label reflects that real span rather than
+  // clamping to "Jul 1-Jul 5", which would misrepresent the 7-day week the
+  // grid actually renders underneath it.
+  assert.equal(weeks[0].label, "Jun 29–Jul 5");
   assert.equal(weeks[0].start.getDay(), 1, "each week should start on a Monday");
   assert.ok(weeks.length >= 4, "a month should split into at least 4 weeks");
 });
@@ -463,6 +467,17 @@ test("mealWeeksForMonth week start dates advance by exactly 7 days", () => {
     const diffDays = (weeks[index].start - weeks[index - 1].start) / 86400000;
     assert.equal(diffDays, 7);
   }
+});
+
+test("currentMealWeekNumber returns the week containing today's date", () => {
+  const weeks = mealWeeksForMonth("2026-07");
+  // July 14 2026 falls in week 3 (Jul 13-Jul 19)
+  assert.equal(currentMealWeekNumber("2026-07", new Date(2026, 6, 14)), 3);
+  assert.equal(weeks.find((w) => w.number === 3).label, "Jul 13–Jul 19");
+});
+
+test("currentMealWeekNumber falls back to week 1 when today isn't in the given month", () => {
+  assert.equal(currentMealWeekNumber("2026-07", new Date(2026, 8, 1)), 1);
 });
 
 test("groupPlanTasksByBucket sorts tasks into daily, weekly, and monthly groups", () => {
