@@ -1253,6 +1253,23 @@ main {
   padding: 0.75rem;
   box-shadow: none;
   background: linear-gradient(180deg, var(--panel), var(--soft));
+  /* A neutral hairline by default; metric-danger/-warning/-good below give
+     it real color so urgency shows at a glance from the edge alone, not
+     just from reading the number inside. */
+  border-top-width: 3px;
+  border-top-color: var(--line);
+}
+
+.metric-danger {
+  border-top-color: var(--coral);
+}
+
+.metric-warning {
+  border-top-color: var(--gold);
+}
+
+.metric-good {
+  border-top-color: var(--green);
 }
 
 .metric span,
@@ -1956,6 +1973,68 @@ main {
 .home-week-item-empty {
   color: var(--muted);
   font-size: 0.74rem;
+}
+
+.quick-add-groups {
+  display: grid;
+  gap: 0.9rem;
+  margin-top: 0.5rem;
+}
+
+.quick-add-group .card-label {
+  margin-bottom: 0.4rem;
+}
+
+button.ghost-accent {
+  background: var(--green-soft);
+  color: color-mix(in srgb, var(--green) 75%, black);
+  border-color: transparent;
+}
+
+/* A small tinted icon tile on an Action-needed row, same icon set as
+   home-week-item above so the same underlying chore/birthday/reminder
+   reads as the same thing in both places on the page. Sits before
+   .compact-row's usual first div, so the width rule that div normally
+   gets from :first-child (full-width when the row wraps) needs restating
+   here since the icon, not the div, is first-child once it's added. */
+.compact-row-icon {
+  width: 26px;
+  height: 26px;
+  min-width: 26px;
+  border-radius: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.78rem;
+  flex: 0 0 auto;
+  background: var(--soft);
+}
+
+.compact-row-icon.overdue {
+  background: color-mix(in srgb, var(--coral) 16%, var(--panel));
+}
+
+.compact-row-icon.due-today {
+  background: color-mix(in srgb, var(--gold) 16%, var(--panel));
+}
+
+.compact-row-icon + div {
+  flex: 1 1 100%;
+  min-width: 0;
+}
+
+/* Merges what used to be three separately bordered/shadowed cards (Bills &
+   goals, Notes, Recent activity) into one panel with hairline dividers
+   between subsections - same content and order, quieter visual weight so
+   they read as one column instead of three competing cards. */
+.home-side-panel {
+  display: grid;
+  gap: 1.1rem;
+}
+
+.home-panel-section + .home-panel-section {
+  border-top: 1px solid var(--line);
+  padding-top: 1.1rem;
 }
 
 /* Pairs a trailing input/select with its icon button(s) on one shared line,

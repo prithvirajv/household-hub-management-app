@@ -1993,6 +1993,12 @@ function renderOnboardingWizard() {
   `;
 }
 
+// Same icon language as homeWeekStrip() below, so the same underlying kind
+// of item (a chore, a birthday, a reminder) is visually recognizable in
+// both places on the page instead of the week strip's icons and this
+// list's plain colored dot meaning the same thing two different ways.
+const HOME_ACTION_KIND_ICON = { Chore: "🧹", Birthday: "🎂", Anniversary: "💍", Reminder: "⏰" };
+
 function renderHome() {
   const items = homeActionItems();
   const billsAndGoals = billAndGoalReminders();
@@ -2005,13 +2011,23 @@ function renderHome() {
       <div class="main-stack">
         <section class="card">
           <div class="card-label">Quick add</div><h3>Jump straight to adding something</h3>
-          <div class="button-row">
-            <button id="homeAddChoreButton" class="ghost" type="button">+ Add chore</button>
-            <button id="homeAddReminderButton" class="ghost" type="button">+ Add reminder</button>
-            <button id="homeAddBirthdayButton" class="ghost" type="button">+ Add birthday</button>
-            <button id="homeAddAnniversaryButton" class="ghost" type="button">+ Add anniversary</button>
-            <button id="homeAddTransactionButton" class="ghost" type="button">+ Add transaction</button>
-            <button id="homeAddIncomeButton" class="ghost" type="button">+ Add income</button>
+          <div class="quick-add-groups">
+            <div class="quick-add-group">
+              <div class="card-label">Household</div>
+              <div class="button-row">
+                <button id="homeAddChoreButton" class="ghost" type="button">+ Add chore</button>
+                <button id="homeAddReminderButton" class="ghost" type="button">+ Add reminder</button>
+                <button id="homeAddBirthdayButton" class="ghost" type="button">+ Add birthday</button>
+                <button id="homeAddAnniversaryButton" class="ghost" type="button">+ Add anniversary</button>
+              </div>
+            </div>
+            <div class="quick-add-group">
+              <div class="card-label">Money</div>
+              <div class="button-row">
+                <button id="homeAddTransactionButton" class="ghost ghost-accent" type="button">+ Add transaction</button>
+                <button id="homeAddIncomeButton" class="ghost ghost-accent" type="button">+ Add income</button>
+              </div>
+            </div>
           </div>
         </section>
         <section class="card home-week-strip-card">
@@ -2029,6 +2045,7 @@ function renderHome() {
           <div class="section-head"><div><span class="card-label">Action needed</span><h3>Past due and due today</h3></div></div>
           ${items.length ? items.map((item) => `
             <div class="compact-row ${item.overdue ? "overdue" : ""}">
+              <span class="compact-row-icon ${item.overdue ? "overdue" : "due-today"}">${HOME_ACTION_KIND_ICON[item.kind] || "•"}</span>
               <div><strong>${escapeHtml(item.title)}</strong><small>${escapeHtml(item.kind)} · ${item.overdue ? "Past due" : "Due today"} · ${escapeHtml(item.detail)}</small></div>
               <div class="chore-complete-group">${item.completion}</div>
               <button class="icon-button" data-home-edit-item="${item.reference}:${item.month}" type="button" aria-label="Edit ${escapeHtml(item.title)} in Calendar">✎</button>
@@ -2043,17 +2060,19 @@ function renderHome() {
         </section>
       </div>
       <aside class="side-stack">
-        <section class="card">
-          <div class="card-label">Bills &amp; goals</div><h3>Needs funding or payment</h3>
-          ${billsAndGoals.length ? billsAndGoals.map((reminder) => `<div class="compact-row"><div><strong>${escapeHtml(reminder.title)}</strong><small>${escapeHtml(reminder.detail)}</small></div><button class="pill-button" data-dismiss-reminder="${escapeHtml(reminder.id)}" type="button">Done</button></div>`).join("") : `<div class="empty-inline">No open bills or goals right now.</div>`}
-        </section>
-        <section class="card">
-          <div class="section-head"><div><span class="card-label">Notes</span><h3>Reminders due</h3></div><button id="homeOpenNoteRemindersButton" class="ghost" type="button">Open Notes</button></div>
-          ${noteReminders.length ? noteReminders.map((note) => `<div class="compact-row ${note.overdue ? "overdue" : ""}"><div><strong>${escapeHtml(note.title)}</strong><small>${note.overdue ? "Past due" : "Due today"} · ${escapeHtml(note.detail)}</small></div></div>`).join("") : `<div class="empty-inline">No note reminders due.</div>`}
-        </section>
-        <section class="card">
-          <div class="card-label">Household</div><h3>Recent activity</h3>
-          ${recentActivity.length ? recentActivity.map((entry) => `<div class="compact-row"><div><strong>${entry.icon} ${escapeHtml(entry.title)}</strong><small>${escapeHtml(entry.detail)} · ${formatShortDate(String(entry.at).slice(0, 10))}</small></div></div>`).join("") : `<div class="empty-inline">Nothing recent to show.</div>`}
+        <section class="card home-side-panel">
+          <div class="home-panel-section">
+            <div class="card-label">Bills &amp; goals</div><h3>Needs funding or payment</h3>
+            ${billsAndGoals.length ? billsAndGoals.map((reminder) => `<div class="compact-row"><div><strong>${escapeHtml(reminder.title)}</strong><small>${escapeHtml(reminder.detail)}</small></div><button class="pill-button" data-dismiss-reminder="${escapeHtml(reminder.id)}" type="button">Done</button></div>`).join("") : `<div class="empty-inline">No open bills or goals right now.</div>`}
+          </div>
+          <div class="home-panel-section">
+            <div class="section-head"><div><span class="card-label">Notes</span><h3>Reminders due</h3></div><button id="homeOpenNoteRemindersButton" class="ghost" type="button">Open Notes</button></div>
+            ${noteReminders.length ? noteReminders.map((note) => `<div class="compact-row ${note.overdue ? "overdue" : ""}"><div><strong>${escapeHtml(note.title)}</strong><small>${note.overdue ? "Past due" : "Due today"} · ${escapeHtml(note.detail)}</small></div></div>`).join("") : `<div class="empty-inline">No note reminders due.</div>`}
+          </div>
+          <div class="home-panel-section">
+            <div class="card-label">Household</div><h3>Recent activity</h3>
+            ${recentActivity.length ? recentActivity.map((entry) => `<div class="compact-row"><div><strong>${entry.icon} ${escapeHtml(entry.title)}</strong><small>${escapeHtml(entry.detail)} · ${formatShortDate(String(entry.at).slice(0, 10))}</small></div></div>`).join("") : `<div class="empty-inline">Nothing recent to show.</div>`}
+          </div>
         </section>
       </aside>
     </section>`;
@@ -13665,7 +13684,22 @@ async function loadApp() {
     state.budget.month = loginMonth;
     state.budget.monthPreferenceSet = true;
   }
-  if (migrated || shouldForceCurrentMonth) autosaveState();
+  // Same "a fresh login always lands on today" principle, applied one level
+  // deeper: even when the month itself was already current, the Meals week
+  // picked on a past visit (e.g. logged in yesterday during week 2) goes
+  // stale as soon as today rolls into a later week - always re-snap the
+  // login month's stored week to whichever one contains today, overwriting
+  // any stale value rather than only filling in an unset one.
+  let shouldForceCurrentWeek = false;
+  if (state?.meals) {
+    state.meals.selectedWeekByMonth ||= {};
+    const currentWeek = currentMealWeekNumber(loginMonth);
+    if (state.meals.selectedWeekByMonth[loginMonth] !== currentWeek) {
+      state.meals.selectedWeekByMonth[loginMonth] = currentWeek;
+      shouldForceCurrentWeek = true;
+    }
+  }
+  if (migrated || shouldForceCurrentMonth || shouldForceCurrentWeek) autosaveState();
   const hashView = location.hash.slice(1);
   if (hashView && renderers[hashView]) currentView = hashView;
   $("#authPanel").hidden = true;
