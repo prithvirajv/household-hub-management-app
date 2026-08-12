@@ -1875,6 +1875,8 @@ test("monthEndDateKey returns the real last day of the month, including February
 
 test("assetValue computes a stock holding from shares * price, or reads .value directly otherwise, clamping negatives to 0", () => {
   assert.equal(assetValue({ assetClass: "stock", shares: 10, price: 25.5 }), 255);
+  assert.equal(assetValue({ assetClass: "retirement", shares: 1094.96, price: 252.44 }), 1094.96 * 252.44, "a share-based retirement holding goes through the same shares * price math as stock, not the raw .value fallback");
+  assert.equal(assetValue({ assetClass: "retirement", value: 18500 }), 18500, "a flat legacy retirement entry with no shares field still reads .value directly");
   assert.equal(assetValue({ value: 400 }), 400);
   assert.equal(assetValue({ value: -50 }), 0, "a negative plain value clamps to 0, not a negative asset");
   assert.equal(assetValue({ assetClass: "stock", shares: -5, price: 10 }), 0, "negative shares clamp to 0 before multiplying");
