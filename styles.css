@@ -227,6 +227,24 @@ nav {
   gap: 0.25rem;
 }
 
+.nav-section {
+  display: grid;
+  gap: 0.25rem;
+}
+
+.nav-section-label {
+  padding: 0.5rem 0.65rem 0.1rem;
+  color: var(--sidebar-muted);
+  font-size: 0.62rem;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.nav-section:first-child .nav-section-label {
+  padding-top: 0;
+}
+
 .sidebar-household {
   display: grid;
   gap: 0.55rem;
@@ -7271,25 +7289,52 @@ input.holdings-modal-market-value-input {
   background: transparent;
 }
 
-.plan-timeline-details {
+/* The daily bucket needs real width for its two-column timeline + right
+   rail layout - .plan-layout's own 760px cap (fine for the flat Weekly/
+   Monthly checklists) would otherwise squeeze both into a single narrow
+   column. */
+.plan-layout-daily {
+  max-width: none;
+}
+
+.plan-day-summary-stats {
   display: grid;
-  gap: 0.6rem;
+  gap: 0.5rem;
+  margin-top: 0.6rem;
 }
 
-.plan-timeline-detail {
-  padding: 0.6rem 0.75rem;
-  border: 1px solid var(--line);
-  border-radius: 8px;
-  background: var(--panel);
+.plan-day-summary-stats > div {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.5rem;
+  font-size: 0.8rem;
 }
 
-.plan-timeline-detail h4 {
-  margin: 0 0 0.35rem;
-  font-size: 0.85rem;
+.plan-day-summary-stats span {
+  color: var(--muted);
 }
 
-.plan-timeline-detail .plan-subtasks {
-  margin: 0;
+.plan-right-rail .plan-subtasks {
+  margin-top: 0.5rem;
+}
+
+.plan-daypart-row {
+  display: grid;
+  grid-template-columns: 70px 1fr 44px;
+  align-items: center;
+  gap: 0.5rem;
+  margin-top: 0.5rem;
+  font-size: 0.78rem;
+}
+
+.plan-daypart-row span {
+  color: var(--muted);
+  font-weight: 700;
+}
+
+.plan-daypart-row small {
+  text-align: right;
+  color: var(--muted);
 }
 
 .documents-layout {

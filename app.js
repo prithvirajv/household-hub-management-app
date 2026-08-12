@@ -22,6 +22,20 @@ const views = [
   ["admin", "Admin", "🛠️"]
 ];
 
+// Purely a rendering grouping for the sidebar (renderNav) - doesn't affect
+// routing, the mobile tab bar, or anything else that reads `views`
+// directly. A view key not listed here still shows (renderNav falls back
+// to a trailing "More" section for anything ungrouped) so a future
+// addition to `views` can never silently vanish from the nav just because
+// this list wasn't updated alongside it.
+const NAV_SECTIONS = [
+  ["Overview", ["home"]],
+  ["Money", ["budget", "bills", "transactions", "paychecks", "wealth", "reports"]],
+  ["Household", ["calendar", "notes", "meals", "recipes", "documents", "decisions", "ious", "sharing"]],
+  ["Personal", ["journal", "plan", "goals"]],
+  ["Settings", ["profile", "help", "admin"]]
+];
+
 let state = null;
 let sessionUser = null;
 let adminData = null;
@@ -1566,7 +1580,8 @@ function renderNotificationBell() {
 
 function renderNav() {
   const badgeCounts = navBadgeCounts();
-  nav.innerHTML = views.filter(([key]) => key !== "admin" || sessionUser?.isAdmin).map(([key, label, icon]) => {
+  const visibleViews = views.filter(([key]) => key !== "admin" || sessionUser?.isAdmin);
+  const navButtonHtml = ([key, label, icon]) => {
     // Bills' count is genuinely urgent (unpaid money owed), so it keeps the
     // coral/red treatment; transactions' count is just "items to review" -
     // informational, not a problem - so it gets a neutral gray badge instead
@@ -1577,7 +1592,15 @@ function renderNav() {
       <span>${key === "calendar" ? calendarNavIconHtml() : icon}</span>${label}${badge}
     </button>
   `;
-  }).join("");
+  };
+  const grouped = new Set(NAV_SECTIONS.flatMap(([, keys]) => keys));
+  const sections = NAV_SECTIONS.map(([sectionLabel, keys]) => [sectionLabel, keys.map((key) => visibleViews.find(([viewKey]) => viewKey === key)).filter(Boolean)]);
+  const leftover = visibleViews.filter(([key]) => !grouped.has(key));
+  if (leftover.length) sections.push(["More", leftover]);
+  nav.innerHTML = sections
+    .filter(([, items]) => items.length)
+    .map(([sectionLabel, items]) => `<div class="nav-section"><div class="nav-section-label">${sectionLabel}</div>${items.map(navButtonHtml).join("")}</div>`)
+    .join("");
 }
 
 // Mirrors #nav's active-state logic for the fixed bottom tab bar shown on
@@ -3541,6 +3564,15 @@ function renderDailyPlan() {
   const scheduled = dailyTasks.filter((task) => task.startTime);
   const unscheduled = dailyTasks.filter((task) => !task.startTime);
   const dayLabel = new Date(`${planSelectedDate}T00:00:00`).toLocaleDateString("en-US", { weekday: "long", month: "short", day: "numeric" });
+  // Not built: collapsing empty hour runs into "N hours free" dividers
+  // (from the design handoff README). The timeline's blocks are positioned
+  // by a linear minutes-since-PLAN_TIMELINE_START_HOUR -> pixels mapping
+  // that pointerdown/pointermove drag-resize (below) also reads and writes
+  // directly - collapsing a middle run of hours would require every block
+  // after it, AND the drag math itself, to convert through a compressed
+  // (segment-aware) coordinate space instead of a uniform one. Flagged for
+  // implementation alongside a drag/resize rework rather than attempted
+  // here, where a mistake would silently corrupt real schedule data.
   const hours = [];
   for (let hour = PLAN_TIMELINE_START_HOUR; hour <= PLAN_TIMELINE_END_HOUR; hour += 1) hours.push(hour);
   const timelineHeight = (PLAN_TIMELINE_END_HOUR - PLAN_TIMELINE_START_HOUR + 1) * 60 * PLAN_PIXELS_PER_MINUTE;
@@ -3552,72 +3584,82 @@ function renderDailyPlan() {
   const editingLog = planEditingActualLogId ? logsToday.find((log) => log.id === planEditingActualLogId) : null;
   if (!editingLog) planEditingActualLogId = null;
 
+  const daySummaryStats = planDaySummaryStats(dailyTasks, scheduled, logsToday);
+
   return `
-    <section class="plan-layout">
+    <section class="plan-layout plan-layout-daily">
       ${renderPlanHead()}
-      <div class="plan-day-nav">
-        <button class="icon-button" data-plan-day="prev" type="button" aria-label="Previous day">‹</button>
-        <strong>${dayLabel}</strong>
-        <button class="icon-button" data-plan-day="next" type="button" aria-label="Next day">›</button>
-        <button class="ghost" data-plan-day="today" type="button">Today</button>
-      </div>
-      <div class="plan-form-row">
-        <form id="planTaskForm" class="plan-task-form plan-task-form-daily card">
-          <input name="title" placeholder="Add a task for this day" value="${escapeHtml(editingTask?.title || "")}" required>
-          <label>Start time (optional)<input name="startTime" type="text" inputmode="numeric" class="time24-input" placeholder="HH:MM" maxlength="5" value="${escapeHtml(editingTask?.startTime || "")}"></label>
-          <label>Duration (min)<input name="durationMinutes" type="number" min="5" step="5" value="${formDuration}"></label>
-          <label>End time<input name="endTimeDisplay" type="text" class="time24-input" value="${escapeHtml(formEndTime)}" readonly tabindex="-1"></label>
-          <label>Repeat<select name="recurrence">${Object.entries(planRecurrenceLabels).map(([value, label]) => `<option value="${value}" ${editingTask && editingTask.recurrence === value ? "selected" : ""}>${label}</option>`).join("")}</select></label>
-          <button type="submit">${editingTask ? "Save changes" : "Add"}</button>
-          ${editingTask ? `<button class="ghost" id="cancelPlanTaskEditButton" type="button">Cancel</button>` : ""}
-        </form>
-        <form id="actualLogForm" class="plan-task-form plan-task-form-daily card plan-actual-log-form">
-          <span class="plan-form-col-label">${editingLog ? "Edit what actually happened" : "Log what actually happened"} (${dayLabel})</span>
-          <label>Start time<input name="logStartTime" type="text" inputmode="numeric" class="time24-input" placeholder="HH:MM" maxlength="5" value="${escapeHtml(editingLog?.startTime || "")}" required></label>
-          <label>End time<input name="logEndTime" type="text" inputmode="numeric" class="time24-input" placeholder="HH:MM" maxlength="5" value="${escapeHtml(editingLog?.endTime || "")}" required></label>
-          <input name="logNote" placeholder="What did you actually do?" value="${escapeHtml(editingLog?.note || "")}" required>
-          ${dailyTasks.length ? `
-            <details class="plan-log-link-tasks" ${editingLog?.linkedTaskIds?.length ? "open" : ""}>
-              <summary>Link to planned task(s) — optional${editingLog?.linkedTaskIds?.length ? ` (${editingLog.linkedTaskIds.length} selected)` : ""}</summary>
-              ${dailyTasks.map((task) => `<label class="plan-log-link-option"><input type="checkbox" name="linkedTaskIds" value="${task.id}" ${editingLog?.linkedTaskIds?.includes(task.id) ? "checked" : ""}> ${escapeHtml(task.title)}</label>`).join("")}
-            </details>` : ""}
-          <div class="plan-form-actions">
-            <button type="submit">${editingLog ? "Save changes" : "Log it"}</button>
-            ${editingLog ? `<button class="ghost" id="cancelActualLogEditButton" type="button">Cancel</button><button class="danger-button" id="deleteActualLogButton" type="button">Delete</button>` : ""}
+      <div class="work-grid">
+        <div class="main-stack">
+          <div class="plan-day-nav">
+            <button class="icon-button" data-plan-day="prev" type="button" aria-label="Previous day">‹</button>
+            <strong>${dayLabel}</strong>
+            <button class="icon-button" data-plan-day="next" type="button" aria-label="Next day">›</button>
+            <button class="ghost" data-plan-day="today" type="button">Today</button>
           </div>
-        </form>
-      </div>
-      ${unscheduled.length ? `<div class="plan-unscheduled"><h4>Unscheduled</h4>${unscheduled.map((task) => renderPlanTaskDaily(task)).join("")}</div>` : ""}
-      <div class="plan-timeline" style="height:${timelineHeight + 28}px">
-        <div class="plan-timeline-hours-label"></div>
-        <div class="plan-timeline-col-label plan-timeline-col-label-planned">Planned</div>
-        <div class="plan-timeline-col-label plan-timeline-col-label-actual">Actual</div>
-        <div class="plan-timeline-hours">${hours.map((hour) => `<div class="plan-timeline-hour" style="height:${60 * PLAN_PIXELS_PER_MINUTE}px">${formatHourLabel(hour)}</div>`).join("")}</div>
-        <div class="plan-timeline-body plan-timeline-body-planned" style="height:${timelineHeight}px" data-plan-timeline>
-          ${(() => {
-            const layout = layoutTimelineBlocks(scheduled.map((task) => ({
-              id: task.id,
-              start: timeToMinutes(task.startTime),
-              end: timeToMinutes(task.startTime) + Number(task.durationMinutes || 30)
-            })));
-            const layoutById = new Map(layout.map((item) => [item.id, item]));
-            return scheduled.map((task) => renderTimelineBlock(task, layoutById.get(task.id))).join("");
-          })()}
+          <div class="plan-form-row">
+            <form id="planTaskForm" class="plan-task-form plan-task-form-daily card">
+              <input name="title" placeholder="Add a task for this day" value="${escapeHtml(editingTask?.title || "")}" required>
+              <label>Start time (optional)<input name="startTime" type="text" inputmode="numeric" class="time24-input" placeholder="HH:MM" maxlength="5" value="${escapeHtml(editingTask?.startTime || "")}"></label>
+              <label>Duration (min)<input name="durationMinutes" type="number" min="5" step="5" value="${formDuration}"></label>
+              <label>End time<input name="endTimeDisplay" type="text" class="time24-input" value="${escapeHtml(formEndTime)}" readonly tabindex="-1"></label>
+              <label>Repeat<select name="recurrence">${Object.entries(planRecurrenceLabels).map(([value, label]) => `<option value="${value}" ${editingTask && editingTask.recurrence === value ? "selected" : ""}>${label}</option>`).join("")}</select></label>
+              <button type="submit">${editingTask ? "Save changes" : "Add"}</button>
+              ${editingTask ? `<button class="ghost" id="cancelPlanTaskEditButton" type="button">Cancel</button>` : ""}
+            </form>
+            <form id="actualLogForm" class="plan-task-form plan-task-form-daily card plan-actual-log-form">
+              <span class="plan-form-col-label">${editingLog ? "Edit what actually happened" : "Log what actually happened"} (${dayLabel})</span>
+              <label>Start time<input name="logStartTime" type="text" inputmode="numeric" class="time24-input" placeholder="HH:MM" maxlength="5" value="${escapeHtml(editingLog?.startTime || "")}" required></label>
+              <label>End time<input name="logEndTime" type="text" inputmode="numeric" class="time24-input" placeholder="HH:MM" maxlength="5" value="${escapeHtml(editingLog?.endTime || "")}" required></label>
+              <input name="logNote" placeholder="What did you actually do?" value="${escapeHtml(editingLog?.note || "")}" required>
+              ${dailyTasks.length ? `
+                <details class="plan-log-link-tasks" ${editingLog?.linkedTaskIds?.length ? "open" : ""}>
+                  <summary>Link to planned task(s) — optional${editingLog?.linkedTaskIds?.length ? ` (${editingLog.linkedTaskIds.length} selected)` : ""}</summary>
+                  ${dailyTasks.map((task) => `<label class="plan-log-link-option"><input type="checkbox" name="linkedTaskIds" value="${task.id}" ${editingLog?.linkedTaskIds?.includes(task.id) ? "checked" : ""}> ${escapeHtml(task.title)}</label>`).join("")}
+                </details>` : ""}
+              <div class="plan-form-actions">
+                <button type="submit">${editingLog ? "Save changes" : "Log it"}</button>
+                ${editingLog ? `<button class="ghost" id="cancelActualLogEditButton" type="button">Cancel</button><button class="danger-button" id="deleteActualLogButton" type="button">Delete</button>` : ""}
+              </div>
+            </form>
+          </div>
+          ${unscheduled.length ? `<div class="plan-unscheduled"><h4>Unscheduled</h4>${unscheduled.map((task) => renderPlanTaskDaily(task)).join("")}</div>` : ""}
+          <div class="plan-timeline" style="height:${timelineHeight + 28}px">
+            <div class="plan-timeline-hours-label"></div>
+            <div class="plan-timeline-col-label plan-timeline-col-label-planned">Planned</div>
+            <div class="plan-timeline-col-label plan-timeline-col-label-actual">Actual</div>
+            <div class="plan-timeline-hours">${hours.map((hour) => `<div class="plan-timeline-hour" style="height:${60 * PLAN_PIXELS_PER_MINUTE}px">${formatHourLabel(hour)}</div>`).join("")}</div>
+            <div class="plan-timeline-body plan-timeline-body-planned" style="height:${timelineHeight}px" data-plan-timeline>
+              ${(() => {
+                const layout = layoutTimelineBlocks(scheduled.map((task) => ({
+                  id: task.id,
+                  start: timeToMinutes(task.startTime),
+                  end: timeToMinutes(task.startTime) + Number(task.durationMinutes || 30)
+                })));
+                const layoutById = new Map(layout.map((item) => [item.id, item]));
+                return scheduled.map((task) => renderTimelineBlock(task, layoutById.get(task.id))).join("");
+              })()}
+            </div>
+            <div class="plan-timeline-body plan-timeline-body-actual" style="height:${timelineHeight}px">
+              ${(() => {
+                const layout = layoutTimelineBlocks(logsToday.map((log) => ({
+                  id: log.id,
+                  start: timeToMinutes(log.startTime),
+                  end: timeToMinutes(log.endTime)
+                })));
+                const layoutById = new Map(layout.map((item) => [item.id, item]));
+                const tasksById = new Map(dailyTasks.map((task) => [task.id, task]));
+                return logsToday.map((log) => renderActualLogBlock(log, tasksById, layoutById.get(log.id))).join("");
+              })()}
+            </div>
+          </div>
         </div>
-        <div class="plan-timeline-body plan-timeline-body-actual" style="height:${timelineHeight}px">
-          ${(() => {
-            const layout = layoutTimelineBlocks(logsToday.map((log) => ({
-              id: log.id,
-              start: timeToMinutes(log.startTime),
-              end: timeToMinutes(log.endTime)
-            })));
-            const layoutById = new Map(layout.map((item) => [item.id, item]));
-            const tasksById = new Map(dailyTasks.map((task) => [task.id, task]));
-            return logsToday.map((log) => renderActualLogBlock(log, tasksById, layoutById.get(log.id))).join("");
-          })()}
-        </div>
+        <aside class="side-stack">
+          ${renderPlanDaySummary(daySummaryStats)}
+          ${renderPlanRightRail(editingTask)}
+          ${renderPlanDaypartCard(scheduled)}
+        </aside>
       </div>
-      ${scheduled.length ? `<div class="plan-timeline-details">${scheduled.map((task) => `<div class="plan-timeline-detail"><h4>${escapeHtml(task.title)}</h4>${renderSubtasks(task)}</div>`).join("")}</div>` : ""}
     </section>`;
 }
 
@@ -3625,6 +3667,99 @@ function formatHourLabel(hour) {
   const period = hour < 12 || hour === 24 ? "AM" : "PM";
   const displayHour = hour % 12 === 0 ? 12 : hour % 12;
   return `${displayHour} ${period}`;
+}
+
+function formatPlanDuration(minutes) {
+  if (minutes <= 0) return "0m";
+  const hours = Math.floor(minutes / 60);
+  const mins = Math.round(minutes % 60);
+  return `${hours ? `${hours}h ` : ""}${mins || !hours ? `${mins}m` : ""}`.trim();
+}
+
+// Longest free block treats scheduled tasks as merged, sorted intervals and
+// walks the gaps between them (plus before the first and after the last) -
+// the same interval-merging shape as layoutTimelineBlocks' overlap check,
+// just measuring gaps instead of overlaps.
+function planDaySummaryStats(dailyTasks, scheduled, logsToday) {
+  const total = dailyTasks.length;
+  const done = dailyTasks.filter((task) => isDailyTaskDoneOnDate(task, planSelectedDate)).length;
+  const dayStart = PLAN_TIMELINE_START_HOUR * 60;
+  const dayEnd = (PLAN_TIMELINE_END_HOUR + 1) * 60;
+  const intervals = scheduled
+    .map((task) => {
+      const start = Math.max(dayStart, timeToMinutes(task.startTime));
+      return [start, Math.min(dayEnd, start + Number(task.durationMinutes || 30))];
+    })
+    .sort((a, b) => a[0] - b[0]);
+  let cursor = dayStart;
+  let longestFree = 0;
+  intervals.forEach(([start, end]) => {
+    if (start > cursor) longestFree = Math.max(longestFree, start - cursor);
+    cursor = Math.max(cursor, end);
+  });
+  longestFree = Math.max(longestFree, dayEnd - cursor);
+  return {
+    completionPct: total ? Math.round((done / total) * 100) : 0,
+    done,
+    total,
+    scheduledMinutes: scheduled.reduce((sum, task) => sum + Number(task.durationMinutes || 30), 0),
+    longestFree,
+    entriesLogged: logsToday.length
+  };
+}
+
+function renderPlanDaySummary(stats) {
+  return `<section class="card plan-day-summary">
+    <div class="card-label">Today</div><h3>Day summary</h3>
+    <div class="goal-ring-row">
+      <div class="goal-ring" style="background:conic-gradient(var(--green) ${stats.completionPct}%, var(--soft-blue) ${stats.completionPct}% 100%)"><div class="goal-ring-inner"><span aria-hidden="true">✓</span></div></div>
+      <div class="goal-ring-stats">
+        <strong>${stats.done}/${stats.total} done</strong>
+        <small>${stats.completionPct}% of today's tasks</small>
+      </div>
+    </div>
+    <div class="plan-day-summary-stats">
+      <div><span>Time scheduled</span><strong>${formatPlanDuration(stats.scheduledMinutes)}</strong></div>
+      <div><span>Longest free block</span><strong>${formatPlanDuration(stats.longestFree)}</strong></div>
+      <div><span>Entries logged</span><strong>${stats.entriesLogged}</strong></div>
+    </div>
+  </section>`;
+}
+
+// Replaces the old always-visible "every scheduled task's subtasks, stacked
+// below the timeline" zone - editingTask is the exact same task a click on
+// a timeline block already opens for editing (planEditingDailyTaskId), so
+// "click a task for its subtasks" reuses that gesture rather than adding a
+// second, competing click handler on the same block.
+function renderPlanRightRail(editingTask) {
+  const subtaskCount = editingTask?.subtasks?.length || 0;
+  const subtaskDone = editingTask?.subtasks?.filter((subtask) => subtask.done).length || 0;
+  return `<section class="card plan-right-rail">
+    <div class="card-label">Focus</div><h3>${editingTask ? escapeHtml(editingTask.title) : "Task details"}</h3>
+    ${editingTask
+      ? `<small class="${subtaskCount ? "" : "muted"}">${subtaskCount ? `${subtaskDone}/${subtaskCount} subtasks done` : "No subtasks yet"}</small>${renderSubtasks(editingTask)}`
+      : `<div class="empty-inline">Click a scheduled task to see its subtasks and progress here.</div>`}
+  </section>`;
+}
+
+function planDaypartBreakdown(scheduled) {
+  const buckets = [["Morning", 0], ["Afternoon", 0], ["Evening", 0]];
+  scheduled.forEach((task) => {
+    const start = timeToMinutes(task.startTime);
+    const duration = Number(task.durationMinutes || 30);
+    const index = start < 12 * 60 ? 0 : start < 17 * 60 ? 1 : 2;
+    buckets[index][1] += duration;
+  });
+  return buckets;
+}
+
+function renderPlanDaypartCard(scheduled) {
+  const buckets = planDaypartBreakdown(scheduled);
+  const max = Math.max(1, ...buckets.map(([, minutes]) => minutes));
+  return `<section class="card plan-daypart-card">
+    <div class="card-label">Rhythm</div><h3>Morning / afternoon / evening</h3>
+    ${buckets.map(([label, minutes]) => `<div class="plan-daypart-row"><span>${label}</span><div class="bar"><span style="width:${Math.round((minutes / max) * 100)}%"></span></div><small>${formatPlanDuration(minutes)}</small></div>`).join("")}
+  </section>`;
 }
 
 function describeLinkedActualLogs(task, linkedLogs) {
