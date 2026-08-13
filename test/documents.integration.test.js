@@ -275,3 +275,25 @@ test("deleting a folder cascades to its subfolders and every document inside the
   assert.equal(remaining.body.folders.some((item) => item.id === root.body.id || item.id === child.body.id), false);
   assert.equal(remaining.body.documents.some((item) => item.id === rootDoc.body.documentId || item.id === childDoc.body.documentId), false);
 });
+
+test("GET /api/documents/folders/:id/download requires a session", async () => {
+  const response = await server.request("/api/documents/folders/some-folder/download");
+  assert.equal(response.status, 401);
+});
+
+test("GET /api/documents/folders/:id/download is unavailable in MEMORY_DB (demo/test) mode", async () => {
+  // The test harness always runs with MEMORY_DB set, which never stores real
+  // file bytes behind its fake upload/download URLs - the route guards
+  // against this up front, before the folder/document lookup, so this
+  // check fires even for a folder id that doesn't exist.
+  const cookie = await signUp("documents-zip-memory@example.com", "Documents Zip Memory Household");
+  const folder = await server.request("/api/documents/folders", { method: "POST", headers: { cookie }, body: JSON.stringify({ name: "Has files" }) });
+  await server.request("/api/documents/upload-url", { method: "POST", headers: { cookie }, body: JSON.stringify({ name: "a.pdf", contentType: "application/pdf", folderId: folder.body.id }) });
+
+  const response = await server.request(`/api/documents/folders/${folder.body.id}/download`, { headers: { cookie } });
+  assert.equal(response.status, 501);
+  assert.equal(response.body.error, "Folder zip download requires live cloud storage and isn't available in demo/local mode");
+
+  const missingFolder = await server.request("/api/documents/folders/folder-does-not-exist/download", { headers: { cookie } });
+  assert.equal(missingFolder.status, 501, "the MEMORY_DB guard runs before the folder lookup, so a bad id still reports 501 not 404");
+});

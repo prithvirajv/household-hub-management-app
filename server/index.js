@@ -14,12 +14,13 @@ const { Pool } = require("pg");
 const { OAuth2Client } = require("google-auth-library");
 const { countries } = require("countries-list");
 const { defaultState } = require("./default-state");
-const { validateJournalPayload, buildDocumentObjectPath, wouldCreateFolderCycle, collectDescendantFolderIds, SMS_CARRIERS, smsGatewayAddress, rollAnnualNotifyAtForward, choreNotifyAt, parseBankStatementPdfText, extractAccountActivityLabel, isValidEmail } = require("../lib/shared-logic");
+const { validateJournalPayload, buildDocumentObjectPath, sanitizeFilename, wouldCreateFolderCycle, collectDescendantFolderIds, SMS_CARRIERS, smsGatewayAddress, rollAnnualNotifyAtForward, choreNotifyAt, parseBankStatementPdfText, extractAccountActivityLabel, isValidEmail } = require("../lib/shared-logic");
 const pdfParse = require("pdf-parse");
 const ExcelJS = require("exceljs");
+const archiver = require("archiver");
 
 const ANNUAL_EVENT_TYPES = ["birthday", "anniversary"];
-const { createSignedUploadUrl, createSignedDownloadUrl, deleteObject, copyObject } = require("./gcs");
+const { createSignedUploadUrl, createSignedDownloadUrl, deleteObject, copyObject, getObjectStream } = require("./gcs");
 
 const PORT = Number(process.env.PORT || 8080);
 const SESSION_COOKIE = "hh_session";
@@ -3370,6 +3371,90 @@ app.delete("/api/documents/folders/:id", requireSession, requireEditAccess, asyn
     }
     await pool.query("DELETE FROM document_folders WHERE id = ANY($1) AND owner_user_id = $2", [folderIdsToDelete, ownerId]);
     res.json({ ok: true, deletedFolderIds: folderIdsToDelete, deletedDocumentCount: documentsToDelete.length });
+  } catch (error) {
+    next(error);
+  }
+});
+
+// Zip-entry path for a document: every ancestor folder name from (but not
+// including) the folder being downloaded down to the document's own
+// folder, so the zip preserves subfolder structure instead of dumping
+// every file flat regardless of how deep it was nested.
+function documentZipSubpath(document, folderById, rootFolderId) {
+  const parts = [];
+  let cursor = document.folder_id ? folderById.get(document.folder_id) : null;
+  while (cursor && cursor.id !== rootFolderId) {
+    parts.unshift(sanitizeFilename(cursor.name));
+    cursor = cursor.parent_id ? folderById.get(cursor.parent_id) : null;
+  }
+  parts.push(sanitizeFilename(document.name));
+  return parts.join("/");
+}
+
+// Disambiguates two documents that would otherwise land on the exact same
+// zip path (same folder, same chosen file name) - mirrors
+// sanitizeSheetName's " (2)", " (3)" suffixing above, just keyed by the
+// full path instead of a 31-char sheet name.
+function uniqueZipEntryPath(fullPath, usedPaths) {
+  if (!usedPaths.has(fullPath)) {
+    usedPaths.add(fullPath);
+    return fullPath;
+  }
+  const dotIndex = fullPath.lastIndexOf(".");
+  const base = dotIndex > 0 ? fullPath.slice(0, dotIndex) : fullPath;
+  const ext = dotIndex > 0 ? fullPath.slice(dotIndex) : "";
+  let suffix = 2;
+  let candidate = `${base} (${suffix})${ext}`;
+  while (usedPaths.has(candidate)) {
+    suffix += 1;
+    candidate = `${base} (${suffix})${ext}`;
+  }
+  usedPaths.add(candidate);
+  return candidate;
+}
+
+app.get("/api/documents/folders/:id/download", requireSession, async (req, res, next) => {
+  try {
+    // Checked up front, before any header/stream work starts: MEMORY_DB
+    // never stores real file bytes behind its fake upload/download URLs, so
+    // there's nothing real for getObjectStream to read. Failing here with a
+    // clean JSON error is far better than starting a zip response and
+    // throwing mid-stream once headers are already committed.
+    if (MEMORY_DB) return res.status(501).json({ error: "Folder zip download requires live cloud storage and isn't available in demo/local mode" });
+    const ownerId = await resolveOwnerId(req);
+    const [folders, documents] = await Promise.all([loadOwnerFolders(ownerId), loadOwnerDocuments(ownerId)]);
+    const folder = folders.find((item) => item.id === req.params.id);
+    if (!folder) return res.status(404).json({ error: "Folder not found" });
+
+    const folderIds = collectDescendantFolderIds(folders.map((item) => ({ id: item.id, parentId: item.parent_id })), folder.id);
+    const folderIdSet = new Set(folderIds);
+    const filesToZip = documents.filter((item) => item.folder_id && folderIdSet.has(item.folder_id) && item.status === "ready");
+    if (!filesToZip.length) return res.status(400).json({ error: "This folder has no files to download" });
+
+    const folderById = new Map(folders.map((item) => [item.id, item]));
+    const usedPaths = new Set();
+    const entries = filesToZip.map((document) => ({
+      document,
+      zipPath: uniqueZipEntryPath(documentZipSubpath(document, folderById, folder.id), usedPaths)
+    }));
+
+    const zipFileName = `${sanitizeFilename(folder.name) || "documents"}.zip`;
+    res.setHeader("Content-Type", "application/zip");
+    res.setHeader("Content-Disposition", `attachment; filename="${zipFileName}"`);
+
+    const archive = archiver("zip", { zlib: { level: 9 } });
+    archive.on("error", (error) => {
+      // Headers/some bytes may already be flushed by the time a mid-stream
+      // read fails (a file deleted from storage after the DB row was
+      // listed, say) - there's no clean HTTP error response left to send at
+      // that point, so just end the response rather than calling next().
+      res.destroy(error);
+    });
+    archive.pipe(res);
+    for (const { document, zipPath } of entries) {
+      archive.append(getObjectStream(document.storage_object), { name: zipPath });
+    }
+    await archive.finalize();
   } catch (error) {
     next(error);
   }

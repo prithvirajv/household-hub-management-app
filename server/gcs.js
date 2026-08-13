@@ -56,4 +56,12 @@ async function copyObject(sourcePath, destPath) {
   await getBucket().file(sourcePath).copy(getBucket().file(destPath));
 }
 
-module.exports = { createSignedUploadUrl, createSignedDownloadUrl, deleteObject, copyObject };
+// Used by folder zip-download, which reads real file bytes rather than
+// handing out a signed URL - has no memory-mode equivalent since
+// MEMORY_DB never stores real content behind its fake upload/download URLs.
+function getObjectStream(objectPath) {
+  if (MEMORY_DB) throw new Error("Object content is not available in MEMORY_DB mode");
+  return getBucket().file(objectPath).createReadStream();
+}
+
+module.exports = { createSignedUploadUrl, createSignedDownloadUrl, deleteObject, copyObject, getObjectStream };

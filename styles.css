@@ -4689,7 +4689,7 @@ button.ghost-accent {
 .holdings-modal-table-head,
 .holdings-modal-row {
   display: grid;
-  grid-template-columns: 1.1fr 1fr 0.7fr 0.9fr 1.15fr 0.9fr 0.95fr 30px;
+  grid-template-columns: 1.1fr 1fr 0.7fr 1.1fr 1.15fr 0.9fr 0.95fr 30px;
   gap: 0.6rem;
   align-items: center;
 }
@@ -4754,6 +4754,41 @@ button.ghost-accent {
 
 .holdings-modal-price-cell small.stock-price-error {
   color: var(--coral);
+}
+
+.holdings-modal-cost-row {
+  display: flex;
+  gap: 0.4rem;
+  align-items: center;
+}
+
+.holdings-modal-cost-row input {
+  flex: 1;
+  min-width: 0;
+}
+
+/* Toggles whether the sibling input is read as a per-share price (default,
+   matches every existing holding's stored costBasis) or a total amount
+   paid, divided by shares on input - the button's own label always shows
+   the mode currently in effect, not the one it switches to. */
+.holdings-modal-cost-mode-toggle {
+  flex-shrink: 0;
+  min-width: 40px;
+  height: 32px;
+  min-height: 0;
+  padding: 0 0.4rem;
+  background: var(--soft);
+  border: 1px solid var(--line);
+  color: var(--muted);
+  border-radius: 6px;
+  font-size: 0.66rem;
+  font-weight: 800;
+}
+
+.holdings-modal-cost-mode-toggle.active {
+  background: var(--green-soft);
+  border-color: var(--green);
+  color: var(--green);
 }
 
 input.holdings-modal-market-value-input {
@@ -5489,7 +5524,10 @@ html[data-theme="dark"] .note-color-coral { background: color-mix(in srgb, #fff0
 .note-card-toolbar {
   position: relative;
   display: grid;
-  grid-template-columns: repeat(5, 34px);
+  /* 6 items live here: color, reminder, labels, bill-link, archive,
+     more-menu - matching the count exactly keeps them on one row instead
+     of an unstyled 6th item wrapping onto its own misaligned line. */
+  grid-template-columns: repeat(6, 34px);
   min-height: 36px;
   align-items: center;
   justify-content: space-between;
@@ -5769,6 +5807,18 @@ html[data-theme="dark"] .note-color-coral { background: color-mix(in srgb, #fff0
 }
 
 .note-toolbar-labels .note-label-picker-options {
+  top: auto;
+  right: 0;
+  bottom: calc(100% + 6px);
+  left: auto;
+  width: 220px;
+}
+
+/* Without this, .note-label-picker-options' default left:0;right:0
+   stretches only across the 34px icon that anchors it (the toolbar's
+   <details> wrapper is itself only 34px wide), squeezing every bill name
+   into an unreadable sliver instead of a real dropdown. */
+.note-bill-link-picker .note-label-picker-options {
   top: auto;
   right: 0;
   bottom: calc(100% + 6px);
@@ -6603,7 +6653,7 @@ html[data-theme="dark"] .note-color-coral { background: color-mix(in srgb, #fff0
   .holdings-modal-row [data-holding-symbol] { grid-area: symbol; }
   .holdings-modal-row [data-holding-type] { grid-area: assetclass; }
   .holdings-modal-row [data-holding-shares] { grid-area: shares; }
-  .holdings-modal-row [data-holding-cost-basis] { grid-area: costbasis; }
+  .holdings-modal-row .holdings-modal-cost-cell { grid-area: costbasis; }
   .holdings-modal-row .holdings-modal-price-cell { grid-area: price; }
   .holdings-modal-row [data-holding-market-value] { grid-area: marketvalue; }
   .holdings-modal-row .holdings-modal-gain-loss { grid-area: gainloss; }

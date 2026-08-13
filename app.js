@@ -157,6 +157,13 @@ let profileVerifyFeedbackIsError = false;
 // Keyed by asset id (not index, since rows can reorder/delete) so a stale
 // "Refresh price" result never gets attributed to the wrong stock row.
 let stockPriceFeedback = {};
+// Whether a holding's Avg. cost cell is currently being entered as a
+// per-share price ("share", the default - and what asset.costBasis has
+// always stored) or as the total amount paid for the position ("total",
+// divided by shares on input). Purely a display/entry preference for the
+// modal, not household data - resets to "share" on reload like the other
+// ephemeral view-state above.
+let holdingsCostEntryMode = {};
 // Fetches a fresh quote for every symbol-bearing holding in the list,
 // mutating price/value in place. A single bad symbol or rate limit only
 // drops that one holding's update, never aborts the batch - used by the
@@ -4330,6 +4337,56 @@ async function openDocumentFile(documentId) {
   render();
 }
 
+// Fetches the zip (rather than a plain window.open on the endpoint) so a
+// server error - demo/local mode, an empty folder - surfaces as a real
+// toast instead of a raw JSON blob loading in a blank tab. When the Web
+// Share API supports sharing files (mainly mobile browsers), offers the
+// OS share sheet first - which itself includes "Save to Files" as one of
+// its targets, so this single action covers both "download" and "share to
+// another app" without a second icon crowding the folder card.
+async function downloadFolderZip(folderId, folderName) {
+  let response;
+  try {
+    response = await fetch(`/api/documents/folders/${folderId}/download`, { credentials: "same-origin" });
+  } catch (error) {
+    showToast("Couldn't download this folder");
+    return;
+  }
+  if (!response.ok) {
+    const body = await response.json().catch(() => ({}));
+    showToast(body.error || "Couldn't download this folder");
+    return;
+  }
+  const blob = await response.blob();
+  const fileName = `${sanitizeFilenameForDownload(folderName) || "documents"}.zip`;
+  if (navigator.canShare) {
+    const file = new File([blob], fileName, { type: "application/zip" });
+    if (navigator.canShare({ files: [file] })) {
+      try {
+        await navigator.share({ files: [file], title: fileName });
+        return;
+      } catch (shareError) {
+        if (shareError?.name === "AbortError") return;
+        // Share failed for some other reason (e.g. no share target picked
+        // on desktop) - fall through to a plain download instead of a
+        // dead end.
+      }
+    }
+  }
+  const blobUrl = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = blobUrl;
+  link.download = fileName;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  URL.revokeObjectURL(blobUrl);
+}
+
+function sanitizeFilenameForDownload(name) {
+  return String(name || "").replace(/[/\\]/g, "_").trim();
+}
+
 function formatDocumentOpenedDate(iso) {
   if (!iso) return "";
   return new Date(iso).toLocaleDateString(undefined, { month: "short", day: "numeric" });
@@ -4553,6 +4610,7 @@ function renderDocuments() {
         <div class="documents-folder-card-actions">
           <button type="button" class="documents-icon-btn" data-documents-rename-folder="${folder.id}" title="Rename folder" aria-label="Rename ${escapeHtml(folder.name)} folder">✎</button>
           ${renderFolderWealthLinkPicker(folder)}
+          <button type="button" class="documents-icon-btn" data-documents-download-folder-zip="${folder.id}" data-documents-download-folder-name="${escapeHtml(folder.name)}" title="Download as zip" aria-label="Download ${escapeHtml(folder.name)} as zip">⬇</button>
           <button type="button" class="documents-icon-btn danger-button" data-documents-delete-folder="${folder.id}" title="Delete folder" aria-label="Delete ${escapeHtml(folder.name)} folder">×</button>
         </div>
         ${folder.wealthItemId ? `<small class="documents-linked-note">Tagged to ${escapeHtml(wealthItemLabel(folder.wealthItemType, folder.wealthItemId) || "")}</small>` : ""}
@@ -11272,6 +11330,18 @@ function bindViewEvents() {
     }
   });
 
+  document.querySelectorAll("[data-documents-download-folder-zip]").forEach((button) => {
+    button.addEventListener("click", async () => {
+      if (button.disabled) return;
+      button.disabled = true;
+      try {
+        await downloadFolderZip(button.dataset.documentsDownloadFolderZip, button.dataset.documentsDownloadFolderName);
+      } finally {
+        button.disabled = false;
+      }
+    });
+  });
+
   document.querySelectorAll("[data-documents-delete-folder]").forEach((button) => {
     button.addEventListener("click", async () => {
       const folderId = button.dataset.documentsDeleteFolder;
@@ -12461,6 +12531,19 @@ document.addEventListener("click", (event) => {
   $("#notificationBellDropdown").hidden = true;
 });
 
+// Every <details>-based popover (Notes' color/reminder/label/bill-link
+// pickers, the more-actions menu, Documents' note-link/wealth-link
+// pickers) shares this one behavior instead of each wiring its own: click
+// anywhere outside an open one and it closes. This also means opening a
+// second popover closes whatever else was left open, since clicking that
+// popover's own summary is itself an "outside click" for the first one -
+// no separate mutual-exclusion logic needed.
+document.addEventListener("click", (event) => {
+  document.querySelectorAll("details[open]").forEach((details) => {
+    if (!details.contains(event.target)) details.removeAttribute("open");
+  });
+});
+
 function applyThemeButtonIcon() {
   const isDark = document.documentElement.getAttribute("data-theme") === "dark";
   const button = $("#themeToggleButton");
@@ -12845,6 +12928,8 @@ function recomputeHoldingsModalRow(assetId) {
 function holdingsModalRowHtml(item) {
   const feedback = stockPriceFeedback[item.id];
   const gain = holdingGainLossMarkup(item);
+  const costMode = holdingsCostEntryMode[item.id] === "total" ? "total" : "share";
+  const costDisplayValue = costMode === "total" ? (Number(item.costBasis || 0) * Number(item.shares || 0)) || 0 : item.costBasis || 0;
   return `<div class="holdings-modal-row" data-holding-row="${item.id}">
     <input value="${escapeHtml(item.symbol || "")}" placeholder="e.g. AAPL" data-holding-symbol="${item.id}" aria-label="Symbol">
     <select data-holding-type="${item.id}" aria-label="Asset class">
@@ -12852,7 +12937,12 @@ function holdingsModalRowHtml(item) {
       <option value="fund" ${item.holdingType === "fund" ? "selected" : ""}>Mutual Fund</option>
     </select>
     <input type="number" min="0" step="0.0001" inputmode="decimal" value="${item.shares || 0}" data-holding-shares="${item.id}" aria-label="Shares">
-    <input type="number" min="0" step="0.01" inputmode="decimal" value="${item.costBasis || 0}" data-holding-cost-basis="${item.id}" aria-label="Average share price paid" placeholder="Avg. cost">
+    <div class="holdings-modal-cost-cell">
+      <div class="holdings-modal-cost-row">
+        <input type="number" min="0" step="0.01" inputmode="decimal" value="${costDisplayValue}" data-holding-cost-basis="${item.id}" aria-label="${costMode === "total" ? "Total amount paid" : "Average share price paid"}" placeholder="${costMode === "total" ? "Total cost" : "Avg. cost"}">
+        <button type="button" class="holdings-modal-cost-mode-toggle ${costMode === "total" ? "active" : ""}" data-holding-cost-mode-toggle="${item.id}" title="${costMode === "total" ? "Switch to entering the per-share cost instead" : "Switch to entering the total amount paid instead"}">${costMode === "total" ? "Total" : "/sh"}</button>
+      </div>
+    </div>
     <div class="holdings-modal-price-cell">
       <div class="holdings-modal-price-row">
         <input type="number" min="0" step="0.01" inputmode="decimal" value="${item.price || 0}" data-holding-price="${item.id}" aria-label="Price per share">
@@ -12894,6 +12984,15 @@ function wireHoldingsModalRowEvents() {
       const asset = findAsset(input.dataset.holdingShares);
       if (!asset) return;
       asset.shares = Math.max(0, Number(input.value || 0));
+      // In "total" entry mode the cost-basis input is showing the total
+      // amount paid, not a per-share figure - keep that total fixed as
+      // shares changes (the real-world fact) and re-derive the per-share
+      // costBasis from it, rather than leaving a now-stale total on screen.
+      if (holdingsCostEntryMode[asset.id] === "total") {
+        const costInput = container.querySelector(`[data-holding-cost-basis="${asset.id}"]`);
+        const total = Math.max(0, Number(costInput?.value || 0));
+        asset.costBasis = asset.shares > 0 ? total / asset.shares : 0;
+      }
       recomputeHoldingsModalRow(asset.id);
     });
   });
@@ -12901,8 +13000,29 @@ function wireHoldingsModalRowEvents() {
     input.addEventListener("input", () => {
       const asset = findAsset(input.dataset.holdingCostBasis);
       if (!asset) return;
-      asset.costBasis = Math.max(0, Number(input.value || 0));
+      const raw = Math.max(0, Number(input.value || 0));
+      asset.costBasis = holdingsCostEntryMode[asset.id] === "total"
+        ? (asset.shares > 0 ? raw / asset.shares : 0)
+        : raw;
       recomputeHoldingsModalRow(asset.id);
+    });
+  });
+  container.querySelectorAll("[data-holding-cost-mode-toggle]").forEach((button) => {
+    button.addEventListener("click", () => {
+      const id = button.dataset.holdingCostModeToggle;
+      const asset = findAsset(id);
+      if (!asset) return;
+      const nextMode = holdingsCostEntryMode[id] === "total" ? "share" : "total";
+      holdingsCostEntryMode[id] = nextMode;
+      const input = container.querySelector(`[data-holding-cost-basis="${id}"]`);
+      if (input) {
+        input.value = nextMode === "total" ? (Number(asset.costBasis || 0) * Number(asset.shares || 0)) || 0 : asset.costBasis || 0;
+        input.placeholder = nextMode === "total" ? "Total cost" : "Avg. cost";
+        input.setAttribute("aria-label", nextMode === "total" ? "Total amount paid" : "Average share price paid");
+      }
+      button.textContent = nextMode === "total" ? "Total" : "/sh";
+      button.title = nextMode === "total" ? "Switch to entering the per-share cost instead" : "Switch to entering the total amount paid instead";
+      button.classList.toggle("active", nextMode === "total");
     });
   });
   container.querySelectorAll("[data-holding-price]").forEach((input) => {
