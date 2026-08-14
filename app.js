@@ -6429,18 +6429,23 @@ function ensurePaycheckOccurrencesGenerated() {
     paycheck.id ||= uniqueId("paycheck");
     const recurrence = paycheck.recurrence || "once";
     // Occurrences already on file were materialized under whatever
-    // recurrence was active when they were generated (generatedRecurrence) -
-    // if the paycheck's recurrence has since changed (e.g. monthly ->
-    // biweekly), those rows no longer match the real schedule and need to be
-    // thrown out and regenerated from the anchor date, not left stale
-    // alongside a mismatched watermark. Checking this on every render
-    // (rather than only reactively in the Repeat dropdown's own change
-    // handler) also self-heals any paycheck already left in this broken
-    // state by an edit made before this check existed.
-    if (paycheck.generatedRecurrence !== recurrence) {
+    // recurrence/anchor date/end date was active when they were generated
+    // (generatedRecurrence/generatedAnchorDate/generatedEndDate) - if any of
+    // those have since changed (e.g. monthly -> biweekly, a corrected start
+    // date, or an end date raised/cleared after generation already ran out
+    // to the 12-month cap under the old, shorter one), those rows no longer
+    // match the real schedule and need to be thrown out and regenerated from
+    // the (possibly new) anchor date, not left stale alongside a mismatched
+    // watermark. Checking this on every render (rather than only reactively
+    // in each field's own change handler) also self-heals any paycheck
+    // already left in this broken state by an edit made before this check
+    // existed.
+    if (paycheck.generatedRecurrence !== recurrence || paycheck.generatedAnchorDate !== paycheck.date || paycheck.generatedEndDate !== (paycheck.endDate || "")) {
       state.paycheckOccurrences = state.paycheckOccurrences.filter((occurrence) => occurrence.seriesId !== paycheck.id);
       paycheck.generatedThroughDate = "";
       paycheck.generatedRecurrence = recurrence;
+      paycheck.generatedAnchorDate = paycheck.date;
+      paycheck.generatedEndDate = paycheck.endDate || "";
     }
     if (recurrence === "once" || recurrence === "bonus") return;
     if (paycheck.generatedThroughDate && paycheck.generatedThroughDate >= capKey) return;
@@ -9783,6 +9788,10 @@ function bindViewEvents() {
   document.querySelectorAll("[data-paycheck-date]").forEach((input) => {
     input.addEventListener("change", () => {
       const paycheck = state.paychecks[Number(input.dataset.paycheckDate)];
+      // Regenerating stale occurrences after an anchor-date change is
+      // handled centrally in ensurePaycheckOccurrencesGenerated (keyed off
+      // generatedAnchorDate), which runs on every render - so no manual
+      // clearing is needed here.
       if (paycheck && input.value) paycheck.date = input.value;
       state.budget.income = budgetIncomeFromPaychecks();
       autosaveState();
@@ -9808,16 +9817,11 @@ function bindViewEvents() {
   document.querySelectorAll("[data-paycheck-end-date]").forEach((input) => {
     input.addEventListener("change", () => {
       const paycheck = state.paychecks[Number(input.dataset.paycheckEndDate)];
-      if (paycheck) {
-        paycheck.endDate = input.value || "";
-        // Rows already materialized past a newly-set (or newly-lowered) end
-        // date would otherwise keep counting as income forever — generation
-        // only prevents new rows going forward, so already-existing ones
-        // need to be pruned here too.
-        if (paycheck.endDate) {
-          state.paycheckOccurrences = (state.paycheckOccurrences || []).filter((occurrence) => occurrence.seriesId !== paycheck.id || occurrence.date <= paycheck.endDate);
-        }
-      }
+      // Regenerating stale occurrences after an end-date change (lowered,
+      // raised, or cleared) is handled centrally in
+      // ensurePaycheckOccurrencesGenerated (keyed off generatedEndDate),
+      // which runs on every render - so no manual pruning is needed here.
+      if (paycheck) paycheck.endDate = input.value || "";
       state.budget.income = budgetIncomeFromPaychecks();
       autosaveState();
       render();
@@ -9858,7 +9862,18 @@ function bindViewEvents() {
   document.querySelectorAll("[data-paycheck-deposit-account]").forEach((select) => {
     select.addEventListener("change", () => {
       const paycheck = state.paychecks[Number(select.dataset.paycheckDepositAccount)];
-      if (paycheck) paycheck.depositAccountId = select.value;
+      if (paycheck) {
+        paycheck.depositAccountId = select.value;
+        // Already-materialized occurrences snapshot depositAccountId at
+        // generation time (ensurePaycheckOccurrencesGenerated) and have no
+        // per-row account field of their own to diverge with, so every
+        // existing row for this series should always track the template -
+        // unlike amount below, there's no manual per-occurrence override to
+        // preserve here.
+        (state.paycheckOccurrences || []).forEach((occurrence) => {
+          if (occurrence.seriesId === paycheck.id) occurrence.depositAccountId = paycheck.depositAccountId;
+        });
+      }
       autosaveState();
       render();
     });
@@ -9869,7 +9884,17 @@ function bindViewEvents() {
       const index = Number(input.dataset.paycheckAmount);
       const paycheck = state.paychecks[index];
       if (!paycheck) return;
+      const previousAmount = paycheck.amount;
       paycheck.amount = Number(input.value || 0);
+      // Already-materialized occurrences snapshot amount at generation time,
+      // so editing the template here wouldn't otherwise reach pay dates that
+      // already exist (e.g. this month's, or next year's if generated ahead
+      // of time) - only propagate to rows still matching the old template
+      // amount, so a payday someone already hand-edited to a one-off amount
+      // (a bonus week, overtime, etc.) isn't silently overwritten.
+      (state.paycheckOccurrences || []).forEach((occurrence) => {
+        if (occurrence.seriesId === paycheck.id && occurrence.amount === previousAmount) occurrence.amount = paycheck.amount;
+      });
       state.budget.income = budgetIncomeFromPaychecks();
       const splitEl = document.querySelector(`[data-paycheck-split="${index}"]`);
       if (splitEl) {
