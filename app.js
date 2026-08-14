@@ -1065,6 +1065,29 @@ function accountName(accountId) {
   return state.accounts.find((account) => account.id === accountId)?.name || "";
 }
 
+// transaction.amount is stored with one fixed internal convention everywhere
+// (positive = expense, negative = money in) regardless of account type - CSV
+// parsing, refund matching, accountBalance, and budget math all rely on that
+// consistently. Display-only: a checking/savings account should read like a
+// real bank statement (deposit +, expense -), so the stored sign is flipped
+// just for what's shown/edited in that row. A credit card purchase already
+// intuitively reads as "+" (it increases what's owed), so it's left as-is;
+// same for a transaction with no linked account, since there's nothing to
+// key the flip off of.
+function displayTransactionAmount(transaction) {
+  const account = state.accounts.find((item) => item.id === transaction.accountId);
+  const flip = account && account.type !== "credit_card";
+  return flip ? -Number(transaction.amount || 0) : Number(transaction.amount || 0);
+}
+
+// Inverse of displayTransactionAmount - converts a value the user just typed
+// into a flipped-display amount field back into the stored convention.
+function storedTransactionAmount(displayValue, accountId) {
+  const account = state.accounts.find((item) => item.id === accountId);
+  const flip = account && account.type !== "credit_card";
+  return flip ? -Number(displayValue || 0) : Number(displayValue || 0);
+}
+
 // Everything referencing this account by id: real transactions, recurring
 // bills, and paycheck deposits. Used to decide whether a rename/delete needs
 // confirmation at all, and what to show in that confirmation.
@@ -2384,11 +2407,18 @@ function ledgerEntryRow(transaction, index, transferMatch) {
   // alphabetically, indistinguishable from a real choice.
   const isSplit = transaction.splits?.length > 0;
   const lineOptions = (transaction.lineId ? "" : `<option value="" disabled selected>Choose a subcategory…</option>`) + allLines().map((line) => `<option value="${line.id}" ${line.id === transaction.lineId ? "selected" : ""}>${line.category} - ${line.name}</option>`).join("");
+  const displayAmount = displayTransactionAmount(transaction);
+  // Color reflects real-world direction of money (stored transaction.amount:
+  // positive is always an expense, negative always money back, regardless of
+  // account type) - NOT the sign actually shown, which displayTransactionAmount
+  // flips for a checking account. A credit card purchase displays "+" (an
+  // unflipped charge) but is still spending, so it must stay red like a
+  // checking expense's "-" does, not green just because the digit is positive.
   return `
     <div class="ledger-entry-row ${state.accounts.length ? "has-accounts" : ""}">
       <input type="checkbox" aria-label="Select ${escapeHtml(transaction.payee)} for bulk categorize" data-ledger-entry-select="${index}" ${ledgerSelectedIndices.has(index) ? "checked" : ""}>
       <input class="line-name-input" aria-label="Payee" data-ledger-entry-payee="${index}" value="${escapeHtml(transaction.payee)}">
-      <input class="money-input" aria-label="Amount" type="number" step="0.01" data-ledger-entry-amount="${index}" value="${transaction.amount}">
+      <input class="money-input ${Number(transaction.amount || 0) < 0 ? "amount-in" : "amount-out"}" aria-label="Amount" type="number" step="0.01" data-ledger-entry-amount="${index}" value="${displayAmount}">
       <input aria-label="Date" type="date" data-ledger-entry-date="${index}" value="${transaction.date}">
       ${isSplit
         ? `<button type="button" class="split-transaction-badge" data-split-transaction-edit="${index}">✂ Split (${transaction.splits.length})</button>`
@@ -2696,7 +2726,7 @@ function renderTransactions() {
               ${transaction.transferMatch ? `<span class="pill pill-info" title="Matches ${escapeHtml(accountName(transaction.transferMatch.accountId))}'s ${exactMoney.format(Math.abs(transaction.transferMatch.amount))} on ${formatShortDate(transaction.transferMatch.date)}">Possible transfer</span>` : ""}
               <label class="row-field row-payee"><small>Payee</small><input data-bank-stream-payee="${transaction.id}" value="${escapeHtml(transaction.payee)}"></label>
               <label class="row-field row-date"><small>Date</small><input type="date" data-bank-stream-date="${transaction.id}" value="${transaction.date}"></label>
-              <label class="row-field row-amount"><small>Amount</small><input class="money-input" type="number" step="0.01" data-bank-stream-amount="${transaction.id}" value="${transaction.amount}"></label>
+              <label class="row-field row-amount"><small>Amount</small><input class="money-input ${Number(transaction.amount || 0) < 0 ? "amount-in" : "amount-out"}" type="number" step="0.01" data-bank-stream-amount="${transaction.id}" value="${displayTransactionAmount(transaction)}"></label>
               <label class="row-field row-select"><small>Subcategory</small><select data-bank-stream-line="${transaction.id}">${lineOptions(transaction.lineId)}</select></label>
               ${!transaction.lineId ? `<button class="icon-button" data-ai-suggest-line="${transaction.id}" type="button" aria-label="Suggest a subcategory with AI for ${escapeHtml(transaction.payee)}" title="No history match for this payee - ask AI to suggest a subcategory">✨</button>` : ""}
               ${transaction.lineId ? `<button class="icon-button ${transaction.categorizationRuleLineId === transaction.lineId ? "active" : ""}" data-toggle-categorization-rule="${transaction.id}" type="button" aria-label="${transaction.categorizationRuleLineId === transaction.lineId ? "Remove" : "Set"} always-categorize rule for ${escapeHtml(transaction.payee)}" title="${transaction.categorizationRuleLineId === transaction.lineId ? "Always categorizing this payee this way - click to remove the rule" : "Always categorize this payee this way"}">🔒</button>` : ""}
@@ -9330,9 +9360,10 @@ function bindViewEvents() {
   document.querySelectorAll("[data-bank-stream-amount]").forEach((input) => {
     input.addEventListener("input", () => {
       const draft = (state.transactionInboxDrafts || []).find((item) => item.id === input.dataset.bankStreamAmount);
-      if (draft) draft.amount = Number(input.value || 0);
+      if (draft) draft.amount = storedTransactionAmount(input.value, draft.accountId);
       autosaveState();
     });
+    input.addEventListener("change", () => render());
   });
 
   document.querySelectorAll("[data-bank-stream-line]").forEach((select) => {
@@ -9450,6 +9481,9 @@ function bindViewEvents() {
       draft.accountHistoryMatch = false;
       transactionValidationFeedback = "";
       autosaveState();
+      // Re-render so the Amount field's sign flip (checking vs. credit card,
+      // see displayTransactionAmount) reflects the newly-linked account.
+      render();
     });
   });
 
@@ -9496,9 +9530,10 @@ function bindViewEvents() {
   document.querySelectorAll("[data-ledger-entry-amount]").forEach((input) => {
     input.addEventListener("input", () => {
       const transaction = state.transactions[Number(input.dataset.ledgerEntryAmount)];
-      if (transaction) transaction.amount = Number(input.value || 0);
+      if (transaction) transaction.amount = storedTransactionAmount(input.value, transaction.accountId);
       autosaveState();
     });
+    input.addEventListener("change", () => render());
   });
 
   document.querySelectorAll("[data-ledger-entry-date]").forEach((input) => {
