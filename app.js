@@ -4839,7 +4839,7 @@ function wireFriendRow(container, index, rows) {
     const query = nameInput.value.trim().toLowerCase();
     const matches = query ? state.friends.filter((friend) => friend.name.toLowerCase().includes(query)) : state.friends;
     menu.innerHTML = matches.length
-      ? matches.map((friend) => `<button type="button" data-friend-option="${friend.id}">${escapeHtml(friend.name)} · ${escapeHtml(friend.email)}</button>`).join("")
+      ? matches.map((friend) => `<button type="button" data-friend-option="${friend.id}">${escapeHtml(friend.name)}${friend.email ? ` · ${escapeHtml(friend.email)}` : ""}</button>`).join("")
       : `<div class="combo-empty">No matching friend yet - add an email below to invite someone new.</div>`;
   }
 
