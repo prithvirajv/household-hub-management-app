@@ -7458,24 +7458,66 @@ function lightenHex(hex, amount) {
 
 // Splits [y0,y1] across `items` proportional to valueOf(item)/totalValue.
 // Returns each item's span on both a continuous "source" side (y0L/y1L -
-// no gaps, so it reads as one uninterrupted node being divided) and a
-// gapped "destination" side (y0R/y1R - each item visually separated) that
-// still sums back to exactly [y0,y1]. Stage 1 (Income -> Category) and
-// stage 2 (Category -> Subcategory, run once per category within its own
-// [y0R,y1R] from stage 1) both use this, just against a different range
-// and total each time.
-function sankeyStageLayout(items, valueOf, y0, y1, gap, totalValue) {
+// no gaps, so it reads as one uninterrupted node being divided, purely
+// proportional to its true value share) and a gapped "destination" side
+// (y0R/y1R - each item visually separated) that still sums back to exactly
+// [y0,y1]. Stage 1 (Income -> Category) and stage 2 (Category ->
+// Subcategory, run once per category within its own [y0R,y1R] from stage
+// 1) both use this, just against a different range and total each time.
+//
+// minHeight (a single number applied to every item, or an array of
+// per-item minimums) guarantees the destination side never renders an
+// illegibly thin band: items that would fall under their minimum by pure
+// proportion get clamped to it, and the space/value taken from them is
+// redistributed proportionally among the remaining items, repeating until
+// nothing left is under its minimum ("water-filling"). This only works if
+// the caller sized [y0,y1] to actually fit every minimum in the first
+// place (see categoryRequiredHeights in cashFlowSankeySvg) - otherwise the
+// clamped items would still eat into what's left and the remainder could
+// go negative. The source side is deliberately left unadjusted so it still
+// reads as the ribbon's true incoming proportion, even as its destination
+// end is visually expanded or compressed for legibility.
+function sankeyStageLayout(items, valueOf, y0, y1, gap, totalValue, minHeight = 0) {
   const span = y1 - y0;
-  const usableSpan = Math.max(1, span - Math.max(0, items.length - 1) * gap);
+  const n = items.length;
+  const usableSpan = Math.max(1, span - Math.max(0, n - 1) * gap);
   const total = totalValue > 0 ? totalValue : 1;
+  const minHeightOf = (index) => (Array.isArray(minHeight) ? minHeight[index] || 0 : minHeight);
+
+  const destHeights = new Array(n).fill(0);
+  let pending = items.map((_, index) => index);
+  let freeSpan = usableSpan;
+  let freeValue = items.reduce((sum, item) => sum + valueOf(item), 0) || 1;
+  let changed = true;
+  while (changed && pending.length) {
+    changed = false;
+    const stillPending = [];
+    for (const index of pending) {
+      const min = minHeightOf(index);
+      const proposed = (valueOf(items[index]) / freeValue) * freeSpan;
+      if (min > 0 && proposed < min) {
+        destHeights[index] = min;
+        freeSpan -= min;
+        freeValue -= valueOf(items[index]);
+        changed = true;
+      } else {
+        stillPending.push(index);
+      }
+    }
+    pending = stillPending;
+  }
+  for (const index of pending) {
+    destHeights[index] = (valueOf(items[index]) / freeValue) * freeSpan;
+  }
+
   let sourceCursor = y0;
   let destCursor = y0;
-  return items.map((item) => {
+  return items.map((item, index) => {
     const share = valueOf(item) / total;
     const y0L = sourceCursor;
     const y1L = sourceCursor + share * span;
     const y0R = destCursor;
-    const y1R = destCursor + share * usableSpan;
+    const y1R = destCursor + destHeights[index];
     sourceCursor = y1L;
     destCursor = y1R + gap;
     return { item, y0L, y1L, y0R, y1R };
@@ -7497,12 +7539,30 @@ function cashFlowSankeySvg(segments, totalIncome) {
   const gap = 6;
   const leafGap = 3;
   const minBandLabelHeight = 9;
-  const height = segments.length ? padding * 2 + segments.length * rowHeight + (segments.length - 1) * gap : padding * 2 + rowHeight;
+  const categoryMinHeight = 26;
+  const leafMinHeight = 16;
   const nodeWidth = 14;
   const incomeX = padding;
   const categoryX = 230;
   const subcategoryX = 480;
-  const stage1 = sankeyStageLayout(segments, (segment) => segment.value, padding, height - padding, gap, totalIncome);
+  // A category needs enough guaranteed room not just for its own label,
+  // but for every one of its subcategories to each hit their own minimum
+  // too - a category with many subcategories needs more than one with a
+  // single (possibly larger) one, even at the same total dollar value.
+  // The chart's height then grows past the plain count-based default
+  // whenever these minimums actually need more room than a proportional
+  // layout would naturally give the smallest categories (e.g. Savings
+  // dominating a period), so nothing wedges below unreadable.
+  const categoryRequiredHeights = segments.map((segment) => {
+    const leavesMin = segment.children.length
+      ? segment.children.length * leafMinHeight + Math.max(0, segment.children.length - 1) * leafGap
+      : 0;
+    return Math.max(categoryMinHeight, leavesMin);
+  });
+  const requiredSpan = categoryRequiredHeights.reduce((sum, min) => sum + min, 0) + Math.max(0, segments.length - 1) * gap;
+  const naturalHeight = segments.length ? padding * 2 + segments.length * rowHeight + (segments.length - 1) * gap : padding * 2 + rowHeight;
+  const height = Math.max(naturalHeight, requiredSpan + padding * 2);
+  const stage1 = sankeyStageLayout(segments, (segment) => segment.value, padding, height - padding, gap, totalIncome, categoryRequiredHeights);
   const midX1 = (incomeX + nodeWidth + categoryX) / 2;
   const midX2 = (categoryX + nodeWidth + subcategoryX) / 2;
   const categoryPct = (segment) => (totalIncome > 0 ? Math.round((segment.value / totalIncome) * 100) : 0);
@@ -7518,7 +7578,7 @@ function cashFlowSankeySvg(segments, totalIncome) {
       ${stage1.map(({ item: segment, y0R, y1R }) => {
         const key = segment.lineIds.length ? segment.lineIds.join(",") : "";
         const clickAttrs = key ? ` data-sankey-lines="${escapeHtml(key)}" tabindex="0" role="button" aria-label="${escapeHtml(segment.label)} transactions"` : "";
-        const leaves = segment.children.length ? sankeyStageLayout(segment.children, (leaf) => leaf.value, y0R, y1R, leafGap, segment.value) : [];
+        const leaves = segment.children.length ? sankeyStageLayout(segment.children, (leaf) => leaf.value, y0R, y1R, leafGap, segment.value, leafMinHeight) : [];
         const showCategoryLabel = y1R - y0R >= minBandLabelHeight;
         return `<rect x="${categoryX}" y="${y0R.toFixed(1)}" width="${nodeWidth}" height="${Math.max(0, y1R - y0R).toFixed(1)}" class="cashflow-sankey-node${key ? " cashflow-sankey-clickable" : ""}" style="fill:${segment.color}" title="${escapeHtml(segment.label)}: ${money.format(segment.value)}"${clickAttrs}></rect>
         ${showCategoryLabel ? `<text x="${categoryX + nodeWidth + 8}" y="${((y0R + y1R) / 2 + 4).toFixed(1)}" class="cashflow-sankey-label cashflow-sankey-label-category${key ? " cashflow-sankey-clickable" : ""}"${clickAttrs}>${escapeHtml(segment.label)} · ${money.format(segment.value)} (${categoryPct(segment)}%)</text>` : ""}
