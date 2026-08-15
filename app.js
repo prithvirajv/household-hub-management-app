@@ -13350,12 +13350,14 @@ function renderIouSplitRows() {
   ` + iouSplitRows.map((row, index) => `
     <div class="iou-split-row">
       ${friendRowFieldsHtml(index, row)}
-      ${assignIouSplitType === "percentage"
-        ? `<input type="number" step="0.01" min="0" max="100" placeholder="%" value="${row.percent || ""}" data-iou-split-percent="${index}">`
-        : assignIouSplitType === "shares"
-          ? `<input type="number" step="1" min="0" placeholder="Parts" value="${row.shares || ""}" data-iou-split-shares="${index}">`
-          : `<input type="number" step="0.01" min="0.01" placeholder="Amount" value="${row.amount || ""}" data-iou-split-amount="${index}" ${assignIouSplitType === "equal" ? "readonly" : ""}>`}
-      <button type="button" class="icon-button ghost" data-remove-iou-split-row="${index}" aria-label="Remove person">×</button>
+      <div class="compact-row-line">
+        ${assignIouSplitType === "percentage"
+          ? `<input type="number" step="0.01" min="0" max="100" placeholder="%" value="${row.percent || ""}" data-iou-split-percent="${index}">`
+          : assignIouSplitType === "shares"
+            ? `<input type="number" step="1" min="0" placeholder="Parts" value="${row.shares || ""}" data-iou-split-shares="${index}">`
+            : `<input type="number" step="0.01" min="0.01" placeholder="Amount" value="${row.amount || ""}" data-iou-split-amount="${index}" ${assignIouSplitType === "equal" ? "readonly" : ""}>`}
+        <button type="button" class="icon-button ghost" data-remove-iou-split-row="${index}" aria-label="Remove person">×</button>
+      </div>
     </div>
   `).join("");
   iouSplitRows.forEach((row, index) => wireFriendRow(container, index, iouSplitRows));
