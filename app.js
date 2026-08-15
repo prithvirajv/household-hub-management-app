@@ -4973,6 +4973,7 @@ function iouRow(iou) {
         ${iou.receiptDocumentId
           ? `<button class="icon-button" data-documents-open-file="${iou.receiptDocumentId}" type="button" aria-label="View receipt for ${escapeHtml(iou.person)}" title="View receipt">📎</button>`
           : `<label class="icon-button iou-receipt-upload" title="Attach a receipt photo" aria-label="Attach a receipt photo for ${escapeHtml(iou.person)}">📷<input type="file" accept="image/*,application/pdf" data-iou-receipt-upload="${iou.id}" hidden></label>`}
+        <button class="icon-button" data-flip-iou-direction="${iou.id}" type="button" aria-label="Flip who owes whom for ${escapeHtml(iou.person)}" title="Flip who owes whom">⇄</button>
         ${iou.settled ? "" : `<button class="icon-button" data-settle-iou="${iou.id}" type="button" aria-label="Mark settled with ${escapeHtml(iou.person)}">✓</button>`}
         <button class="icon-button danger-button" data-delete-iou="${iou.id}" type="button" aria-label="Delete IOU with ${escapeHtml(iou.person)}">×</button>
       </div>
@@ -11832,6 +11833,17 @@ function bindViewEvents() {
     });
   });
 
+  document.querySelectorAll("[data-flip-iou-direction]").forEach((button) => {
+    button.addEventListener("click", () => {
+      const iou = state.ious.find((item) => item.id === button.dataset.flipIouDirection);
+      if (!iou) return;
+      iou.direction = iou.direction === "i_owe" ? "owed_to_me" : "i_owe";
+      autosaveState();
+      render();
+      showToast(iou.direction === "i_owe" ? `Now shows: you owe ${iou.person} ${exactMoney.format(iou.amount)}.` : `Now shows: ${iou.person} owes you ${exactMoney.format(iou.amount)}.`, { type: "success" });
+    });
+  });
+
   document.querySelectorAll("[data-settle-iou]").forEach((button) => {
     button.addEventListener("click", () => {
       const iou = state.ious.find((item) => item.id === button.dataset.settleIou);
@@ -13416,6 +13428,21 @@ function resolveIouSource(source) {
   return transactionInboxItems().find((item) => item.id === source.id) || null;
 }
 
+// The dialog's default assumes you paid for something and friends owe you
+// their share - correct for an expense (positive stored amount), but
+// backwards for a deposit (negative stored amount, e.g. a friend Zelling
+// you their share of something, or lending you money outright): there,
+// the far more common case is that the money coming in is a debt you now
+// owe back, not one owed to you. Direction is still a plain dropdown the
+// user can flip either way - this only sets a sensible starting guess.
+function updateAssignIouDirectionHint() {
+  const owedToMe = $("#assignIouDirection")?.value !== "i_owe";
+  const hint = $("#assignIouDirectionHint");
+  if (hint) hint.textContent = owedToMe
+    ? "Only your remaining share is accepted as your own expense - everyone else's share becomes a separate amount they owe you."
+    : "Only your remaining share is accepted as your own expense - everyone else's share becomes a separate amount you owe them.";
+}
+
 function openAssignIouDialog(source) {
   const record = resolveIouSource(source);
   if (!record) return;
@@ -13427,6 +13454,8 @@ function openAssignIouDialog(source) {
   form.reason.value = record.payee || "";
   form.date.value = record.date || dateKey(new Date());
   $("#assignIouSplitType").value = "exact";
+  $("#assignIouDirection").value = Number(record.amount) < 0 ? "i_owe" : "owed_to_me";
+  updateAssignIouDirectionHint();
   $("#assignIouTotal").textContent = exactMoney.format(assignIouDraftTotal);
   // Default to an even 2-way split (you + one friend), like Splitwise's
   // default - the user can edit the amount or add more people from here.
@@ -13444,6 +13473,7 @@ function openAssignIouDialog(source) {
 
 $("#closeAssignIouDialogButton").addEventListener("click", () => $("#assignIouDialog").close());
 $("#cancelAssignIouButton").addEventListener("click", () => $("#assignIouDialog").close());
+$("#assignIouDirection").addEventListener("change", updateAssignIouDirectionHint);
 $("#assignIouSplitType").addEventListener("change", (event) => {
   assignIouSplitType = event.currentTarget.value;
   renderIouSplitRows();
@@ -13529,12 +13559,13 @@ $("#assignIouForm").addEventListener("submit", async (event) => {
   }
 
   state.ious ||= [];
+  const direction = data.direction === "i_owe" ? "i_owe" : "owed_to_me";
   splits.forEach((split) => {
     state.ious.push({
       id: uniqueId("iou"),
       person: split.person,
       amount: split.amount,
-      direction: "owed_to_me",
+      direction,
       reason: String(data.reason || "").trim(),
       date: data.date || record.date,
       accountId: recordAccountId,
