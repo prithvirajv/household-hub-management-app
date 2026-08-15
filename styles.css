@@ -3066,6 +3066,53 @@ button.ghost-accent {
   border-radius: 50%;
 }
 
+/* Groups the flat Accounts list into collapsible sections by type (Checking,
+   Savings, Cash, Other, Credit cards) - each account-item inside keeps its
+   own drag-to-reorder wiring unchanged, this only adds the wrapping
+   <details>/<summary> and a per-group subtotal. */
+.account-type-group + .account-type-group {
+  margin-top: 0.9rem;
+}
+
+.account-type-group summary {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  cursor: pointer;
+  font-weight: 800;
+  padding: 0.3rem 0.1rem;
+}
+
+.account-type-group summary small {
+  flex: 1;
+  font-weight: 600;
+}
+
+.account-type-group .account-item {
+  margin-top: 0.6rem;
+}
+
+.account-sparkline {
+  width: 90px;
+  height: 28px;
+  flex-shrink: 0;
+}
+
+.account-sparkline polyline {
+  fill: none;
+  stroke-width: 1.5;
+  stroke-linejoin: round;
+  stroke-linecap: round;
+}
+
+.account-sparkline-up polyline {
+  stroke: var(--green);
+}
+
+.account-sparkline-down polyline {
+  stroke: var(--coral);
+}
+
 .paycheck-card-header {
   display: flex;
   align-items: center;
@@ -3785,48 +3832,58 @@ button.ghost-accent {
   align-items: flex-end;
 }
 
-/* Cash flow breakdown - a single stacked bar (each category a proportional-
-   width segment) + wrapped legend, replacing the earlier Sankey ribbon
-   diagram. Segment colors come from the selected Reports color theme. */
-.cashflow-breakdown-bar {
-  display: flex;
-  height: 34px;
-  border-radius: 8px;
-  overflow: hidden;
+/* Cash flow breakdown - a two-stage ribbon Sankey (Income -> Category ->
+   Subcategory). width/height attributes (not just viewBox) define the
+   intrinsic aspect ratio; height:auto lets the browser scale it uniformly
+   with no text distortion, unlike the line chart above which uses a fixed
+   CSS height + preserveAspectRatio="none" since it draws no text of its
+   own. Category colors come from the selected Reports color theme;
+   subcategory ribbons/nodes are that same color lightened, so the two
+   stages read as one family. */
+.cashflow-sankey-svg {
+  width: 100%;
+  height: auto;
+  display: block;
 }
 
-.cashflow-breakdown-segment {
-  transition: width 0.7s ease, filter 0.15s ease;
+.cashflow-sankey-node {
+  fill: var(--navy);
 }
 
-.cashflow-breakdown-clickable {
+.cashflow-sankey-ribbon {
+  opacity: 0.35;
+  transition: opacity 0.15s ease;
+}
+
+.cashflow-sankey-ribbon-leaf {
+  opacity: 0.3;
+}
+
+.cashflow-sankey-clickable {
   cursor: pointer;
 }
 
-.cashflow-breakdown-clickable:hover {
-  filter: brightness(1.1);
+.cashflow-sankey-clickable:hover {
+  opacity: 0.55;
 }
 
-.cashflow-breakdown-legend {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.7rem 1.1rem;
-  margin-top: 0.9rem;
-}
-
-.cashflow-breakdown-legend-item {
-  display: flex;
-  align-items: center;
-  gap: 0.4rem;
-  font-size: 0.78rem;
+.cashflow-sankey-label {
+  fill: var(--text);
+  font-size: 11px;
   font-weight: 700;
+  dominant-baseline: middle;
 }
 
-.cashflow-breakdown-legend-item i {
-  width: 9px;
-  height: 9px;
-  border-radius: 2px;
-  flex-shrink: 0;
+.cashflow-sankey-label-category {
+  font-size: 10px;
+}
+
+.cashflow-sankey-label-income {
+  fill: var(--muted);
+  font-size: 10px;
+  font-weight: 900;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
 }
 
 /* Reports toolbar: segmented pill controls (scope, density, category style)
@@ -8623,7 +8680,8 @@ html[data-theme="dark"] .note-color-coral { background: color-mix(in srgb, #fff0
   .tag-transaction-list,
   .documents-file-info-panel,
   .networth-chart-line,
-  .cashflow-breakdown-segment,
+  .cashflow-sankey-ribbon,
+  .cashflow-sankey-clickable,
   .report-category-ring-dial {
     animation: none;
     transition: none;

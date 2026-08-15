@@ -1065,6 +1065,66 @@ function accountName(accountId) {
   return state.accounts.find((account) => account.id === accountId)?.name || "";
 }
 
+// Same reconstruction accountBalance() already does for the big net worth
+// trend chart (computeNetWorthTrend calls it per month too), just scoped to
+// one account instead of the whole household - each point is that
+// account's real balance as of that month's end, not a separately stored
+// series.
+function accountBalanceTrend(accountId, monthKeys) {
+  const context = {
+    accounts: state.accounts,
+    transactions: state.transactions,
+    paychecks: state.paychecks,
+    paycheckOccurrences: state.paycheckOccurrences,
+    transfers: state.transfers,
+    ious: state.ious || []
+  };
+  return monthKeys.map((monthKey) => accountBalance(accountId, context, monthEndDateKey(monthKey)));
+}
+
+// A small inline trend line next to each account row (no axis, no dots) -
+// deliberately much simpler than netWorthTrendSvg's full chart, matching
+// how compact per-row sparklines read elsewhere (e.g. a stock ticker list).
+// Flat/single-point trends (a brand-new account, or one where every month
+// reconstructs to the same balance) render nothing rather than a
+// meaningless dot or a flat line with no story to tell.
+function accountSparklineSvg(values) {
+  if (values.length < 2 || values.every((value) => value === values[0])) return "";
+  const width = 90;
+  const height = 28;
+  const padding = 2;
+  const max = Math.max(...values);
+  const min = Math.min(...values);
+  const range = max - min || 1;
+  const stepX = (width - padding * 2) / (values.length - 1);
+  const points = values.map((value, index) => {
+    const x = padding + stepX * index;
+    const y = height - padding - ((value - min) / range) * (height - padding * 2);
+    return `${x.toFixed(1)},${y.toFixed(1)}`;
+  }).join(" ");
+  const trendUp = values[values.length - 1] >= values[0];
+  return `<svg viewBox="0 0 ${width} ${height}" class="account-sparkline ${trendUp ? "account-sparkline-up" : "account-sparkline-down"}" role="img" aria-label="${trendUp ? "Balance trending up" : "Balance trending down"} over the last ${values.length} months"><polyline points="${points}"></polyline></svg>`;
+}
+
+// Fixed, sensible display order (assets first, liabilities last) rather
+// than alphabetical - matches how Monarch-style account lists group
+// checking/savings/cash before credit cards. Groups with no accounts are
+// simply omitted, so a household with only checking+credit card sees just
+// those two sections.
+const ACCOUNT_TYPE_GROUPS = [
+  { type: "checking", label: "Checking" },
+  { type: "savings", label: "Savings" },
+  { type: "cash", label: "Cash" },
+  { type: "other", label: "Other" },
+  { type: "credit_card", label: "Credit cards" }
+];
+
+function groupAccountsByType(accounts) {
+  return ACCOUNT_TYPE_GROUPS
+    .map((group) => ({ ...group, accounts: accounts.filter((account) => account.type === group.type) }))
+    .filter((group) => group.accounts.length);
+}
+
 // transaction.amount is stored with one fixed internal convention everywhere
 // (positive = expense, negative = money in) regardless of account type - CSV
 // parsing, refund matching, accountBalance, and budget math all rely on that
@@ -5451,7 +5511,20 @@ function renderWealth() {
         </section>` : ""}
         <section class="card">
           <div class="section-head"><div><span class="card-label">Cash flow</span><h3>Accounts</h3></div><button id="addAccountButton" type="button">+ Add account</button></div>
-          ${state.accounts.length ? state.accounts.map((account, index) => accountItemRow(account, index)).join("") : `<div class="onboarding-empty compact-onboarding"><div class="empty-symbol" aria-hidden="true">▥</div><h3>Add your first account</h3><p>Track a checking account your paycheck deposits into, and a credit card whose purchases it pays off.</p></div>`}
+          ${state.accounts.length
+            ? groupAccountsByType(state.accounts).map((group) => {
+                const isLiabilityGroup = group.type === "credit_card";
+                const groupTotal = group.accounts.reduce((sum, account) => sum + currentAccountBalance(account.id), 0);
+                return `<details class="account-type-group" open>
+                  <summary>
+                    <span>${group.label}</span>
+                    <small class="muted">${group.accounts.length} account${group.accounts.length === 1 ? "" : "s"}</small>
+                    <b class="${isLiabilityGroup && groupTotal > 0 ? "danger" : ""}">${money.format(groupTotal)}</b>
+                  </summary>
+                  ${group.accounts.map((account) => accountItemRow(account, state.accounts.indexOf(account))).join("")}
+                </details>`;
+              }).join("")
+            : `<div class="onboarding-empty compact-onboarding"><div class="empty-symbol" aria-hidden="true">▥</div><h3>Add your first account</h3><p>Track a checking account your paycheck deposits into, and a credit card whose purchases it pays off.</p></div>`}
         </section>
         <section class="card">
           <div class="section-head"><div><span class="card-label">Cash flow</span><h3>Transfers</h3></div></div>
@@ -5534,6 +5607,10 @@ function accountItemRow(account, index) {
   const balance = currentAccountBalance(account.id);
   const isLiability = account.type === "credit_card";
   const typeLabels = { checking: "Checking", savings: "Savings", cash: "Cash", credit_card: "Credit card", other: "Other" };
+  // Closed accounts stop accruing new history worth trending, and a
+  // just-added account has no past months behind it yet - both skip the
+  // sparkline computation rather than rendering a flat/misleading line.
+  const sparkline = account.closedAt ? "" : accountSparklineSvg(accountBalanceTrend(account.id, trailingMonthKeys(6)));
   return `<article class="account-item ${isLiability ? "liability" : ""}" draggable="true" data-drag-account="${account.id}">
     <div class="debt-edit-grid">
       <label class="debt-name-field">Account name<input data-account-name="${index}" value="${escapeHtml(account.name)}" aria-label="Account name"></label>
@@ -5545,6 +5622,7 @@ function accountItemRow(account, index) {
       <span class="account-drag-handle" aria-hidden="true" title="Drag to reorder">⠿</span>
       <i class="account-type-dot" style="background:${accountTypeColors[account.type] || accountTypeColors.other}" title="${typeLabels[account.type] || account.type}"></i>
       <div class="split-stat"><span>${isLiability ? "Owed" : "Balance"}</span><b class="${isLiability && balance > 0 ? "danger" : ""}">${money.format(balance)}</b></div>
+      ${sparkline}
       ${account.closedAt ? `<span class="pill pill-warning" title="No new transactions can be added after ${formatShortDate(account.closedAt)}">Closed ${formatShortDate(account.closedAt)}</span>` : ""}
       <button class="icon-button danger-button" data-delete-account="${index}" type="button" aria-label="Remove ${escapeHtml(account.name)}">×</button>
     </div>
@@ -5738,7 +5816,7 @@ function renderReports() {
   const rangeTransactions = state.transactions.filter((transaction) => (monthKeys.length ? monthKeys : trailingMonthKeys(6)).includes(transaction.date?.slice(0, 7)));
   const reportsTagGroups = groupTransactionsByTag(rangeTransactions).sort((a, b) => b.total - a.total);
   const selectedReportsTagGroup = reportsTagGroups.find((group) => group.key === reportsSelectedTag) || null;
-  const expandedSankeySegment = reportsExpandedSankeyLineKey ? sankeySegments.find((segment) => segment.lineIds.length && segment.lineIds.join(",") === reportsExpandedSankeyLineKey) || null : null;
+  const expandedSankeySegment = reportsExpandedSankeyLineKey ? resolveExpandedSankeySegment(sankeySegments, reportsExpandedSankeyLineKey) : null;
   const expandedSankeyTransactions = expandedSankeySegment ? rangeTransactions.filter((transaction) => transactionHasLine(transaction, expandedSankeySegment.lineIds)) : [];
   // reportsSelectedCategoryLine is "cat:<lineId>,<lineId>,..." (every
   // subcategory under that category, joined - categories have no id of their
@@ -5835,8 +5913,8 @@ function renderReports() {
         </section>` : ""}
         ${showCard("cashflowbreakdown") ? `<section class="card">
           <div class="section-head"><div><span class="card-label">Breakdown</span><h3>Cash flow breakdown</h3></div><span>${money.format(totalIncome)} income this period</span></div>
-          ${sankeySegments.length ? cashFlowBreakdownBar(sankeySegments, totalIncome) : `<div class="empty-inline">No income or spend in this period</div>`}
-          ${sankeySegments.some((segment) => segment.lineIds.length) ? `<small class="muted">Click a category band for its transactions.</small>` : ""}
+          ${sankeySegments.length ? cashFlowSankeySvg(sankeySegments, totalIncome) : `<div class="empty-inline">No income or spend in this period</div>`}
+          ${sankeySegments.some((segment) => segment.lineIds.length || segment.children.length) ? `<small class="muted">Click a category or subcategory band for its transactions.</small>` : ""}
           ${expandedSankeySegment ? `
             <div class="tag-summary-total"><span>${escapeHtml(expandedSankeySegment.label)} total</span><b>${money.format(expandedSankeySegment.value)}</b></div>
             <div class="tag-transaction-list">${expandedSankeyTransactions.length ? [...expandedSankeyTransactions].sort((a, b) => (b.date || "").localeCompare(a.date || "")).map((transaction) => `
@@ -7347,30 +7425,114 @@ function cashFlowChart(months) {
     <div class="cashflow-legend"><span class="cashflow-legend-income">Income</span><span class="cashflow-legend-expense">Expenses</span></div>`;
 }
 
-// Single stacked bar (each category as a proportional-width segment) + a
-// wrapped legend below - replaces the earlier two-column Sankey ribbon
-// diagram with a simpler read: hover any segment for its exact amount,
-// click one with real transactions behind it to drill down (same
-// data-sankey-lines click handler the Sankey version used, reused as-is).
-// Colors come from the caller's chosen Reports color theme, cycling
-// through its 5-color palette by index - not each category's own stored
-// .color, so switching Reports themes never touches Budget's colors.
-function cashFlowBreakdownBar(segments, totalIncome) {
+// A category-level Sankey key is that segment's comma-joined line ids
+// (set on the category's node/ribbon in cashFlowSankeySvg); a subcategory
+// key is a single lineId (its one line, no comma - never collides with a
+// category key since categories always join through at least one line and
+// commas only appear once there's more than one). Checking the category
+// level first keeps that lookup exactly as before; falling through to each
+// segment's children only when nothing matched there covers the new
+// subcategory-level clicks introduced by the two-level Sankey.
+function resolveExpandedSankeySegment(segments, key) {
+  const categoryMatch = segments.find((segment) => segment.lineIds.length && segment.lineIds.join(",") === key);
+  if (categoryMatch) return categoryMatch;
+  for (const segment of segments) {
+    const leaf = segment.children.find((child) => child.lineId === key);
+    if (leaf) return { label: leaf.label, value: leaf.value, lineIds: [leaf.lineId] };
+  }
+  return null;
+}
+
+// Blends a #rrggbb color toward white by `amount` (0-1) - used to tint a
+// category's subcategory ribbons/nodes a lighter shade of that category's
+// own color, so the two Sankey stages read as one family rather than an
+// unrelated second palette.
+function lightenHex(hex, amount) {
+  const value = parseInt(hex.replace("#", ""), 16);
+  const r = (value >> 16) & 255;
+  const g = (value >> 8) & 255;
+  const b = value & 255;
+  const blend = (channel) => Math.round(channel + (255 - channel) * amount);
+  return `rgb(${blend(r)}, ${blend(g)}, ${blend(b)})`;
+}
+
+// Splits [y0,y1] across `items` proportional to valueOf(item)/totalValue.
+// Returns each item's span on both a continuous "source" side (y0L/y1L -
+// no gaps, so it reads as one uninterrupted node being divided) and a
+// gapped "destination" side (y0R/y1R - each item visually separated) that
+// still sums back to exactly [y0,y1]. Stage 1 (Income -> Category) and
+// stage 2 (Category -> Subcategory, run once per category within its own
+// [y0R,y1R] from stage 1) both use this, just against a different range
+// and total each time.
+function sankeyStageLayout(items, valueOf, y0, y1, gap, totalValue) {
+  const span = y1 - y0;
+  const usableSpan = Math.max(1, span - Math.max(0, items.length - 1) * gap);
+  const total = totalValue > 0 ? totalValue : 1;
+  let sourceCursor = y0;
+  let destCursor = y0;
+  return items.map((item) => {
+    const share = valueOf(item) / total;
+    const y0L = sourceCursor;
+    const y1L = sourceCursor + share * span;
+    const y0R = destCursor;
+    const y1R = destCursor + share * usableSpan;
+    sourceCursor = y1L;
+    destCursor = y1R + gap;
+    return { item, y0L, y1L, y0R, y1R };
+  });
+}
+
+// Two-stage ribbon Sankey: Income -> Category -> Subcategory, restoring the
+// original two-column ribbon look (see git history for the single-stage
+// version this extends) with a second stage added per category. Subcategory
+// bands subdivide their own category's already-allocated [y0R,y1R] span
+// from stage 1 (not the full chart height), so every category's total
+// still reads as the sum of its own subcategory ribbons. A category with no
+// children (only Savings, which has no backing lines) simply stops at the
+// category column - no stage-2 ribbons for it.
+function cashFlowSankeySvg(segments, totalIncome) {
+  const width = 760;
+  const padding = 20;
+  const rowHeight = 34;
+  const gap = 6;
+  const leafGap = 3;
+  const minBandLabelHeight = 9;
+  const height = segments.length ? padding * 2 + segments.length * rowHeight + (segments.length - 1) * gap : padding * 2 + rowHeight;
+  const nodeWidth = 14;
+  const incomeX = padding;
+  const categoryX = 230;
+  const subcategoryX = 480;
+  const stage1 = sankeyStageLayout(segments, (segment) => segment.value, padding, height - padding, gap, totalIncome);
+  const midX1 = (incomeX + nodeWidth + categoryX) / 2;
+  const midX2 = (categoryX + nodeWidth + subcategoryX) / 2;
+  const categoryPct = (segment) => (totalIncome > 0 ? Math.round((segment.value / totalIncome) * 100) : 0);
   return `
-    <div class="cashflow-breakdown-bar">
-      ${segments.map((segment) => {
-        const pct = totalIncome > 0 ? (segment.value / totalIncome) * 100 : 0;
+    <svg viewBox="0 0 ${width} ${height}" width="${width}" height="${height}" class="cashflow-sankey-svg" role="img" aria-label="Cash flow breakdown">
+      <rect x="${incomeX}" y="${padding}" width="${nodeWidth}" height="${(height - padding * 2).toFixed(1)}" class="cashflow-sankey-node cashflow-sankey-node-income"></rect>
+      <text x="${incomeX}" y="${padding - 6}" class="cashflow-sankey-label cashflow-sankey-label-income">Income</text>
+      ${stage1.map(({ item: segment, y0L, y1L, y0R, y1R }) => {
         const key = segment.lineIds.length ? segment.lineIds.join(",") : "";
-        const clickable = key ? ` data-sankey-lines="${escapeHtml(key)}" tabindex="0" role="button" aria-label="${escapeHtml(segment.label)} transactions"` : "";
-        return `<div class="cashflow-breakdown-segment${key ? " cashflow-breakdown-clickable" : ""}" style="width:${pct.toFixed(2)}%; background:${segment.color}" title="${escapeHtml(segment.label)}: ${money.format(segment.value)}"${clickable}></div>`;
+        const clickAttrs = key ? ` data-sankey-lines="${escapeHtml(key)}" tabindex="0" role="button" aria-label="${escapeHtml(segment.label)} transactions"` : "";
+        return `<path d="M${(incomeX + nodeWidth).toFixed(1)},${y0L.toFixed(1)} C${midX1.toFixed(1)},${y0L.toFixed(1)} ${midX1.toFixed(1)},${y0R.toFixed(1)} ${categoryX.toFixed(1)},${y0R.toFixed(1)} L${categoryX.toFixed(1)},${y1R.toFixed(1)} C${midX1.toFixed(1)},${y1R.toFixed(1)} ${midX1.toFixed(1)},${y1L.toFixed(1)} ${(incomeX + nodeWidth).toFixed(1)},${y1L.toFixed(1)} Z" class="cashflow-sankey-ribbon${key ? " cashflow-sankey-clickable" : ""}" style="fill:${segment.color}" title="${escapeHtml(segment.label)}: ${money.format(segment.value)}"${clickAttrs}></path>`;
       }).join("")}
-    </div>
-    <div class="cashflow-breakdown-legend">
-      ${segments.map((segment) => {
-        const pct = totalIncome > 0 ? Math.round((segment.value / totalIncome) * 100) : 0;
-        return `<span class="cashflow-breakdown-legend-item"><i style="background:${segment.color}"></i>${escapeHtml(segment.label)} <b>${money.format(segment.value)}</b> <small class="muted">${pct}%</small></span>`;
+      ${stage1.map(({ item: segment, y0R, y1R }) => {
+        const key = segment.lineIds.length ? segment.lineIds.join(",") : "";
+        const clickAttrs = key ? ` data-sankey-lines="${escapeHtml(key)}" tabindex="0" role="button" aria-label="${escapeHtml(segment.label)} transactions"` : "";
+        const leaves = segment.children.length ? sankeyStageLayout(segment.children, (leaf) => leaf.value, y0R, y1R, leafGap, segment.value) : [];
+        const showCategoryLabel = y1R - y0R >= minBandLabelHeight;
+        return `<rect x="${categoryX}" y="${y0R.toFixed(1)}" width="${nodeWidth}" height="${Math.max(0, y1R - y0R).toFixed(1)}" class="cashflow-sankey-node${key ? " cashflow-sankey-clickable" : ""}" style="fill:${segment.color}" title="${escapeHtml(segment.label)}: ${money.format(segment.value)}"${clickAttrs}></rect>
+        ${showCategoryLabel ? `<text x="${categoryX + nodeWidth + 8}" y="${((y0R + y1R) / 2 + 4).toFixed(1)}" class="cashflow-sankey-label cashflow-sankey-label-category${key ? " cashflow-sankey-clickable" : ""}"${clickAttrs}>${escapeHtml(segment.label)} · ${money.format(segment.value)} (${categoryPct(segment)}%)</text>` : ""}
+        ${leaves.map(({ item: leaf, y0L: ly0L, y1L: ly1L, y0R: ly0R, y1R: ly1R }) => {
+          const leafColor = lightenHex(segment.color, 0.35);
+          const leafClickAttrs = ` data-sankey-lines="${escapeHtml(leaf.lineId)}" tabindex="0" role="button" aria-label="${escapeHtml(leaf.label)} transactions"`;
+          const leafPct = segment.value > 0 ? Math.round((leaf.value / segment.value) * categoryPct(segment)) : 0;
+          const showLabel = ly1R - ly0R >= minBandLabelHeight;
+          return `<path d="M${(categoryX + nodeWidth).toFixed(1)},${ly0L.toFixed(1)} C${midX2.toFixed(1)},${ly0L.toFixed(1)} ${midX2.toFixed(1)},${ly0R.toFixed(1)} ${subcategoryX.toFixed(1)},${ly0R.toFixed(1)} L${subcategoryX.toFixed(1)},${ly1R.toFixed(1)} C${midX2.toFixed(1)},${ly1R.toFixed(1)} ${midX2.toFixed(1)},${ly1L.toFixed(1)} ${(categoryX + nodeWidth).toFixed(1)},${ly1L.toFixed(1)} Z" class="cashflow-sankey-ribbon cashflow-sankey-ribbon-leaf cashflow-sankey-clickable" style="fill:${leafColor}" title="${escapeHtml(leaf.label)}: ${money.format(leaf.value)}"${leafClickAttrs}></path>
+          <rect x="${subcategoryX}" y="${ly0R.toFixed(1)}" width="${nodeWidth}" height="${Math.max(0, ly1R - ly0R).toFixed(1)}" class="cashflow-sankey-node cashflow-sankey-clickable" style="fill:${leafColor}" title="${escapeHtml(leaf.label)}: ${money.format(leaf.value)}"${leafClickAttrs}></rect>
+          ${showLabel ? `<text x="${subcategoryX + nodeWidth + 8}" y="${((ly0R + ly1R) / 2 + 4).toFixed(1)}" class="cashflow-sankey-label cashflow-sankey-clickable"${leafClickAttrs}>${escapeHtml(leaf.label)} · ${money.format(leaf.value)} (${leafPct}%)</text>` : ""}`;
+        }).join("")}`;
       }).join("")}
-    </div>`;
+    </svg>`;
 }
 
 // ---- Export-only chart renderers ----
@@ -12612,6 +12774,12 @@ document.addEventListener("click", (event) => {
 // no separate mutual-exclusion logic needed.
 document.addEventListener("click", (event) => {
   document.querySelectorAll("details[open]").forEach((details) => {
+    // account-type-group is a persistent collapsible section (Wealth's
+    // grouped Accounts list), not a transient popover - it should only
+    // open/close from its own summary, never snap shut just because some
+    // unrelated part of the page was clicked (including the very click
+    // that first rendered it open, which is "outside" it at this point).
+    if (details.classList.contains("account-type-group")) return;
     if (!details.contains(event.target)) details.removeAttribute("open");
   });
 });
@@ -13336,7 +13504,7 @@ function recomputeAssignIouSplits() {
       if (input) input.value = row.amount;
     });
   }
-  if (assignIouSplitType === "equal") {
+  if (isAssignIouAutoSplitType()) {
     assignIouYou.amount = result.payerAmount;
     const youInput = document.querySelector(`#assignIouSplitRows [data-iou-split-you-amount]`);
     if (youInput) youInput.value = result.payerAmount;
@@ -13347,13 +13515,20 @@ function recomputeAssignIouSplits() {
   }
 }
 
+// "equal" and the two direction-merged presets ("all_them"/"all_me") all
+// derive both the You field and every friend amount automatically - none
+// of them are hand-typed, so their inputs stay readonly the same way.
+function isAssignIouAutoSplitType() {
+  return assignIouSplitType === "equal" || assignIouSplitType === "all_them" || assignIouSplitType === "all_me";
+}
+
 function renderIouSplitRows() {
   const container = $("#assignIouSplitRows");
   const youField = assignIouSplitType === "percentage"
     ? `<input type="number" step="0.01" min="0" max="100" placeholder="%" value="${assignIouYou.percent || ""}" data-iou-split-you-percent>`
     : assignIouSplitType === "shares"
       ? `<input type="number" step="1" min="0" placeholder="Parts" value="${assignIouYou.shares || ""}" data-iou-split-you-shares>`
-      : `<input type="number" step="0.01" min="0" placeholder="Amount" value="${assignIouYou.amount || ""}" data-iou-split-you-amount ${assignIouSplitType === "equal" ? "readonly" : ""}>`;
+      : `<input type="number" step="0.01" min="0" placeholder="Amount" value="${assignIouYou.amount || ""}" data-iou-split-you-amount ${isAssignIouAutoSplitType() ? "readonly" : ""}>`;
   container.innerHTML = `
     <div class="iou-split-row iou-split-you-row">
       <div class="iou-split-you-label">You</div>
@@ -13367,7 +13542,7 @@ function renderIouSplitRows() {
           ? `<input type="number" step="0.01" min="0" max="100" placeholder="%" value="${row.percent || ""}" data-iou-split-percent="${index}">`
           : assignIouSplitType === "shares"
             ? `<input type="number" step="1" min="0" placeholder="Parts" value="${row.shares || ""}" data-iou-split-shares="${index}">`
-            : `<input type="number" step="0.01" min="0.01" placeholder="Amount" value="${row.amount || ""}" data-iou-split-amount="${index}" ${assignIouSplitType === "equal" ? "readonly" : ""}>`}
+            : `<input type="number" step="0.01" min="0.01" placeholder="Amount" value="${row.amount || ""}" data-iou-split-amount="${index}" ${isAssignIouAutoSplitType() ? "readonly" : ""}>`}
         <button type="button" class="icon-button ghost" data-remove-iou-split-row="${index}" aria-label="Remove person">×</button>
       </div>
     </div>
@@ -13443,6 +13618,23 @@ function updateAssignIouDirectionHint() {
     : "Only your remaining share is accepted as your own expense - everyone else's share becomes a separate amount you owe them.";
 }
 
+// The two quick-preset split types ("all_them"/"all_me") already say who
+// owes whom in their own label ("They owe everything" / "I owe
+// everything"), so asking again via the separate Direction dropdown would
+// be redundant and could even contradict it - this hides Direction and
+// drives its value from the chosen preset instead. Any other split type
+// (exact/equal/percentage/shares) is a real multi-way split where you might
+// keep a share too, so Direction still needs its own independent choice.
+function syncAssignIouDirectionForSplitType() {
+  const directionField = document.getElementById("assignIouDirectionField");
+  const isPreset = assignIouSplitType === "all_them" || assignIouSplitType === "all_me";
+  if (directionField) directionField.style.display = isPreset ? "none" : "";
+  if (isPreset) {
+    $("#assignIouDirection").value = assignIouSplitType === "all_me" ? "i_owe" : "owed_to_me";
+    updateAssignIouDirectionHint();
+  }
+}
+
 function openAssignIouDialog(source) {
   const record = resolveIouSource(source);
   if (!record) return;
@@ -13455,6 +13647,7 @@ function openAssignIouDialog(source) {
   form.date.value = record.date || dateKey(new Date());
   $("#assignIouSplitType").value = "exact";
   $("#assignIouDirection").value = Number(record.amount) < 0 ? "i_owe" : "owed_to_me";
+  syncAssignIouDirectionForSplitType();
   updateAssignIouDirectionHint();
   $("#assignIouTotal").textContent = exactMoney.format(assignIouDraftTotal);
   // Default to an even 2-way split (you + one friend), like Splitwise's
@@ -13476,6 +13669,7 @@ $("#cancelAssignIouButton").addEventListener("click", () => $("#assignIouDialog"
 $("#assignIouDirection").addEventListener("change", updateAssignIouDirectionHint);
 $("#assignIouSplitType").addEventListener("change", (event) => {
   assignIouSplitType = event.currentTarget.value;
+  syncAssignIouDirectionForSplitType();
   renderIouSplitRows();
 });
 $("#addIouSplitRowButton").addEventListener("click", () => {

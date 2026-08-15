@@ -7,7 +7,7 @@
     <title>FamilyLoop</title>
     <link rel="icon" type="image/svg+xml" href="/assets/favicon.svg">
     <link rel="apple-touch-icon" href="/assets/apple-touch-icon.png">
-    <link rel="stylesheet" href="/styles.css?v=20260813-2">
+    <link rel="stylesheet" href="/styles.css?v=20260815-2">
     <script>
       (function () {
         var saved = localStorage.getItem("familyloop-theme");
@@ -274,11 +274,13 @@
         <p class="muted" id="assignIouDirectionHint">Only your remaining share is accepted as your own expense - everyone else's share becomes a separate amount they owe you.</p>
         <form id="assignIouForm">
           <div class="iou-split-total"><span>Total bill</span><b id="assignIouTotal">$0.00</b></div>
-          <label>Direction<select id="assignIouDirection" name="direction">
+          <label id="assignIouDirectionField">Direction<select id="assignIouDirection" name="direction">
             <option value="owed_to_me">They owe me their share</option>
             <option value="i_owe">I owe them their share</option>
           </select></label>
           <label>Split type<select id="assignIouSplitType">
+            <option value="all_them">They owe everything</option>
+            <option value="all_me">I owe everything</option>
             <option value="exact">Exact amounts</option>
             <option value="equal">Equal</option>
             <option value="percentage">Percentage</option>
@@ -394,6 +396,6 @@
     <script src="https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/build/pdf.min.js"></script>
     <script>if (window.pdfjsLib) pdfjsLib.GlobalWorkerOptions.workerSrc = "https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/build/pdf.worker.min.js";</script>
     <script src="/lib/shared-logic.js?v=20260812-5"></script>
-    <script src="/app.js?v=20260815-1"></script>
+    <script src="/app.js?v=20260815-2"></script>
   </body>
 </html>

@@ -939,6 +939,18 @@ test("computeBillSplitAmounts (equal): payerAmount always reconciles to the cent
   assert.equal(Math.round(total * 100) / 100, 100);
 });
 
+test("computeBillSplitAmounts (all_them/all_me): the whole total splits evenly across friends only, payer always gets 0 regardless of yourShare", () => {
+  const singleFriend = computeBillSplitAmounts("all_them", 2000, [{}]);
+  assert.ok(singleFriend.ok);
+  assert.deepEqual(singleFriend.friendAmounts, [2000]);
+  assert.equal(singleFriend.payerAmount, 0);
+
+  const twoFriends = computeBillSplitAmounts("all_me", 100, [{}, {}], 999);
+  assert.ok(twoFriends.ok);
+  assert.equal(twoFriends.friendAmounts.reduce((sum, amount) => sum + amount, 0), 100);
+  assert.equal(twoFriends.payerAmount, 0);
+});
+
 test("computeBillSplitAmounts (percentage): friend percentages convert to dollar amounts, payer gets the rest", () => {
   const result = computeBillSplitAmounts("percentage", 100, [{ percent: 40 }, { percent: 30 }]);
   assert.ok(result.ok);
@@ -1983,4 +1995,26 @@ test("sankeyFlowSegments sorts categories by value descending, drops zero-spend 
   assert.equal(withSavings.find((segment) => segment.label === "Savings").value, 1500);
   const noSavings = sankeyFlowSegments(categories, 4000, 4500);
   assert.equal(noSavings.find((segment) => segment.label === "Savings"), undefined, "no Savings segment once spend meets or exceeds income");
+});
+
+test("sankeyFlowSegments includes each category's subcategories as children, sorted descending with zero-spend lines dropped", () => {
+  const categories = [
+    {
+      name: "Housing",
+      color: "#a",
+      value: 1800,
+      lines: [
+        { id: "mortgage", name: "Mortgage", value: 1500 },
+        { id: "hoa", name: "HOA", value: 300 },
+        { id: "repairs", name: "Repairs", value: 0 }
+      ]
+    }
+  ];
+  const [housing] = sankeyFlowSegments(categories, 5000, 1800);
+  assert.deepEqual(housing.children, [
+    { label: "Mortgage", value: 1500, lineId: "mortgage" },
+    { label: "HOA", value: 300, lineId: "hoa" }
+  ]);
+  const savings = sankeyFlowSegments(categories, 5000, 1800).find((segment) => segment.label === "Savings");
+  assert.deepEqual(savings.children, [], "Savings has no subcategory breakdown");
 });
