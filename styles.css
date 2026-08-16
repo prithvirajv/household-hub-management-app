@@ -742,6 +742,12 @@ main {
   gap: 0.55rem;
 }
 
+.share-note-link-section {
+  margin-top: 0.9rem;
+  padding-top: 0.9rem;
+  border-top: 1px solid var(--line);
+}
+
 .form-message {
   min-height: 1rem;
   margin: 0;

@@ -13998,6 +13998,7 @@ function openShareNoteDialog(note) {
   form.reset();
   $("#shareNoteTitle").textContent = note.title || "Untitled note";
   $("#shareNoteMessage").textContent = "";
+  $("#shareNoteLinkMessage").textContent = "";
   $("#shareNoteDialog").showModal();
 }
 
@@ -14033,6 +14034,31 @@ $("#shareNoteForm").addEventListener("submit", async (event) => {
     $("#shareNoteMessage").textContent = error.message;
   } finally {
     submitButton.disabled = false;
+  }
+});
+
+$("#copyShareNoteLinkButton").addEventListener("click", async () => {
+  const note = state.notes.entries.find((item) => item.id === pendingShareNoteId);
+  if (!note) return;
+  $("#shareNoteLinkMessage").textContent = "";
+  try {
+    const result = await api("/api/notes/share-link", { method: "POST", body: JSON.stringify({ noteId: note.id }) });
+    await navigator.clipboard.writeText(result.url);
+    showToast("Link copied - anyone with it can view and check off items, no account needed.", { type: "success" });
+  } catch (error) {
+    $("#shareNoteLinkMessage").textContent = error.message;
+  }
+});
+
+$("#stopShareNoteLinkButton").addEventListener("click", async () => {
+  const note = state.notes.entries.find((item) => item.id === pendingShareNoteId);
+  if (!note) return;
+  $("#shareNoteLinkMessage").textContent = "";
+  try {
+    await api("/api/notes/share-link", { method: "DELETE", body: JSON.stringify({ noteId: note.id }) });
+    showToast("Stopped sharing - the old link no longer works.", { type: "success" });
+  } catch (error) {
+    $("#shareNoteLinkMessage").textContent = error.message;
   }
 });
 

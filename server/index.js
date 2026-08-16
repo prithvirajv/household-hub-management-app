@@ -129,7 +129,8 @@ const memoryDb = {
   pushDevices: [],
   privateData: [],
   documentFolders: [],
-  documents: []
+  documents: [],
+  noteShares: []
 };
 
 const app = express();
@@ -2911,6 +2912,72 @@ app.post("/api/notes/share", requireSession, async (req, res, next) => {
   }
 });
 
+// Get-or-create: repeat calls for the same note return the same live link
+// rather than minting a new one each time (UNIQUE(household_id, note_id) +
+// ON CONFLICT DO UPDATE, the no-op SET makes RETURNING still hand back the
+// existing row's token instead of nothing).
+app.post("/api/notes/share-link", requireSession, async (req, res, next) => {
+  try {
+    const noteId = String(req.body.noteId || "").trim();
+    if (!noteId) return res.status(400).json({ error: "Missing noteId" });
+    const householdId = req.sessionUser.household_id;
+    const note = await findHouseholdNoteById(householdId, noteId);
+    if (!note || note.trashed) return res.status(404).json({ error: "Note not found" });
+    let token;
+    if (MEMORY_DB) {
+      let share = memoryDb.noteShares.find((item) => item.household_id === householdId && item.note_id === noteId);
+      if (!share) {
+        share = { token: crypto.randomBytes(32).toString("base64url"), household_id: householdId, note_id: noteId, created_by: req.sessionUser.id, created_at: new Date().toISOString() };
+        memoryDb.noteShares.push(share);
+      }
+      token = share.token;
+    } else {
+      const candidateToken = crypto.randomBytes(32).toString("base64url");
+      const result = await pool.query(
+        `INSERT INTO note_shares (token, household_id, note_id, created_by) VALUES ($1, $2, $3, $4)
+         ON CONFLICT (household_id, note_id) DO UPDATE SET household_id = EXCLUDED.household_id
+         RETURNING token`,
+        [candidateToken, householdId, noteId, req.sessionUser.id]
+      );
+      token = result.rows[0].token;
+    }
+    res.json({ ok: true, url: `${APP_BASE_URL}/shared-notes/${token}` });
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.delete("/api/notes/share-link", requireSession, async (req, res, next) => {
+  try {
+    const noteId = String(req.body.noteId || "").trim();
+    const householdId = req.sessionUser.household_id;
+    if (MEMORY_DB) {
+      memoryDb.noteShares = memoryDb.noteShares.filter((item) => !(item.household_id === householdId && item.note_id === noteId));
+    } else {
+      await pool.query("DELETE FROM note_shares WHERE household_id = $1 AND note_id = $2", [householdId, noteId]);
+    }
+    res.json({ ok: true });
+  } catch (error) {
+    next(error);
+  }
+});
+
+// Public - no session, same reasoning as GET /shared-notes/:token above.
+app.post("/api/shared-notes/:token/toggle", async (req, res, next) => {
+  try {
+    const resolved = await resolveSharedNote(String(req.params.token || ""));
+    if (!resolved) return res.status(404).json({ error: "This shared note is no longer available." });
+    const itemId = String(req.body.itemId || "");
+    const item = (resolved.note.checklist || []).find((entry) => entry.id === itemId);
+    if (!item) return res.status(404).json({ error: "Checklist item not found." });
+    item.done = Boolean(req.body.done);
+    await saveHouseholdAppState(resolved.share.household_id, resolved.appState);
+    res.json({ ok: true });
+  } catch (error) {
+    next(error);
+  }
+});
+
 app.delete("/api/households/:id", requireSession, async (req, res, next) => {
   try {
     const householdId = String(req.params.id || "");
@@ -3292,6 +3359,155 @@ async function findHouseholdNoteById(householdId, noteId) {
   if (!noteId) return null;
   const appState = await loadHouseholdAppState(householdId);
   return appState?.notes?.entries?.find((item) => item.id === noteId) || null;
+}
+
+// Persists a mutated app_state back the same way PUT /api/state does
+// (household row + the user_shared_modules copy notes/meals/etc. sync
+// through) - used by the public checklist-toggle endpoint below, which has
+// no session to route through the real PUT handler. Deliberately skips
+// syncNotificationJobs: a checklist tick from a shared note link has
+// nothing to do with reminder/due-date notification jobs.
+async function saveHouseholdAppState(householdId, appState) {
+  if (MEMORY_DB) {
+    const household = memoryDb.households.find((item) => item.id === householdId);
+    if (!household) return;
+    household.app_state = appState;
+    const ownerId = memoryPrimaryOwnerId(householdId);
+    const shared = memoryDb.sharedModules.find((item) => item.owner_user_id === ownerId);
+    if (shared) shared.app_state = sharedModulesFromState(appState);
+    else memoryDb.sharedModules.push({ owner_user_id: ownerId, app_state: sharedModulesFromState(appState) });
+    return;
+  }
+  const ownerId = await databasePrimaryOwnerId(pool, householdId);
+  await Promise.all([
+    pool.query("UPDATE households SET app_state = $1, updated_at = now() WHERE id = $2", [appState, householdId]),
+    pool.query(
+      `INSERT INTO user_shared_modules (owner_user_id, app_state, updated_at) VALUES ($1, $2, now())
+       ON CONFLICT (owner_user_id) DO UPDATE SET app_state = EXCLUDED.app_state, updated_at = now()`,
+      [ownerId, sharedModulesFromState(appState)]
+    )
+  ]);
+}
+
+async function findNoteShare(token) {
+  if (!token) return null;
+  if (MEMORY_DB) return memoryDb.noteShares.find((item) => item.token === token) || null;
+  const result = await pool.query("SELECT * FROM note_shares WHERE token = $1", [token]);
+  return result.rows[0] || null;
+}
+
+// A note-share link resolves live against the note's current content every
+// time it's opened (not a frozen copy from when the link was made) - the
+// token only ever unlocks the current title/body/checklist, so an already
+//-shared note that gets edited later shows the edit, and a trashed/deleted
+// note (or a revoked token) simply stops resolving instead of leaking a
+// stale snapshot.
+// Returns the note as a live reference inside the returned appState (not a
+// separately-fetched copy) - the toggle endpoint below mutates resolved.note
+// in place and then saves resolved.appState as-is, so the two must share
+// the same object graph or the mutation would silently be lost.
+async function resolveSharedNote(token) {
+  const share = await findNoteShare(token);
+  if (!share) return null;
+  const appState = await loadHouseholdAppState(share.household_id);
+  const note = appState?.notes?.entries?.find((item) => item.id === share.note_id);
+  if (!note || note.trashed) return null;
+  return { share, appState, note };
+}
+
+function escapeHtmlAttr(value) {
+  return escapeHtml(value).replaceAll("`", "&#096;");
+}
+
+function renderSharedNoteUnavailablePage() {
+  return `<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex, nofollow">
+<title>Note unavailable - FamilyLoop</title>
+<style>
+  body { font-family: Inter, ui-sans-serif, system-ui, -apple-system, sans-serif; max-width: 480px; margin: 4rem auto; padding: 0 1.25rem; text-align: center; color: #2a2620; background: #fdf8f1; }
+  @media (prefers-color-scheme: dark) { body { background: #201c16; color: #f1ece2; } }
+</style>
+</head>
+<body>
+  <h1>This note is no longer available</h1>
+  <p>The link may have been revoked, or the note was deleted.</p>
+</body>
+</html>`;
+}
+
+function renderSharedNotePage(token, note) {
+  const safeTitle = escapeHtml(note.title || "Untitled note");
+  const safeBody = escapeHtml(note.body || "");
+  const checklist = Array.isArray(note.checklist) ? note.checklist : [];
+  const checklistHtml = checklist.length
+    ? `<ul class="checklist">${checklist.map((item) => `
+      <li class="${item.parentId ? "nested" : ""}">
+        <label>
+          <input type="checkbox" data-item-id="${escapeHtmlAttr(item.id)}" ${item.done ? "checked" : ""}>
+          <span class="${item.done ? "done" : ""}">${escapeHtml(item.text)}</span>
+        </label>
+      </li>`).join("")}</ul>`
+    : "";
+  return `<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex, nofollow">
+<title>${safeTitle} - Shared note</title>
+<style>
+  :root { color-scheme: light dark; }
+  body { font-family: Inter, ui-sans-serif, system-ui, -apple-system, sans-serif; max-width: 560px; margin: 0 auto; padding: 2rem 1.25rem 4rem; background: #fdf8f1; color: #2a2620; }
+  h1 { font-size: 1.4rem; margin: 0 0 0.75rem; }
+  .brand { font-size: 0.72rem; font-weight: 800; letter-spacing: 0.04em; text-transform: uppercase; color: #9a9186; }
+  .body-text { white-space: pre-wrap; line-height: 1.55; margin: 1rem 0; }
+  ul.checklist { list-style: none; padding: 0; margin: 1rem 0; }
+  ul.checklist li { padding: 0.5rem 0; border-bottom: 1px solid #eee0cf; }
+  ul.checklist li.nested { padding-left: 1.75rem; }
+  ul.checklist label { display: flex; align-items: center; gap: 0.65rem; cursor: pointer; }
+  ul.checklist input { width: 18px; height: 18px; flex-shrink: 0; }
+  .done { text-decoration: line-through; color: #9a9186; }
+  .footer { margin-top: 2.5rem; font-size: 0.75rem; color: #9a9186; }
+  @media (prefers-color-scheme: dark) {
+    body { background: #201c16; color: #f1ece2; }
+    ul.checklist li { border-color: #3a3428; }
+  }
+</style>
+</head>
+<body>
+  <div class="brand">Shared from FamilyLoop</div>
+  <h1>${safeTitle}</h1>
+  ${safeBody ? `<p class="body-text">${safeBody.replaceAll("\n", "<br>")}</p>` : ""}
+  ${checklistHtml}
+  <p class="footer">${checklist.length ? "Checking items here updates the note in real time - " : ""}No account needed to view this.</p>
+  <script>
+    document.querySelectorAll('input[type="checkbox"]').forEach(function (checkbox) {
+      checkbox.addEventListener('change', function () {
+        var itemId = checkbox.dataset.itemId;
+        var done = checkbox.checked;
+        var label = checkbox.nextElementSibling;
+        checkbox.disabled = true;
+        fetch('/api/shared-notes/${escapeHtmlAttr(token)}/toggle', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ itemId: itemId, done: done })
+        }).then(function (response) {
+          if (!response.ok) throw new Error('failed');
+          label.classList.toggle('done', done);
+        }).catch(function () {
+          checkbox.checked = !done;
+        }).finally(function () {
+          checkbox.disabled = false;
+        });
+      });
+    });
+  </script>
+</body>
+</html>`;
 }
 
 async function findHouseholdWealthItemById(householdId, wealthItemType, wealthItemId) {
@@ -3964,6 +4180,23 @@ if (TEST_EXPOSE_NOTIFICATIONS) {
 
 app.get("/", (_req, res) => {
   res.sendFile(path.join(__dirname, "..", "welcome.html"));
+});
+
+// Public - no session. The token itself is the access credential (same
+// model as any "anyone with the link" share), so intentionally reachable
+// with no login: that's the entire point of a link the recipient opens
+// without a FamilyLoop account.
+app.get("/shared-notes/:token", async (req, res, next) => {
+  try {
+    const resolved = await resolveSharedNote(String(req.params.token || ""));
+    if (!resolved) {
+      res.status(404).send(renderSharedNoteUnavailablePage());
+      return;
+    }
+    res.send(renderSharedNotePage(req.params.token, resolved.note));
+  } catch (error) {
+    next(error);
+  }
 });
 
 app.use((error, _req, res, _next) => {

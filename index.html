@@ -7,7 +7,7 @@
     <title>FamilyLoop</title>
     <link rel="icon" type="image/svg+xml" href="/assets/favicon.svg">
     <link rel="apple-touch-icon" href="/assets/apple-touch-icon.png">
-    <link rel="stylesheet" href="/styles.css?v=20260815-4">
+    <link rel="stylesheet" href="/styles.css?v=20260815-5">
     <script>
       (function () {
         var saved = localStorage.getItem("familyloop-theme");
@@ -357,6 +357,14 @@
             <button type="submit">Send</button>
           </div>
         </form>
+        <div class="share-note-link-section">
+          <p class="muted">Or share a link they can open, view, and check off items on - also no account needed.</p>
+          <p id="shareNoteLinkMessage" class="form-message"></p>
+          <div class="dialog-actions">
+            <button id="stopShareNoteLinkButton" class="ghost" type="button">Stop sharing</button>
+            <button id="copyShareNoteLinkButton" class="ghost" type="button">Copy link</button>
+          </div>
+        </div>
       </div>
     </dialog>
 
@@ -416,6 +424,6 @@
     <script src="https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/build/pdf.min.js"></script>
     <script>if (window.pdfjsLib) pdfjsLib.GlobalWorkerOptions.workerSrc = "https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/build/pdf.worker.min.js";</script>
     <script src="/lib/shared-logic.js?v=20260812-5"></script>
-    <script src="/app.js?v=20260815-4"></script>
+    <script src="/app.js?v=20260815-5"></script>
   </body>
 </html>

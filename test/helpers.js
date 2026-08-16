@@ -49,7 +49,14 @@ async function startTestServer(env = {}) {
         ...options,
         headers: { "content-type": "application/json", ...(options.headers || {}) }
       });
-      const body = await response.json().catch(() => ({}));
+      // Mirrors the client's own api() wrapper (app.js): most endpoints are
+      // JSON, but a couple (the public shared-note page) send back real
+      // HTML, so tests checking those need the actual markup rather than
+      // the old always-{} fallback from a failed .json() parse.
+      const responseContentType = response.headers.get("content-type") || "";
+      const body = responseContentType.includes("application/json")
+        ? await response.json().catch(() => ({}))
+        : await response.text();
       const setCookies = typeof response.headers.getSetCookie === "function"
         ? response.headers.getSetCookie()
         : [response.headers.get("set-cookie")].filter(Boolean);

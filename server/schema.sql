@@ -270,3 +270,18 @@ ALTER TABLE documents
 -- returns a JS Date object, which round-trips through JSON as a full
 -- UTC-midnight timestamp instead of the plain date the client sent).
 ALTER TABLE documents ADD COLUMN IF NOT EXISTS expiry_date TEXT;
+
+-- A note's actual content lives in the household's app_state JSONB blob
+-- (state.notes.entries), same as everywhere else - this table is only the
+-- token -> (household, note) pointer that makes a link resolvable with no
+-- session. UNIQUE(household_id, note_id) keeps "get or create a link for
+-- this note" idempotent (INSERT ... ON CONFLICT DO UPDATE returns the
+-- existing token instead of minting a second live link for the same note).
+CREATE TABLE IF NOT EXISTS note_shares (
+  token TEXT PRIMARY KEY,
+  household_id UUID NOT NULL REFERENCES households(id) ON DELETE CASCADE,
+  note_id TEXT NOT NULL,
+  created_by UUID REFERENCES users(id) ON DELETE SET NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  UNIQUE (household_id, note_id)
+);
