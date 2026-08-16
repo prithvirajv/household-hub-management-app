@@ -240,6 +240,11 @@ let journalComposerDraft = null;
 // documentsData is household-shared (like Notes/Calendar), backed by real Postgres
 // rows and Google Cloud Storage, not part of `state`/autosaveState().
 let documentsData = null;
+// Notes shared directly with the signed-in user by another FamilyLoop
+// account holder (via /api/notes/share-user), across households - lives
+// outside `state`/autosaveState() same as documentsData, since it isn't
+// this household's data to own or overwrite via PUT /api/state.
+let sharedWithMeNotes = null;
 let documentsCurrentFolderId = null;
 let documentsUploading = false;
 let documentsDragPayload = null;
@@ -309,6 +314,7 @@ async function handleAuthExpired() {
   sessionUser = null;
   adminData = null;
   sharingAccess = null;
+  sharedWithMeNotes = null;
   households = [];
   document.body.classList.add("auth-mode");
   $("#householdWorkspaceControl").hidden = true;
@@ -1906,6 +1912,7 @@ function render() {
   bindViewEvents();
   if (currentView === "admin" && !adminData) loadAdminData();
   if (["documents", "wealth"].includes(currentView) && !documentsData) loadDocumentsData();
+  if (currentView === "notes" && sharedWithMeNotes === null) loadSharedWithMeNotes();
   if (["sharing", "calendar"].includes(currentView) && !sharingAccess) loadSharingAccess();
   if (currentView === "calendar" && sharedCalendarMembers.length === 0) loadCalendarMembers();
   if (!onboardingAutoShown && shouldShowOnboarding()) {
@@ -3252,6 +3259,11 @@ function renderNotes() {
           <span aria-hidden="true">⌕</span>
           <input id="notesSearch" placeholder="Search household notes" value="${state.notes.search || ""}">
         </div>
+        ${state.notes.activeView === "notes" && sharedWithMeNotes?.length ? `
+          <section class="notes-result-section">
+            <div class="notes-section-label">Shared with me</div>
+            <div class="notes-board">${sharedWithMeNotes.map(renderSharedWithMeCard).join("")}</div>
+          </section>` : ""}
         ${state.notes.activeView === "trash" ? `<div class="notes-trash-banner"><span>Notes in Trash are permanently deleted after 7 days.</span><button id="emptyNotesTrashButton" type="button" ${notes.length ? "" : "disabled"}>Empty Trash</button></div>` : ""}
         ${canCompose && !state.notes.composerOpen ? `<button id="openNoteComposerButton" class="note-composer-compact" type="button"><span>Take a note...</span><span aria-hidden="true">☑</span></button>` : ""}
         ${canCompose && state.notes.composerOpen ? `<form id="noteComposer" class="note-composer">
@@ -3303,6 +3315,29 @@ function renderNotes() {
         </div>
       </dialog>
     </section>`;
+}
+
+// Cards for notes shared directly with the signed-in user (as opposed to
+// renderNoteCard, which is for this household's own notes) - reuses the
+// same .note-card/.note-check-row visual language but is deliberately a
+// separate, simpler renderer: no labels/reminders/bill-links/pin/archive/
+// color, since those are household-note concepts that don't apply to a
+// note living in someone else's household.
+function renderSharedWithMeCard(shared) {
+  const checklist = Array.isArray(shared.checklist) ? shared.checklist : [];
+  const checklistRow = (item) => `<div class="note-check-row">
+    <input type="checkbox" data-shared-note-check="${shared.shareId}:${item.id}" aria-label="Complete ${escapeHtml(item.text)}" ${item.done ? "checked" : ""}>
+    <input class="note-check-text" data-shared-note-check-text="${shared.shareId}:${item.id}" value="${escapeHtml(item.text)}" placeholder="Checklist item" aria-label="Checklist item">
+  </div>`;
+  return `<article class="note-card shared-with-me-card" data-shared-note-id="${shared.shareId}">
+    <div class="note-reminder shared-with-me-owner">Shared from ${escapeHtml(shared.sharedFromHousehold || "another household")}</div>
+    <input class="note-title-input" data-shared-note-title="${shared.shareId}" value="${escapeHtml(shared.title || "")}" placeholder="Untitled note" aria-label="Note title">
+    <textarea class="note-body-input" data-shared-note-body="${shared.shareId}" rows="${shared.body ? "2" : "1"}" placeholder="Take a note..." aria-label="Note body">${escapeHtml(shared.body || "")}</textarea>
+    ${checklist.map(checklistRow).join("")}
+    <form class="note-add-item-form" data-add-shared-note-item="${shared.shareId}">
+      <input name="item" placeholder="Add checklist item" aria-label="Add checklist item" autocomplete="off">
+    </form>
+  </article>`;
 }
 
 function reopenNoteLabelsDialog() {
@@ -7990,6 +8025,95 @@ function bindViewEvents() {
       const suggestions = document.querySelector(`[data-note-check-suggestions="${input.dataset.noteCheckText}"]`);
       suggestions.hidden = true;
       input.setAttribute("aria-expanded", "false");
+    });
+  });
+
+  // "Shared with me" cards (renderSharedWithMeCard) - each mutation is a
+  // real network call (there's no local copy owned by this account to
+  // autosave), so title/body/item-text save on blur rather than every
+  // keystroke, matching the public shared-note page's convention. The
+  // local sharedWithMeNotes cache is updated optimistically so the UI
+  // reflects the change immediately; a failed request just re-loads from
+  // the server and shows what actually happened.
+  document.querySelectorAll("[data-shared-note-title]").forEach((input) => {
+    input.addEventListener("blur", async () => {
+      const shareId = input.dataset.sharedNoteTitle;
+      const shared = sharedWithMeNotes?.find((item) => item.shareId === shareId);
+      if (!shared || shared.title === input.value) return;
+      shared.title = input.value;
+      try {
+        await api(`/api/notes/shared-with-me/${encodeURIComponent(shareId)}`, { method: "PUT", body: JSON.stringify({ title: input.value }) });
+      } catch (error) {
+        showToast(error.message, { type: "error" });
+        loadSharedWithMeNotes();
+      }
+    });
+  });
+
+  document.querySelectorAll("[data-shared-note-body]").forEach((input) => {
+    input.addEventListener("blur", async () => {
+      const shareId = input.dataset.sharedNoteBody;
+      const shared = sharedWithMeNotes?.find((item) => item.shareId === shareId);
+      if (!shared || shared.body === input.value) return;
+      shared.body = input.value;
+      try {
+        await api(`/api/notes/shared-with-me/${encodeURIComponent(shareId)}`, { method: "PUT", body: JSON.stringify({ body: input.value }) });
+      } catch (error) {
+        showToast(error.message, { type: "error" });
+        loadSharedWithMeNotes();
+      }
+    });
+  });
+
+  document.querySelectorAll("[data-shared-note-check]").forEach((input) => {
+    input.addEventListener("change", async () => {
+      const [shareId, itemId] = input.dataset.sharedNoteCheck.split(":");
+      const shared = sharedWithMeNotes?.find((item) => item.shareId === shareId);
+      const checklistItem = shared?.checklist.find((item) => item.id === itemId);
+      if (!checklistItem) return;
+      checklistItem.done = input.checked;
+      try {
+        await api(`/api/notes/shared-with-me/${encodeURIComponent(shareId)}/toggle`, { method: "POST", body: JSON.stringify({ itemId, done: input.checked }) });
+      } catch (error) {
+        showToast(error.message, { type: "error" });
+        loadSharedWithMeNotes();
+      }
+    });
+  });
+
+  document.querySelectorAll("[data-shared-note-check-text]").forEach((input) => {
+    input.addEventListener("blur", async () => {
+      const [shareId, itemId] = input.dataset.sharedNoteCheckText.split(":");
+      const shared = sharedWithMeNotes?.find((item) => item.shareId === shareId);
+      const checklistItem = shared?.checklist.find((item) => item.id === itemId);
+      if (!checklistItem || checklistItem.text === input.value) return;
+      checklistItem.text = input.value;
+      try {
+        await api(`/api/notes/shared-with-me/${encodeURIComponent(shareId)}/items/${encodeURIComponent(itemId)}`, { method: "PUT", body: JSON.stringify({ text: input.value }) });
+      } catch (error) {
+        showToast(error.message, { type: "error" });
+        loadSharedWithMeNotes();
+      }
+    });
+  });
+
+  document.querySelectorAll("[data-add-shared-note-item]").forEach((form) => {
+    form.addEventListener("submit", async (event) => {
+      event.preventDefault();
+      const shareId = form.dataset.addSharedNoteItem;
+      const input = form.querySelector('[name="item"]');
+      const text = input.value.trim();
+      if (!text) return;
+      const shared = sharedWithMeNotes?.find((item) => item.shareId === shareId);
+      if (!shared) return;
+      try {
+        const result = await api(`/api/notes/shared-with-me/${encodeURIComponent(shareId)}/items`, { method: "POST", body: JSON.stringify({ text }) });
+        shared.checklist.push(result.item);
+        input.value = "";
+        render();
+      } catch (error) {
+        showToast(error.message, { type: "error" });
+      }
     });
   });
 
@@ -12788,6 +12912,7 @@ $("#signOutButton").addEventListener("click", async () => {
   sessionUser = null;
   adminData = null;
   sharingAccess = null;
+  sharedWithMeNotes = null;
   households = [];
   calendarFeedback = "";
   $("#householdWorkspaceControl").hidden = true;
@@ -13992,6 +14117,28 @@ $("#settleUpForm").addEventListener("submit", (event) => {
 
 let pendingShareNoteId = "";
 
+function renderShareNoteUserList(shares) {
+  const list = $("#shareNoteUserList");
+  if (!shares.length) {
+    list.innerHTML = `<li class="muted">Not shared with anyone's login yet.</li>`;
+    return;
+  }
+  list.innerHTML = shares.map((share) => `
+    <li>
+      <span>${escapeHtml(share.name ? `${share.name} (${share.email})` : share.email)}</span>
+      <button type="button" class="ghost" data-remove-share-user="${escapeHtml(share.userId)}">Remove</button>
+    </li>`).join("");
+}
+
+async function refreshShareNoteUserList(noteId) {
+  try {
+    const result = await api(`/api/notes/${encodeURIComponent(noteId)}/shares`);
+    renderShareNoteUserList(result.shares);
+  } catch (error) {
+    $("#shareNoteUserList").innerHTML = `<li class="muted">${escapeHtml(error.message)}</li>`;
+  }
+}
+
 function openShareNoteDialog(note) {
   pendingShareNoteId = note.id;
   const form = $("#shareNoteForm");
@@ -13999,6 +14146,10 @@ function openShareNoteDialog(note) {
   $("#shareNoteTitle").textContent = note.title || "Untitled note";
   $("#shareNoteMessage").textContent = "";
   $("#shareNoteLinkMessage").textContent = "";
+  $("#shareNoteUserForm").reset();
+  $("#shareNoteUserMessage").textContent = "";
+  $("#shareNoteUserList").innerHTML = "";
+  refreshShareNoteUserList(note.id);
   $("#shareNoteDialog").showModal();
 }
 
@@ -14060,6 +14211,46 @@ $("#stopShareNoteLinkButton").addEventListener("click", async () => {
     showToast("Stopped sharing - the old link no longer works.", { type: "success" });
   } catch (error) {
     $("#shareNoteLinkMessage").textContent = error.message;
+  }
+});
+
+$("#shareNoteUserForm").addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const note = state.notes.entries.find((item) => item.id === pendingShareNoteId);
+  if (!note) return;
+  const data = Object.fromEntries(new FormData(event.currentTarget));
+  const submitButton = event.currentTarget.querySelector('[type="submit"]');
+  submitButton.disabled = true;
+  $("#shareNoteUserMessage").textContent = "";
+  try {
+    const result = await api("/api/notes/share-user", { method: "POST", body: JSON.stringify({ noteId: note.id, email: data.email }) });
+    renderShareNoteUserList(result.shares);
+    event.currentTarget.reset();
+    showToast(`Shared with ${data.email} - they'll see it under Notes → Shared with me.`, { type: "success" });
+  } catch (error) {
+    $("#shareNoteUserMessage").textContent = error.message;
+  } finally {
+    submitButton.disabled = false;
+  }
+});
+
+$("#shareNoteUserList").addEventListener("click", async (event) => {
+  const button = event.target.closest("[data-remove-share-user]");
+  if (!button) return;
+  const note = state.notes.entries.find((item) => item.id === pendingShareNoteId);
+  if (!note) return;
+  button.disabled = true;
+  $("#shareNoteUserMessage").textContent = "";
+  try {
+    const result = await api("/api/notes/share-user", {
+      method: "DELETE",
+      body: JSON.stringify({ noteId: note.id, sharedWithUserId: button.dataset.removeShareUser })
+    });
+    renderShareNoteUserList(result.shares);
+    showToast("Removed - they no longer have access.", { type: "success" });
+  } catch (error) {
+    $("#shareNoteUserMessage").textContent = error.message;
+    button.disabled = false;
   }
 });
 
@@ -14329,6 +14520,18 @@ async function loadDocumentsData(shouldRender = true) {
     documentsData = { folders: [], documents: [] };
     if (shouldRender && currentView === "documents") render();
   }
+}
+
+async function loadSharedWithMeNotes(shouldRender = true) {
+  if (!sessionUser) return;
+  try {
+    const result = await api("/api/notes/shared-with-me");
+    sharedWithMeNotes = result.notes;
+  } catch (error) {
+    console.warn("Unable to load notes shared with me", error);
+    sharedWithMeNotes = [];
+  }
+  if (shouldRender && currentView === "notes") render();
 }
 
 async function loadAdminData() {

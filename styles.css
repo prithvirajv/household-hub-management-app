@@ -748,6 +748,37 @@ main {
   border-top: 1px solid var(--line);
 }
 
+.share-note-user-section {
+  margin-top: 0.9rem;
+  padding-top: 0.9rem;
+  border-top: 1px solid var(--line);
+}
+
+.share-note-user-list {
+  list-style: none;
+  padding: 0;
+  margin: 0.6rem 0 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+
+.share-note-user-list li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.6rem;
+  padding: 0.4rem 0.6rem;
+  border-radius: 8px;
+  background: var(--soft);
+  font-size: 0.9rem;
+}
+
+.shared-with-me-owner {
+  font-weight: 600;
+  color: var(--blue);
+}
+
 .form-message {
   min-height: 1rem;
   margin: 0;

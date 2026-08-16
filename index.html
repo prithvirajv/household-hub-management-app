@@ -365,6 +365,17 @@
             <button id="copyShareNoteLinkButton" class="ghost" type="button">Copy link</button>
           </div>
         </div>
+        <div class="share-note-user-section">
+          <p class="muted">Or share with someone who has a FamilyLoop account - they'll see it under Notes → Shared with me when signed in, and can edit it too.</p>
+          <form id="shareNoteUserForm">
+            <label>Their FamilyLoop email<input name="email" type="email" required placeholder="name@example.com"></label>
+            <p id="shareNoteUserMessage" class="form-message"></p>
+            <div class="dialog-actions">
+              <button type="submit">Share</button>
+            </div>
+          </form>
+          <ul id="shareNoteUserList" class="share-note-user-list"></ul>
+        </div>
       </div>
     </dialog>
 
@@ -424,6 +435,6 @@
     <script src="https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/build/pdf.min.js"></script>
     <script>if (window.pdfjsLib) pdfjsLib.GlobalWorkerOptions.workerSrc = "https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/build/pdf.worker.min.js";</script>
     <script src="/lib/shared-logic.js?v=20260812-5"></script>
-    <script src="/app.js?v=20260816-2"></script>
+    <script src="/app.js?v=20260816-3"></script>
   </body>
 </html>

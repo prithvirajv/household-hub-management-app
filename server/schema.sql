@@ -285,3 +285,20 @@ CREATE TABLE IF NOT EXISTS note_shares (
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   UNIQUE (household_id, note_id)
 );
+
+-- Same live token->note pointer idea as note_shares above, but the
+-- credential is "being signed in as this specific user" instead of
+-- knowledge of a random token - used for sharing a note with a named
+-- FamilyLoop account holder (who then sees it under their own login,
+-- across households) rather than anyone with a link. id is a real PK
+-- (not a natural key) so a share can be addressed/removed by id without
+-- the client needing to know the recipient's user id.
+CREATE TABLE IF NOT EXISTS note_user_shares (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  household_id UUID NOT NULL REFERENCES households(id) ON DELETE CASCADE,
+  note_id TEXT NOT NULL,
+  owner_user_id UUID REFERENCES users(id) ON DELETE SET NULL,
+  shared_with_user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  UNIQUE (household_id, note_id, shared_with_user_id)
+);

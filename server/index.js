@@ -130,7 +130,8 @@ const memoryDb = {
   privateData: [],
   documentFolders: [],
   documents: [],
-  noteShares: []
+  noteShares: [],
+  noteUserShares: []
 };
 
 const app = express();
@@ -673,6 +674,23 @@ function sendNoteShareEmail({ to, title, body, checklist, senderName, message, l
       linkUrl ? `\n\nOpen, edit, and check off items: ${linkUrl}` : ""
     ].join(""),
     html: `<h2>${safeSender} shared a note with you</h2>${safeMessage ? `<p>${escapeHtml(safeMessage)}</p>` : ""}<h3>${safeTitle}</h3>${safeBody ? `<p>${safeBody.replaceAll("\n", "<br>")}</p>` : ""}${htmlChecklist}${linkUrl ? `<p><a href="${escapeHtmlAttr(linkUrl)}">Open the note to view, edit, and check off items</a></p>` : ""}<p style="color:#8a8a8a;font-size:0.85em;">Sent from FamilyLoop - no account needed to read this email.</p>`
+  });
+}
+
+// Notifies an existing FamilyLoop account holder that a note was shared
+// directly with their login (as opposed to sendNoteShareEmail above, which
+// is a point-in-time copy sent to any address, account or not). No content
+// or link in the email itself - the note only exists behind a session, so
+// the email just points them at signing in and opening Notes -> Shared
+// with me, same as any other "something changed, come look" notification.
+function sendNoteUserShareEmail({ to, title, senderName }) {
+  const safeTitle = escapeHtml(title || "Untitled note");
+  const safeSender = escapeHtml(senderName || "Someone");
+  return sendTransactionalEmail({
+    to,
+    subject: `${senderName || "Someone"} shared a note with you: ${title || "Untitled note"}`,
+    text: `${senderName || "Someone"} shared a note with you on FamilyLoop: "${title || "Untitled note"}".\n\nSign in to FamilyLoop and open Notes -> Shared with me to view and edit it: ${APP_BASE_URL}`,
+    html: `<h2>${safeSender} shared a note with you</h2><p><strong>${safeTitle}</strong></p><p>Sign in to FamilyLoop and open <strong>Notes &rarr; Shared with me</strong> to view and edit it.</p><p><a href="${escapeHtmlAttr(APP_BASE_URL)}">Open FamilyLoop</a></p>`
   });
 }
 
@@ -3044,8 +3062,150 @@ app.post("/api/shared-notes/:token/items", async (req, res, next) => {
     if (!text) return res.status(400).json({ error: "Enter item text" });
     if (!Array.isArray(resolved.note.checklist)) resolved.note.checklist = [];
     if (resolved.note.checklist.length >= 200) return res.status(400).json({ error: "This checklist is full" });
-    const item = { id: crypto.randomUUID(), text, done: false, parentId: "" };
-    resolved.note.checklist.push(item);
+    const item = addChecklistItemToNote(resolved.note, text);
+    await saveHouseholdAppState(resolved.share.household_id, resolved.appState);
+    res.json({ ok: true, item });
+  } catch (error) {
+    next(error);
+  }
+});
+
+// Owner-side: who has this note been directly shared with (not counting
+// the public link) - drives the "shared with" list in the Share dialog.
+app.get("/api/notes/:noteId/shares", requireSession, async (req, res, next) => {
+  try {
+    const noteId = String(req.params.noteId || "");
+    const householdId = req.sessionUser.household_id;
+    const note = await findHouseholdNoteById(householdId, noteId);
+    if (!note) return res.status(404).json({ error: "Note not found" });
+    res.json({ shares: await listNoteUserShares(householdId, noteId) });
+  } catch (error) {
+    next(error);
+  }
+});
+
+// Shares a note with a specific existing FamilyLoop account holder (as
+// opposed to POST /api/notes/share above, which is a one-off email to
+// anyone, and /api/notes/share-link, which is a public no-login link).
+// The recipient sees it under their own login regardless of which
+// household(s) they belong to - see GET /api/notes/shared-with-me below.
+app.post("/api/notes/share-user", requireSession, async (req, res, next) => {
+  try {
+    const noteId = String(req.body.noteId || "").trim();
+    const email = String(req.body.email || "").trim().toLowerCase();
+    if (!noteId) return res.status(400).json({ error: "Missing noteId" });
+    if (!isValidEmail(email)) return res.status(400).json({ error: "Enter a valid email" });
+    const householdId = req.sessionUser.household_id;
+    const note = await findHouseholdNoteById(householdId, noteId);
+    if (!note || note.trashed) return res.status(404).json({ error: "Note not found" });
+    const target = await findUserByEmail(email);
+    if (!target) return res.status(404).json({ error: "No FamilyLoop account with that email" });
+    if (target.id === req.sessionUser.id) return res.status(400).json({ error: "That's your own account" });
+    if (await isHouseholdMember(householdId, target.id)) {
+      return res.status(400).json({ error: "They're already a member of this household and can already see this note" });
+    }
+    await createNoteUserShare(householdId, noteId, req.sessionUser.id, target.id);
+    const emailDelivery = await sendNoteUserShareEmail({ to: target.email, title: note.title, senderName: req.sessionUser.name });
+    res.json({ ok: true, shares: await listNoteUserShares(householdId, noteId), email: emailDelivery });
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.delete("/api/notes/share-user", requireSession, async (req, res, next) => {
+  try {
+    const noteId = String(req.body.noteId || "").trim();
+    const sharedWithUserId = String(req.body.sharedWithUserId || "").trim();
+    const householdId = req.sessionUser.household_id;
+    await removeNoteUserShare(householdId, noteId, sharedWithUserId);
+    res.json({ ok: true, shares: await listNoteUserShares(householdId, noteId) });
+  } catch (error) {
+    next(error);
+  }
+});
+
+// Recipient-side: every note directly shared with the signed-in user,
+// resolved live (current title/body/checklist, not a snapshot from when
+// it was shared) - same reasoning as resolveSharedNote() for the public
+// link. A note that's since been trashed, or a share that's been removed,
+// simply drops out of this list rather than erroring.
+app.get("/api/notes/shared-with-me", requireSession, async (req, res, next) => {
+  try {
+    const rows = MEMORY_DB
+      ? memoryDb.noteUserShares.filter((item) => item.shared_with_user_id === req.sessionUser.id)
+      : (await pool.query("SELECT * FROM note_user_shares WHERE shared_with_user_id = $1", [req.sessionUser.id])).rows;
+    const notes = [];
+    for (const share of rows) {
+      const appState = await loadHouseholdAppState(share.household_id);
+      const note = appState?.notes?.entries?.find((item) => item.id === share.note_id);
+      if (!note || note.trashed) continue;
+      notes.push({
+        shareId: share.id,
+        noteId: note.id,
+        title: note.title || "",
+        body: note.body || "",
+        checklist: note.checklist || [],
+        sharedFromHousehold: await loadHouseholdName(share.household_id)
+      });
+    }
+    res.json({ notes });
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.put("/api/notes/shared-with-me/:shareId", requireSession, async (req, res, next) => {
+  try {
+    const resolved = await resolveNoteUserShare(req.params.shareId, req.sessionUser.id);
+    if (!resolved) return res.status(404).json({ error: "This note is no longer shared with you." });
+    if (req.body.title !== undefined) resolved.note.title = String(req.body.title).slice(0, 200);
+    if (req.body.body !== undefined) resolved.note.body = String(req.body.body).slice(0, 20000);
+    await saveHouseholdAppState(resolved.share.household_id, resolved.appState);
+    res.json({ ok: true });
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.post("/api/notes/shared-with-me/:shareId/toggle", requireSession, async (req, res, next) => {
+  try {
+    const resolved = await resolveNoteUserShare(req.params.shareId, req.sessionUser.id);
+    if (!resolved) return res.status(404).json({ error: "This note is no longer shared with you." });
+    const item = (resolved.note.checklist || []).find((entry) => entry.id === String(req.body.itemId || ""));
+    if (!item) return res.status(404).json({ error: "Checklist item not found." });
+    item.done = Boolean(req.body.done);
+    await saveHouseholdAppState(resolved.share.household_id, resolved.appState);
+    res.json({ ok: true });
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.put("/api/notes/shared-with-me/:shareId/items/:itemId", requireSession, async (req, res, next) => {
+  try {
+    const resolved = await resolveNoteUserShare(req.params.shareId, req.sessionUser.id);
+    if (!resolved) return res.status(404).json({ error: "This note is no longer shared with you." });
+    const item = (resolved.note.checklist || []).find((entry) => entry.id === req.params.itemId);
+    if (!item) return res.status(404).json({ error: "Checklist item not found." });
+    const text = String(req.body.text || "").trim().slice(0, 500);
+    if (!text) return res.status(400).json({ error: "Enter item text" });
+    item.text = text;
+    await saveHouseholdAppState(resolved.share.household_id, resolved.appState);
+    res.json({ ok: true });
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.post("/api/notes/shared-with-me/:shareId/items", requireSession, async (req, res, next) => {
+  try {
+    const resolved = await resolveNoteUserShare(req.params.shareId, req.sessionUser.id);
+    if (!resolved) return res.status(404).json({ error: "This note is no longer shared with you." });
+    const text = String(req.body.text || "").trim().slice(0, 500);
+    if (!text) return res.status(400).json({ error: "Enter item text" });
+    if (!Array.isArray(resolved.note.checklist)) resolved.note.checklist = [];
+    if (resolved.note.checklist.length >= 200) return res.status(400).json({ error: "This checklist is full" });
+    const item = addChecklistItemToNote(resolved.note, text);
     await saveHouseholdAppState(resolved.share.household_id, resolved.appState);
     res.json({ ok: true, item });
   } catch (error) {
@@ -3434,6 +3594,105 @@ async function findHouseholdNoteById(householdId, noteId) {
   if (!noteId) return null;
   const appState = await loadHouseholdAppState(householdId);
   return appState?.notes?.entries?.find((item) => item.id === noteId) || null;
+}
+
+async function findUserByEmail(email) {
+  if (!email) return null;
+  if (MEMORY_DB) return memoryDb.users.find((item) => item.email === email) || null;
+  const result = await pool.query("SELECT id, email, name FROM users WHERE email = $1", [email]);
+  return result.rows[0] || null;
+}
+
+async function loadHouseholdName(householdId) {
+  if (MEMORY_DB) return memoryDb.households.find((item) => item.id === householdId)?.name || "";
+  const result = await pool.query("SELECT name FROM households WHERE id = $1", [householdId]);
+  return result.rows[0]?.name || "";
+}
+
+async function isHouseholdMember(householdId, userId) {
+  if (MEMORY_DB) return memoryDb.memberships.some((item) => item.household_id === householdId && item.user_id === userId);
+  const result = await pool.query("SELECT 1 FROM household_memberships WHERE household_id = $1 AND user_id = $2", [householdId, userId]);
+  return result.rows.length > 0;
+}
+
+// List of {id, userId, email, name} a note has been shared with directly
+// (not the public link) - used to render "shared with" on the owner side.
+async function listNoteUserShares(householdId, noteId) {
+  if (MEMORY_DB) {
+    return memoryDb.noteUserShares
+      .filter((item) => item.household_id === householdId && item.note_id === noteId)
+      .map((row) => {
+        const user = memoryDb.users.find((item) => item.id === row.shared_with_user_id);
+        return { id: row.id, userId: row.shared_with_user_id, email: user?.email || "", name: user?.name || "" };
+      });
+  }
+  const result = await pool.query(
+    `SELECT nus.id, nus.shared_with_user_id AS "userId", u.email, u.name
+     FROM note_user_shares nus JOIN users u ON u.id = nus.shared_with_user_id
+     WHERE nus.household_id = $1 AND nus.note_id = $2
+     ORDER BY nus.created_at ASC`,
+    [householdId, noteId]
+  );
+  return result.rows;
+}
+
+// Idempotent - sharing the same note with the same user twice just keeps
+// the one row (UNIQUE(household_id, note_id, shared_with_user_id)).
+async function createNoteUserShare(householdId, noteId, ownerUserId, sharedWithUserId) {
+  if (MEMORY_DB) {
+    const existing = memoryDb.noteUserShares.find((item) => item.household_id === householdId && item.note_id === noteId && item.shared_with_user_id === sharedWithUserId);
+    if (existing) return existing;
+    const row = { id: crypto.randomUUID(), household_id: householdId, note_id: noteId, owner_user_id: ownerUserId, shared_with_user_id: sharedWithUserId, created_at: new Date().toISOString() };
+    memoryDb.noteUserShares.push(row);
+    return row;
+  }
+  const result = await pool.query(
+    `INSERT INTO note_user_shares (household_id, note_id, owner_user_id, shared_with_user_id) VALUES ($1, $2, $3, $4)
+     ON CONFLICT (household_id, note_id, shared_with_user_id) DO UPDATE SET household_id = EXCLUDED.household_id
+     RETURNING *`,
+    [householdId, noteId, ownerUserId, sharedWithUserId]
+  );
+  return result.rows[0];
+}
+
+async function removeNoteUserShare(householdId, noteId, sharedWithUserId) {
+  if (MEMORY_DB) {
+    memoryDb.noteUserShares = memoryDb.noteUserShares.filter((item) => !(item.household_id === householdId && item.note_id === noteId && item.shared_with_user_id === sharedWithUserId));
+    return;
+  }
+  await pool.query("DELETE FROM note_user_shares WHERE household_id = $1 AND note_id = $2 AND shared_with_user_id = $3", [householdId, noteId, sharedWithUserId]);
+}
+
+async function findNoteUserShare(shareId) {
+  if (!shareId) return null;
+  if (MEMORY_DB) return memoryDb.noteUserShares.find((item) => item.id === shareId) || null;
+  const result = await pool.query("SELECT * FROM note_user_shares WHERE id = $1", [shareId]);
+  return result.rows[0] || null;
+}
+
+// Same live-reference pattern as resolveSharedNote() for the public link
+// (see below) - note is found inside the returned appState, not a separate
+// fetch, so mutating it and saving appState actually persists. Access is
+// gated on shareId belonging to the requesting user, not knowledge of a
+// token - removing the row (see DELETE /api/notes/share-user) revokes
+// access immediately, the same way revoking a public link does.
+async function resolveNoteUserShare(shareId, requestingUserId) {
+  const share = await findNoteUserShare(shareId);
+  if (!share || share.shared_with_user_id !== requestingUserId) return null;
+  const appState = await loadHouseholdAppState(share.household_id);
+  const note = appState?.notes?.entries?.find((item) => item.id === share.note_id);
+  if (!note || note.trashed) return null;
+  return { share, appState, note };
+}
+
+// Shared by both the public-link add-item endpoint and the
+// shared-with-me add-item endpoint below - always a top-level item
+// (parentId ""), since neither surface has a concept of nesting.
+function addChecklistItemToNote(note, text) {
+  if (!Array.isArray(note.checklist)) note.checklist = [];
+  const item = { id: crypto.randomUUID(), text, done: false, parentId: "" };
+  note.checklist.push(item);
+  return item;
 }
 
 // Persists a mutated app_state back the same way PUT /api/state does
