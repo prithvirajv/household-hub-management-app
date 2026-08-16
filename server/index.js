@@ -647,7 +647,7 @@ function sendFriendInviteEmail({ email, name, inviterName }) {
 // whatever content the client sent. checklist is a plain [{text, done}]
 // array (already flattened/ordered by the client) so the email body can
 // render checked/unchecked items without re-implementing bucketChecklistItems.
-function sendNoteShareEmail({ to, title, body, checklist, senderName, message }) {
+function sendNoteShareEmail({ to, title, body, checklist, senderName, message, linkUrl }) {
   const safeTitle = escapeHtml(title || "Untitled note");
   const safeSender = escapeHtml(senderName || "Someone");
   const safeBody = escapeHtml(body || "");
@@ -657,6 +657,10 @@ function sendNoteShareEmail({ to, title, body, checklist, senderName, message })
     ? `<ul>${items.map((item) => `<li style="${item.done ? "text-decoration:line-through;color:#8a8a8a;" : ""}">${escapeHtml(item.text)}</li>`).join("")}</ul>`
     : "";
   const safeMessage = String(message || "").trim();
+  // linkUrl (when present) points at the same live shared-note page the
+  // in-app "Copy link" button hands out - included here too so a recipient
+  // who only ever sees the email still gets a way to view/check off items/
+  // add items without an account, not just a frozen copy of the content.
   return sendTransactionalEmail({
     to,
     subject: `${senderName || "Someone"} shared a note with you: ${title || "Untitled note"}`,
@@ -665,9 +669,10 @@ function sendNoteShareEmail({ to, title, body, checklist, senderName, message })
       safeMessage ? `\n${safeMessage}\n` : "",
       `\n${title || "Untitled note"}\n`,
       body || "",
-      textChecklist ? `\n${textChecklist}` : ""
+      textChecklist ? `\n${textChecklist}` : "",
+      linkUrl ? `\n\nOpen, edit, and check off items: ${linkUrl}` : ""
     ].join(""),
-    html: `<h2>${safeSender} shared a note with you</h2>${safeMessage ? `<p>${escapeHtml(safeMessage)}</p>` : ""}<h3>${safeTitle}</h3>${safeBody ? `<p>${safeBody.replaceAll("\n", "<br>")}</p>` : ""}${htmlChecklist}<p style="color:#8a8a8a;font-size:0.85em;">Sent from FamilyLoop - no account needed to read this email.</p>`
+    html: `<h2>${safeSender} shared a note with you</h2>${safeMessage ? `<p>${escapeHtml(safeMessage)}</p>` : ""}<h3>${safeTitle}</h3>${safeBody ? `<p>${safeBody.replaceAll("\n", "<br>")}</p>` : ""}${htmlChecklist}${linkUrl ? `<p><a href="${escapeHtmlAttr(linkUrl)}">Open the note to view, edit, and check off items</a></p>` : ""}<p style="color:#8a8a8a;font-size:0.85em;">Sent from FamilyLoop - no account needed to read this email.</p>`
   });
 }
 
@@ -2891,9 +2896,51 @@ app.post("/api/friends/invite", requireSession, async (req, res, next) => {
   }
 });
 
+// Cosmetic only - the token alone is what resolveSharedNote() looks up, so
+// a mismatched or missing slug in the URL still works, it just won't have
+// the friendly title on the link when someone glances at it before opening.
+function slugify(text) {
+  return String(text || "").toLowerCase().trim()
+    .replace(/[^a-z0-9]+/g, "-").replace(/(^-|-$)/g, "").slice(0, 60);
+}
+
+function shareUrlForToken(token, title) {
+  const slug = slugify(title);
+  return `${APP_BASE_URL}/shared-notes/${token}${slug ? `/${slug}` : ""}`;
+}
+
+// Get-or-create: repeat calls for the same note return the same live token
+// rather than minting a new one each time (UNIQUE(household_id, note_id) +
+// ON CONFLICT DO UPDATE, the no-op SET makes RETURNING still hand back the
+// existing row's token instead of nothing). Shared by both the "Copy link"
+// button and the email-share flow below, which now includes the same link.
+async function getOrCreateNoteShareToken(householdId, noteId, userId) {
+  if (MEMORY_DB) {
+    let share = memoryDb.noteShares.find((item) => item.household_id === householdId && item.note_id === noteId);
+    if (!share) {
+      share = { token: crypto.randomBytes(32).toString("base64url"), household_id: householdId, note_id: noteId, created_by: userId, created_at: new Date().toISOString() };
+      memoryDb.noteShares.push(share);
+    }
+    return share.token;
+  }
+  const candidateToken = crypto.randomBytes(32).toString("base64url");
+  const result = await pool.query(
+    `INSERT INTO note_shares (token, household_id, note_id, created_by) VALUES ($1, $2, $3, $4)
+     ON CONFLICT (household_id, note_id) DO UPDATE SET household_id = EXCLUDED.household_id
+     RETURNING token`,
+    [candidateToken, householdId, noteId, userId]
+  );
+  return result.rows[0].token;
+}
+
 // Shares a note by email to anyone, including someone with no FamilyLoop
 // account - requireSession only guards against an anonymous caller
 // spamming arbitrary addresses, it has nothing to do with the recipient.
+// When the client sends a noteId (real, non-trashed note in the caller's
+// household), a live share link is minted/reused and included in the email
+// alongside the point-in-time content, so the recipient can also open the
+// note directly to view, edit, and check off items rather than only reading
+// a snapshot.
 app.post("/api/notes/share", requireSession, async (req, res, next) => {
   try {
     const to = String(req.body.to || "").trim().toLowerCase();
@@ -2905,17 +2952,23 @@ app.post("/api/notes/share", requireSession, async (req, res, next) => {
       ? req.body.checklist.slice(0, 200).map((item) => ({ text: String(item?.text || "").slice(0, 500), done: Boolean(item?.done) })).filter((item) => item.text)
       : [];
     const senderName = req.sessionUser.name;
-    const emailDelivery = await sendNoteShareEmail({ to, title, body, checklist, senderName, message });
-    res.json({ ok: true, email: emailDelivery });
+    const noteId = String(req.body.noteId || "").trim();
+    let linkUrl = "";
+    if (noteId) {
+      const householdId = req.sessionUser.household_id;
+      const note = await findHouseholdNoteById(householdId, noteId);
+      if (note && !note.trashed) {
+        const token = await getOrCreateNoteShareToken(householdId, noteId, req.sessionUser.id);
+        linkUrl = shareUrlForToken(token, note.title || title);
+      }
+    }
+    const emailDelivery = await sendNoteShareEmail({ to, title, body, checklist, senderName, message, linkUrl });
+    res.json({ ok: true, email: emailDelivery, url: linkUrl });
   } catch (error) {
     next(error);
   }
 });
 
-// Get-or-create: repeat calls for the same note return the same live link
-// rather than minting a new one each time (UNIQUE(household_id, note_id) +
-// ON CONFLICT DO UPDATE, the no-op SET makes RETURNING still hand back the
-// existing row's token instead of nothing).
 app.post("/api/notes/share-link", requireSession, async (req, res, next) => {
   try {
     const noteId = String(req.body.noteId || "").trim();
@@ -2923,25 +2976,8 @@ app.post("/api/notes/share-link", requireSession, async (req, res, next) => {
     const householdId = req.sessionUser.household_id;
     const note = await findHouseholdNoteById(householdId, noteId);
     if (!note || note.trashed) return res.status(404).json({ error: "Note not found" });
-    let token;
-    if (MEMORY_DB) {
-      let share = memoryDb.noteShares.find((item) => item.household_id === householdId && item.note_id === noteId);
-      if (!share) {
-        share = { token: crypto.randomBytes(32).toString("base64url"), household_id: householdId, note_id: noteId, created_by: req.sessionUser.id, created_at: new Date().toISOString() };
-        memoryDb.noteShares.push(share);
-      }
-      token = share.token;
-    } else {
-      const candidateToken = crypto.randomBytes(32).toString("base64url");
-      const result = await pool.query(
-        `INSERT INTO note_shares (token, household_id, note_id, created_by) VALUES ($1, $2, $3, $4)
-         ON CONFLICT (household_id, note_id) DO UPDATE SET household_id = EXCLUDED.household_id
-         RETURNING token`,
-        [candidateToken, householdId, noteId, req.sessionUser.id]
-      );
-      token = result.rows[0].token;
-    }
-    res.json({ ok: true, url: `${APP_BASE_URL}/shared-notes/${token}` });
+    const token = await getOrCreateNoteShareToken(householdId, noteId, req.sessionUser.id);
+    res.json({ ok: true, url: shareUrlForToken(token, note.title) });
   } catch (error) {
     next(error);
   }
@@ -2973,6 +3009,45 @@ app.post("/api/shared-notes/:token/toggle", async (req, res, next) => {
     item.done = Boolean(req.body.done);
     await saveHouseholdAppState(resolved.share.household_id, resolved.appState);
     res.json({ ok: true });
+  } catch (error) {
+    next(error);
+  }
+});
+
+// Public - no session. Lets a link recipient edit an existing item's text
+// in place (same threat model as the toggle endpoint above: the token is
+// the credential).
+app.put("/api/shared-notes/:token/items/:itemId", async (req, res, next) => {
+  try {
+    const resolved = await resolveSharedNote(String(req.params.token || ""));
+    if (!resolved) return res.status(404).json({ error: "This shared note is no longer available." });
+    const item = (resolved.note.checklist || []).find((entry) => entry.id === req.params.itemId);
+    if (!item) return res.status(404).json({ error: "Checklist item not found." });
+    const text = String(req.body.text || "").trim().slice(0, 500);
+    if (!text) return res.status(400).json({ error: "Enter item text" });
+    item.text = text;
+    await saveHouseholdAppState(resolved.share.household_id, resolved.appState);
+    res.json({ ok: true });
+  } catch (error) {
+    next(error);
+  }
+});
+
+// Public - no session. Adds a new top-level checklist item (parentId "" -
+// the shared page has no concept of nesting, so new items always land at
+// the top level regardless of where the rest of the list nests).
+app.post("/api/shared-notes/:token/items", async (req, res, next) => {
+  try {
+    const resolved = await resolveSharedNote(String(req.params.token || ""));
+    if (!resolved) return res.status(404).json({ error: "This shared note is no longer available." });
+    const text = String(req.body.text || "").trim().slice(0, 500);
+    if (!text) return res.status(400).json({ error: "Enter item text" });
+    if (!Array.isArray(resolved.note.checklist)) resolved.note.checklist = [];
+    if (resolved.note.checklist.length >= 200) return res.status(400).json({ error: "This checklist is full" });
+    const item = { id: crypto.randomUUID(), text, done: false, parentId: "" };
+    resolved.note.checklist.push(item);
+    await saveHouseholdAppState(resolved.share.household_id, resolved.appState);
+    res.json({ ok: true, item });
   } catch (error) {
     next(error);
   }
@@ -3439,19 +3514,20 @@ function renderSharedNoteUnavailablePage() {
 </html>`;
 }
 
+function renderSharedNoteChecklistItem(item) {
+  return `
+      <li class="${item.parentId ? "nested" : ""}" data-item-id="${escapeHtmlAttr(item.id)}">
+        <input type="checkbox" data-item-id="${escapeHtmlAttr(item.id)}" ${item.done ? "checked" : ""}>
+        <span class="item-text ${item.done ? "done" : ""}" contenteditable="true" spellcheck="false">${escapeHtml(item.text)}</span>
+      </li>`;
+}
+
 function renderSharedNotePage(token, note) {
   const safeTitle = escapeHtml(note.title || "Untitled note");
   const safeBody = escapeHtml(note.body || "");
   const checklist = Array.isArray(note.checklist) ? note.checklist : [];
-  const checklistHtml = checklist.length
-    ? `<ul class="checklist">${checklist.map((item) => `
-      <li class="${item.parentId ? "nested" : ""}">
-        <label>
-          <input type="checkbox" data-item-id="${escapeHtmlAttr(item.id)}" ${item.done ? "checked" : ""}>
-          <span class="${item.done ? "done" : ""}">${escapeHtml(item.text)}</span>
-        </label>
-      </li>`).join("")}</ul>`
-    : "";
+  const checklistHtml = checklist.map(renderSharedNoteChecklistItem).join("");
+  const safeToken = escapeHtmlAttr(token);
   return `<!doctype html>
 <html lang="en">
 <head>
@@ -3466,15 +3542,21 @@ function renderSharedNotePage(token, note) {
   .brand { font-size: 0.72rem; font-weight: 800; letter-spacing: 0.04em; text-transform: uppercase; color: #9a9186; }
   .body-text { white-space: pre-wrap; line-height: 1.55; margin: 1rem 0; }
   ul.checklist { list-style: none; padding: 0; margin: 1rem 0; }
-  ul.checklist li { padding: 0.5rem 0; border-bottom: 1px solid #eee0cf; }
+  ul.checklist li { display: flex; align-items: center; gap: 0.65rem; padding: 0.5rem 0; border-bottom: 1px solid #eee0cf; }
   ul.checklist li.nested { padding-left: 1.75rem; }
-  ul.checklist label { display: flex; align-items: center; gap: 0.65rem; cursor: pointer; }
-  ul.checklist input { width: 18px; height: 18px; flex-shrink: 0; }
+  ul.checklist input[type="checkbox"] { width: 18px; height: 18px; flex-shrink: 0; cursor: pointer; }
+  .item-text { flex: 1; outline: none; border-radius: 4px; padding: 0.15rem 0.3rem; margin: -0.15rem -0.3rem; }
+  .item-text:focus { background: rgba(154, 145, 134, 0.14); }
   .done { text-decoration: line-through; color: #9a9186; }
+  .add-item-row { display: flex; gap: 0.5rem; margin: 0.75rem 0 1.25rem; }
+  .add-item-row input { flex: 1; font: inherit; padding: 0.5rem 0.65rem; border: 1px solid #eee0cf; border-radius: 6px; background: transparent; color: inherit; }
+  .add-item-row button { font: inherit; padding: 0.5rem 0.9rem; border: none; border-radius: 6px; background: #d68a3e; color: #fff; cursor: pointer; }
+  .add-item-row button:disabled { opacity: 0.6; cursor: default; }
   .footer { margin-top: 2.5rem; font-size: 0.75rem; color: #9a9186; }
   @media (prefers-color-scheme: dark) {
     body { background: #201c16; color: #f1ece2; }
     ul.checklist li { border-color: #3a3428; }
+    .add-item-row input { border-color: #3a3428; }
   }
 </style>
 </head>
@@ -3482,28 +3564,92 @@ function renderSharedNotePage(token, note) {
   <div class="brand">Shared from FamilyLoop</div>
   <h1>${safeTitle}</h1>
   ${safeBody ? `<p class="body-text">${safeBody.replaceAll("\n", "<br>")}</p>` : ""}
-  ${checklistHtml}
-  <p class="footer">${checklist.length ? "Checking items here updates the note in real time - " : ""}No account needed to view this.</p>
+  <ul class="checklist" id="checklist">${checklistHtml}</ul>
+  <form class="add-item-row" id="addItemForm">
+    <input type="text" id="newItemText" placeholder="Add an item" maxlength="500" autocomplete="off">
+    <button type="submit">Add</button>
+  </form>
+  <p class="footer">Checking, editing, and adding items here updates the note in real time - no account needed.</p>
   <script>
-    document.querySelectorAll('input[type="checkbox"]').forEach(function (checkbox) {
+    var TOKEN = ${JSON.stringify(String(token))};
+
+    function wireItem(li) {
+      var checkbox = li.querySelector('input[type="checkbox"]');
+      var span = li.querySelector('.item-text');
+
       checkbox.addEventListener('change', function () {
-        var itemId = checkbox.dataset.itemId;
         var done = checkbox.checked;
-        var label = checkbox.nextElementSibling;
         checkbox.disabled = true;
-        fetch('/api/shared-notes/${escapeHtmlAttr(token)}/toggle', {
+        fetch('/api/shared-notes/' + TOKEN + '/toggle', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ itemId: itemId, done: done })
+          body: JSON.stringify({ itemId: li.dataset.itemId, done: done })
         }).then(function (response) {
           if (!response.ok) throw new Error('failed');
-          label.classList.toggle('done', done);
+          span.classList.toggle('done', done);
         }).catch(function () {
           checkbox.checked = !done;
         }).finally(function () {
           checkbox.disabled = false;
         });
       });
+
+      function saveText() {
+        var text = span.textContent.trim();
+        var original = span.dataset.original || '';
+        if (!text) { span.textContent = original; return; }
+        if (text === original) { span.textContent = text; return; }
+        fetch('/api/shared-notes/' + TOKEN + '/items/' + encodeURIComponent(li.dataset.itemId), {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ text: text })
+        }).then(function (response) {
+          if (!response.ok) throw new Error('failed');
+          span.dataset.original = text;
+        }).catch(function () {
+          span.textContent = original;
+        });
+      }
+      span.dataset.original = span.textContent.trim();
+      span.addEventListener('blur', saveText);
+      span.addEventListener('keydown', function (event) {
+        if (event.key === 'Enter') { event.preventDefault(); span.blur(); }
+      });
+    }
+
+    document.querySelectorAll('#checklist li').forEach(wireItem);
+
+    document.getElementById('addItemForm').addEventListener('submit', function (event) {
+      event.preventDefault();
+      var input = document.getElementById('newItemText');
+      var text = input.value.trim();
+      if (!text) return;
+      var button = event.currentTarget.querySelector('button');
+      button.disabled = true;
+      fetch('/api/shared-notes/' + TOKEN + '/items', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text: text })
+      }).then(function (response) {
+        if (!response.ok) throw new Error('failed');
+        return response.json();
+      }).then(function (data) {
+        var li = document.createElement('li');
+        var checkbox = document.createElement('input');
+        checkbox.type = 'checkbox';
+        var span = document.createElement('span');
+        span.className = 'item-text';
+        span.contentEditable = 'true';
+        span.spellcheck = false;
+        span.textContent = data.item.text;
+        li.dataset.itemId = data.item.id;
+        li.appendChild(checkbox);
+        li.appendChild(span);
+        document.getElementById('checklist').appendChild(li);
+        wireItem(li);
+        input.value = '';
+      }).catch(function () {})
+        .finally(function () { button.disabled = false; });
     });
   </script>
 </body>
@@ -4186,7 +4332,7 @@ app.get("/", (_req, res) => {
 // model as any "anyone with the link" share), so intentionally reachable
 // with no login: that's the entire point of a link the recipient opens
 // without a FamilyLoop account.
-app.get("/shared-notes/:token", async (req, res, next) => {
+app.get("/shared-notes/:token/:slug?", async (req, res, next) => {
   try {
     const resolved = await resolveSharedNote(String(req.params.token || ""));
     if (!resolved) {

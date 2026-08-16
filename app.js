@@ -14022,6 +14022,7 @@ $("#shareNoteForm").addEventListener("submit", async (event) => {
       body: JSON.stringify({
         to: data.to,
         message: data.message,
+        noteId: note.id,
         title: note.title,
         body: note.body,
         checklist: (note.checklist || []).map((item) => ({ text: item.text, done: item.done }))
@@ -14029,7 +14030,7 @@ $("#shareNoteForm").addEventListener("submit", async (event) => {
     });
     $("#shareNoteDialog").close();
     pendingShareNoteId = "";
-    showToast(`Note sent to ${data.to}.`, { type: "success" });
+    showToast(`Note sent to ${data.to}, including a link they can open to view and edit it.`, { type: "success" });
   } catch (error) {
     $("#shareNoteMessage").textContent = error.message;
   } finally {

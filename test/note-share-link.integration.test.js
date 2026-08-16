@@ -35,7 +35,7 @@ async function addNote(cookie, noteId, overrides = {}) {
 }
 
 function tokenFromUrl(url) {
-  return url.split("/shared-notes/")[1];
+  return url.split("/shared-notes/")[1].split("/")[0];
 }
 
 test("note share-link requires a session", async () => {
@@ -145,6 +145,107 @@ test("stopping sharing revokes the link, and re-sharing mints a fresh token", as
     body: JSON.stringify({ noteId: "grocery-note" })
   });
   assert.notEqual(tokenFromUrl(recreated.body.url), firstToken);
+});
+
+test("the share link includes a slugified title so the URL hints at the note before it's opened, but only the token is actually looked up", async () => {
+  const cookie = await signUp("note-link-owner-5@example.com");
+  await addNote(cookie, "titled-note", { title: "Weekend Trip Packing List!!" });
+
+  const created = await server.request("/api/notes/share-link", {
+    method: "POST",
+    headers: { cookie },
+    body: JSON.stringify({ noteId: "titled-note" })
+  });
+  assert.ok(created.body.url.endsWith("/weekend-trip-packing-list"), created.body.url);
+
+  // The slug is cosmetic - a wrong or missing slug still resolves the note.
+  const token = tokenFromUrl(created.body.url);
+  const withWrongSlug = await server.request(`/shared-notes/${token}/not-the-real-slug`);
+  assert.equal(withWrongSlug.status, 200);
+  assert.ok(withWrongSlug.body.includes("Weekend Trip Packing List!!"));
+});
+
+test("note share-link email includes a link to view and edit when a real noteId is sent", async () => {
+  const cookie = await signUp("note-link-owner-6@example.com");
+  await addNote(cookie, "emailed-note", { title: "Emailed note" });
+
+  const withNoteId = await server.request("/api/notes/share", {
+    method: "POST",
+    headers: { cookie },
+    body: JSON.stringify({ to: "friend@example.com", noteId: "emailed-note", title: "Emailed note", body: "" })
+  });
+  assert.equal(withNoteId.status, 200);
+  assert.ok(withNoteId.body.url.includes("/shared-notes/"));
+
+  // No noteId (or a note that isn't real/is trashed) - no link, but the
+  // email still sends with just the point-in-time content, same as before.
+  const withoutNoteId = await server.request("/api/notes/share", {
+    method: "POST",
+    headers: { cookie },
+    body: JSON.stringify({ to: "friend@example.com", title: "Untracked note", body: "" })
+  });
+  assert.equal(withoutNoteId.status, 200);
+  assert.equal(withoutNoteId.body.url, "");
+});
+
+test("a link recipient can add a new checklist item and edit an existing item's text, with no account", async () => {
+  const cookie = await signUp("note-link-owner-7@example.com");
+  await addNote(cookie, "editable-note");
+  const created = await server.request("/api/notes/share-link", {
+    method: "POST",
+    headers: { cookie },
+    body: JSON.stringify({ noteId: "editable-note" })
+  });
+  const token = tokenFromUrl(created.body.url);
+
+  const added = await server.request(`/api/shared-notes/${token}/items`, {
+    method: "POST",
+    body: JSON.stringify({ text: "Sunscreen" })
+  });
+  assert.equal(added.status, 200);
+  assert.equal(added.body.item.text, "Sunscreen");
+  assert.equal(added.body.item.done, false);
+
+  const edited = await server.request(`/api/shared-notes/${token}/items/item-1`, {
+    method: "PUT",
+    body: JSON.stringify({ text: "Passport (renewed)" })
+  });
+  assert.equal(edited.status, 200);
+
+  const page = await server.request(`/shared-notes/${token}`);
+  assert.ok(page.body.includes("Sunscreen"), "new item shows up on the page");
+  assert.ok(page.body.includes("Passport (renewed)"), "edited item text shows up on the page");
+
+  // Both changes land in the real note through the owner's authenticated
+  // state read too.
+  const state = await server.request("/api/state", { headers: { cookie } });
+  const note = state.body.notes.entries.find((item) => item.id === "editable-note");
+  assert.equal(note.checklist.length, 2);
+  assert.equal(note.checklist[0].text, "Passport (renewed)");
+  assert.equal(note.checklist[1].text, "Sunscreen");
+});
+
+test("adding an item with no text 400s, editing an unknown item 404s", async () => {
+  const cookie = await signUp("note-link-owner-8@example.com");
+  await addNote(cookie, "validation-note");
+  const created = await server.request("/api/notes/share-link", {
+    method: "POST",
+    headers: { cookie },
+    body: JSON.stringify({ noteId: "validation-note" })
+  });
+  const token = tokenFromUrl(created.body.url);
+
+  const blankAdd = await server.request(`/api/shared-notes/${token}/items`, {
+    method: "POST",
+    body: JSON.stringify({ text: "   " })
+  });
+  assert.equal(blankAdd.status, 400);
+
+  const unknownEdit = await server.request(`/api/shared-notes/${token}/items/not-a-real-item`, {
+    method: "PUT",
+    body: JSON.stringify({ text: "Anything" })
+  });
+  assert.equal(unknownEdit.status, 404);
 });
 
 test("a trashed note's share link stops resolving", async () => {
