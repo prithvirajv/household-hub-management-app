@@ -14044,7 +14044,7 @@ $("#copyShareNoteLinkButton").addEventListener("click", async () => {
   $("#shareNoteLinkMessage").textContent = "";
   try {
     const result = await api("/api/notes/share-link", { method: "POST", body: JSON.stringify({ noteId: note.id }) });
-    await navigator.clipboard.writeText(result.url);
+    await navigator.clipboard.writeText(`${note.title || "Untitled note"} : ${result.url}`);
     showToast("Link copied - anyone with it can view and check off items, no account needed.", { type: "success" });
   } catch (error) {
     $("#shareNoteLinkMessage").textContent = error.message;
