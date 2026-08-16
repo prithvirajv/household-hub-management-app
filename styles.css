@@ -157,6 +157,21 @@ select {
   color: var(--text);
 }
 
+/* textarea isn't part of the input/select rule above (every other textarea
+   in the app - note composer, journal composer, decisions form - defines
+   its own styling instead of inheriting a generic one), so #shareNoteForm's
+   message field needs its own copy of the same base look. */
+#shareNoteForm textarea {
+  width: 100%;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 0.45rem 0.55rem;
+  background: var(--panel);
+  color: var(--text);
+  font: inherit;
+  resize: vertical;
+}
+
 label {
   display: grid;
   gap: 0.25rem;

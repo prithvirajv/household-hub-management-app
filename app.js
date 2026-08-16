@@ -3393,6 +3393,7 @@ function renderNoteCard(note) {
       <details class="note-more-menu"><summary title="More actions" aria-label="More actions">⋮</summary><div class="note-more-menu-panel">
         <button data-duplicate-note="${note.id}" type="button">Make a copy</button>
         <button data-toggle-note-checklist="${note.id}" type="button">${note.showChecklist ? "Hide checkboxes" : "Show checkboxes"}</button>
+        <button data-share-note="${note.id}" type="button">Share via email</button>
         <button class="danger-button" data-trash-note="${note.id}" type="button">Delete note</button>
       </div></details>
     </div>`}
@@ -8269,6 +8270,13 @@ function bindViewEvents() {
       note.showChecklist = !note.showChecklist;
       autosaveState();
       render();
+    });
+  });
+
+  document.querySelectorAll("[data-share-note]").forEach((button) => {
+    button.addEventListener("click", () => {
+      const note = state.notes.entries.find((item) => item.id === button.dataset.shareNote);
+      if (note) openShareNoteDialog(note);
     });
   });
 
@@ -13980,6 +13988,52 @@ $("#settleUpForm").addEventListener("submit", (event) => {
   pendingSettleUpPersonKey = "";
   $("#settleUpDialog").close();
   render();
+});
+
+let pendingShareNoteId = "";
+
+function openShareNoteDialog(note) {
+  pendingShareNoteId = note.id;
+  const form = $("#shareNoteForm");
+  form.reset();
+  $("#shareNoteTitle").textContent = note.title || "Untitled note";
+  $("#shareNoteMessage").textContent = "";
+  $("#shareNoteDialog").showModal();
+}
+
+$("#closeShareNoteDialogButton").addEventListener("click", () => $("#shareNoteDialog").close());
+$("#cancelShareNoteButton").addEventListener("click", () => $("#shareNoteDialog").close());
+
+$("#shareNoteForm").addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const note = state.notes.entries.find((item) => item.id === pendingShareNoteId);
+  if (!note) {
+    $("#shareNoteDialog").close();
+    return;
+  }
+  const data = Object.fromEntries(new FormData(event.currentTarget));
+  const submitButton = event.currentTarget.querySelector('[type="submit"]');
+  submitButton.disabled = true;
+  $("#shareNoteMessage").textContent = "";
+  try {
+    await api("/api/notes/share", {
+      method: "POST",
+      body: JSON.stringify({
+        to: data.to,
+        message: data.message,
+        title: note.title,
+        body: note.body,
+        checklist: (note.checklist || []).map((item) => ({ text: item.text, done: item.done }))
+      })
+    });
+    $("#shareNoteDialog").close();
+    pendingShareNoteId = "";
+    showToast(`Note sent to ${data.to}.`, { type: "success" });
+  } catch (error) {
+    $("#shareNoteMessage").textContent = error.message;
+  } finally {
+    submitButton.disabled = false;
+  }
 });
 
 $("#householdForm").addEventListener("submit", async (event) => {

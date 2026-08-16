@@ -640,6 +640,36 @@ function sendFriendInviteEmail({ email, name, inviterName }) {
   });
 }
 
+// Shares a note's content by email to any address, member or not - the
+// note itself lives client-side (state.notes.entries), so like the friend
+// invite above, there's nothing to look up here, just a mail send of
+// whatever content the client sent. checklist is a plain [{text, done}]
+// array (already flattened/ordered by the client) so the email body can
+// render checked/unchecked items without re-implementing bucketChecklistItems.
+function sendNoteShareEmail({ to, title, body, checklist, senderName, message }) {
+  const safeTitle = escapeHtml(title || "Untitled note");
+  const safeSender = escapeHtml(senderName || "Someone");
+  const safeBody = escapeHtml(body || "");
+  const items = Array.isArray(checklist) ? checklist : [];
+  const textChecklist = items.map((item) => `${item.done ? "[x]" : "[ ]"} ${item.text}`).join("\n");
+  const htmlChecklist = items.length
+    ? `<ul>${items.map((item) => `<li style="${item.done ? "text-decoration:line-through;color:#8a8a8a;" : ""}">${escapeHtml(item.text)}</li>`).join("")}</ul>`
+    : "";
+  const safeMessage = String(message || "").trim();
+  return sendTransactionalEmail({
+    to,
+    subject: `${senderName || "Someone"} shared a note with you: ${title || "Untitled note"}`,
+    text: [
+      `${senderName || "Someone"} shared a note with you on FamilyLoop.`,
+      safeMessage ? `\n${safeMessage}\n` : "",
+      `\n${title || "Untitled note"}\n`,
+      body || "",
+      textChecklist ? `\n${textChecklist}` : ""
+    ].join(""),
+    html: `<h2>${safeSender} shared a note with you</h2>${safeMessage ? `<p>${escapeHtml(safeMessage)}</p>` : ""}<h3>${safeTitle}</h3>${safeBody ? `<p>${safeBody.replaceAll("\n", "<br>")}</p>` : ""}${htmlChecklist}<p style="color:#8a8a8a;font-size:0.85em;">Sent from FamilyLoop - no account needed to read this email.</p>`
+  });
+}
+
 function cloneJson(value) {
   return JSON.parse(JSON.stringify(value ?? null));
 }
@@ -2854,6 +2884,27 @@ app.post("/api/friends/invite", requireSession, async (req, res, next) => {
     const inviterName = String(req.body.inviterName || "").trim() || req.sessionUser.name;
     if (!isValidEmail(email)) return res.status(400).json({ error: "Enter a valid email" });
     const emailDelivery = await sendFriendInviteEmail({ email, name, inviterName });
+    res.json({ ok: true, email: emailDelivery });
+  } catch (error) {
+    next(error);
+  }
+});
+
+// Shares a note by email to anyone, including someone with no FamilyLoop
+// account - requireSession only guards against an anonymous caller
+// spamming arbitrary addresses, it has nothing to do with the recipient.
+app.post("/api/notes/share", requireSession, async (req, res, next) => {
+  try {
+    const to = String(req.body.to || "").trim().toLowerCase();
+    if (!isValidEmail(to)) return res.status(400).json({ error: "Enter a valid email" });
+    const title = String(req.body.title || "").slice(0, 200);
+    const body = String(req.body.body || "").slice(0, 20000);
+    const message = String(req.body.message || "").slice(0, 2000);
+    const checklist = Array.isArray(req.body.checklist)
+      ? req.body.checklist.slice(0, 200).map((item) => ({ text: String(item?.text || "").slice(0, 500), done: Boolean(item?.done) })).filter((item) => item.text)
+      : [];
+    const senderName = req.sessionUser.name;
+    const emailDelivery = await sendNoteShareEmail({ to, title, body, checklist, senderName, message });
     res.json({ ok: true, email: emailDelivery });
   } catch (error) {
     next(error);
