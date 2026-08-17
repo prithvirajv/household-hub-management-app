@@ -3070,6 +3070,23 @@ app.post("/api/shared-notes/:token/items", async (req, res, next) => {
   }
 });
 
+// Public - no session. Deletes a checklist item entirely (as opposed to
+// the toggle endpoint, which only marks it done/not done).
+app.delete("/api/shared-notes/:token/items/:itemId", async (req, res, next) => {
+  try {
+    const resolved = await resolveSharedNote(String(req.params.token || ""));
+    if (!resolved) return res.status(404).json({ error: "This shared note is no longer available." });
+    const items = resolved.note.checklist || [];
+    const index = items.findIndex((entry) => entry.id === req.params.itemId);
+    if (index === -1) return res.status(404).json({ error: "Checklist item not found." });
+    items.splice(index, 1);
+    await saveHouseholdAppState(resolved.share.household_id, resolved.appState);
+    res.json({ ok: true });
+  } catch (error) {
+    next(error);
+  }
+});
+
 // Owner-side: who has this note been directly shared with (not counting
 // the public link) - drives the "shared with" list in the Share dialog.
 app.get("/api/notes/:noteId/shares", requireSession, async (req, res, next) => {
@@ -3208,6 +3225,21 @@ app.post("/api/notes/shared-with-me/:shareId/items", requireSession, async (req,
     const item = addChecklistItemToNote(resolved.note, text);
     await saveHouseholdAppState(resolved.share.household_id, resolved.appState);
     res.json({ ok: true, item });
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.delete("/api/notes/shared-with-me/:shareId/items/:itemId", requireSession, async (req, res, next) => {
+  try {
+    const resolved = await resolveNoteUserShare(req.params.shareId, req.sessionUser.id);
+    if (!resolved) return res.status(404).json({ error: "This note is no longer shared with you." });
+    const items = resolved.note.checklist || [];
+    const index = items.findIndex((entry) => entry.id === req.params.itemId);
+    if (index === -1) return res.status(404).json({ error: "Checklist item not found." });
+    items.splice(index, 1);
+    await saveHouseholdAppState(resolved.share.household_id, resolved.appState);
+    res.json({ ok: true });
   } catch (error) {
     next(error);
   }
@@ -3778,6 +3810,7 @@ function renderSharedNoteChecklistItem(item) {
       <li class="${item.parentId ? "nested" : ""}" data-item-id="${escapeHtmlAttr(item.id)}">
         <input type="checkbox" data-item-id="${escapeHtmlAttr(item.id)}" ${item.done ? "checked" : ""}>
         <span class="item-text ${item.done ? "done" : ""}" contenteditable="true" spellcheck="false">${escapeHtml(item.text)}</span>
+        <button type="button" class="delete-item-button" data-delete-item-id="${escapeHtmlAttr(item.id)}" aria-label="Delete item">×</button>
       </li>`;
 }
 
@@ -3807,6 +3840,8 @@ function renderSharedNotePage(token, note) {
   .item-text { flex: 1; outline: none; border-radius: 4px; padding: 0.15rem 0.3rem; margin: -0.15rem -0.3rem; }
   .item-text:focus { background: rgba(154, 145, 134, 0.14); }
   .done { text-decoration: line-through; color: #9a9186; }
+  .delete-item-button { flex-shrink: 0; width: 22px; height: 22px; line-height: 1; border: none; border-radius: 50%; background: transparent; color: #9a9186; font-size: 1rem; cursor: pointer; }
+  .delete-item-button:hover { background: rgba(154, 145, 134, 0.14); color: #e05252; }
   .add-item-row { display: flex; gap: 0.5rem; margin: 0.75rem 0 1.25rem; }
   .add-item-row input { flex: 1; font: inherit; padding: 0.5rem 0.65rem; border: 1px solid #eee0cf; border-radius: 6px; background: transparent; color: inherit; }
   .add-item-row button { font: inherit; padding: 0.5rem 0.9rem; border: none; border-radius: 6px; background: #d68a3e; color: #fff; cursor: pointer; }
@@ -3874,6 +3909,19 @@ function renderSharedNotePage(token, note) {
       span.addEventListener('keydown', function (event) {
         if (event.key === 'Enter') { event.preventDefault(); span.blur(); }
       });
+
+      var deleteButton = li.querySelector('.delete-item-button');
+      deleteButton.addEventListener('click', function () {
+        deleteButton.disabled = true;
+        fetch('/api/shared-notes/' + TOKEN + '/items/' + encodeURIComponent(li.dataset.itemId), {
+          method: 'DELETE'
+        }).then(function (response) {
+          if (!response.ok) throw new Error('failed');
+          li.remove();
+        }).catch(function () {
+          deleteButton.disabled = false;
+        });
+      });
     }
 
     document.querySelectorAll('#checklist li').forEach(wireItem);
@@ -3902,8 +3950,14 @@ function renderSharedNotePage(token, note) {
         span.spellcheck = false;
         span.textContent = data.item.text;
         li.dataset.itemId = data.item.id;
+        var deleteButton = document.createElement('button');
+        deleteButton.type = 'button';
+        deleteButton.className = 'delete-item-button';
+        deleteButton.setAttribute('aria-label', 'Delete item');
+        deleteButton.textContent = '×';
         li.appendChild(checkbox);
         li.appendChild(span);
+        li.appendChild(deleteButton);
         document.getElementById('checklist').appendChild(li);
         wireItem(li);
         input.value = '';

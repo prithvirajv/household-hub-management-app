@@ -248,6 +248,49 @@ test("adding an item with no text 400s, editing an unknown item 404s", async () 
   assert.equal(unknownEdit.status, 404);
 });
 
+test("a link recipient can delete a checklist item with no account, and the removal lands in the owner's real note", async () => {
+  const cookie = await signUp("note-link-owner-9@example.com");
+  await addNote(cookie, "deletable-note", {
+    checklist: [
+      { id: "item-1", text: "Passport", done: false, parentId: "" },
+      { id: "item-2", text: "Sunscreen", done: false, parentId: "" }
+    ]
+  });
+  const created = await server.request("/api/notes/share-link", {
+    method: "POST",
+    headers: { cookie },
+    body: JSON.stringify({ noteId: "deletable-note" })
+  });
+  const token = tokenFromUrl(created.body.url);
+
+  const deleted = await server.request(`/api/shared-notes/${token}/items/item-1`, { method: "DELETE" });
+  assert.equal(deleted.status, 200);
+  assert.equal(deleted.body.ok, true);
+
+  const page = await server.request(`/shared-notes/${token}`);
+  assert.ok(!page.body.includes("Passport"), "deleted item no longer shows up on the page");
+  assert.ok(page.body.includes("Sunscreen"), "the other item is untouched");
+
+  const state = await server.request("/api/state", { headers: { cookie } });
+  const note = state.body.notes.entries.find((item) => item.id === "deletable-note");
+  assert.equal(note.checklist.length, 1);
+  assert.equal(note.checklist[0].id, "item-2");
+});
+
+test("deleting an unknown item 404s", async () => {
+  const cookie = await signUp("note-link-owner-10@example.com");
+  await addNote(cookie, "delete-validation-note");
+  const created = await server.request("/api/notes/share-link", {
+    method: "POST",
+    headers: { cookie },
+    body: JSON.stringify({ noteId: "delete-validation-note" })
+  });
+  const token = tokenFromUrl(created.body.url);
+
+  const response = await server.request(`/api/shared-notes/${token}/items/not-a-real-item`, { method: "DELETE" });
+  assert.equal(response.status, 404);
+});
+
 test("a trashed note's share link stops resolving", async () => {
   const cookie = await signUp("note-link-owner-4@example.com");
   await addNote(cookie, "trash-me-note");

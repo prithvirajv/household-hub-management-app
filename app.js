@@ -3328,6 +3328,7 @@ function renderSharedWithMeCard(shared) {
   const checklistRow = (item) => `<div class="note-check-row">
     <input type="checkbox" data-shared-note-check="${shared.shareId}:${item.id}" aria-label="Complete ${escapeHtml(item.text)}" ${item.done ? "checked" : ""}>
     <input class="note-check-text" data-shared-note-check-text="${shared.shareId}:${item.id}" value="${escapeHtml(item.text)}" placeholder="Checklist item" aria-label="Checklist item">
+    <button class="note-check-delete" data-delete-shared-note-item="${shared.shareId}:${item.id}" type="button" aria-label="Delete checklist item">×</button>
   </div>`;
   return `<article class="note-card shared-with-me-card" data-shared-note-id="${shared.shareId}">
     <div class="note-reminder shared-with-me-owner">Shared from ${escapeHtml(shared.sharedFromHousehold || "another household")}</div>
@@ -8110,6 +8111,21 @@ function bindViewEvents() {
         const result = await api(`/api/notes/shared-with-me/${encodeURIComponent(shareId)}/items`, { method: "POST", body: JSON.stringify({ text }) });
         shared.checklist.push(result.item);
         input.value = "";
+        render();
+      } catch (error) {
+        showToast(error.message, { type: "error" });
+      }
+    });
+  });
+
+  document.querySelectorAll("[data-delete-shared-note-item]").forEach((button) => {
+    button.addEventListener("click", async () => {
+      const [shareId, itemId] = button.dataset.deleteSharedNoteItem.split(":");
+      const shared = sharedWithMeNotes?.find((item) => item.shareId === shareId);
+      if (!shared) return;
+      try {
+        await api(`/api/notes/shared-with-me/${encodeURIComponent(shareId)}/items/${encodeURIComponent(itemId)}`, { method: "DELETE" });
+        shared.checklist = shared.checklist.filter((item) => item.id !== itemId);
         render();
       } catch (error) {
         showToast(error.message, { type: "error" });

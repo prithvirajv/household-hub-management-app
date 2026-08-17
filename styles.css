@@ -1547,9 +1547,19 @@ main {
   color: var(--muted);
 }
 
+/* This grid's rows (.budget-line-head/.budget-line) each have their own
+   fixed-minimum column tracks that can add up to more than the card gets
+   in the two-column main-stack/side-stack layout (see the "Next up"/
+   "Insights" cards sitting alongside Budget Core). Without this, the
+   overflow doesn't scroll - it bleeds past the card's right edge and the
+   subcategory action buttons end up overlapping the Owner column, which is
+   exactly the "delete(x) is not aligned" symptom. overflow-x:auto keeps it
+   contained (same fix already used for .envelope-flow-row on this page). */
 .budget-table {
   display: grid;
   gap: 0.25rem;
+  overflow-x: auto;
+  padding-bottom: 0.15rem;
 }
 
 .budget-ledger-card {
@@ -1697,7 +1707,7 @@ main {
    the same grid columns so values line up underneath their header. */
 .budget-line-head {
   display: grid;
-  grid-template-columns: minmax(140px, 1fr) minmax(120px, 130px) minmax(90px, 110px) minmax(80px, 100px) minmax(80px, 100px) minmax(90px, 110px) 80px;
+  grid-template-columns: minmax(140px, 1fr) minmax(120px, 130px) minmax(90px, 110px) minmax(80px, 100px) minmax(80px, 100px) minmax(90px, 110px) 112px;
   gap: 0.5rem;
   padding: 0.3rem 0.6rem 0.15rem;
   color: var(--muted);
@@ -1709,7 +1719,7 @@ main {
 
 .budget-line {
   display: grid;
-  grid-template-columns: minmax(140px, 1fr) minmax(120px, 130px) minmax(90px, 110px) minmax(80px, 100px) minmax(80px, 100px) minmax(90px, 110px) 80px;
+  grid-template-columns: minmax(140px, 1fr) minmax(120px, 130px) minmax(90px, 110px) minmax(80px, 100px) minmax(80px, 100px) minmax(90px, 110px) 112px;
   gap: 0.5rem;
   align-items: center;
   padding: 0.55rem 0.6rem;
@@ -3740,12 +3750,6 @@ button.ghost-accent {
   padding: 0.45rem 0.65rem;
   color: var(--text);
   white-space: nowrap;
-}
-
-.share-all-toggle input,
-.scope-toggle input {
-  width: auto;
-  min-height: 0;
 }
 
 .scope-grid {

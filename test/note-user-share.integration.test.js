@@ -274,3 +274,43 @@ test("a trashed note drops out of shared-with-me, and add-item validation matche
   const afterTrash = await server.request("/api/notes/shared-with-me", { headers: { cookie: recipientCookie } });
   assert.equal(afterTrash.body.notes.length, 0);
 });
+
+test("a signed-in recipient can delete a checklist item, and it's gone from the owner's real note too", async () => {
+  const ownerCookie = await signUp("note-user-owner-7@example.com", { householdName: "Owner Household 7" });
+  await addNote(ownerCookie, "chores-note-7", {
+    checklist: [
+      { id: "item-1", text: "Mow the lawn", done: false, parentId: "" },
+      { id: "item-2", text: "Water the plants", done: false, parentId: "" }
+    ]
+  });
+  const recipientCookie = await signUp("note-user-recipient-7@example.com", { householdName: "Recipient Household 7" });
+
+  const shared = await server.request("/api/notes/share-user", {
+    method: "POST",
+    headers: { cookie: ownerCookie },
+    body: JSON.stringify({ noteId: "chores-note-7", email: "note-user-recipient-7@example.com" })
+  });
+  const shareId = shared.body.shares[0].id;
+
+  const deleted = await server.request(`/api/notes/shared-with-me/${shareId}/items/item-1`, {
+    method: "DELETE",
+    headers: { cookie: recipientCookie }
+  });
+  assert.equal(deleted.status, 200);
+  assert.equal(deleted.body.ok, true);
+
+  const sharedWithMe = await server.request("/api/notes/shared-with-me", { headers: { cookie: recipientCookie } });
+  assert.equal(sharedWithMe.body.notes[0].checklist.length, 1);
+  assert.equal(sharedWithMe.body.notes[0].checklist[0].id, "item-2");
+
+  const state = await server.request("/api/state", { headers: { cookie: ownerCookie } });
+  const note = state.body.notes.entries.find((item) => item.id === "chores-note-7");
+  assert.equal(note.checklist.length, 1);
+  assert.equal(note.checklist[0].id, "item-2");
+
+  const unknownDelete = await server.request(`/api/notes/shared-with-me/${shareId}/items/not-a-real-item`, {
+    method: "DELETE",
+    headers: { cookie: recipientCookie }
+  });
+  assert.equal(unknownDelete.status, 404);
+});
