@@ -3428,7 +3428,7 @@ function renderNoteCard(note) {
       <details class="note-more-menu"><summary title="More actions" aria-label="More actions">⋮</summary><div class="note-more-menu-panel">
         <button data-duplicate-note="${note.id}" type="button">Make a copy</button>
         <button data-toggle-note-checklist="${note.id}" type="button">${note.showChecklist ? "Hide checkboxes" : "Show checkboxes"}</button>
-        <button data-share-note="${note.id}" type="button">Share via email</button>
+        <button data-share-note="${note.id}" type="button">Share</button>
         <button class="danger-button" data-trash-note="${note.id}" type="button">Delete note</button>
       </div></details>
     </div>`}
@@ -14146,7 +14146,6 @@ function openShareNoteDialog(note) {
   $("#shareNoteTitle").textContent = note.title || "Untitled note";
   $("#shareNoteMessage").textContent = "";
   $("#shareNoteLinkMessage").textContent = "";
-  $("#shareNoteUserForm").reset();
   $("#shareNoteUserMessage").textContent = "";
   $("#shareNoteUserList").innerHTML = "";
   refreshShareNoteUserList(note.id);
@@ -14156,6 +14155,12 @@ function openShareNoteDialog(note) {
 $("#closeShareNoteDialogButton").addEventListener("click", () => $("#shareNoteDialog").close());
 $("#cancelShareNoteButton").addEventListener("click", () => $("#shareNoteDialog").close());
 
+// One email field does both jobs: try sharing with an existing FamilyLoop
+// account first (full edit access under their own login, tracked and
+// revocable - see the "Shared with" list below), and only if that account
+// doesn't exist, fall back to the plain one-off email copy. The two paths
+// used to be separate forms; merged per explicit feedback that a second
+// "Their FamilyLoop email" field was one field too many.
 $("#shareNoteForm").addEventListener("submit", async (event) => {
   event.preventDefault();
   const note = state.notes.entries.find((item) => item.id === pendingShareNoteId);
@@ -14163,27 +14168,42 @@ $("#shareNoteForm").addEventListener("submit", async (event) => {
     $("#shareNoteDialog").close();
     return;
   }
-  const data = Object.fromEntries(new FormData(event.currentTarget));
-  const submitButton = event.currentTarget.querySelector('[type="submit"]');
+  // Captured before the first await below - event.currentTarget reverts to
+  // null once the event finishes dispatching, which happens synchronously
+  // and well before an awaited fetch resolves.
+  const form = event.currentTarget;
+  const data = Object.fromEntries(new FormData(form));
+  const submitButton = form.querySelector('[type="submit"]');
   submitButton.disabled = true;
   $("#shareNoteMessage").textContent = "";
   try {
-    await api("/api/notes/share", {
-      method: "POST",
-      body: JSON.stringify({
-        to: data.to,
-        message: data.message,
-        noteId: note.id,
-        title: note.title,
-        body: note.body,
-        checklist: (note.checklist || []).map((item) => ({ text: item.text, done: item.done }))
-      })
-    });
-    $("#shareNoteDialog").close();
-    pendingShareNoteId = "";
-    showToast(`Note sent to ${data.to}, including a link they can open to view and edit it.`, { type: "success" });
+    const result = await api("/api/notes/share-user", { method: "POST", body: JSON.stringify({ noteId: note.id, email: data.to }) });
+    renderShareNoteUserList(result.shares);
+    form.reset();
+    showToast(`Shared with ${data.to} - they'll see it under Notes → Shared with me.`, { type: "success" });
   } catch (error) {
-    $("#shareNoteMessage").textContent = error.message;
+    if (error.message !== "No FamilyLoop account with that email") {
+      $("#shareNoteMessage").textContent = error.message;
+    } else {
+      try {
+        await api("/api/notes/share", {
+          method: "POST",
+          body: JSON.stringify({
+            to: data.to,
+            message: data.message,
+            noteId: note.id,
+            title: note.title,
+            body: note.body,
+            checklist: (note.checklist || []).map((item) => ({ text: item.text, done: item.done }))
+          })
+        });
+        $("#shareNoteDialog").close();
+        pendingShareNoteId = "";
+        showToast(`We didn't find a FamilyLoop account for ${data.to}, so it's been sent as a regular email instead.`, { type: "success" });
+      } catch (emailError) {
+        $("#shareNoteMessage").textContent = emailError.message;
+      }
+    }
   } finally {
     submitButton.disabled = false;
   }
@@ -14211,26 +14231,6 @@ $("#stopShareNoteLinkButton").addEventListener("click", async () => {
     showToast("Stopped sharing - the old link no longer works.", { type: "success" });
   } catch (error) {
     $("#shareNoteLinkMessage").textContent = error.message;
-  }
-});
-
-$("#shareNoteUserForm").addEventListener("submit", async (event) => {
-  event.preventDefault();
-  const note = state.notes.entries.find((item) => item.id === pendingShareNoteId);
-  if (!note) return;
-  const data = Object.fromEntries(new FormData(event.currentTarget));
-  const submitButton = event.currentTarget.querySelector('[type="submit"]');
-  submitButton.disabled = true;
-  $("#shareNoteUserMessage").textContent = "";
-  try {
-    const result = await api("/api/notes/share-user", { method: "POST", body: JSON.stringify({ noteId: note.id, email: data.email }) });
-    renderShareNoteUserList(result.shares);
-    event.currentTarget.reset();
-    showToast(`Shared with ${data.email} - they'll see it under Notes → Shared with me.`, { type: "success" });
-  } catch (error) {
-    $("#shareNoteUserMessage").textContent = error.message;
-  } finally {
-    submitButton.disabled = false;
   }
 });
 
