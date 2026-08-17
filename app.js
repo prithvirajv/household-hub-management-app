@@ -2643,6 +2643,15 @@ function renderTransactions() {
   // manual pick or a refund match), so this offers to reset just those back
   // to unassigned in one action instead of reviewing every row by hand.
   const historyMatchedDraftCount = allImported.filter((transaction) => transaction.historyMatch).length;
+  // A bank's "pending" (not-yet-posted) rows can pile up across a re-import
+  // or two, especially right after a parser fix - grouped per account (not
+  // just a single "clear all pending" button) so clearing one account's
+  // stale queue doesn't touch another account's still-relevant pending rows.
+  const pendingDraftCountsByAccount = new Map();
+  allImported.forEach((transaction) => {
+    if (!transaction.isPending || !transaction.accountId) return;
+    pendingDraftCountsByAccount.set(transaction.accountId, (pendingDraftCountsByAccount.get(transaction.accountId) || 0) + 1);
+  });
   const unassignedLedger = [];
   // Without an explicit placeholder, a still-unassigned draft (lineId: "")
   // has no <option> that matches "selected" at all - the browser then just
@@ -2794,6 +2803,11 @@ function renderTransactions() {
             <span><small>A since-fixed bug could have mis-suggested the Subcategory on ${historyMatchedDraftCount} row${historyMatchedDraftCount === 1 ? "" : "s"} (every month) marked <strong>From history</strong> — safe to clear and redo if any look wrong.</small></span>
             <button type="button" id="bankStreamClearHistoryMatches" class="ghost">Clear ${historyMatchedDraftCount} suggested subcategor${historyMatchedDraftCount === 1 ? "y" : "ies"}</button>
           </div>` : ""}
+          ${pendingDraftCountsByAccount.size ? [...pendingDraftCountsByAccount.entries()].map(([accountId, count]) => `
+          <div class="bank-stream-bulk-account bank-stream-bulk-warning">
+            <span><small><strong>${escapeHtml(accountName(accountId))}</strong> has ${count} row${count === 1 ? "" : "s"} (every month) still marked <strong>Pending</strong> by the bank — clear them out if they've since posted or been re-imported.</small></span>
+            <button type="button" class="ghost danger-button" data-clear-pending-account="${accountId}">Clear ${count} pending row${count === 1 ? "" : "s"}</button>
+          </div>`).join("") : ""}
           ${imported.length ? `<div class="bank-stream-sort-row">
             <span>Sort:</span>
             <button type="button" data-sort-bank-stream="date">Date${bankStreamSortIndicator("date")}</button>
@@ -9928,6 +9942,20 @@ function bindViewEvents() {
     transactionValidationFeedback = `Cleared the suggested Subcategory on ${matched.length} row${matched.length === 1 ? "" : "s"} - pick each one by hand, or re-suggest with the ✨ AI button.`;
     autosaveState();
     render();
+  });
+
+  document.querySelectorAll("[data-clear-pending-account]").forEach((button) => {
+    button.addEventListener("click", async () => {
+      const accountId = button.dataset.clearPendingAccount;
+      const pending = (state.transactionInboxDrafts || []).filter((draft) => draft.accountId === accountId && draft.isPending);
+      if (!pending.length) return;
+      const confirmed = await showConfirm(`Remove all ${pending.length} pending row${pending.length === 1 ? "" : "s"} for ${accountName(accountId)}? This deletes them from Bank stream - it doesn't touch anything already accepted into the Ledger.`, { confirmLabel: "Remove" });
+      if (!confirmed) return;
+      state.transactionInboxDrafts = (state.transactionInboxDrafts || []).filter((draft) => !(draft.accountId === accountId && draft.isPending));
+      transactionValidationFeedback = `Removed ${pending.length} pending row${pending.length === 1 ? "" : "s"} for ${accountName(accountId)}.`;
+      autosaveState();
+      render();
+    });
   });
 
   document.querySelectorAll("[data-ledger-entry-payee]").forEach((input) => {
