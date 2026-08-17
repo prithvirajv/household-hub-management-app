@@ -1212,6 +1212,22 @@ test("parseBankCsvTransactions: a checking-style export (mostly negative) is una
   ]);
 });
 
+test("parseBankCsvTransactions: a 'Transaction Type' DEBIT/CREDIT column (credit unions like DCU) is authoritative and isn't fooled by a checking withdrawal that pays a different card's autopay", () => {
+  const csv = [
+    "Date,Transaction Type,Description,Amount",
+    "07/17/2026,DEBIT,ELECTRONIC WITHDRAWAL SAMPLE CARD AUTOPAY PAYMENT,-251.45",
+    "07/20/2026,DEBIT,ELECTRONIC WITHDRAWAL OTHER CARD AUTOPAY PAYMENT,-46.66",
+    "07/23/2026,CREDIT,ELECTRONIC DEPOSIT - SAMPLE EMPLOYER PAYROLL,1106.06",
+    "07/30/2026,CREDIT,DIVIDEND,0.14"
+  ].join("\n");
+  assert.deepEqual(parseBankCsvTransactions(csv), [
+    { date: "2026-07-17", payee: "ELECTRONIC WITHDRAWAL SAMPLE CARD AUTOPAY PAYMENT", amount: 251.45 },
+    { date: "2026-07-20", payee: "ELECTRONIC WITHDRAWAL OTHER CARD AUTOPAY PAYMENT", amount: 46.66 },
+    { date: "2026-07-23", payee: "ELECTRONIC DEPOSIT - SAMPLE EMPLOYER PAYROLL", amount: -1106.06, isDeposit: true },
+    { date: "2026-07-30", payee: "DIVIDEND", amount: -0.14, isDeposit: true }
+  ], "two of the four rows have 'AUTOPAY PAYMENT' in their description (paying an external card from this checking account, not this account's own payoff) - without the explicit type column, the payment-description heuristic would misread the whole file as credit-card-style and store every deposit positive/every withdrawal negative, the exact opposite of this app's checking convention");
+});
+
 test("parseBankCsvTransactions: recognizes Chase's own 'Posting Date' header text (a real export column name this parser used to miss entirely, returning nothing)", () => {
   const csv = [
     "Details,Posting Date,Description,Amount,Type,Balance,Check or Slip #",
