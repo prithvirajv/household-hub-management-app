@@ -1541,6 +1541,16 @@ function nextRecurringBudgetDueDate(bill, selectedMonth = state.budget.month) {
   while (dateKeyToMonthKey(cursor).localeCompare(selectedMonth) < 0) {
     cursor = addMonthsToDateKey(cursor, interval);
   }
+  // A stored due date can also sit more than one interval ahead of the
+  // selected month (e.g. someone picked the wrong year) - pull it back to
+  // the nearest occurrence on or after selectedMonth instead of leaving it
+  // wherever the anchor happened to land, so "months to save" reflects the
+  // bill that's actually coming up next rather than some future repeat.
+  let earlier = addMonthsToDateKey(cursor, -interval);
+  while (earlier && dateKeyToMonthKey(earlier).localeCompare(selectedMonth) >= 0) {
+    cursor = earlier;
+    earlier = addMonthsToDateKey(cursor, -interval);
+  }
   return cursor;
 }
 
@@ -1632,12 +1642,24 @@ function calendarNavIconHtml() {
   return `<span class="nav-calendar-icon" aria-hidden="true" title="${fullLabel}"><span class="nav-calendar-icon-day">${now.getDate()}</span></span>`;
 }
 
+// billsRows() reflects whatever month the Budget/Bills page happens to be
+// showing (state.budget.month), which is a perfectly normal thing to browse
+// ahead or back to - a future month's bills aren't "unpaid" in any
+// meaningful sense, they just haven't happened yet. Badges/notifications
+// should only ever reflect bills you're actually behind on right now, so
+// this only counts them while the real current month is the one on screen;
+// browsing elsewhere doesn't manufacture a false alert.
+function unpaidBillsForNotifications() {
+  if (state.budget.month !== currentMonthKey()) return [];
+  return billsRows().filter((bill) => !bill.paid);
+}
+
 // Mocked-up counts kept intentionally small in scope: unpaid-and-due-soon
 // bills, and Bank Stream rows still waiting for review. Both are cheap to
 // derive from data already loaded for other views, so no new state needed.
 function navBadgeCounts() {
   if (!state) return {};
-  const bills = billsRows().filter((bill) => !bill.paid).length;
+  const bills = unpaidBillsForNotifications().length;
   const transactions = transactionInboxItems().filter((transaction) => !(state.transactionInboxDone || []).includes(transaction.id)).length;
   return { bills, transactions };
 }
@@ -1652,7 +1674,7 @@ function notificationBellItems() {
     detail: `${item.kind} · Past due`,
     view: "home"
   }));
-  const openBills = billsRows().filter((bill) => !bill.paid).map((bill) => ({
+  const openBills = unpaidBillsForNotifications().map((bill) => ({
     title: bill.name,
     detail: `Bill · Due day ${bill.dueDay}`,
     view: "bills"
@@ -9044,17 +9066,35 @@ function bindViewEvents() {
   });
 
   document.querySelectorAll("[data-budget-recurring-due-date]").forEach((input) => {
+    const [categoryIndex, lineIndex] = input.dataset.budgetRecurringDueDate.split(":").map(Number);
     input.addEventListener("input", () => {
-      const [categoryIndex, lineIndex] = input.dataset.budgetRecurringDueDate.split(":").map(Number);
+      // A native date input reports "" while any segment (e.g. the year) is
+      // only partially typed, not just when the field is genuinely cleared -
+      // bail out instead of substituting `${state.budget.month}-01` and
+      // persisting/autosaving that mid-keystroke. That fallback was what
+      // made typing a new year snap back to the old due date: each digit
+      // typed into the year briefly re-anchors the bill to the fallback
+      // date before the final digit completes it.
+      if (!input.value) return;
       const line = state.budget.categories[categoryIndex]?.lines[lineIndex];
       if (!line?.recurringBill) return;
-      line.recurringBill.dueDate = input.value || `${state.budget.month}-01`;
+      line.recurringBill.dueDate = input.value;
       applyRecurringBudgetToLine(line);
       refreshBudgetTotals(categoryIndex, lineIndex);
       refreshIncomeTotals();
       autosaveState();
     });
-    input.addEventListener("change", () => render());
+    input.addEventListener("change", () => {
+      if (!input.value) {
+        const line = state.budget.categories[categoryIndex]?.lines[lineIndex];
+        if (line?.recurringBill) {
+          line.recurringBill.dueDate = `${state.budget.month}-01`;
+          applyRecurringBudgetToLine(line);
+          autosaveState();
+        }
+      }
+      render();
+    });
   });
 
   document.querySelectorAll("[data-budget-line-name]").forEach((input) => {
