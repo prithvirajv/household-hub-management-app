@@ -13867,21 +13867,30 @@ function updateAssignIouDirectionHint() {
     : "Only your remaining share is accepted as your own expense - everyone else's share becomes a separate amount you owe them.";
 }
 
-// The two quick-preset split types ("all_them"/"all_me") already say who
-// owes whom in their own label ("They owe everything" / "I owe
-// everything"), so asking again via the separate Direction dropdown would
-// be redundant and could even contradict it - this hides Direction and
-// drives its value from the chosen preset instead. Any other split type
-// (exact/equal/percentage/shares) is a real multi-way split where you might
-// keep a share too, so Direction still needs its own independent choice.
+// Direction used to be its own always-visible dropdown alongside Split
+// type, asking the same "who paid" question a second time on every single
+// entry even though the answer is "me" the vast majority of the time
+// ("its hard for adding, i see a amount either i want to split that with
+// my friends on percentage or eqiual share or they owe all amount i paid
+// or you owe all amount and it was paid by them"). The <select> itself
+// stays in the DOM (submit still reads it via FormData), but it's never
+// shown - openAssignIouDialog seeds it with a sensible default from the
+// transaction's own sign, and this swap button is the only way to
+// override that guess, replacing a second mandatory dropdown with one
+// optional, low-prominence toggle. The two quick-preset split types
+// ("all_them"/"all_me") already say who owes whom in their own label, so
+// the swap button is redundant there too and stays hidden alongside it.
 function syncAssignIouDirectionForSplitType() {
-  const directionField = document.getElementById("assignIouDirectionField");
   const isPreset = assignIouSplitType === "all_them" || assignIouSplitType === "all_me";
-  if (directionField) directionField.style.display = isPreset ? "none" : "";
+  const swapButton = $("#assignIouSwapDirection");
   if (isPreset) {
     $("#assignIouDirection").value = assignIouSplitType === "all_me" ? "i_owe" : "owed_to_me";
-    updateAssignIouDirectionHint();
+    if (swapButton) swapButton.hidden = true;
+  } else if (swapButton) {
+    swapButton.hidden = false;
+    swapButton.textContent = $("#assignIouDirection").value === "i_owe" ? "Swap: you paid instead" : "Swap: they paid instead";
   }
+  updateAssignIouDirectionHint();
 }
 
 function openAssignIouDialog(source) {
@@ -13897,7 +13906,6 @@ function openAssignIouDialog(source) {
   $("#assignIouSplitType").value = "exact";
   $("#assignIouDirection").value = Number(record.amount) < 0 ? "i_owe" : "owed_to_me";
   syncAssignIouDirectionForSplitType();
-  updateAssignIouDirectionHint();
   $("#assignIouTotal").textContent = exactMoney.format(assignIouDraftTotal);
   // Default to an even 2-way split (you + one friend), like Splitwise's
   // default - the user can edit the amount or add more people from here.
@@ -13916,6 +13924,11 @@ function openAssignIouDialog(source) {
 $("#closeAssignIouDialogButton").addEventListener("click", () => $("#assignIouDialog").close());
 $("#cancelAssignIouButton").addEventListener("click", () => $("#assignIouDialog").close());
 $("#assignIouDirection").addEventListener("change", updateAssignIouDirectionHint);
+$("#assignIouSwapDirection").addEventListener("click", () => {
+  const direction = $("#assignIouDirection");
+  direction.value = direction.value === "i_owe" ? "owed_to_me" : "i_owe";
+  syncAssignIouDirectionForSplitType();
+});
 $("#assignIouSplitType").addEventListener("change", (event) => {
   assignIouSplitType = event.currentTarget.value;
   syncAssignIouDirectionForSplitType();

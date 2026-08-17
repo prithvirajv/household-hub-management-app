@@ -109,6 +109,28 @@ button.ghost {
   border: 1px solid var(--line);
 }
 
+/* A plain text link masquerading as a button - for a low-prominence,
+   optional override sitting next to a primary field (e.g. "Swap: they
+   paid instead" beside the Assign IOU split-type picker), where a
+   full-height filled button would visually compete with the field it's
+   modifying instead of reading as a secondary aside. */
+button.ghost-link {
+  background: transparent;
+  color: var(--muted);
+  border: none;
+  padding: 0.2rem 0;
+  min-height: 0;
+  font-weight: 700;
+  font-size: 0.78rem;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  align-self: flex-start;
+}
+
+button.ghost-link:hover:not(:disabled) {
+  color: var(--text);
+}
+
 /* Custom checkbox: a rounded-square button instead of the browser's native
    box, filled with the accent + a checkmark when checked - used wherever a
    checkbox represents completion (Notes checklists, Plan tasks/subtasks,
