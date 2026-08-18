@@ -2643,13 +2643,17 @@ function renderTransactions() {
   // manual pick or a refund match), so this offers to reset just those back
   // to unassigned in one action instead of reviewing every row by hand.
   const historyMatchedDraftCount = allImported.filter((transaction) => transaction.historyMatch).length;
-  // A bank's "pending" (not-yet-posted) rows can pile up across a re-import
-  // or two, especially right after a parser fix - grouped per account (not
-  // just a single "clear all pending" button) so clearing one account's
-  // stale queue doesn't touch another account's still-relevant pending rows.
+  // Bank Stream rows can pile up across a re-import or two (especially
+  // right after a parser fix changes how a file's rows come out) faster
+  // than anyone reviews them - "pending" here means every unreviewed row
+  // still sitting in the queue for a given account, not just the bank's
+  // own Pending/not-yet-posted flag (most rows never carry that flag at
+  // all). Grouped per account, not a single "clear everything" button, so
+  // clearing one account's stale queue never touches another account's
+  // still-relevant rows.
   const pendingDraftCountsByAccount = new Map();
   allImported.forEach((transaction) => {
-    if (!transaction.isPending || !transaction.accountId) return;
+    if (!transaction.accountId) return;
     pendingDraftCountsByAccount.set(transaction.accountId, (pendingDraftCountsByAccount.get(transaction.accountId) || 0) + 1);
   });
   const unassignedLedger = [];
@@ -2805,8 +2809,8 @@ function renderTransactions() {
           </div>` : ""}
           ${pendingDraftCountsByAccount.size ? [...pendingDraftCountsByAccount.entries()].map(([accountId, count]) => `
           <div class="bank-stream-bulk-account bank-stream-bulk-warning">
-            <span><small><strong>${escapeHtml(accountName(accountId))}</strong> has ${count} row${count === 1 ? "" : "s"} (every month) still marked <strong>Pending</strong> by the bank — clear them out if they've since posted or been re-imported.</small></span>
-            <button type="button" class="ghost danger-button" data-clear-pending-account="${accountId}">Clear ${count} pending row${count === 1 ? "" : "s"}</button>
+            <span><small><strong>${escapeHtml(accountName(accountId))}</strong> has ${count} row${count === 1 ? "" : "s"} (every month) still sitting unreviewed in Bank stream — clear them all out at once instead of reviewing each one.</small></span>
+            <button type="button" class="ghost danger-button" data-clear-pending-account="${accountId}">Clear all ${count} row${count === 1 ? "" : "s"} for ${escapeHtml(accountName(accountId))}</button>
           </div>`).join("") : ""}
           ${imported.length ? `<div class="bank-stream-sort-row">
             <span>Sort:</span>
@@ -9947,12 +9951,12 @@ function bindViewEvents() {
   document.querySelectorAll("[data-clear-pending-account]").forEach((button) => {
     button.addEventListener("click", async () => {
       const accountId = button.dataset.clearPendingAccount;
-      const pending = (state.transactionInboxDrafts || []).filter((draft) => draft.accountId === accountId && draft.isPending);
+      const pending = (state.transactionInboxDrafts || []).filter((draft) => draft.accountId === accountId);
       if (!pending.length) return;
-      const confirmed = await showConfirm(`Remove all ${pending.length} pending row${pending.length === 1 ? "" : "s"} for ${accountName(accountId)}? This deletes them from Bank stream - it doesn't touch anything already accepted into the Ledger.`, { confirmLabel: "Remove" });
+      const confirmed = await showConfirm(`Remove all ${pending.length} unreviewed row${pending.length === 1 ? "" : "s"} for ${accountName(accountId)}? This deletes them from Bank stream - it doesn't touch anything already accepted into the Ledger, and no other account's rows are affected.`, { confirmLabel: "Remove" });
       if (!confirmed) return;
-      state.transactionInboxDrafts = (state.transactionInboxDrafts || []).filter((draft) => !(draft.accountId === accountId && draft.isPending));
-      transactionValidationFeedback = `Removed ${pending.length} pending row${pending.length === 1 ? "" : "s"} for ${accountName(accountId)}.`;
+      state.transactionInboxDrafts = (state.transactionInboxDrafts || []).filter((draft) => draft.accountId !== accountId);
+      transactionValidationFeedback = `Removed ${pending.length} row${pending.length === 1 ? "" : "s"} for ${accountName(accountId)}.`;
       autosaveState();
       render();
     });
