@@ -2807,11 +2807,15 @@ function renderTransactions() {
             <span><small>A since-fixed bug could have mis-suggested the Subcategory on ${historyMatchedDraftCount} row${historyMatchedDraftCount === 1 ? "" : "s"} (every month) marked <strong>From history</strong> — safe to clear and redo if any look wrong.</small></span>
             <button type="button" id="bankStreamClearHistoryMatches" class="ghost">Clear ${historyMatchedDraftCount} suggested subcategor${historyMatchedDraftCount === 1 ? "y" : "ies"}</button>
           </div>` : ""}
-          ${pendingDraftCountsByAccount.size ? [...pendingDraftCountsByAccount.entries()].map(([accountId, count]) => `
-          <div class="bank-stream-bulk-account bank-stream-bulk-warning">
-            <span><small><strong>${escapeHtml(accountName(accountId))}</strong> has ${count} row${count === 1 ? "" : "s"} (every month) still sitting unreviewed in Bank stream — clear them all out at once instead of reviewing each one.</small></span>
-            <button type="button" class="ghost danger-button" data-clear-pending-account="${accountId}">Clear all ${count} row${count === 1 ? "" : "s"} for ${escapeHtml(accountName(accountId))}</button>
-          </div>`).join("") : ""}
+          ${pendingDraftCountsByAccount.size && state.accounts.length ? `<div class="bank-stream-bulk-account bank-stream-bulk-warning">
+            <label><small>Clear every unreviewed row (every month) for one account, instead of reviewing each one</small>
+              <select id="bankStreamClearAccountSelect">
+                <option value="">Choose an account…</option>
+                ${state.accounts.map((account) => `<option value="${account.id}">${escapeHtml(account.name)}${pendingDraftCountsByAccount.get(account.id) ? ` (${pendingDraftCountsByAccount.get(account.id)})` : ""}</option>`).join("")}
+              </select>
+            </label>
+            <button type="button" id="bankStreamClearAccountButton" class="ghost danger-button">Clear</button>
+          </div>` : ""}
           ${imported.length ? `<div class="bank-stream-sort-row">
             <span>Sort:</span>
             <button type="button" data-sort-bank-stream="date">Date${bankStreamSortIndicator("date")}</button>
@@ -9948,18 +9952,22 @@ function bindViewEvents() {
     render();
   });
 
-  document.querySelectorAll("[data-clear-pending-account]").forEach((button) => {
-    button.addEventListener("click", async () => {
-      const accountId = button.dataset.clearPendingAccount;
-      const pending = (state.transactionInboxDrafts || []).filter((draft) => draft.accountId === accountId);
-      if (!pending.length) return;
-      const confirmed = await showConfirm(`Remove all ${pending.length} unreviewed row${pending.length === 1 ? "" : "s"} for ${accountName(accountId)}? This deletes them from Bank stream - it doesn't touch anything already accepted into the Ledger, and no other account's rows are affected.`, { confirmLabel: "Remove" });
-      if (!confirmed) return;
-      state.transactionInboxDrafts = (state.transactionInboxDrafts || []).filter((draft) => draft.accountId !== accountId);
-      transactionValidationFeedback = `Removed ${pending.length} row${pending.length === 1 ? "" : "s"} for ${accountName(accountId)}.`;
-      autosaveState();
+  $("#bankStreamClearAccountButton")?.addEventListener("click", async () => {
+    const select = $("#bankStreamClearAccountSelect");
+    const accountId = select?.value;
+    if (!accountId) return;
+    const pending = (state.transactionInboxDrafts || []).filter((draft) => draft.accountId === accountId);
+    if (!pending.length) {
+      transactionValidationFeedback = `${accountName(accountId)} has no unreviewed Bank stream rows to clear.`;
       render();
-    });
+      return;
+    }
+    const confirmed = await showConfirm(`Remove all ${pending.length} unreviewed row${pending.length === 1 ? "" : "s"} for ${accountName(accountId)}? This deletes them from Bank stream - it doesn't touch anything already accepted into the Ledger, and no other account's rows are affected.`, { confirmLabel: "Remove" });
+    if (!confirmed) return;
+    state.transactionInboxDrafts = (state.transactionInboxDrafts || []).filter((draft) => draft.accountId !== accountId);
+    transactionValidationFeedback = `Removed ${pending.length} row${pending.length === 1 ? "" : "s"} for ${accountName(accountId)}.`;
+    autosaveState();
+    render();
   });
 
   document.querySelectorAll("[data-ledger-entry-payee]").forEach((input) => {
