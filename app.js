@@ -102,6 +102,12 @@ const REPORTS_THEMES = {
 // Which decision card has its pros/cons/notes/attachments expanded - one at
 // a time (accordion), same convention as Reports' expandedRingCategory.
 let expandedDecisionId = null;
+// Which Wealth "Accounts" groups (by account type) are collapsed - a plain
+// Set of group types rather than a boolean-per-group object, so a newly
+// added account type just starts absent (expanded) with nothing to
+// initialize. Session-local like the flags above; not persisted to state
+// since it's just a display preference, not household data.
+let wealthCollapsedGroups = new Set();
 // Bills page's own filter pill (all/due/overdue) - session-local display
 // state, same convention as Reports' reportsScope/reportsDensity.
 let billsFilter = "all";
@@ -1128,6 +1134,13 @@ const ACCOUNT_TYPE_GROUPS = [
   { type: "other", label: "Other" },
   { type: "credit_card", label: "Credit cards" }
 ];
+
+// A household that's been paying off cards for a while can rack up dozens
+// of transfers, which used to render as one very long unbroken list on the
+// Wealth page - capping the directly-visible rows and tucking the rest
+// behind a <details> disclosure (same convention as the debt payment-history
+// list) keeps the page a reasonable length without hiding anything for good.
+const TRANSFER_LIST_VISIBLE_LIMIT = 8;
 
 function groupAccountsByType(accounts) {
   return ACCOUNT_TYPE_GROUPS
@@ -5622,7 +5635,7 @@ function renderWealth() {
             ? groupAccountsByType(state.accounts).map((group) => {
                 const isLiabilityGroup = group.type === "credit_card";
                 const groupTotal = group.accounts.reduce((sum, account) => sum + currentAccountBalance(account.id), 0);
-                return `<details class="account-type-group" open>
+                return `<details class="account-type-group" data-account-group="${group.type}" ${wealthCollapsedGroups.has(group.type) ? "" : "open"}>
                   <summary>
                     <span>${group.label}</span>
                     <small class="muted">${group.accounts.length} account${group.accounts.length === 1 ? "" : "s"}</small>
@@ -5643,7 +5656,7 @@ function renderWealth() {
             <label>Memo<input name="memo" placeholder="Credit card payment"></label>
             <button type="submit">Transfer</button>
           </form>` : `<div class="empty-inline">Add at least two accounts to record a transfer, like paying a credit card from checking.</div>`}
-          ${state.transfers.length ? state.transfers.map((transfer, index) => transferRow(transfer, index)).join("") : ""}
+          ${state.transfers.length ? `${state.transfers.slice(0, TRANSFER_LIST_VISIBLE_LIMIT).map((transfer, index) => transferRow(transfer, index)).join("")}${state.transfers.length > TRANSFER_LIST_VISIBLE_LIMIT ? `<details class="transfers-overflow-details"><summary>Show ${state.transfers.length - TRANSFER_LIST_VISIBLE_LIMIT} more transfer${state.transfers.length - TRANSFER_LIST_VISIBLE_LIMIT === 1 ? "" : "s"}</summary>${state.transfers.slice(TRANSFER_LIST_VISIBLE_LIMIT).map((transfer, index) => transferRow(transfer, index + TRANSFER_LIST_VISIBLE_LIMIT)).join("")}</details>` : ""}` : ""}
         </section>
         <section class="card">
           <div class="section-head"><div><span class="card-label">Debt snowball</span><h3>Debt payoff tracker</h3></div><button id="addDebtButton" type="button">+ Add debt</button></div>
@@ -12122,6 +12135,21 @@ function bindViewEvents() {
       const key = button.dataset.wealthDocToggle;
       wealthDocsExpandedKey = wealthDocsExpandedKey === key ? null : key;
       render();
+    });
+  });
+
+  // The <details> element already toggles itself instantly on click with no
+  // help needed - this just remembers the open/closed state in JS so it
+  // survives the next render() (which fires on nearly every Wealth page
+  // input change and would otherwise snap every group back open).
+  // Deliberately does NOT call render() itself: re-rendering on every toggle
+  // would rebuild the DOM node the user just clicked, which is unnecessary
+  // churn for a change the browser already applied.
+  document.querySelectorAll("[data-account-group]").forEach((details) => {
+    details.addEventListener("toggle", () => {
+      const type = details.dataset.accountGroup;
+      if (details.open) wealthCollapsedGroups.delete(type);
+      else wealthCollapsedGroups.add(type);
     });
   });
 

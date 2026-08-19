@@ -4542,15 +4542,21 @@ button.ghost-accent {
   text-transform: uppercase;
 }
 
-.payment-history {
+.payment-history,
+.transfers-overflow-details {
   border-top: 1px solid var(--line);
   padding-top: 0.55rem;
 }
 
-.payment-history summary {
+.payment-history summary,
+.transfers-overflow-details summary {
   cursor: pointer;
   color: var(--muted);
   font-weight: 800;
+}
+
+.transfers-overflow-details .compact-row {
+  margin-top: 0.5rem;
 }
 
 .payment-history > div {
