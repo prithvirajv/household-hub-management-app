@@ -13,7 +13,8 @@ const {
   parseCreditCardStatementText, parseCheckingAccountActivityText, parseBankStatementPdfText, normalizeTag, groupTransactionsByTag, monthKeysInRange, spentByLineInMonth,
   recurringBudgetSetAside, nextRecurringBudgetDueDate, monthsUntilDueInclusive,
   annualEventDate, nextAnnualEventDate, annualEventNotifyAt, rollAnnualNotifyAtForward,
-  nextPendingChoreOccurrence, currentChoreOccurrenceDate, zonedTimeToUtcIso, choreNotifyAt
+  nextPendingChoreOccurrence, currentChoreOccurrenceDate, zonedTimeToUtcIso, choreNotifyAt,
+  buildCalendarIcs, parseIcsText, icsEventsToCalendarDrafts, buildCalendarCsv, parseCalendarCsv
 } = require("../lib/shared-logic");
 
 test("layoutTimelineBlocks gives non-overlapping tasks full width", () => {
@@ -2033,4 +2034,98 @@ test("sankeyFlowSegments includes each category's subcategories as children, sor
   ]);
   const savings = sankeyFlowSegments(categories, 5000, 1800).find((segment) => segment.label === "Savings");
   assert.deepEqual(savings.children, [], "Savings has no subcategory breakdown");
+});
+
+test("buildCalendarIcs + parseIcsText + icsEventsToCalendarDrafts round-trips a recurring chore exactly", () => {
+  const chore = {
+    id: "chore-1", title: "Take out trash", recurrence: "every3months", endDate: "2027-01-01",
+    startDate: "2026-06-01", time: "18:30", location: "Curb", assignees: [{ key: "a@x.com", name: "A" }]
+  };
+  const ics = buildCalendarIcs([], [chore]);
+  const [draft] = icsEventsToCalendarDrafts(parseIcsText(ics));
+  assert.equal(draft.kind, "chore");
+  assert.equal(draft.title, "Take out trash");
+  assert.equal(draft.date, "2026-06-01");
+  assert.equal(draft.time, "18:30");
+  assert.equal(draft.recurrence, "every3months");
+  assert.equal(draft.endDate, "2027-01-01");
+  assert.equal(draft.location, "Curb");
+  assert.deepEqual(draft.assigneeKeys, ["a@x.com"]);
+});
+
+test("buildCalendarIcs + parseIcsText + icsEventsToCalendarDrafts round-trips a birthday exactly", () => {
+  const birthday = { id: "event-1", title: "Mom's birthday", type: "birthday", annual: true, date: "1965-04-12", monthDay: "04-12", reminderDays: 3, assignees: [] };
+  const ics = buildCalendarIcs([birthday], []);
+  const [draft] = icsEventsToCalendarDrafts(parseIcsText(ics));
+  assert.equal(draft.kind, "event");
+  assert.equal(draft.type, "birthday");
+  assert.equal(draft.date, "1965-04-12");
+  assert.equal(draft.recurrence, "yearly");
+  assert.equal(draft.reminderDays, 3);
+});
+
+test("buildCalendarIcs + parseIcsText + icsEventsToCalendarDrafts round-trips a weekly reminder exactly", () => {
+  const reminder = { id: "event-2", title: "Pay rent", type: "reminder", date: "2026-09-01", dateTime: "2026-09-01T09:00", recurrence: "weekly", location: "", assignees: [] };
+  const ics = buildCalendarIcs([reminder], []);
+  const [draft] = icsEventsToCalendarDrafts(parseIcsText(ics));
+  assert.equal(draft.kind, "event");
+  assert.equal(draft.type, "reminder");
+  assert.equal(draft.date, "2026-09-01");
+  assert.equal(draft.time, "09:00");
+  assert.equal(draft.recurrence, "weekly");
+});
+
+test("buildCalendarIcs escapes commas/semicolons in titles and locations so parseIcsText recovers them exactly", () => {
+  const reminder = { id: "event-3", title: "Buy milk, eggs; bread", type: "reminder", date: "2026-09-01", dateTime: "2026-09-01T09:00", recurrence: "once", location: "Store; Main St, Suite 2", assignees: [] };
+  const ics = buildCalendarIcs([reminder], []);
+  const [draft] = icsEventsToCalendarDrafts(parseIcsText(ics));
+  assert.equal(draft.title, "Buy milk, eggs; bread");
+  assert.equal(draft.location, "Store; Main St, Suite 2");
+});
+
+test("icsEventsToCalendarDrafts maps a generic external .ics VEVENT (no X-FAMILYLOOP markers) to a safe generic reminder", () => {
+  const externalIcs = [
+    "BEGIN:VCALENDAR",
+    "VERSION:2.0",
+    "BEGIN:VEVENT",
+    "UID:abc123@google.com",
+    "DTSTAMP:20260101T000000Z",
+    "SUMMARY:Team standup",
+    "DTSTART:20260915T093000",
+    "RRULE:FREQ=WEEKLY",
+    "LOCATION:Zoom",
+    "END:VEVENT",
+    "END:VCALENDAR"
+  ].join("\r\n");
+  const [draft] = icsEventsToCalendarDrafts(parseIcsText(externalIcs));
+  assert.equal(draft.kind, "event");
+  assert.equal(draft.type, "reminder", "no signal an external event is a birthday/chore, so it must not be guessed");
+  assert.equal(draft.title, "Team standup");
+  assert.equal(draft.date, "2026-09-15");
+  assert.equal(draft.time, "09:30");
+  assert.equal(draft.recurrence, "weekly");
+  assert.deepEqual(draft.assigneeKeys, []);
+});
+
+test("buildCalendarCsv + parseCalendarCsv round-trips a chore and an annual event", () => {
+  const chore = { id: "chore-1", title: "Vacuum", recurrence: "weekly", startDate: "2026-06-01", time: "10:00", location: "", assignees: [{ key: "b@x.com" }], endDate: "" };
+  const anniversary = { id: "event-1", title: "Wedding anniversary", type: "anniversary", annual: true, date: "2010-05-20", reminderDays: 7, assignees: [] };
+  const csv = buildCalendarCsv([anniversary], [chore]);
+  const drafts = parseCalendarCsv(csv);
+  const choreDraft = drafts.find((draft) => draft.title === "Vacuum");
+  const annivDraft = drafts.find((draft) => draft.title === "Wedding anniversary");
+  assert.equal(choreDraft.kind, "chore");
+  assert.equal(choreDraft.recurrence, "weekly");
+  assert.deepEqual(choreDraft.assigneeKeys, ["b@x.com"]);
+  assert.equal(annivDraft.kind, "event");
+  assert.equal(annivDraft.type, "anniversary");
+  assert.equal(annivDraft.date, "2010-05-20");
+  assert.equal(annivDraft.reminderDays, 7);
+});
+
+test("buildCalendarCsv quotes fields containing commas so parseCalendarCsv doesn't split them apart", () => {
+  const reminder = { id: "event-4", title: "Buy milk, eggs", type: "reminder", date: "2026-09-01", dateTime: "2026-09-01T09:00", recurrence: "once", location: "", assignees: [] };
+  const csv = buildCalendarCsv([reminder], []);
+  const [draft] = parseCalendarCsv(csv);
+  assert.equal(draft.title, "Buy milk, eggs");
 });

@@ -3048,6 +3048,37 @@ button.ghost-accent {
   min-width: 90px;
 }
 
+.calendar-import-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  max-height: 50vh;
+  overflow-y: auto;
+  margin: 0.5rem 0;
+}
+
+.calendar-import-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.6rem;
+  padding: 0.55rem 0.65rem;
+  border-radius: 6px;
+  background: var(--soft-blue);
+  cursor: pointer;
+}
+
+.calendar-import-row input[type="checkbox"] {
+  margin-top: 0.2rem;
+  flex: none;
+}
+
+.calendar-import-row span {
+  display: flex;
+  flex-direction: column;
+  gap: 0.1rem;
+  min-width: 0;
+}
+
 .calendar-form-status {
   grid-column: 1 / -1;
   min-height: 1rem;
@@ -5114,6 +5145,31 @@ input.holdings-modal-market-value-input {
   display: grid;
   gap: 0.85rem;
   padding: 1.1rem;
+}
+
+/* The Share note dialog's content (intro text, form, shared-with list, share-
+   link section) can add up to taller than the viewport on a shorter screen -
+   without this, the browser's native <dialog> top-layer scroll kicks in and
+   scrolls the WHOLE dialog (title and close button included) out of view, so
+   the top of the dialog reads as cut off mid-sentence with no way back to the
+   close button. Scoping the scroll to the content itself (with the title bar
+   pinned via position: sticky) keeps the close button reachable at all times
+   instead of scrolling away with everything else. */
+#shareNoteDialog {
+  max-height: min(640px, 92vh);
+}
+
+#shareNoteDialog .delete-budget-line-dialog-content {
+  max-height: min(640px, 92vh);
+  overflow-y: auto;
+}
+
+#shareNoteDialog .section-head {
+  position: sticky;
+  top: 0;
+  background: var(--panel);
+  padding-bottom: 0.4rem;
+  z-index: 1;
 }
 
 .global-search-results {

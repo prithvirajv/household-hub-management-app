@@ -123,6 +123,10 @@ let splitBillRows = [];
 // the other types.
 let splitBillYou = { amount: 0, percent: 0, shares: 1 };
 let calendarFeedback = "";
+// Parsed-but-not-yet-inserted calendar import rows, shown in the preview
+// dialog for the user to confirm before anything is added to state.
+let calendarImportDrafts = [];
+let calendarImportFeedback = "";
 // Kept out of state (like calendarFeedback) so a confirmation message never
 // gets saved into the shared household blob and replayed for every login.
 let mealsFeedback = "";
@@ -3075,7 +3079,7 @@ function renderCalendar() {
         <section class="card calendar-main-card">
           <div class="section-head">
             <div><span class="card-label">Household calendar</span><h3>Chores, birthdays, anniversaries and reminders</h3></div>
-            <div class="button-row"><button id="addChoreButton" class="ghost" type="button">+ Add chore</button><button id="addBirthdayButton" class="ghost" type="button">+ Add birthday</button><button id="addAnniversaryButton" class="ghost" type="button">+ Add anniversary</button><button id="addReminderButton" class="ghost" type="button">+ Add reminder</button></div>
+            <div class="button-row"><button id="addChoreButton" class="ghost" type="button">+ Add chore</button><button id="addBirthdayButton" class="ghost" type="button">+ Add birthday</button><button id="addAnniversaryButton" class="ghost" type="button">+ Add anniversary</button><button id="addReminderButton" class="ghost" type="button">+ Add reminder</button><button id="calendarExportIcsButton" class="ghost" type="button">Export .ics</button><button id="calendarExportCsvButton" class="ghost" type="button">Export .csv</button><button id="calendarImportButton" class="ghost" type="button">Import</button><input id="calendarImportFileInput" type="file" accept=".ics,.csv,text/calendar,text/csv" hidden></div>
           </div>
           <div class="calendar-member-filter" role="group" aria-label="Filter calendar by person">
             <button type="button" class="member-chip ${calendarFilterOwner ? "" : "active"}" data-calendar-filter-owner="">All people</button>
@@ -3163,6 +3167,28 @@ function renderCalendar() {
         </section>
       </aside>
     </section>`;
+}
+
+// Re-renders just the import-preview dialog's checklist in place (rather
+// than going through the full render() pipeline, which would tear down and
+// recreate the open <dialog> itself and close it).
+function renderCalendarImportPreview() {
+  const list = $("#calendarImportList");
+  if (!list) return;
+  list.innerHTML = calendarImportDrafts.length
+    ? calendarImportDrafts.map((draft, index) => `
+      <label class="calendar-import-row">
+        <input type="checkbox" data-import-index="${index}" checked>
+        <span>
+          <strong>${escapeHtml(draft.title)}</strong>
+          <small>${draft.date}${draft.time ? ` · ${draft.time}` : ""} · ${escapeHtml(draft.kind === "chore" ? "Chore" : (annualEventLabels[draft.type] || "Reminder"))}${draft.recurrence && draft.recurrence !== "once" ? ` · repeats ${draft.recurrence}` : ""}</small>
+        </span>
+      </label>`).join("")
+    : `<div class="empty-inline">Nothing to import</div>`;
+  const submitButton = $("#submitCalendarImportButton");
+  if (submitButton) submitButton.textContent = `Import ${calendarImportDrafts.length} item${calendarImportDrafts.length === 1 ? "" : "s"}`;
+  const status = $("#calendarImportMessage");
+  if (status) status.textContent = calendarImportFeedback || "";
 }
 
 function ensureNotesData() {
@@ -11630,6 +11656,61 @@ function bindViewEvents() {
     });
   });
 
+  $("#calendarExportIcsButton")?.addEventListener("click", () => {
+    downloadTextFile("familyloop-calendar.ics", "text/calendar", buildCalendarIcs(state.calendar.events, state.calendar.chores));
+  });
+  $("#calendarExportCsvButton")?.addEventListener("click", () => {
+    downloadTextFile("familyloop-calendar.csv", "text/csv", buildCalendarCsv(state.calendar.events, state.calendar.chores));
+  });
+
+  $("#calendarImportButton")?.addEventListener("click", () => $("#calendarImportFileInput")?.click());
+
+  $("#calendarImportFileInput")?.addEventListener("change", (event) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = () => {
+      const text = String(reader.result || "");
+      const isIcs = file.name.toLowerCase().endsWith(".ics") || /^\s*BEGIN:VCALENDAR/i.test(text);
+      const drafts = isIcs ? icsEventsToCalendarDrafts(parseIcsText(text)) : parseCalendarCsv(text);
+      if (!drafts.length) {
+        calendarImportFeedback = `No calendar items found in ${file.name}.`;
+        render();
+        return;
+      }
+      calendarImportDrafts = drafts;
+      calendarImportFeedback = "";
+      $("#calendarImportPreviewDialog")?.showModal();
+      renderCalendarImportPreview();
+    };
+    reader.readAsText(file);
+    event.target.value = "";
+  });
+
+  $("#closeCalendarImportDialogButton")?.addEventListener("click", () => $("#calendarImportPreviewDialog")?.close());
+  $("#cancelCalendarImportButton")?.addEventListener("click", () => $("#calendarImportPreviewDialog")?.close());
+
+  $("#calendarImportForm")?.addEventListener("submit", (event) => {
+    event.preventDefault();
+    const checkedIndexes = [...document.querySelectorAll("#calendarImportList input[type='checkbox']:checked")].map((input) => Number(input.dataset.importIndex));
+    const selected = calendarImportDrafts.filter((draft, index) => checkedIndexes.includes(index));
+    if (!selected.length) {
+      $("#calendarImportPreviewDialog")?.close();
+      return;
+    }
+    ensureAssigneesData();
+    selected.forEach((draft) => {
+      const { kind, item } = calendarDraftToItem(draft);
+      if (kind === "chore") state.calendar.chores.push(item);
+      else state.calendar.events.push(item);
+    });
+    calendarFeedback = `Imported ${selected.length} calendar item${selected.length === 1 ? "" : "s"}.`;
+    calendarImportDrafts = [];
+    $("#calendarImportPreviewDialog")?.close();
+    autosaveState();
+    render();
+  });
+
   document.querySelectorAll("[data-share-scope]").forEach((input) => {
     input.addEventListener("change", () => {
       const scope = input.dataset.shareScope;
@@ -12729,6 +12810,74 @@ function refreshTransactionSubcategoryMenu() {
 
 function uniqueId(seed) {
   return String(seed || "item").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/(^-|-$)/g, "") + "-" + Math.random().toString(36).slice(2, 7);
+}
+
+// All calendar data already lives in browser memory, so exporting it is a
+// pure client-side Blob download - no server round-trip needed, unlike the
+// xlsx report export (which needs the server's exceljs library).
+function downloadTextFile(filename, mimeType, text) {
+  const blob = new Blob([text], { type: mimeType });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = filename;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  URL.revokeObjectURL(url);
+}
+
+// Turns a parsed import draft (from icsEventsToCalendarDrafts or
+// parseCalendarCsv - same flat shape either way) into the exact chore/event
+// object shape the quick-add form itself builds (app.js's #calendarQuickAdd
+// submit handler), so an imported item behaves identically to one added by
+// hand.
+function calendarDraftToItem(draft) {
+  const assignees = draft.assigneeKeys.length ? resolveAssignees(draft.assigneeKeys) : resolveAssignees([sessionUser?.email || "Household owner"]);
+  if (draft.kind === "chore") {
+    const recurrence = draft.recurrence || "once";
+    const endDate = recurrence === "once" ? "" : draft.endDate || "";
+    return {
+      kind: "chore",
+      item: {
+        id: uniqueId("chore"),
+        title: draft.title,
+        assignees,
+        cadence: choreCadenceLabel({ recurrence, endDate }),
+        recurrence,
+        endDate,
+        startDate: draft.date,
+        nextDue: draft.date,
+        time: draft.time || "09:00",
+        notifyAt: new Date(`${draft.date}T${draft.time || "09:00"}`).toISOString(),
+        location: draft.location || "",
+        completedBy: {}
+      }
+    };
+  }
+  const isAnnual = ANNUAL_EVENT_TYPES.includes(draft.type);
+  const monthDay = isAnnual ? draft.date.slice(5) : undefined;
+  const reminderDays = isAnnual ? (draft.reminderDays ?? 1) : undefined;
+  return {
+    kind: "event",
+    item: {
+      id: uniqueId("event"),
+      title: draft.title,
+      date: draft.date,
+      dateTime: `${draft.date}T${draft.time || "09:00"}`,
+      notifyAt: isAnnual
+        ? annualEventNotifyAt({ monthDay, reminderDays, dateTime: `${draft.date}T${draft.time || "09:00"}` })
+        : new Date(`${draft.date}T${draft.time || "09:00"}`).toISOString(),
+      reminderAt: isAnnual ? undefined : `${draft.date}T${draft.time || "09:00"}`,
+      monthDay,
+      type: isAnnual ? draft.type : "reminder",
+      annual: isAnnual,
+      location: isAnnual ? "" : (draft.location || ""),
+      reminderDays,
+      recurrence: isAnnual ? undefined : (draft.recurrence || "once"),
+      assignees
+    }
+  };
 }
 
 nav.addEventListener("click", async (event) => {
