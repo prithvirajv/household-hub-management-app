@@ -3437,14 +3437,14 @@ function linkedBillName(note) {
 function renderNoteCard(note) {
   const { open, completed } = bucketChecklistItems(note.checklist);
   const checklistRow = (item) => `<div class="note-check-row ${item.done ? "done" : ""} ${item.parentId ? "child-item" : ""}" draggable="true" data-drag-checklist-item="${note.id}:${item.id}">
-    <span class="note-check-drag-handle" aria-hidden="true" title="Drag to reorder">⠿</span>
+    <span class="note-check-drag-handle" aria-hidden="true" data-tooltip="Drag to reorder">⠿</span>
     <input data-note-check="${note.id}:${item.id}" type="checkbox" aria-label="Complete ${escapeHtml(item.text)}" ${item.done ? "checked" : ""}>
     <div class="note-check-combobox">
       <input class="note-check-text" data-note-check-text="${note.id}:${item.id}" value="${escapeHtml(item.text)}" placeholder="Checklist item" aria-label="Checklist item" aria-autocomplete="list" aria-expanded="false" autocomplete="off">
       <div class="note-item-suggestions" data-note-check-suggestions="${note.id}:${item.id}" role="listbox" hidden></div>
     </div>
-    <button class="note-check-level" data-indent-note-item="${note.id}:${item.id}" type="button" aria-label="${item.parentId ? "Move checklist item to top level" : "Make checklist item a sub-item"}" title="${item.parentId ? "Move to top level" : "Make sub-item"}">${item.parentId ? "←" : "→"}</button>
-    <button class="note-check-plan" data-add-checklist-to-plan="${note.id}:${item.id}" type="button" aria-label="Add to today's Plan" title="Add to today's Plan">◫</button>
+    <button class="note-check-level" data-indent-note-item="${note.id}:${item.id}" type="button" aria-label="${item.parentId ? "Move checklist item to top level" : "Make checklist item a sub-item"}" data-tooltip="${item.parentId ? "Move to top level" : "Make sub-item"}">${item.parentId ? "←" : "→"}</button>
+    <button class="note-check-plan" data-add-checklist-to-plan="${note.id}:${item.id}" type="button" aria-label="Add to today's Plan" data-tooltip="Add to today's Plan">◫</button>
     <button class="note-check-delete" data-delete-note-item="${note.id}:${item.id}" type="button" aria-label="Delete checklist item">×</button>
   </div>`;
   return `<article class="note-card ${noteColorClass(note.color)}" data-note-id="${note.id}">

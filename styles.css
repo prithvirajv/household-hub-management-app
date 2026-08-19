@@ -6089,19 +6089,94 @@ html[data-theme="dark"] .note-color-coral { background: color-mix(in srgb, #fff0
   text-decoration: line-through;
 }
 
+/* A narrow note card (three-up on this page, or a single-column mobile
+   layout) doesn't have room for drag handle + checkbox + text + three
+   full-size (30px) action icons all on one line without crushing the
+   text down to a sliver or unreadable truncation - the fixed-px icon
+   columns a plain grid needs can't reclaim that space no matter how
+   long the item text is. Kept as one line (no wrap - the buttons should
+   stay put, not jump to a second row) but the three action icons are
+   shrunk to a compact 22px so they take noticeably less of the row,
+   leaving the rest to the text, which still grows to fill whatever's
+   left via flex-grow. */
 .note-check-row {
-  display: grid;
-  grid-template-columns: 16px 22px minmax(0, 1fr) 30px 30px 30px;
-  gap: 0.55rem;
+  display: flex;
+  flex-wrap: nowrap;
+  gap: 0.3rem;
   align-items: center;
   min-height: 34px;
   position: relative;
+}
+
+.note-check-drag-handle,
+.note-check-row > input[type="checkbox"] {
+  flex: 0 0 auto;
+}
+
+.note-check-level,
+.note-check-plan,
+.note-check-delete {
+  flex: 0 0 22px;
+  width: 22px;
+  min-width: 22px;
+  min-height: 22px;
+  font-size: 0.78rem;
+}
+
+.note-check-combobox,
+.note-check-row > .note-check-text {
+  flex: 1 1 auto;
+  min-width: 60px;
 }
 
 .note-check-row.child-item {
   margin-left: 1.75rem;
   padding-left: 0.65rem;
   border-left: 2px solid var(--border);
+}
+
+/* The browser's own title-attribute tooltip has a fixed ~1s show delay
+   that no CSS/HTML can shorten - these three icons shrank down to 22px
+   (see .note-check-level/.note-check-plan above) specifically to leave
+   room for the checklist text, so a quick label on hover matters more
+   here than usual. Swapped title -> data-tooltip so this CSS tooltip is
+   the only one that fires (title's native tooltip would otherwise still
+   show up too, after its own delay, once the pointer lingers). */
+.note-check-drag-handle,
+.note-check-level,
+.note-check-plan {
+  position: relative;
+}
+
+.note-check-drag-handle[data-tooltip]::after,
+.note-check-level[data-tooltip]::after,
+.note-check-plan[data-tooltip]::after {
+  content: attr(data-tooltip);
+  position: absolute;
+  bottom: calc(100% + 6px);
+  left: 50%;
+  transform: translateX(-50%);
+  background: var(--text);
+  color: var(--panel);
+  font-size: 0.68rem;
+  font-weight: 700;
+  white-space: nowrap;
+  padding: 0.25rem 0.5rem;
+  border-radius: 6px;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.1s ease;
+  transition-delay: 0.15s;
+  z-index: 30;
+}
+
+.note-check-drag-handle[data-tooltip]:hover::after,
+.note-check-drag-handle[data-tooltip]:focus-visible::after,
+.note-check-level[data-tooltip]:hover::after,
+.note-check-level[data-tooltip]:focus-visible::after,
+.note-check-plan[data-tooltip]:hover::after,
+.note-check-plan[data-tooltip]:focus-visible::after {
+  opacity: 1;
 }
 
 .note-check-drag-handle {
@@ -6156,7 +6231,6 @@ html[data-theme="dark"] .note-color-coral { background: color-mix(in srgb, #fff0
 
 .note-check-combobox {
   position: relative;
-  min-width: 0;
 }
 
 .note-check-combobox .note-check-text {
