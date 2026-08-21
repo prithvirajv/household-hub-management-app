@@ -3090,7 +3090,7 @@ function renderCalendar() {
         <section class="card calendar-main-card">
           <div class="section-head">
             <div><span class="card-label">Household calendar</span><h3>Chores, birthdays, anniversaries and reminders</h3></div>
-            <div class="button-row"><button id="addChoreButton" class="ghost" type="button">+ Add chore</button><button id="addBirthdayButton" class="ghost" type="button">+ Add birthday</button><button id="addAnniversaryButton" class="ghost" type="button">+ Add anniversary</button><button id="addReminderButton" class="ghost" type="button">+ Add reminder</button><button id="calendarExportIcsButton" class="ghost" type="button">Export .ics</button><button id="calendarExportCsvButton" class="ghost" type="button">Export .csv</button><button id="calendarImportButton" class="ghost" type="button">Import</button><input id="calendarImportFileInput" type="file" accept=".ics,.csv,text/calendar,text/csv" hidden></div>
+            <div class="button-row"><button id="addChoreButton" class="ghost" type="button">+ Add chore</button><button id="addBirthdayButton" class="ghost" type="button">+ Add birthday</button><button id="addAnniversaryButton" class="ghost" type="button">+ Add anniversary</button><button id="addReminderButton" class="ghost" type="button">+ Add reminder</button><details class="documents-item-menu calendar-toolbar-menu"><summary class="ghost-summary">⇵ Export / Import</summary><div class="documents-item-menu-options calendar-export-import-panel"><button type="button" id="calendarExportIcsButton">Export as .ics</button><button type="button" id="calendarExportCsvButton">Export as .csv</button><button type="button" id="calendarImportButton">Import file…</button></div></details><input id="calendarImportFileInput" type="file" accept=".ics,.csv,text/calendar,text/csv" hidden></div>
           </div>
           <div class="calendar-member-filter" role="group" aria-label="Filter calendar by person">
             <button type="button" class="member-chip ${calendarFilterOwner ? "" : "active"}" data-calendar-filter-owner="">All people</button>
@@ -3187,19 +3187,30 @@ function renderCalendarImportPreview() {
   const list = $("#calendarImportList");
   if (!list) return;
   list.innerHTML = calendarImportDrafts.length
-    ? calendarImportDrafts.map((draft, index) => `
+    ? `<label class="calendar-import-select-all"><input type="checkbox" id="calendarImportSelectAll" checked><span>Select all (${calendarImportDrafts.length})</span></label>` +
+      calendarImportDrafts.map((draft, index) => {
+        const typeLabel = draft.kind === "chore" ? "Chore" : (annualEventLabels[draft.type] || "Reminder");
+        const badgeLabel = draft.recurrence && draft.recurrence !== "once" ? `${typeLabel} · repeats ${draft.recurrence}` : typeLabel;
+        return `
       <label class="calendar-import-row">
         <input type="checkbox" data-import-index="${index}" checked>
         <span>
           <strong>${escapeHtml(draft.title)}</strong>
-          <small>${draft.date}${draft.time ? ` · ${draft.time}` : ""} · ${escapeHtml(draft.kind === "chore" ? "Chore" : (annualEventLabels[draft.type] || "Reminder"))}${draft.recurrence && draft.recurrence !== "once" ? ` · repeats ${draft.recurrence}` : ""}</small>
+          <small>${draft.date}${draft.time ? ` · ${draft.time}` : ""}</small>
+          <span class="pill">${escapeHtml(badgeLabel)}</span>
         </span>
-      </label>`).join("")
+      </label>`;
+      }).join("")
     : `<div class="empty-inline">Nothing to import</div>`;
   const submitButton = $("#submitCalendarImportButton");
   if (submitButton) submitButton.textContent = `Import ${calendarImportDrafts.length} item${calendarImportDrafts.length === 1 ? "" : "s"}`;
   const status = $("#calendarImportMessage");
   if (status) status.textContent = calendarImportFeedback || "";
+  $("#calendarImportSelectAll")?.addEventListener("change", (event) => {
+    document.querySelectorAll("#calendarImportList input[data-import-index]").forEach((checkbox) => {
+      checkbox.checked = event.currentTarget.checked;
+    });
+  });
 }
 
 function ensureNotesData() {
@@ -11722,14 +11733,19 @@ function bindViewEvents() {
     });
   });
 
-  $("#calendarExportIcsButton")?.addEventListener("click", () => {
+  $("#calendarExportIcsButton")?.addEventListener("click", (event) => {
     downloadTextFile("familyloop-calendar.ics", "text/calendar", buildCalendarIcs(state.calendar.events, state.calendar.chores));
+    event.currentTarget.closest("details")?.removeAttribute("open");
   });
-  $("#calendarExportCsvButton")?.addEventListener("click", () => {
+  $("#calendarExportCsvButton")?.addEventListener("click", (event) => {
     downloadTextFile("familyloop-calendar.csv", "text/csv", buildCalendarCsv(state.calendar.events, state.calendar.chores));
+    event.currentTarget.closest("details")?.removeAttribute("open");
   });
 
-  $("#calendarImportButton")?.addEventListener("click", () => $("#calendarImportFileInput")?.click());
+  $("#calendarImportButton")?.addEventListener("click", (event) => {
+    event.currentTarget.closest("details")?.removeAttribute("open");
+    $("#calendarImportFileInput")?.click();
+  });
 
   $("#calendarImportFileInput")?.addEventListener("change", (event) => {
     const file = event.target.files?.[0];

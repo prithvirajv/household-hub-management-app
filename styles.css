@@ -3075,8 +3075,30 @@ button.ghost-accent {
 .calendar-import-row span {
   display: flex;
   flex-direction: column;
-  gap: 0.1rem;
+  align-items: flex-start;
+  gap: 0.25rem;
   min-width: 0;
+}
+
+.calendar-import-select-all {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.2rem 0.65rem 0.5rem;
+  font-size: 0.78rem;
+  font-weight: 700;
+  color: var(--muted);
+  cursor: pointer;
+  border-bottom: 1px solid var(--line);
+  margin-bottom: 0.2rem;
+}
+
+.calendar-toolbar-menu {
+  position: relative;
+}
+
+.calendar-export-import-panel {
+  min-width: 170px;
 }
 
 .calendar-form-status {
