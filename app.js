@@ -108,6 +108,11 @@ let expandedDecisionId = null;
 // initialize. Session-local like the flags above; not persisted to state
 // since it's just a display preference, not household data.
 let wealthCollapsedGroups = new Set();
+// Whether the Wealth page's whole transfer history is collapsed - one flag
+// for the entire list (not per-transfer) since it's shown as a single
+// disclosure. Starts collapsed so a household with a long transfer history
+// doesn't load onto a very long page by default.
+let wealthTransfersCollapsed = true;
 // Bills page's own filter pill (all/due/overdue) - session-local display
 // state, same convention as Reports' reportsScope/reportsDensity.
 let billsFilter = "all";
@@ -1134,13 +1139,6 @@ const ACCOUNT_TYPE_GROUPS = [
   { type: "other", label: "Other" },
   { type: "credit_card", label: "Credit cards" }
 ];
-
-// A household that's been paying off cards for a while can rack up dozens
-// of transfers, which used to render as one very long unbroken list on the
-// Wealth page - capping the directly-visible rows and tucking the rest
-// behind a <details> disclosure (same convention as the debt payment-history
-// list) keeps the page a reasonable length without hiding anything for good.
-const TRANSFER_LIST_VISIBLE_LIMIT = 8;
 
 function groupAccountsByType(accounts) {
   return ACCOUNT_TYPE_GROUPS
@@ -5656,7 +5654,19 @@ function renderWealth() {
             <label>Memo<input name="memo" placeholder="Credit card payment"></label>
             <button type="submit">Transfer</button>
           </form>` : `<div class="empty-inline">Add at least two accounts to record a transfer, like paying a credit card from checking.</div>`}
-          ${state.transfers.length ? `${state.transfers.slice(0, TRANSFER_LIST_VISIBLE_LIMIT).map((transfer, index) => transferRow(transfer, index)).join("")}${state.transfers.length > TRANSFER_LIST_VISIBLE_LIMIT ? `<details class="transfers-overflow-details"><summary>Show ${state.transfers.length - TRANSFER_LIST_VISIBLE_LIMIT} more transfer${state.transfers.length - TRANSFER_LIST_VISIBLE_LIMIT === 1 ? "" : "s"}</summary>${state.transfers.slice(TRANSFER_LIST_VISIBLE_LIMIT).map((transfer, index) => transferRow(transfer, index + TRANSFER_LIST_VISIBLE_LIMIT)).join("")}</details>` : ""}` : ""}
+          ${state.transfers.length ? `<details class="transfers-overflow-details" data-transfers-toggle ${wealthTransfersCollapsed ? "" : "open"}>
+            <summary>Transfer history (${state.transfers.length})</summary>
+            ${state.transfers
+              .map((transfer, index) => ({ transfer, index }))
+              // Newest date first (ties broken by whichever was added most
+              // recently) - transfers are stored in plain insertion order via
+              // unshift, which drifts from date order the moment someone
+              // logs a back-dated transfer, so this always re-sorts for
+              // display rather than trusting the array's own order.
+              .sort((a, b) => (b.transfer.date || "").localeCompare(a.transfer.date || "") || b.index - a.index)
+              .map(({ transfer, index }) => transferRow(transfer, index))
+              .join("")}
+          </details>` : ""}
         </section>
         <section class="card">
           <div class="section-head"><div><span class="card-label">Debt snowball</span><h3>Debt payoff tracker</h3></div><button id="addDebtButton" type="button">+ Add debt</button></div>
@@ -5674,7 +5684,16 @@ function renderWealth() {
             <div class="debt-progress-bar"><span style="width:${debtPayoffProgressPercent(debt)}%"></span></div>
             <p class="debt-progress-caption">${debtPayoffProgressPercent(debt)}% paid off · ${money.format(debt.balance)} remaining</p>
             <div class="payment-row"><label>Additional payment<input data-debt-payment="${index}" value="0" type="number" min="0" step="0.01"></label><button class="ghost" data-apply-debt-payment="${index}" type="button" ${Number(debt.minimum || 0) <= 0 ? "disabled" : ""}>Record EMI payment</button><button class="icon-button danger-button" data-delete-debt="${index}" type="button" aria-label="Delete ${escapeHtml(debt.name)}">×</button></div>
-            ${debt.payments?.length ? `<details class="payment-history"><summary>Payment history (${debt.payments.length})</summary>${debt.payments.slice(0, 8).map((payment, paymentIndex) => `<div><input type="date" data-debt-payment-date="${index}:${paymentIndex}" value="${payment.date}" aria-label="Date for this ${escapeHtml(debt.name)} payment"><span>${money.format(payment.amount)} paid</span><span>${money.format(payment.principal)} principal</span><span>${money.format(payment.interest)} interest</span><button class="icon-button danger-button" data-delete-debt-payment="${index}:${paymentIndex}" type="button" aria-label="Remove this ${escapeHtml(debt.name)} payment and restore its balance">×</button></div>`).join("")}</details>` : ""}
+            ${debt.payments?.length ? `<details class="payment-history"><summary>Payment history (${debt.payments.length})</summary>${debt.payments
+              .map((payment, paymentIndex) => ({ payment, paymentIndex }))
+              // Payments are stored in insertion order (unshift on record,
+              // date field freely editable after the fact), which drifts
+              // from date order the moment a payment is logged late or its
+              // date corrected - always re-sort for display instead.
+              .sort((a, b) => (b.payment.date || "").localeCompare(a.payment.date || "") || b.paymentIndex - a.paymentIndex)
+              .slice(0, 8)
+              .map(({ payment, paymentIndex }) => `<div><input type="date" data-debt-payment-date="${index}:${paymentIndex}" value="${payment.date}" aria-label="Date for this ${escapeHtml(debt.name)} payment"><span>${money.format(payment.amount)} paid</span><span>${money.format(payment.principal)} principal</span><span>${money.format(payment.interest)} interest</span><button class="icon-button danger-button" data-delete-debt-payment="${index}:${paymentIndex}" type="button" aria-label="Remove this ${escapeHtml(debt.name)} payment and restore its balance">×</button></div>`)
+              .join("")}</details>` : ""}
           </article>`).join("") : `<div class="onboarding-empty compact-onboarding"><div class="empty-symbol" aria-hidden="true">↓</div><h3>Add a debt when you are ready</h3><p>Track its balance, rate, payment, and the asset it secures.</p></div>`}
         </section>
       </div>
@@ -6943,6 +6962,11 @@ function nextChoreOccurrenceInMonth(chore) {
 }
 
 const UPCOMING_LIST_LIMIT = 5;
+// Cap for the Calendar page's own "Daily planner / Upcoming schedule" side
+// panel specifically - a separate, slightly higher limit than
+// UPCOMING_LIST_LIMIT (used by the Chore rotation / Remember panels) since
+// this one panel already merges three different item types together.
+const DAILY_PLANNER_LIST_LIMIT = 8;
 
 const ANNUAL_EVENT_TYPES = ["birthday", "anniversary"];
 const annualEventLabels = { birthday: "Birthday", anniversary: "Anniversary" };
@@ -7203,20 +7227,49 @@ function visibleScheduleItems() {
   return items.filter((item) => (item.assignees || []).some((assignee) => assignee.key === calendarFilterOwner));
 }
 
-// The "Upcoming schedule" side-panel is meant to be forward-looking only —
-// unlike the calendar grid (which must keep showing every day of the month,
-// past and future, since it's a literal calendar), and unlike the dedicated
-// Chore rotation / Birthdays panels (which intentionally keep surfacing
-// overdue, not-yet-actioned items). Once a date has passed, it drops off
-// this list even if nobody completed/wished it — that's what the other
-// panels are for.
+// The "Upcoming schedule" side-panel shows what still needs attention: any
+// not-yet-done item up through 7 days from now, including ones from earlier
+// in the currently-viewed month that are already overdue (unlike the
+// calendar grid, which shows every day regardless of completion, and keeps
+// a completed chore visible - see "Keep completed chores on calendar grid").
+// A chore is checked against isChoreOccurrenceComplete for its own
+// occurrence date; a birthday/anniversary against isAnnualEventYearComplete
+// for the viewed year; a plain one-time reminder is already filtered out of
+// scheduleItems() once complete (see isReminderComplete there), so it always
+// passes here. Capped at DAILY_PLANNER_LIST_LIMIT, oldest/most-overdue
+// first, so a busy month doesn't turn this into another long scrollable list.
 function upcomingScheduleItems() {
-  const today = dateKey(new Date());
   const sevenDaysAhead = dateKey(new Date(Date.now() + 7 * 24 * 60 * 60 * 1000));
-  return visibleScheduleItems().filter((item) => {
+  const selectedYear = Number(state.budget.month.slice(0, 4));
+  const notDone = visibleScheduleItems().filter((item) => {
     const fullDate = `${state.budget.month}-${item.date.slice(3)}`;
-    return fullDate >= today && fullDate <= sevenDaysAhead;
+    if (fullDate > sevenDaysAhead) return false;
+    if (item.sourceKind === "chore") {
+      const chore = state.calendar.chores.find((candidate) => candidate.id === item.sourceId);
+      return Boolean(chore) && !isChoreOccurrenceComplete(chore, fullDate);
+    }
+    if (item.sourceKind === "event" && ANNUAL_EVENT_TYPES.includes(item.type)) {
+      const event = state.calendar.events.find((candidate) => candidate.id === item.sourceId);
+      return Boolean(event) && !isAnnualEventYearComplete(event, selectedYear);
+    }
+    return true;
   });
+  // A recurring chore left unmarked since day one of the month can have
+  // several not-yet-done occurrences here (every past week's instance) -
+  // only the single earliest one is genuinely "what's overdue right now"
+  // for that chore; the rest are just the same chore piling up ahead of
+  // everything else. notDone is already date-ascending (inherited from
+  // scheduleItems()), so the first occurrence seen per chore id is its
+  // earliest.
+  const seenChoreIds = new Set();
+  return notDone
+    .filter((item) => {
+      if (item.sourceKind !== "chore") return true;
+      if (seenChoreIds.has(item.sourceId)) return false;
+      seenChoreIds.add(item.sourceId);
+      return true;
+    })
+    .slice(0, DAILY_PLANNER_LIST_LIMIT);
 }
 
 function calendarCells() {
@@ -12151,6 +12204,10 @@ function bindViewEvents() {
       if (details.open) wealthCollapsedGroups.delete(type);
       else wealthCollapsedGroups.add(type);
     });
+  });
+
+  $("[data-transfers-toggle]")?.addEventListener("toggle", (event) => {
+    wealthTransfersCollapsed = !event.currentTarget.open;
   });
 
   document.querySelectorAll("[data-documents-delete]").forEach((button) => {
