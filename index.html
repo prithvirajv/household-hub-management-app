@@ -7,7 +7,7 @@
     <title>FamilyLoop</title>
     <link rel="icon" type="image/svg+xml" href="/assets/favicon.svg">
     <link rel="apple-touch-icon" href="/assets/apple-touch-icon.png">
-    <link rel="stylesheet" href="/styles.css?v=20260821-1">
+    <link rel="stylesheet" href="/styles.css?v=20260821-2">
     <script>
       (function () {
         var saved = localStorage.getItem("familyloop-theme");
@@ -243,6 +243,13 @@
           <label>Section
             <select name="section" id="exportReportSection"></select>
           </label>
+          <label id="exportReportCalendarFormatField" hidden>Format
+            <select name="calendarFormat" id="exportReportCalendarFormat">
+              <option value="xlsx">Excel report (.xlsx)</option>
+              <option value="ics">Calendar file (.ics)</option>
+              <option value="csv">Spreadsheet (.csv)</option>
+            </select>
+          </label>
           <div id="exportReportScopeField">
             <label>Time range
               <select name="scopeType" id="exportReportScopeType">
@@ -256,6 +263,8 @@
             <label data-export-scope="range">End date<input type="date" name="rangeEnd"></label>
             <label data-export-scope="year">Year<input type="number" name="year" min="2000" max="2100" step="1"></label>
           </div>
+          <p id="exportReportCalendarImportHint" class="muted" hidden>Or <button type="button" id="exportReportImportButton" class="ghost-link">import calendar items</button> from a .ics or .csv file.</p>
+          <input id="calendarImportFileInput" type="file" accept=".ics,.csv,text/calendar,text/csv" hidden>
           <p id="exportReportMessage" class="form-message"></p>
           <div class="dialog-actions">
             <button id="cancelExportReportButton" class="ghost" type="button">Cancel</button>
@@ -448,6 +457,6 @@
     <script src="https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/build/pdf.min.js"></script>
     <script>if (window.pdfjsLib) pdfjsLib.GlobalWorkerOptions.workerSrc = "https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/build/pdf.worker.min.js";</script>
     <script src="/lib/shared-logic.js?v=20260819-2"></script>
-    <script src="/app.js?v=20260821-2"></script>
+    <script src="/app.js?v=20260821-3"></script>
   </body>
 </html>

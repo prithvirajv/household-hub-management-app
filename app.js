@@ -3090,7 +3090,7 @@ function renderCalendar() {
         <section class="card calendar-main-card">
           <div class="section-head">
             <div><span class="card-label">Household calendar</span><h3>Chores, birthdays, anniversaries and reminders</h3></div>
-            <div class="button-row"><button id="addChoreButton" class="ghost" type="button">+ Add chore</button><button id="addBirthdayButton" class="ghost" type="button">+ Add birthday</button><button id="addAnniversaryButton" class="ghost" type="button">+ Add anniversary</button><button id="addReminderButton" class="ghost" type="button">+ Add reminder</button><details class="documents-item-menu calendar-toolbar-menu"><summary class="ghost-summary">⇵ Export / Import</summary><div class="documents-item-menu-options calendar-export-import-panel"><button type="button" id="calendarExportIcsButton">Export as .ics</button><button type="button" id="calendarExportCsvButton">Export as .csv</button><button type="button" id="calendarImportButton">Import file…</button></div></details><input id="calendarImportFileInput" type="file" accept=".ics,.csv,text/calendar,text/csv" hidden></div>
+            <div class="button-row"><button id="addChoreButton" class="ghost" type="button">+ Add chore</button><button id="addBirthdayButton" class="ghost" type="button">+ Add birthday</button><button id="addAnniversaryButton" class="ghost" type="button">+ Add anniversary</button><button id="addReminderButton" class="ghost" type="button">+ Add reminder</button></div>
           </div>
           <div class="calendar-member-filter" role="group" aria-label="Filter calendar by person">
             <button type="button" class="member-chip ${calendarFilterOwner ? "" : "active"}" data-calendar-filter-owner="">All people</button>
@@ -11749,66 +11749,6 @@ function bindViewEvents() {
     });
   });
 
-  $("#calendarExportIcsButton")?.addEventListener("click", (event) => {
-    downloadTextFile("familyloop-calendar.ics", "text/calendar", buildCalendarIcs(state.calendar.events, state.calendar.chores));
-    event.currentTarget.closest("details")?.removeAttribute("open");
-  });
-  $("#calendarExportCsvButton")?.addEventListener("click", (event) => {
-    downloadTextFile("familyloop-calendar.csv", "text/csv", buildCalendarCsv(state.calendar.events, state.calendar.chores));
-    event.currentTarget.closest("details")?.removeAttribute("open");
-  });
-
-  $("#calendarImportButton")?.addEventListener("click", (event) => {
-    event.currentTarget.closest("details")?.removeAttribute("open");
-    $("#calendarImportFileInput")?.click();
-  });
-
-  $("#calendarImportFileInput")?.addEventListener("change", (event) => {
-    const file = event.target.files?.[0];
-    if (!file) return;
-    const reader = new FileReader();
-    reader.onload = () => {
-      const text = String(reader.result || "");
-      const isIcs = file.name.toLowerCase().endsWith(".ics") || /^\s*BEGIN:VCALENDAR/i.test(text);
-      const drafts = isIcs ? icsEventsToCalendarDrafts(parseIcsText(text)) : parseCalendarCsv(text);
-      if (!drafts.length) {
-        calendarImportFeedback = `No calendar items found in ${file.name}.`;
-        render();
-        return;
-      }
-      calendarImportDrafts = drafts;
-      calendarImportFeedback = "";
-      $("#calendarImportPreviewDialog")?.showModal();
-      renderCalendarImportPreview();
-    };
-    reader.readAsText(file);
-    event.target.value = "";
-  });
-
-  $("#closeCalendarImportDialogButton")?.addEventListener("click", () => $("#calendarImportPreviewDialog")?.close());
-  $("#cancelCalendarImportButton")?.addEventListener("click", () => $("#calendarImportPreviewDialog")?.close());
-
-  $("#calendarImportForm")?.addEventListener("submit", (event) => {
-    event.preventDefault();
-    const checkedIndexes = [...document.querySelectorAll("#calendarImportList input[type='checkbox']:checked")].map((input) => Number(input.dataset.importIndex));
-    const selected = calendarImportDrafts.filter((draft, index) => checkedIndexes.includes(index));
-    if (!selected.length) {
-      $("#calendarImportPreviewDialog")?.close();
-      return;
-    }
-    ensureAssigneesData();
-    selected.forEach((draft) => {
-      const { kind, item } = calendarDraftToItem(draft);
-      if (kind === "chore") state.calendar.chores.push(item);
-      else state.calendar.events.push(item);
-    });
-    calendarFeedback = `Imported ${selected.length} calendar item${selected.length === 1 ? "" : "s"}.`;
-    calendarImportDrafts = [];
-    $("#calendarImportPreviewDialog")?.close();
-    autosaveState();
-    render();
-  });
-
   document.querySelectorAll("[data-share-scope]").forEach((input) => {
     input.addEventListener("change", () => {
       const scope = input.dataset.shareScope;
@@ -13581,16 +13521,26 @@ $("#confirmAccountActionConfirmButton").addEventListener("click", () => {
   onConfirm(targetAccountId);
 });
 
+// The Calendar section is the only one that can export as .ics/.csv
+// instead of the shared .xlsx workbook (a calendar file round-trips with
+// other calendar apps and with FamilyLoop's own Import; a workbook can't).
+// Those two formats always export everything on the calendar rather than
+// a scoped time range, so the Time range picker only makes sense for .xlsx.
 function updateExportReportScopeFields() {
   const form = $("#exportReportForm");
   if (!form) return;
   const section = form.section.value;
-  const isSnapshot = REPORT_SECTIONS[section]?.periodicity === "snapshot";
+  const isCalendar = section === "calendar";
+  const calendarFormat = form.calendarFormat.value;
+  $("#exportReportCalendarFormatField").hidden = !isCalendar;
+  $("#exportReportCalendarImportHint").hidden = !isCalendar;
+  const isSnapshot = REPORT_SECTIONS[section]?.periodicity === "snapshot" || (isCalendar && calendarFormat !== "xlsx");
   $("#exportReportScopeField").hidden = isSnapshot;
   const scopeType = form.scopeType.value;
   form.querySelectorAll("[data-export-scope]").forEach((field) => {
     field.hidden = field.dataset.exportScope !== scopeType;
   });
+  $("#submitExportReportButton").textContent = isCalendar ? `Export .${calendarFormat}` : "Export .xlsx";
 }
 
 function openExportReportDialog(defaultSection) {
@@ -13598,6 +13548,7 @@ function openExportReportDialog(defaultSection) {
   const sectionSelect = $("#exportReportSection");
   sectionSelect.innerHTML = Object.entries(REPORT_SECTIONS).map(([key, meta]) => `<option value="${key}">${escapeHtml(meta.label)}</option>`).join("");
   sectionSelect.value = REPORT_SECTIONS[defaultSection] ? defaultSection : "budget";
+  form.calendarFormat.value = "xlsx";
   // Opening the dialog from Reports itself defaults to whatever scope the
   // page is already showing, so the export and the on-screen view never
   // drift apart - every other page just defaults to the current month.
@@ -13620,12 +13571,71 @@ $("#closeExportReportDialogButton").addEventListener("click", () => $("#exportRe
 $("#cancelExportReportButton").addEventListener("click", () => $("#exportReportDialog").close());
 $("#exportReportSection").addEventListener("change", updateExportReportScopeFields);
 $("#exportReportScopeType").addEventListener("change", updateExportReportScopeFields);
+$("#exportReportCalendarFormat").addEventListener("change", updateExportReportScopeFields);
+
+$("#exportReportImportButton").addEventListener("click", () => {
+  $("#exportReportDialog").close();
+  $("#calendarImportFileInput").click();
+});
+
+$("#calendarImportFileInput").addEventListener("change", (event) => {
+  const file = event.target.files?.[0];
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = () => {
+    const text = String(reader.result || "");
+    const isIcs = file.name.toLowerCase().endsWith(".ics") || /^\s*BEGIN:VCALENDAR/i.test(text);
+    const drafts = isIcs ? icsEventsToCalendarDrafts(parseIcsText(text)) : parseCalendarCsv(text);
+    if (!drafts.length) {
+      calendarImportFeedback = `No calendar items found in ${file.name}.`;
+      render();
+      return;
+    }
+    calendarImportDrafts = drafts;
+    calendarImportFeedback = "";
+    $("#calendarImportPreviewDialog").showModal();
+    renderCalendarImportPreview();
+  };
+  reader.readAsText(file);
+  event.target.value = "";
+});
+
+$("#closeCalendarImportDialogButton").addEventListener("click", () => $("#calendarImportPreviewDialog").close());
+$("#cancelCalendarImportButton").addEventListener("click", () => $("#calendarImportPreviewDialog").close());
+
+$("#calendarImportForm").addEventListener("submit", (event) => {
+  event.preventDefault();
+  const checkedIndexes = [...document.querySelectorAll("#calendarImportList input[type='checkbox']:checked")].map((input) => Number(input.dataset.importIndex));
+  const selected = calendarImportDrafts.filter((draft, index) => checkedIndexes.includes(index));
+  if (selected.length) {
+    ensureAssigneesData();
+    selected.forEach((draft) => {
+      const { kind, item } = calendarDraftToItem(draft);
+      if (kind === "chore") state.calendar.chores.push(item);
+      else state.calendar.events.push(item);
+    });
+    calendarFeedback = `Imported ${selected.length} calendar item${selected.length === 1 ? "" : "s"}.`;
+    calendarImportDrafts = [];
+    autosaveState();
+    render();
+  }
+  $("#calendarImportPreviewDialog").close();
+});
 
 $("#exportReportForm").addEventListener("submit", async (event) => {
   event.preventDefault();
   const form = event.currentTarget;
   const data = Object.fromEntries(new FormData(form));
   const section = data.section;
+  if (section === "calendar" && data.calendarFormat !== "xlsx") {
+    if (data.calendarFormat === "ics") {
+      downloadTextFile("familyloop-calendar.ics", "text/calendar", buildCalendarIcs(state.calendar.events, state.calendar.chores));
+    } else {
+      downloadTextFile("familyloop-calendar.csv", "text/csv", buildCalendarCsv(state.calendar.events, state.calendar.chores));
+    }
+    $("#exportReportDialog").close();
+    return;
+  }
   let scope;
   if (REPORT_SECTIONS[section]?.periodicity === "snapshot") {
     scope = { type: "month", month: state.budget.month };

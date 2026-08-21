@@ -3093,14 +3093,6 @@ button.ghost-accent {
   margin-bottom: 0.2rem;
 }
 
-.calendar-toolbar-menu {
-  position: relative;
-}
-
-.calendar-export-import-panel {
-  min-width: 170px;
-}
-
 .calendar-form-status {
   grid-column: 1 / -1;
   min-height: 1rem;
