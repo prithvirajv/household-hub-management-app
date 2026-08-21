@@ -7268,16 +7268,26 @@ function visibleScheduleItems() {
 function upcomingScheduleItems() {
   const sevenDaysAhead = dateKey(new Date(Date.now() + 7 * 24 * 60 * 60 * 1000));
   const selectedYear = Number(state.budget.month.slice(0, 4));
+  // This is a personal to-do list, not the shared household calendar grid -
+  // a jointly-assigned chore/reminder/birthday can still need OTHER
+  // assignees' confirmation, but it should drop off THIS viewer's own list
+  // the moment they've marked their own part done, same personalization
+  // used by the Calendar grid's overdue styling (see calendarCells above).
+  const viewerKey = sessionUser?.email || "";
   const notDone = visibleScheduleItems().filter((item) => {
     const fullDate = `${state.budget.month}-${item.date.slice(3)}`;
     if (fullDate > sevenDaysAhead) return false;
     if (item.sourceKind === "chore") {
       const chore = state.calendar.chores.find((candidate) => candidate.id === item.sourceId);
-      return Boolean(chore) && !isChoreOccurrenceComplete(chore, fullDate);
+      return Boolean(chore) && isChoreOccurrencePendingFor(chore, fullDate, viewerKey);
     }
     if (item.sourceKind === "event" && ANNUAL_EVENT_TYPES.includes(item.type)) {
       const event = state.calendar.events.find((candidate) => candidate.id === item.sourceId);
-      return Boolean(event) && !isAnnualEventYearComplete(event, selectedYear);
+      return Boolean(event) && isAnnualEventYearPendingFor(event, selectedYear, viewerKey);
+    }
+    if (item.sourceKind === "event" && item.type === "reminder") {
+      const event = state.calendar.events.find((candidate) => candidate.id === item.sourceId);
+      return Boolean(event) && isReminderPendingFor(event, viewerKey);
     }
     return true;
   });
