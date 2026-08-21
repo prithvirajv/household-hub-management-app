@@ -3140,8 +3140,24 @@ function renderCalendar() {
                 // birthday/anniversary chip has its own separate "wished"
                 // tracking and isn't meant to look alarming once its date
                 // has simply passed within the visible month grid.
-                const escalates = item.sourceKind === "chore" || item.type === "reminder";
                 const itemDateKey = `${state.budget.month}-${item.date.slice(3)}`;
+                // A jointly-assigned chore/reminder can stay visible here for
+                // the rest of the household until every assignee has
+                // confirmed their own part (see choreCompletionButtons /
+                // reminderCompletionControl) - but the "past due" alarm is
+                // personal: once the viewer has marked their own part done,
+                // it shouldn't keep flagging as overdue to them just because
+                // someone else hasn't finished theirs (same personalization
+                // already used for the Daily planner side panel).
+                let viewerPending = true;
+                if (item.sourceKind === "chore") {
+                  const chore = state.calendar.chores.find((candidate) => candidate.id === item.sourceId);
+                  viewerPending = Boolean(chore) && isChoreOccurrencePendingFor(chore, itemDateKey, viewerKey);
+                } else if (item.type === "reminder") {
+                  const event = state.calendar.events.find((candidate) => candidate.id === item.sourceId);
+                  viewerPending = Boolean(event) && isReminderPendingFor(event, viewerKey);
+                }
+                const escalates = (item.sourceKind === "chore" || item.type === "reminder") && viewerPending;
                 const daysOverdue = escalates && itemDateKey < today ? Math.round((new Date(`${today}T00:00:00`) - new Date(`${itemDateKey}T00:00:00`)) / 86400000) : 0;
                 const overdueClass = daysOverdue > 7 ? "overdue-severe" : daysOverdue > 2 ? "overdue-moderate" : daysOverdue > 0 ? "overdue-mild" : "";
                 return `<button class="event ${item.eventType || item.type} ${overdueClass}" style="border-left:3px solid ${memberColor(item.assignees?.[0]?.key)}" data-edit-calendar-item="${item.sourceKind}:${item.sourceId}" type="button" title="Edit ${escapeHtml(item.title)}${assigneeNames(item.assignees) ? ` · ${escapeHtml(assigneeNames(item.assignees))}` : ""}${daysOverdue ? ` · ${daysOverdue}d overdue` : ""}">${item.recurring ? `<span class="event-recurring-badge" aria-hidden="true">🔁</span> ` : ""}${daysOverdue ? `<span class="event-overdue-badge" aria-hidden="true">⚠${daysOverdue}d</span> ` : ""}${escapeHtml(item.title)}</button>`;
