@@ -5448,13 +5448,16 @@ function renderMeals() {
   const nutrition = mealNutritionTotals();
   const groceryGroups = groceryListByAisle();
 
-  const dayGrid = weekPlans.length === 0 && !activeMealSlot
-    ? `<div class="empty-inline meal-empty-week"><p>Nothing planned for this week yet.</p><button type="button" data-open-meal-slot="Monday:Dinner">Plan Monday dinner</button></div>`
-    : `<div class="meal-grid">${days.map((day, dayIndex) => {
-        const dayDate = new Date(selectedWeekInfo.start);
-        dayDate.setDate(dayDate.getDate() + dayIndex);
-        return mealDayHtml(day, dayDate, visibleMeals);
-      }).join("")}</div>`;
+  // An empty week used to show one hardcoded "Plan Monday dinner" shortcut
+  // instead of the real grid - misleading on any week where Monday/Dinner
+  // isn't actually what the user wants to plan first. The day/slot grid
+  // already renders every empty cell as its own "Open" button, so there's
+  // no need for a special case at all.
+  const dayGrid = `<div class="meal-grid">${days.map((day, dayIndex) => {
+    const dayDate = new Date(selectedWeekInfo.start);
+    dayDate.setDate(dayDate.getDate() + dayIndex);
+    return mealDayHtml(day, dayDate, visibleMeals);
+  }).join("")}</div>`;
 
   return `
     <section class="meal-layout">

@@ -5861,21 +5861,6 @@ html[data-theme="dark"] .note-color-coral { background: color-mix(in srgb, #fff0
   font-size: 0.7rem;
 }
 
-.meal-empty-week {
-  grid-column: 1 / -1;
-  display: grid;
-  justify-items: center;
-  gap: 0.6rem;
-  padding: 2rem 1rem;
-  text-align: center;
-}
-
-.meal-empty-week p {
-  color: var(--muted);
-  font-weight: 700;
-  margin: 0;
-}
-
 .meal-slot-picker {
   display: grid;
   gap: 0.5rem;
