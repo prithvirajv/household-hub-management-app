@@ -64,4 +64,21 @@ function getObjectStream(objectPath) {
   return getBucket().file(objectPath).createReadStream();
 }
 
-module.exports = { createSignedUploadUrl, createSignedDownloadUrl, deleteObject, copyObject, getObjectStream };
+// Used by the nightly DB backup job, which already has the full dump in
+// memory (piped from pg_dump) rather than a client-side upload needing a
+// signed URL.
+async function uploadBuffer(objectPath, buffer, contentType) {
+  if (MEMORY_DB) return;
+  await getBucket().file(objectPath).save(buffer, { contentType, resumable: false });
+}
+
+// Used to prune old dated backups down to a retention window - returns
+// {name, updated} for each object under the prefix, oldest-relevant fields
+// only, not full metadata.
+async function listObjects(prefix) {
+  if (MEMORY_DB) return [];
+  const [files] = await getBucket().getFiles({ prefix });
+  return files.map((file) => ({ name: file.name, updated: file.metadata.updated }));
+}
+
+module.exports = { createSignedUploadUrl, createSignedDownloadUrl, deleteObject, copyObject, getObjectStream, uploadBuffer, listObjects };

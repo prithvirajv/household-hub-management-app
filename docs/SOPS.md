@@ -117,7 +117,22 @@ is via the **direct/unpooled** endpoint (hostname without the `-pooler`
 suffix) — see [Incident playbooks](#incident-playbooks) for why the pooled
 endpoint must never be used here.
 
-**Backup/export**:
+**Automated nightly backup**: Cloud Scheduler job `familyloop-backup-db`
+(`us-central1`) hits `POST /api/internal/backup-db` every night at 11:50 PM
+America/New_York, authenticated with the same `NOTIFICATION_SECRET` bearer
+token as the notification worker. The endpoint runs `pg_dump` (via
+`postgresql-client-16`, installed in the Dockerfile from the PGDG apt repo
+since it must be the same or newer major version than Neon's Postgres 16 -
+Debian bookworm's own repo only has v15) and uploads the dump to
+`gs://familyloop-documents-solid-coder-212120/backups/familyloop-YYYY-MM-DD.dump`,
+pruning anything older than 14 days. There is **no standing standby
+database** (Cloud SQL was decommissioned after the Neon cutover, and a
+24/7 hot standby costs real money for a personal app that rarely needs
+it) - recovery from a Neon outage means restoring the latest GCS dump into
+a freshly-provisioned Cloud SQL instance on demand (~5-10 min), not
+flipping a switch. See the Neon quota incident playbook below.
+
+**Manual backup/export** (same format, run it yourself anytime):
 
 ```bash
 pg_dump "$DATABASE_URL" -Fc -f backup-$(date +%Y%m%d).dump
@@ -174,6 +189,41 @@ gcloud storage buckets list --project=solid-coder-212120
 Confirm the bucket name in `.env.deploy` matches an actual bucket, redeploy,
 then verify with a real upload → `gcloud storage ls gs://<bucket>/` →
 delete → verify it's gone.
+
+### Neon compute-time quota exceeded (whole site down, both domains 500)
+
+**Symptom**: `/readyz` and every page 500 on both `familyloop.net` and
+`famelo.net`. Cloud Run logs show the container repeatedly exiting on
+startup - `gcloud logging read` shows `Container called exit(1)` preceded
+by a Postgres error `code: '53000'` and the literal text `Your account or
+project has exceeded the compute time quota. Upgrade your plan to increase
+limits.` This happened once already (2026-08-23) on Neon's free tier.
+
+**Root cause**: Neon suspends the compute endpoint entirely once the
+account's compute-hour quota is exceeded - it refuses *every* connection
+(not just new/heavy ones), including a bare `psql` connection with nothing
+else attached. The startup migration step in `server/index.js` can't
+connect, throws, and `process.exit(1)`s, which fails Cloud Run's TCP
+startup probe and takes down the whole service, not just slow requests.
+
+**Fix**:
+1. Upgrade the Neon plan (or wait for the monthly quota reset) from the
+   [Neon dashboard](https://console.neon.tech) - this is the only way to
+   unblock the compute endpoint; nothing on the app or Cloud Run side can
+   work around it.
+2. Confirm it's actually reachable again: `psql "$DATABASE_URL" -c "select now();"`.
+3. Redeploy (`bash scripts/deploy-cloud-run.sh`) even though no code
+   changed - Cloud Run backs off retrying a crash-looping revision, so a
+   fresh deploy is the fastest way to force an immediate clean startup
+   attempt rather than waiting out the backoff window.
+4. Health-check both domains per the standard post-deploy step.
+
+**If downgrading back to free tier on purpose** (e.g. to test the limits):
+take a fresh manual backup first (`pg_dump "$DATABASE_URL" -Fc -f ...`,
+or just trigger `POST /api/internal/backup-db` and check
+`gs://familyloop-documents-solid-coder-212120/backups/`) *before* the
+downgrade, while Neon is still reachable - once it blocks, you cannot
+pull anything out until it's unblocked again.
 
 ### Neon connection fails at startup (`no schema has been selected to create in`, code `3F000`)
 

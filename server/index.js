@@ -1,6 +1,7 @@
 const fs = require("fs");
 const path = require("path");
 const crypto = require("crypto");
+const { spawn } = require("child_process");
 const express = require("express");
 const cookieParser = require("cookie-parser");
 const nodemailer = require("nodemailer");
@@ -20,7 +21,7 @@ const ExcelJS = require("exceljs");
 const archiver = require("archiver");
 
 const ANNUAL_EVENT_TYPES = ["birthday", "anniversary"];
-const { createSignedUploadUrl, createSignedDownloadUrl, deleteObject, copyObject, getObjectStream } = require("./gcs");
+const { createSignedUploadUrl, createSignedDownloadUrl, deleteObject, copyObject, getObjectStream, uploadBuffer, listObjects } = require("./gcs");
 
 const PORT = Number(process.env.PORT || 8080);
 const SESSION_COOKIE = "hh_session";
@@ -4623,6 +4624,50 @@ app.post("/api/internal/notifications/process", requireNotificationSecret, async
     }
 
     res.json({ processed: jobs.length, sent, failed, retried, pushSent, pushPruned: allInvalidTokens.size, smsSent });
+  } catch (error) {
+    next(error);
+  }
+});
+
+// Reuses the notification worker's Cloud Scheduler auth (same trust
+// boundary - both are internal-only, cron-triggered endpoints) rather than
+// adding a second secret to manage.
+const BACKUP_RETENTION_DAYS = 14;
+
+function runPgDump() {
+  return new Promise((resolve, reject) => {
+    const child = spawn("pg_dump", [DATABASE_URL, "--no-owner", "--no-privileges", "-Fc"], { stdio: ["ignore", "pipe", "pipe"] });
+    const chunks = [];
+    let stderr = "";
+    child.stdout.on("data", (chunk) => chunks.push(chunk));
+    child.stderr.on("data", (chunk) => { stderr += chunk.toString(); });
+    child.on("error", reject);
+    child.on("close", (code) => {
+      if (code !== 0) return reject(new Error(stderr.trim() || `pg_dump exited with code ${code}`));
+      resolve(Buffer.concat(chunks));
+    });
+  });
+}
+
+// Cloud Scheduler hits this nightly (see docs/SOPS.md) so a Neon outage -
+// like a compute-time quota suspension, which blocks every connection
+// including ours - never means losing more than a day of data: there is
+// always a same-day dump in GCS to restore from instead of falling back to
+// whatever was last written to the Cloud SQL rollback instance months ago.
+app.post("/api/internal/backup-db", requireNotificationSecret, async (req, res, next) => {
+  try {
+    if (MEMORY_DB) return res.json({ skipped: "MEMORY_DB mode has no database to back up" });
+    const dump = await runPgDump();
+    const dateKey = new Date().toISOString().slice(0, 10);
+    const objectPath = `backups/familyloop-${dateKey}.dump`;
+    await uploadBuffer(objectPath, dump, "application/octet-stream");
+
+    const existing = await listObjects("backups/");
+    const cutoff = Date.now() - BACKUP_RETENTION_DAYS * 24 * 60 * 60 * 1000;
+    const stale = existing.filter((file) => new Date(file.updated).getTime() < cutoff);
+    await Promise.all(stale.map((file) => deleteObject(file.name)));
+
+    res.json({ ok: true, object: objectPath, sizeBytes: dump.length, pruned: stale.length });
   } catch (error) {
     next(error);
   }
