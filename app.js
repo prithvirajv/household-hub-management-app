@@ -3927,10 +3927,12 @@ async function filesToJournalPhotos(fileList) {
   return photos;
 }
 
-const planBuckets = ["daily", "weekly", "monthly"];
+// "weekly"/"monthly" used to be separate tabs, each just a flat undated
+// list with zero date structure - this label map now only labels
+// pre-existing weekly/monthly tasks (still real data, see groupPlanTasksByBucket)
+// folded into the single day view's Unscheduled section instead.
 const planBucketLabels = { daily: "Daily", weekly: "Weekly", monthly: "Monthly" };
 const planRecurrenceLabels = { none: "Does not repeat", daily: "Every day", weekdays: "Every weekday", weekly: "Every week", monthly: "Every month" };
-let planActiveBucket = "daily";
 let planSelectedDate = dateKey(new Date());
 let planDragState = null;
 let planEditingDailyTaskId = null;
@@ -3950,13 +3952,6 @@ function actualLogsForDate(dateKey) {
   return privateData.plans.actualLogs?.[dateKey] || [];
 }
 
-function defaultPlanAnchorDate(bucket) {
-  const now = new Date();
-  if (bucket === "monthly") return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
-  if (bucket === "daily") return planSelectedDate;
-  return now.toISOString().slice(0, 10);
-}
-
 function formatPlanAnchorDate(task) {
   if (!task.anchorDate) return "";
   if (task.bucket === "monthly") {
@@ -3969,41 +3964,11 @@ function formatPlanAnchorDate(task) {
 function renderPlan() {
   if (!privateData) return "";
   ensurePlanData();
-  if (planActiveBucket === "daily") return renderDailyPlan();
-  const tasks = groupPlanTasksByBucket(privateData.plans.tasks)[planActiveBucket];
-  const bucketLabel = planBucketLabels[planActiveBucket].toLowerCase();
-  return `
-    <section class="plan-layout">
-      ${renderPlanHead()}
-      <form id="planTaskForm" class="plan-task-form card">
-        <input name="title" placeholder="Add a ${bucketLabel} task" required>
-        <input name="anchorDate" type="${planActiveBucket === "monthly" ? "month" : "date"}" value="${defaultPlanAnchorDate(planActiveBucket)}">
-        <button type="submit">Add</button>
-      </form>
-      <div class="plan-task-list">
-        ${tasks.length ? tasks.map(renderPlanTask).join("") : `<div class="empty-inline">No ${bucketLabel} tasks yet.</div>`}
-      </div>
-    </section>`;
+  return renderDailyPlan();
 }
 
 function renderPlanHead() {
-  return `<p class="private-note">Private to you — never shared with other household members.</p>
-    <div class="plan-bucket-tabs">${planBuckets.map((bucket) => `<button class="${planActiveBucket === bucket ? "active" : ""}" data-plan-bucket="${bucket}" type="button">${planBucketLabels[bucket]}</button>`).join("")}</div>`;
-}
-
-function renderPlanTask(task) {
-  return `<div class="plan-task-row ${task.done ? "done" : ""}" data-plan-task-id="${task.id}">
-    <input type="checkbox" data-plan-task-check="${task.id}" ${task.done ? "checked" : ""} aria-label="Complete ${escapeHtml(task.title)}">
-    <div class="plan-task-copy">
-      <input class="plan-task-title" data-plan-task-title="${task.id}" value="${escapeHtml(task.title)}" aria-label="Task title">
-      <small>${escapeHtml(formatPlanAnchorDate(task))}${task.goalName ? ` · 🎯 ${escapeHtml(task.goalName)}` : ""}</small>
-    </div>
-    <select class="plan-task-goal-select" data-plan-task-goal="${task.id}" aria-label="Link ${escapeHtml(task.title)} to a goal">
-      <option value="">No goal</option>
-      ${state.goals.sinkingFunds.map((fund) => `<option value="${escapeHtml(fund.name)}" ${task.goalName === fund.name ? "selected" : ""}>${escapeHtml(fund.name)}</option>`).join("")}
-    </select>
-    <button class="icon-button danger-button" data-delete-plan-task="${task.id}" type="button" aria-label="Delete task">×</button>
-  </div>${renderSubtasks(task)}`;
+  return `<p class="private-note">Private to you — never shared with other household members.</p>`;
 }
 
 function renderDailyPlan() {
@@ -4012,7 +3977,12 @@ function renderDailyPlan() {
     .slice()
     .sort((a, b) => (a.startTime ? timeToMinutes(a.startTime) : Infinity) - (b.startTime ? timeToMinutes(b.startTime) : Infinity));
   const scheduled = dailyTasks.filter((task) => task.startTime);
-  const unscheduled = dailyTasks.filter((task) => !task.startTime);
+  // Weekly/monthly tasks used to live in their own tabs, each just a flat
+  // undated list - folded into this same Unscheduled section instead (see
+  // planBucketLabels), since they were never actually tied to a specific
+  // day/week/month structure in the UI to begin with.
+  const legacyTasks = privateData.plans.tasks.filter((task) => task.bucket === "weekly" || task.bucket === "monthly");
+  const unscheduled = [...dailyTasks.filter((task) => !task.startTime), ...legacyTasks];
   const dayLabel = new Date(`${planSelectedDate}T00:00:00`).toLocaleDateString("en-US", { weekday: "long", month: "short", day: "numeric" });
   // Not built: collapsing empty hour runs into "N hours free" dividers
   // (from the design handoff README). The timeline's blocks are positioned
@@ -4047,6 +4017,8 @@ function renderDailyPlan() {
             <button class="icon-button" data-plan-day="next" type="button" aria-label="Next day">›</button>
             <button class="ghost" data-plan-day="today" type="button">Today</button>
           </div>
+          ${renderPlanWeekStrip()}
+          ${renderPlanNextTaskBanner(scheduled)}
           <div class="plan-form-row">
             <form id="planTaskForm" class="plan-task-form plan-task-form-daily card">
               <input name="title" placeholder="Add a task for this day" value="${escapeHtml(editingTask?.title || "")}" required>
@@ -4080,6 +4052,11 @@ function renderDailyPlan() {
             <div class="plan-timeline-col-label plan-timeline-col-label-actual">Actual</div>
             <div class="plan-timeline-hours">${hours.map((hour) => `<div class="plan-timeline-hour" style="height:${60 * PLAN_PIXELS_PER_MINUTE}px">${formatHourLabel(hour)}</div>`).join("")}</div>
             <div class="plan-timeline-body plan-timeline-body-planned" style="height:${timelineHeight}px" data-plan-timeline>
+              ${planTimelineGaps(scheduled).map(([gapStart, gapEnd]) => {
+                const top = (gapStart - PLAN_TIMELINE_START_HOUR * 60) * PLAN_PIXELS_PER_MINUTE;
+                const height = (gapEnd - gapStart) * PLAN_PIXELS_PER_MINUTE;
+                return `<div class="plan-timeline-gap" style="top:${top}px;height:${height}px"><span>${formatPlanDuration(gapEnd - gapStart)} free</span></div>`;
+              }).join("")}
               ${(() => {
                 const layout = layoutTimelineBlocks(scheduled.map((task) => ({
                   id: task.id,
@@ -4111,6 +4088,75 @@ function renderDailyPlan() {
         </aside>
       </div>
     </section>`;
+}
+
+// A compact 7-day (Sun-Sat) strip containing whichever day is currently
+// selected, for jumping straight to a day instead of stepping through
+// prev/next one at a time. The dot only reflects daily-bucket tasks (the
+// only kind actually tied to a specific date) - legacy weekly/monthly
+// tasks live in every day's Unscheduled section regardless, so a dot for
+// those would be on every single day and mean nothing.
+function renderPlanWeekStrip() {
+  const selected = new Date(`${planSelectedDate}T00:00:00`);
+  const weekStart = new Date(selected);
+  weekStart.setDate(selected.getDate() - selected.getDay());
+  const today = dateKey(new Date());
+  const days = [];
+  for (let offset = 0; offset < 7; offset += 1) {
+    const date = new Date(weekStart);
+    date.setDate(weekStart.getDate() + offset);
+    const key = dateKey(date);
+    const hasTasks = privateData.plans.tasks.some((task) => task.bucket === "daily" && dailyTaskOccursOnDate(task, key));
+    days.push({ key, weekday: date.toLocaleDateString("en-US", { weekday: "short" }), day: date.getDate(), isToday: key === today, isSelected: key === planSelectedDate, hasTasks });
+  }
+  return `<div class="plan-week-strip">${days.map((day) => `
+    <button type="button" class="plan-week-day ${day.isSelected ? "selected" : ""} ${day.isToday ? "today" : ""}" data-plan-select-day="${day.key}" aria-label="${day.weekday} ${day.day}" aria-pressed="${day.isSelected}">
+      <span class="plan-week-day-label">${day.weekday}</span>
+      <span class="plan-week-day-number">${day.day}</span>
+      <span class="plan-week-day-dot" aria-hidden="true">${day.hasTasks ? "•" : ""}</span>
+    </button>`).join("")}
+  </div>`;
+}
+
+// Only shown for today (a future/past day has no "now" to count down from)
+// and only when there's a not-yet-done scheduled task still ahead - a stray
+// banner counting down to a task that's already passed or already done
+// would be more confusing than helpful.
+function renderPlanNextTaskBanner(scheduled) {
+  if (planSelectedDate !== dateKey(new Date())) return "";
+  const now = new Date();
+  const nowMinutes = now.getHours() * 60 + now.getMinutes();
+  const upcoming = scheduled
+    .filter((task) => !isDailyTaskDoneOnDate(task, planSelectedDate) && timeToMinutes(task.startTime) >= nowMinutes)
+    .sort((a, b) => timeToMinutes(a.startTime) - timeToMinutes(b.startTime))[0];
+  if (!upcoming) return "";
+  const minutesUntil = timeToMinutes(upcoming.startTime) - nowMinutes;
+  return `<div class="plan-next-task-banner">⏱ ${minutesUntil <= 0 ? "Starting now" : `${formatPlanDuration(minutesUntil)} until`} <strong>${escapeHtml(upcoming.title)}</strong></div>`;
+}
+
+const PLAN_GAP_CALLOUT_MIN_MINUTES = 45;
+
+// Free stretches between scheduled tasks (and before the first / after the
+// last), same interval-merging shape as planDaySummaryStats' longestFree -
+// this returns every qualifying gap rather than just the longest one, so
+// each can get its own callout in the Planned column.
+function planTimelineGaps(scheduled) {
+  const dayStart = PLAN_TIMELINE_START_HOUR * 60;
+  const dayEnd = (PLAN_TIMELINE_END_HOUR + 1) * 60;
+  const intervals = scheduled
+    .map((task) => {
+      const start = Math.max(dayStart, timeToMinutes(task.startTime));
+      return [start, Math.min(dayEnd, start + Number(task.durationMinutes || 30))];
+    })
+    .sort((a, b) => a[0] - b[0]);
+  const gaps = [];
+  let cursor = dayStart;
+  intervals.forEach(([start, end]) => {
+    if (start > cursor) gaps.push([cursor, start]);
+    cursor = Math.max(cursor, end);
+  });
+  if (dayEnd > cursor) gaps.push([cursor, dayEnd]);
+  return gaps.filter(([start, end]) => end - start >= PLAN_GAP_CALLOUT_MIN_MINUTES);
 }
 
 function formatHourLabel(hour) {
@@ -4243,7 +4289,11 @@ function renderTimelineBlock(task, layoutInfo) {
   const editing = task.id === planEditingDailyTaskId;
   const columns = layoutInfo?.columns || 1;
   const column = layoutInfo?.column || 0;
-  const gutter = 6;
+  // Wider than the Actual column's own gutter (see renderActualLogBlock) so
+  // the dashed connector line + per-block dot (styles.css, scoped to
+  // .plan-timeline-body-planned) have room on the left without sitting
+  // behind the block's own content.
+  const gutter = 24;
   const gap = columns > 1 ? 4 : 0;
   const left = `calc(${gutter}px + (100% - ${gutter * 2}px) * ${column} / ${columns})`;
   const width = `calc((100% - ${gutter * 2}px) / ${columns} - ${gap}px)`;
@@ -4309,18 +4359,39 @@ function renderActualLogBlock(log, tasksById, layoutInfo) {
   </div>`;
 }
 
+// Renders both a genuinely-unscheduled today's task (bucket "daily", no
+// startTime) and a pre-existing weekly/monthly-bucket task, now folded into
+// the same Unscheduled section (see renderDailyPlan) - the two have
+// different completion tracking (isDailyTaskDoneOnDate's per-date map vs a
+// flat task.done) and only a legacy task keeps the goal-link select that
+// used to live in the old flat weekly/monthly list.
 function renderPlanTaskDaily(task) {
-  const done = isDailyTaskDoneOnDate(task, planSelectedDate);
-  const linkedLogs = actualLogsForDate(planSelectedDate).filter((log) => (log.linkedTaskIds || []).includes(task.id));
-  const { label: actualLabel } = describeLinkedActualLogs(task, linkedLogs);
+  const isDaily = task.bucket === "daily";
+  const done = isDaily ? isDailyTaskDoneOnDate(task, planSelectedDate) : Boolean(task.done);
+  const linkedLogs = isDaily ? actualLogsForDate(planSelectedDate).filter((log) => (log.linkedTaskIds || []).includes(task.id)) : [];
+  const { label: actualLabel } = isDaily ? describeLinkedActualLogs(task, linkedLogs) : { label: "" };
+  const subtasks = task.subtasks || [];
+  const subtaskDone = subtasks.filter((item) => item.done).length;
+  const metaChips = [];
+  if (isDaily && task.recurrence && task.recurrence !== "none") metaChips.push(planRecurrenceLabels[task.recurrence]);
+  if (!isDaily) metaChips.push(`${planBucketLabels[task.bucket]} · ${formatPlanAnchorDate(task)}`);
+  if (actualLabel) metaChips.push(actualLabel);
   return `<div class="plan-task-row plan-task-row-daily ${done ? "done" : ""}" data-plan-task-id="${task.id}">
-    <input type="checkbox" data-plan-task-check="${task.id}" ${done ? "checked" : ""} aria-label="Complete ${escapeHtml(task.title)}">
+    <span class="plan-task-icon" aria-hidden="true">${isDaily ? "📝" : "🗂️"}</span>
     <div class="plan-task-copy">
       <input class="plan-task-title" data-plan-task-title="${task.id}" value="${escapeHtml(task.title)}" aria-label="Task title">
-      ${task.recurrence && task.recurrence !== "none" ? `<small>${planRecurrenceLabels[task.recurrence]}</small>` : ""}
-      ${actualLabel ? `<small>${escapeHtml(actualLabel)}</small>` : ""}
+      <div class="plan-task-meta">
+        ${metaChips.length ? `<small>${escapeHtml(metaChips.join(" · "))}</small>` : ""}
+        ${subtasks.length ? `<span class="pill">${subtaskDone}/${subtasks.length}</span>` : ""}
+        ${task.goalName ? `<span class="pill">🎯 ${escapeHtml(task.goalName)}</span>` : ""}
+      </div>
     </div>
-    <button class="icon-button" data-schedule-plan-task="${task.id}" type="button" aria-label="Schedule ${escapeHtml(task.title)}" title="Give this a start time">🕐</button>
+    ${!isDaily ? `<select class="plan-task-goal-select" data-plan-task-goal="${task.id}" aria-label="Link ${escapeHtml(task.title)} to a goal">
+      <option value="">No goal</option>
+      ${state.goals.sinkingFunds.map((fund) => `<option value="${escapeHtml(fund.name)}" ${task.goalName === fund.name ? "selected" : ""}>${escapeHtml(fund.name)}</option>`).join("")}
+    </select>` : ""}
+    ${isDaily ? `<button class="icon-button" data-schedule-plan-task="${task.id}" type="button" aria-label="Schedule ${escapeHtml(task.title)}" title="Give this a start time">🕐</button>` : ""}
+    <input type="checkbox" class="plan-task-circle" data-plan-task-check="${task.id}" ${done ? "checked" : ""} aria-label="Complete ${escapeHtml(task.title)}">
     <button class="icon-button danger-button" data-delete-plan-task="${task.id}" type="button" aria-label="Delete task">×</button>
   </div>${renderSubtasks(task)}`;
 }
@@ -5780,7 +5851,7 @@ function netWorthStockGroupCard(group) {
       <button type="button" class="live-price-pill" data-refresh-stock-group="${group.groupId}">↻ Live price</button>
       <small class="muted">${liveCaption}</small>
     </div>
-    <button class="icon-button danger-button" data-delete-stock-group="${group.groupId}" type="button" aria-label="Remove ${escapeHtml(group.groupName)}">×</button>
+    <button class="icon-button danger-button card-close-button" data-delete-stock-group="${group.groupId}" type="button" aria-label="Remove ${escapeHtml(group.groupName)}">×</button>
   </article>`;
 }
 
@@ -5807,8 +5878,8 @@ function accountItemRow(account, index) {
       <div class="split-stat"><span>${isLiability ? "Owed" : "Balance"}</span><b class="${isLiability && balance > 0 ? "danger" : ""}">${money.format(balance)}</b></div>
       ${sparkline}
       ${account.closedAt ? `<span class="pill pill-warning" title="No new transactions can be added after ${formatShortDate(account.closedAt)}">Closed ${formatShortDate(account.closedAt)}</span>` : ""}
-      <button class="icon-button danger-button" data-delete-account="${index}" type="button" aria-label="Remove ${escapeHtml(account.name)}">×</button>
     </div>
+    <button class="icon-button danger-button card-close-button" data-delete-account="${index}" type="button" aria-label="Remove ${escapeHtml(account.name)}">×</button>
   </article>`;
 }
 
@@ -5837,7 +5908,7 @@ function netWorthItemRow(item, type, index) {
       : isAccountLinked(type, item.id)
         ? `<div class="net-worth-linked-value"><span>Amount (from account)</span><strong>${money.format(Number(item.value || 0))}</strong></div>`
         : `<label>Amount<input data-net-worth-value="${type}:${index}" type="number" min="0" step="0.01" inputmode="decimal" value="${Number(item.value || 0)}" aria-label="${isLiability ? "Liability" : "Asset"} amount"></label>`}
-    <button class="icon-button danger-button" data-delete-${type}="${index}" type="button" aria-label="Remove ${escapeHtml(item.name)}">×</button>
+    <button class="icon-button danger-button card-close-button" data-delete-${type}="${index}" type="button" aria-label="Remove ${escapeHtml(item.name)}">×</button>
     <button type="button" class="wealth-doc-chip" data-wealth-doc-toggle="${wealthKey}" title="Documents tagged to ${escapeHtml(item.name)}">📄 ${linkedDocuments.length}</button>
     ${wealthDocsExpandedKey === wealthKey ? `<div class="wealth-doc-list">
       ${linkedDocuments.length ? linkedDocuments.map((document) => `<div class="wealth-doc-list-row">
@@ -7995,7 +8066,6 @@ function bindViewEvents() {
   }));
 
   $("#homeOpenPlanButton")?.addEventListener("click", () => {
-    planActiveBucket = "daily";
     planSelectedDate = dateKey(new Date());
     goToViewAndRun("plan");
   });
@@ -8881,15 +8951,6 @@ function bindViewEvents() {
     }
   });
 
-  document.querySelectorAll("[data-plan-bucket]").forEach((button) => {
-    button.addEventListener("click", () => {
-      planActiveBucket = button.dataset.planBucket;
-      planEditingDailyTaskId = null;
-      planEditingActualLogId = null;
-      render();
-    });
-  });
-
   document.querySelectorAll("[data-plan-day]").forEach((button) => {
     button.addEventListener("click", () => {
       const date = new Date(`${planSelectedDate}T00:00:00`);
@@ -8899,6 +8960,15 @@ function bindViewEvents() {
       else if (button.dataset.planDay === "next") date.setDate(date.getDate() + 1);
       else { planSelectedDate = dateKey(new Date()); render(); return; }
       planSelectedDate = dateKey(date);
+      render();
+    });
+  });
+
+  document.querySelectorAll("[data-plan-select-day]").forEach((button) => {
+    button.addEventListener("click", () => {
+      planEditingDailyTaskId = null;
+      planEditingActualLogId = null;
+      planSelectedDate = button.dataset.planSelectDay;
       render();
     });
   });
@@ -8965,7 +9035,7 @@ function bindViewEvents() {
 
   (() => {
     const form = $("#planTaskForm");
-    if (!form || planActiveBucket !== "daily") return;
+    if (!form) return;
     const startInput = form.querySelector('[name="startTime"]');
     const durationInput = form.querySelector('[name="durationMinutes"]');
     const endDisplay = form.querySelector('[name="endTimeDisplay"]');
@@ -8983,7 +9053,7 @@ function bindViewEvents() {
     const form = event.currentTarget;
     const data = Object.fromEntries(new FormData(form));
     if (!data.title || !data.title.trim()) return;
-    if (planActiveBucket === "daily" && planEditingDailyTaskId) {
+    if (planEditingDailyTaskId) {
       const task = privateData.plans.tasks.find((item) => item.id === planEditingDailyTaskId);
       if (task) {
         task.title = data.title.trim();
@@ -8996,24 +9066,19 @@ function bindViewEvents() {
       render();
       return;
     }
-    const task = {
+    privateData.plans.tasks.push({
       id: uniqueId("plan"),
       title: data.title.trim(),
       notes: "",
-      bucket: planActiveBucket,
-      anchorDate: data.anchorDate || defaultPlanAnchorDate(planActiveBucket),
+      bucket: "daily",
+      anchorDate: planSelectedDate,
       createdAt: new Date().toISOString(),
-      subtasks: []
-    };
-    if (planActiveBucket === "daily") {
-      task.startTime = data.startTime || "";
-      task.durationMinutes = Math.max(5, Number(data.durationMinutes || 30));
-      task.recurrence = data.recurrence || "none";
-      task.completedDates = [];
-    } else {
-      task.done = false;
-    }
-    privateData.plans.tasks.push(task);
+      subtasks: [],
+      startTime: data.startTime || "",
+      durationMinutes: Math.max(5, Number(data.durationMinutes || 30)),
+      recurrence: data.recurrence || "none",
+      completedDates: []
+    });
     autosavePlans();
     render();
   });
