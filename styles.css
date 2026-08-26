@@ -6190,6 +6190,21 @@ html[data-theme="dark"] .note-color-coral { background: color-mix(in srgb, #fff0
   min-width: 60px;
 }
 
+/* A checklist item's text is a <textarea> (not an <input>, which can never
+   wrap) specifically so a long item wraps across lines instead of clipping
+   - see autoGrowNoteCheckText in app.js, which keeps its height fitted to
+   content with no visible resize handle or scrollbar. */
+.note-check-text {
+  display: block;
+  resize: none;
+  overflow: hidden;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  line-height: 1.3;
+  padding: 0.25rem 0;
+  font: inherit;
+}
+
 .note-check-row.child-item {
   margin-left: 1.75rem;
   padding-left: 0.65rem;

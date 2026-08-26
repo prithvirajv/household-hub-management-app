@@ -3435,7 +3435,7 @@ function renderSharedWithMeCard(shared) {
   const checklist = Array.isArray(shared.checklist) ? shared.checklist : [];
   const checklistRow = (item) => `<div class="note-check-row">
     <input type="checkbox" data-shared-note-check="${shared.shareId}:${item.id}" aria-label="Complete ${escapeHtml(item.text)}" ${item.done ? "checked" : ""}>
-    <input class="note-check-text" data-shared-note-check-text="${shared.shareId}:${item.id}" value="${escapeHtml(item.text)}" placeholder="Checklist item" aria-label="Checklist item">
+    <textarea class="note-check-text" data-shared-note-check-text="${shared.shareId}:${item.id}" placeholder="Checklist item" aria-label="Checklist item" rows="1">${escapeHtml(item.text)}</textarea>
     <button class="note-check-delete" data-delete-shared-note-item="${shared.shareId}:${item.id}" type="button" aria-label="Delete checklist item">×</button>
   </div>`;
   return `<article class="note-card shared-with-me-card" data-shared-note-id="${shared.shareId}">
@@ -3498,13 +3498,27 @@ function linkedBillName(note) {
   return bill ? bill.name : null;
 }
 
+// Checklist item text is a <textarea> (see renderNoteCard/renderSharedWithMeCard)
+// rather than an <input> specifically so a long item wraps across multiple
+// lines instead of clipping - a plain <input> can never wrap regardless of
+// CSS. This keeps it sized to exactly its content (no visible resize handle,
+// no leftover blank lines) by resetting height to auto and reading back
+// scrollHeight, the standard auto-grow-textarea trick. Called both on every
+// 'input' keystroke and once up front when the row is first bound, so
+// already-long saved text renders at full height immediately rather than
+// only after the user next edits it.
+function autoGrowNoteCheckText(el) {
+  el.style.height = "auto";
+  el.style.height = `${el.scrollHeight}px`;
+}
+
 function renderNoteCard(note) {
   const { open, completed } = bucketChecklistItems(note.checklist);
   const checklistRow = (item) => `<div class="note-check-row ${item.done ? "done" : ""} ${item.parentId ? "child-item" : ""}" draggable="true" data-drag-checklist-item="${note.id}:${item.id}">
     <span class="note-check-drag-handle" aria-hidden="true" data-tooltip="Drag to reorder">⠿</span>
     <input data-note-check="${note.id}:${item.id}" type="checkbox" aria-label="Complete ${escapeHtml(item.text)}" ${item.done ? "checked" : ""}>
     <div class="note-check-combobox">
-      <input class="note-check-text" data-note-check-text="${note.id}:${item.id}" value="${escapeHtml(item.text)}" placeholder="Checklist item" aria-label="Checklist item" aria-autocomplete="list" aria-expanded="false" autocomplete="off">
+      <textarea class="note-check-text" data-note-check-text="${note.id}:${item.id}" placeholder="Checklist item" aria-label="Checklist item" aria-autocomplete="list" aria-expanded="false" autocomplete="off" rows="1">${escapeHtml(item.text)}</textarea>
       <div class="note-item-suggestions" data-note-check-suggestions="${note.id}:${item.id}" role="listbox" hidden></div>
     </div>
     <button class="note-check-level" data-indent-note-item="${note.id}:${item.id}" type="button" aria-label="${item.parentId ? "Move checklist item to top level" : "Make checklist item a sub-item"}" data-tooltip="${item.parentId ? "Move to top level" : "Make sub-item"}">${item.parentId ? "←" : "→"}</button>
@@ -8169,7 +8183,9 @@ function bindViewEvents() {
   });
 
   document.querySelectorAll("[data-note-check-text]").forEach((input) => {
+    autoGrowNoteCheckText(input);
     input.addEventListener("input", () => {
+      autoGrowNoteCheckText(input);
       const [noteId, itemId] = input.dataset.noteCheckText.split(":");
       const note = state.notes.entries.find((item) => item.id === noteId);
       const checklistItem = note?.checklist.find((item) => item.id === itemId);
@@ -8198,6 +8214,15 @@ function bindViewEvents() {
       autosaveState();
     });
     input.addEventListener("keydown", (event) => {
+      // A checklist item is conceptually one line that may wrap visually
+      // once it no longer fits an <input> (see autoGrowNoteCheckText) - Enter
+      // shouldn't insert a literal newline into it the way it would in a
+      // real multi-line textarea, so this just moves focus away instead.
+      if (event.key === "Enter") {
+        event.preventDefault();
+        input.blur();
+        return;
+      }
       if (event.key !== "Escape") return;
       const suggestions = document.querySelector(`[data-note-check-suggestions="${input.dataset.noteCheckText}"]`);
       suggestions.hidden = true;
@@ -8259,6 +8284,13 @@ function bindViewEvents() {
   });
 
   document.querySelectorAll("[data-shared-note-check-text]").forEach((input) => {
+    autoGrowNoteCheckText(input);
+    input.addEventListener("input", () => autoGrowNoteCheckText(input));
+    input.addEventListener("keydown", (event) => {
+      if (event.key !== "Enter") return;
+      event.preventDefault();
+      input.blur();
+    });
     input.addEventListener("blur", async () => {
       const [shareId, itemId] = input.dataset.sharedNoteCheckText.split(":");
       const shared = sharedWithMeNotes?.find((item) => item.shareId === shareId);
@@ -9529,7 +9561,7 @@ function bindViewEvents() {
   document.querySelectorAll("[data-add-line-category]").forEach((button) => {
     button.addEventListener("click", () => {
       const category = state.budget.categories[Number(button.dataset.addLineCategory)];
-      category.lines.push({ id: uniqueId(category.name), name: "New subcategory", planned: 0, dueDay: 28 });
+      category.lines.push({ id: uniqueId(category.name), name: "New subcategory", planned: 0, dueDay: null });
       autosaveState();
       render();
     });
@@ -9539,7 +9571,7 @@ function bindViewEvents() {
     const name = ($("#newCategoryName")?.value || "New category").trim();
     if (!name) return;
     if (state.budget.categories.some((category) => category.name.toLowerCase() === name.toLowerCase())) return;
-    state.budget.categories.push({ name, color: categoryColor(state.budget.categories.length), lines: [{ id: uniqueId(name), name: "New subcategory", planned: 0, dueDay: 28 }] });
+    state.budget.categories.push({ name, color: categoryColor(state.budget.categories.length), lines: [{ id: uniqueId(name), name: "New subcategory", planned: 0, dueDay: null }] });
     autosaveState();
     render();
   });
@@ -9578,7 +9610,7 @@ function bindViewEvents() {
     const category = state.budget.categories[Number($("#transactionParentCategory")?.value || 0)];
     if (!name) return;
     if (category.lines.some((line) => line.name.toLowerCase() === name.toLowerCase())) return;
-    category.lines.push({ id: uniqueId(name), name, planned: 0, dueDay: 28 });
+    category.lines.push({ id: uniqueId(name), name, planned: 0, dueDay: null });
     state.household.activity.unshift(`Added ${name} subcategory under ${category.name} from Transactions`);
     autosaveState();
     render();
