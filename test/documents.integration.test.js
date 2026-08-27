@@ -297,3 +297,27 @@ test("GET /api/documents/folders/:id/download is unavailable in MEMORY_DB (demo/
   const missingFolder = await server.request("/api/documents/folders/folder-does-not-exist/download", { headers: { cookie } });
   assert.equal(missingFolder.status, 501, "the MEMORY_DB guard runs before the folder lookup, so a bad id still reports 501 not 404");
 });
+
+// The MEMORY_DB guard above means the full integration suite can never reach
+// the actual zip-writing code the folder-download route uses against real
+// cloud storage - archiver@8 rewrote its package as ESM, so
+// require("archiver") now returns {Archiver, ZipArchive, ...} instead of the
+// old callable factory function, and calling it as `archiver("zip", opts)`
+// throws "archiver is not a function" on every real request while every
+// MEMORY_DB-gated test still passes. This checks the archiver import shape
+// directly (bypassing HTTP/DB entirely) so a future archiver bump - or
+// reverting this fix - fails a test instead of only failing in production.
+// Deliberately synchronous/no actual zip-writing: driving append()/pipe()/
+// finalize() end-to-end here hangs under node:test's runner even though the
+// identical stream sequence completes in well under a second as a plain
+// script - a node:test/archiver interaction, not a real bug - so this only
+// asserts the shape (constructible, has the methods the route calls).
+test("archiver's ZipArchive class has the shape the folder-download route expects (regression: archiver@8 has no callable default export)", () => {
+  const { ZipArchive } = require("archiver");
+  assert.equal(typeof ZipArchive, "function", "archiver@8's require() result has no callable default export - use `new ZipArchive(opts)`, not `archiver('zip', opts)`");
+  const archive = new ZipArchive({ zlib: { level: 9 } });
+  assert.equal(typeof archive.append, "function");
+  assert.equal(typeof archive.pipe, "function");
+  assert.equal(typeof archive.finalize, "function");
+  archive.destroy();
+});

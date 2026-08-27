@@ -18,7 +18,12 @@ const { defaultState } = require("./default-state");
 const { validateJournalPayload, buildDocumentObjectPath, sanitizeFilename, wouldCreateFolderCycle, collectDescendantFolderIds, SMS_CARRIERS, smsGatewayAddress, rollAnnualNotifyAtForward, choreNotifyAt, parseBankStatementPdfText, extractAccountActivityLabel, isValidEmail } = require("../lib/shared-logic");
 const pdfParse = require("pdf-parse");
 const ExcelJS = require("exceljs");
-const archiver = require("archiver");
+// archiver@8 is an ESM-only rewrite: require("archiver") returns the module
+// namespace object ({Archiver, ZipArchive, TarArchive, JsonArchive}), not a
+// callable factory the way archiver@<=7 did - `archiver("zip", opts)` throws
+// "archiver is not a function" every time, so this constructs the class
+// directly instead.
+const { ZipArchive } = require("archiver");
 
 const ANNUAL_EVENT_TYPES = ["birthday", "anniversary"];
 const { createSignedUploadUrl, createSignedDownloadUrl, deleteObject, copyObject, getObjectStream, uploadBuffer, listObjects } = require("./gcs");
@@ -4169,7 +4174,7 @@ app.get("/api/documents/folders/:id/download", requireSession, async (req, res, 
     res.setHeader("Content-Type", "application/zip");
     res.setHeader("Content-Disposition", `attachment; filename="${zipFileName}"`);
 
-    const archive = archiver("zip", { zlib: { level: 9 } });
+    const archive = new ZipArchive({ zlib: { level: 9 } });
     archive.on("error", (error) => {
       // Headers/some bytes may already be flushed by the time a mid-stream
       // read fails (a file deleted from storage after the DB row was
