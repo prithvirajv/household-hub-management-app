@@ -45,6 +45,12 @@ let households = [];
 let countryCatalog = [];
 let currentView = "home";
 let autosaveTimer = null;
+// True whenever a debounced autosave is scheduled but hasn't fired yet - a
+// refresh/tab-close in that ~350ms window would otherwise silently drop
+// whatever just changed (e.g. a note added right before hitting refresh),
+// since nothing else ever flushes it. See the pagehide/visibilitychange
+// listeners below.
+let autosavePending = false;
 let inviteEmailStatus = "";
 let googleSignInInitialized = false;
 let googleMapsApiKey = "";
@@ -415,7 +421,9 @@ function autosaveState() {
   }
   const householdIdAtSchedule = currentHouseholdId();
   clearTimeout(autosaveTimer);
+  autosavePending = true;
   autosaveTimer = setTimeout(() => {
+    autosavePending = false;
     if (currentHouseholdId() !== householdIdAtSchedule) return;
     // Re-check at fire time, not just at schedule time above - `state` is a
     // mutable global and 350ms is long enough for something else (a
@@ -435,6 +443,32 @@ function autosaveState() {
   }, 350);
 }
 
+// Fires the pending debounced autosave (if any) immediately, with
+// keepalive so the request can complete even if the page is already
+// unloading - used by the pagehide/visibilitychange flush below, so a
+// refresh/tab-close within the 350ms debounce window doesn't silently
+// drop whatever was just changed.
+function flushPendingAutosave() {
+  if (!autosavePending || !state) return;
+  autosavePending = false;
+  clearTimeout(autosaveTimer);
+  if (!looksLikeCompleteState(state)) return;
+  if (sessionUser?.accessLevel === "view") return;
+  api("/api/state", {
+    method: "PUT",
+    headers: { "X-Household-Id": currentHouseholdId() || "" },
+    body: JSON.stringify(state),
+    keepalive: true
+  }).catch((error) => {
+    console.warn("Flush autosave failed", error);
+  });
+}
+
+document.addEventListener("visibilitychange", () => {
+  if (document.visibilityState === "hidden") flushPendingAutosave();
+});
+window.addEventListener("pagehide", flushPendingAutosave);
+
 async function saveStateNow() {
   if (!state) return;
   if (!looksLikeCompleteState(state)) {
@@ -442,6 +476,7 @@ async function saveStateNow() {
     return;
   }
   const householdIdAtCall = currentHouseholdId();
+  autosavePending = false;
   clearTimeout(autosaveTimer);
   await api("/api/state", {
     method: "PUT",
