@@ -15,7 +15,7 @@ const { Pool } = require("pg");
 const { OAuth2Client } = require("google-auth-library");
 const { countries } = require("countries-list");
 const { defaultState } = require("./default-state");
-const { validateJournalPayload, buildDocumentObjectPath, sanitizeFilename, wouldCreateFolderCycle, collectDescendantFolderIds, SMS_CARRIERS, smsGatewayAddress, rollAnnualNotifyAtForward, choreNotifyAt, parseBankStatementPdfText, extractAccountActivityLabel, isValidEmail } = require("../lib/shared-logic");
+const { validateJournalPayload, buildDocumentObjectPath, sanitizeFilename, wouldCreateFolderCycle, collectDescendantFolderIds, SMS_CARRIERS, smsGatewayAddress, rollAnnualNotifyAtForward, choreNotifyAt, parseBankStatementPdfText, extractAccountActivityLabel, isValidEmail, parseImageReminderDraft, pgDumpArgs } = require("../lib/shared-logic");
 const pdfParse = require("pdf-parse");
 const ExcelJS = require("exceljs");
 // archiver@8 is an ESM-only rewrite: require("archiver") returns the module
@@ -145,6 +145,7 @@ app.disable("x-powered-by");
 app.use("/api/private-data/journal", express.json({ limit: "10mb" }));
 app.use("/api/bank-statement", express.json({ limit: "15mb" }));
 app.use("/api/reports", express.json({ limit: "20mb" }));
+app.use("/api/calendar/reminder-from-image", express.json({ limit: "10mb" }));
 app.use(express.json({ limit: "1mb" }));
 app.use(cookieParser(SESSION_SECRET));
 app.use(express.static(path.join(__dirname, ".."), {
@@ -1448,6 +1449,52 @@ app.post("/api/transactions/suggest-account", requireSession, async (req, res, n
     if (!response.ok) return res.status(502).json({ error: body?.error?.message || "The AI suggestion service is unavailable right now" });
     const text = body.candidates?.[0]?.content?.parts?.[0]?.text?.trim();
     res.json({ accountId: text && validIds.has(text) ? text : null });
+  } catch (error) {
+    next(error);
+  }
+});
+
+// Lets a photo of an invitation, appointment card, flyer, etc. become a
+// Calendar reminder: the image never touches storage, it's sent inline to
+// the vision model and the extracted draft is handed back for the user to
+// review/edit before it's added client-side (mirrors the calendar .ics/.csv
+// import preview - AI output is always a draft, never auto-committed).
+const REMINDER_IMAGE_ALLOWED_TYPES = new Set(["image/jpeg", "image/png", "image/webp", "image/heic", "image/heif"]);
+const REMINDER_IMAGE_MAX_BASE64_CHARS = 8 * 1024 * 1024; // ~6MB of actual image bytes
+
+app.post("/api/calendar/reminder-from-image", requireSession, async (req, res, next) => {
+  try {
+    if (!GEMINI_API_KEY) return res.status(503).json({ error: "AI photo reading is not configured for this deployment" });
+    const mimeType = String(req.body?.mimeType || "").trim().toLowerCase();
+    const imageBase64 = String(req.body?.imageBase64 || "").trim();
+    if (!REMINDER_IMAGE_ALLOWED_TYPES.has(mimeType)) return res.status(400).json({ error: "Unsupported image type - use a JPEG, PNG, WEBP, or HEIC photo" });
+    if (!imageBase64) return res.status(400).json({ error: "No image provided" });
+    if (imageBase64.length > REMINDER_IMAGE_MAX_BASE64_CHARS) return res.status(400).json({ error: "That photo is too large - try a smaller image" });
+
+    const today = new Date().toISOString().slice(0, 10);
+    const response = await fetch(`${GEMINI_API_BASE_URL}/v1beta/models/${encodeURIComponent(GEMINI_MODEL)}:generateContent?key=${encodeURIComponent(GEMINI_API_KEY)}`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        contents: [{
+          role: "user",
+          parts: [
+            { inlineData: { mimeType, data: imageBase64 } },
+            { text: `Today's date is ${today}. Read this photo (an invitation, appointment card, flyer, screenshot, or similar) and extract a single calendar reminder from it.` }
+          ]
+        }],
+        systemInstruction: {
+          parts: [{
+            text: "You are extracting a single reminder/event from a photo for a household calendar app. Reply with ONLY a JSON object - no markdown fences, no explanation - with exactly these keys: \"title\" (short event name), \"date\" (YYYY-MM-DD, resolved against today's date if the photo only shows a relative or partial date; empty string if genuinely undeterminable), \"time\" (24-hour HH:MM; empty string if no time is shown), \"location\" (empty string if none). Never invent a date, time, or location that isn't actually supported by the image."
+          }]
+        },
+        generationConfig: { maxOutputTokens: 300 }
+      })
+    });
+    const body = await response.json().catch(() => ({}));
+    if (!response.ok) return res.status(502).json({ error: body?.error?.message || "The AI photo reading service is unavailable right now" });
+    const text = body.candidates?.[0]?.content?.parts?.[0]?.text || "";
+    res.json(parseImageReminderDraft(text));
   } catch (error) {
     next(error);
   }
@@ -4641,7 +4688,9 @@ const BACKUP_RETENTION_DAYS = 14;
 
 function runPgDump() {
   return new Promise((resolve, reject) => {
-    const child = spawn("pg_dump", [DATABASE_URL, "--no-owner", "--no-privileges", "-Fc"], { stdio: ["ignore", "pipe", "pipe"] });
+    const args = pgDumpArgs({ cloudSqlConnectionName: CLOUD_SQL_CONNECTION_NAME, dbUser: DB_USER, dbName: DB_NAME, databaseUrl: DATABASE_URL });
+    const env = CLOUD_SQL_CONNECTION_NAME ? { ...process.env, PGPASSWORD: DB_PASSWORD } : process.env;
+    const child = spawn("pg_dump", args, { stdio: ["ignore", "pipe", "pipe"], env });
     const chunks = [];
     let stderr = "";
     child.stdout.on("data", (chunk) => chunks.push(chunk));

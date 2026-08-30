@@ -110,27 +110,33 @@ pass it as an env var to the deploy invocation) and re-run the deploy above —
 `put_secret()` creates the new version and disables the old one
 automatically. There is no separate manual rotation script.
 
-## Database — Neon Postgres
+## Database — Cloud SQL (was Neon until 2026-08-30)
 
-Production is on **Neon** (serverless Postgres), not Cloud SQL. Connection
-is via the **direct/unpooled** endpoint (hostname without the `-pooler`
-suffix) — see [Incident playbooks](#incident-playbooks) for why the pooled
-endpoint must never be used here.
+**Production is currently on Cloud SQL** (`familyloop-postgres`, Postgres 16,
+`us-central1-a`, database `household_hub`), reached via
+`deploy-cloud-run.sh`'s default Cloud SQL path (Unix socket over
+`--add-cloudsql-instances`, not a TCP `DATABASE_URL`). This is a switch made
+during the 2026-08-30 incident below, not the original design - the app
+still fully supports an external `DATABASE_URL` (Neon, Supabase, etc.) if
+`.env.deploy` sets one, see `USE_CLOUD_SQL` in `scripts/deploy-cloud-run.sh`.
+`.env.deploy` has Neon's old connection string commented out rather than
+deleted, in case of a deliberate move back once Neon's plan/quota is sorted.
 
 **Automated nightly backup**: Cloud Scheduler job `familyloop-backup-db`
 (`us-central1`) hits `POST /api/internal/backup-db` every night at 11:50 PM
 America/New_York, authenticated with the same `NOTIFICATION_SECRET` bearer
 token as the notification worker. The endpoint runs `pg_dump` (via
-`postgresql-client-16`, installed in the Dockerfile from the PGDG apt repo
-since it must be the same or newer major version than Neon's Postgres 16 -
-Debian bookworm's own repo only has v15) and uploads the dump to
+`postgresql-client-16`, installed in the Dockerfile from the PGDG apt repo -
+Debian bookworm's own repo only has v15, and pg_dump must be the same or
+newer major version than whatever Postgres it's dumping from) and uploads
+the dump to
 `gs://familyloop-documents-solid-coder-212120/backups/familyloop-YYYY-MM-DD.dump`,
-pruning anything older than 14 days. There is **no standing standby
-database** (Cloud SQL was decommissioned after the Neon cutover, and a
-24/7 hot standby costs real money for a personal app that rarely needs
-it) - recovery from a Neon outage means restoring the latest GCS dump into
-a freshly-provisioned Cloud SQL instance on demand (~5-10 min), not
-flipping a switch. See the Neon quota incident playbook below.
+pruning anything older than 14 days. `runPgDump()` (server/index.js) builds
+its `pg_dump` invocation the same way as the app's own connection pool -
+Cloud SQL over the `/cloudsql/<connection-name>` Unix socket with
+`-h`/`-U`/`-d`/`PGPASSWORD`, or a plain `DATABASE_URL` for an external
+database - so this switched over automatically with the rest of the app
+when production moved to Cloud SQL; it doesn't assume one provider.
 
 **Manual backup/export** (same format, run it yourself anytime):
 

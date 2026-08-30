@@ -14,7 +14,8 @@ const {
   recurringBudgetSetAside, nextRecurringBudgetDueDate, monthsUntilDueInclusive,
   annualEventDate, nextAnnualEventDate, annualEventNotifyAt, rollAnnualNotifyAtForward,
   nextPendingChoreOccurrence, currentChoreOccurrenceDate, zonedTimeToUtcIso, choreNotifyAt,
-  buildCalendarIcs, parseIcsText, icsEventsToCalendarDrafts, buildCalendarCsv, parseCalendarCsv
+  buildCalendarIcs, parseIcsText, icsEventsToCalendarDrafts, buildCalendarCsv, parseCalendarCsv,
+  parseImageReminderDraft, pgDumpArgs
 } = require("../lib/shared-logic");
 
 test("layoutTimelineBlocks gives non-overlapping tasks full width", () => {
@@ -2128,4 +2129,43 @@ test("buildCalendarCsv quotes fields containing commas so parseCalendarCsv doesn
   const csv = buildCalendarCsv([reminder], []);
   const [draft] = parseCalendarCsv(csv);
   assert.equal(draft.title, "Buy milk, eggs");
+});
+
+test("parseImageReminderDraft parses a plain JSON reply", () => {
+  const draft = parseImageReminderDraft('{"title":"Robotics pickup","date":"2026-09-12","time":"17:30","location":"School gym"}');
+  assert.deepEqual(draft, { title: "Robotics pickup", date: "2026-09-12", time: "17:30", location: "School gym" });
+});
+
+test("parseImageReminderDraft strips a ```json code fence before parsing", () => {
+  const draft = parseImageReminderDraft('```json\n{"title":"Dentist","date":"2026-10-01","time":"09:00","location":""}\n```');
+  assert.equal(draft.title, "Dentist");
+  assert.equal(draft.date, "2026-10-01");
+});
+
+test("parseImageReminderDraft drops an invalid date or time rather than passing through garbage", () => {
+  const draft = parseImageReminderDraft('{"title":"Party","date":"next friday","time":"5pm","location":"Somewhere"}');
+  assert.equal(draft.title, "Party");
+  assert.equal(draft.date, "");
+  assert.equal(draft.time, "");
+  assert.equal(draft.location, "Somewhere");
+});
+
+test("parseImageReminderDraft degrades to an all-blank draft on unparseable text, without throwing", () => {
+  const draft = parseImageReminderDraft("I couldn't read this image clearly.");
+  assert.deepEqual(draft, { title: "", date: "", time: "", location: "" });
+});
+
+test("parseImageReminderDraft defaults missing fields to empty strings", () => {
+  const draft = parseImageReminderDraft('{"title":"Just a title"}');
+  assert.deepEqual(draft, { title: "Just a title", date: "", time: "", location: "" });
+});
+
+test("pgDumpArgs targets the Cloud SQL Unix socket when a connection name is set", () => {
+  const args = pgDumpArgs({ cloudSqlConnectionName: "proj:region:instance", dbUser: "household_hub", dbName: "household_hub", databaseUrl: "" });
+  assert.deepEqual(args, ["-h", "/cloudsql/proj:region:instance", "-U", "household_hub", "-d", "household_hub", "--no-owner", "--no-privileges", "-Fc"]);
+});
+
+test("pgDumpArgs falls back to a plain DATABASE_URL when there's no Cloud SQL connection name", () => {
+  const args = pgDumpArgs({ cloudSqlConnectionName: "", dbUser: "", dbName: "", databaseUrl: "postgresql://user:pass@host/db" });
+  assert.deepEqual(args, ["postgresql://user:pass@host/db", "--no-owner", "--no-privileges", "-Fc"]);
 });
