@@ -44,6 +44,9 @@ let sharedCalendarMembers = [];
 let households = [];
 let countryCatalog = [];
 let currentView = "home";
+// Holds the AI-extracted draft ({title,date,time,location,previewDataUrl})
+// while #reminderFromImageDialog is open - null hides the dialog entirely.
+let calendarPhotoReminderDraft = null;
 let autosaveTimer = null;
 // True whenever a debounced autosave is scheduled but hasn't fired yet - a
 // refresh/tab-close in that ~350ms window would otherwise silently drop
@@ -1983,7 +1986,7 @@ function render() {
   view.innerHTML = (renderers[currentView] || renderers.budget)();
   bindViewEvents();
   if (currentView === "admin" && !adminData) loadAdminData();
-  if (["documents", "wealth"].includes(currentView) && !documentsData) loadDocumentsData();
+  if (["documents", "wealth", "notes"].includes(currentView) && !documentsData) loadDocumentsData();
   if (currentView === "notes" && sharedWithMeNotes === null) loadSharedWithMeNotes();
   if (["sharing", "calendar"].includes(currentView) && !sharingAccess) loadSharingAccess();
   if (currentView === "calendar" && sharedCalendarMembers.length === 0) loadCalendarMembers();
@@ -3125,7 +3128,7 @@ function renderCalendar() {
         <section class="card calendar-main-card">
           <div class="section-head">
             <div><span class="card-label">Household calendar</span><h3>Chores, birthdays, anniversaries and reminders</h3></div>
-            <div class="button-row"><button id="addChoreButton" class="ghost" type="button">+ Add chore</button><button id="addBirthdayButton" class="ghost" type="button">+ Add birthday</button><button id="addAnniversaryButton" class="ghost" type="button">+ Add anniversary</button><button id="addReminderButton" class="ghost" type="button">+ Add reminder</button></div>
+            <div class="button-row"><button id="addChoreButton" class="ghost" type="button">+ Add chore</button><button id="addBirthdayButton" class="ghost" type="button">+ Add birthday</button><button id="addAnniversaryButton" class="ghost" type="button">+ Add anniversary</button><button id="addReminderButton" class="ghost" type="button">+ Add reminder</button><button id="calendarPhotoReminderButton" class="ghost" type="button">📷 From photo</button><input id="calendarPhotoReminderInput" type="file" accept="image/*" hidden></div>
           </div>
           <div class="calendar-member-filter" role="group" aria-label="Filter calendar by person">
             <button type="button" class="member-chip ${calendarFilterOwner ? "" : "active"}" data-calendar-filter-owner="">All people</button>
@@ -3228,6 +3231,24 @@ function renderCalendar() {
           }).join("") : `<div class="empty-inline">No birthdays or anniversaries added</div>`}
         </section>
       </aside>
+      <dialog id="reminderFromImageDialog" class="app-dialog">
+        <form id="reminderFromImageForm">
+          <div class="section-head">
+            <h2>Reminder from photo</h2>
+            <button type="button" id="closeReminderFromImageDialog" class="icon-button ghost" aria-label="Close">×</button>
+          </div>
+          ${calendarPhotoReminderDraft?.previewDataUrl ? `<img class="reminder-from-image-preview" src="${calendarPhotoReminderDraft.previewDataUrl}" alt="Uploaded photo">` : ""}
+          <p class="muted">Review what was read from the photo, then add it as a reminder.</p>
+          <label>Title<input name="title" required value="${escapeHtml(calendarPhotoReminderDraft?.title || "")}"></label>
+          <div class="calendar-form-row">
+            <label>Date<input name="date" type="date" required value="${calendarPhotoReminderDraft?.date || ""}"></label>
+            <label>Time<input name="time" type="text" inputmode="numeric" class="time24-input" placeholder="HH:MM" maxlength="5" value="${escapeHtml(calendarPhotoReminderDraft?.time || "09:00")}"></label>
+          </div>
+          <label>Location<input name="location" value="${escapeHtml(calendarPhotoReminderDraft?.location || "")}"></label>
+          <p id="reminderFromImageMessage" class="form-message">${calendarPhotoReminderDraft?.title || calendarPhotoReminderDraft?.date ? "" : "Couldn't read a title or date from this photo - fill them in below."}</p>
+          <div class="dialog-actions"><button type="submit">Add reminder</button></div>
+        </form>
+      </dialog>
     </section>`;
 }
 
@@ -3533,6 +3554,14 @@ function linkedBillName(note) {
   return bill ? bill.name : null;
 }
 
+// Images attached to a note are just Documents rows with noteId set to
+// this note (the same relationship Documents' own note-link picker uses,
+// just driven from the note's side) - reuses the existing GCS upload
+// pipeline and thumbnail cache rather than inventing separate storage.
+function noteLinkedImages(noteId) {
+  return (documentsData?.documents || []).filter((item) => item.noteId === noteId && item.status === "ready" && item.contentType?.startsWith("image/"));
+}
+
 // Checklist item text is a <textarea> (see renderNoteCard/renderSharedWithMeCard)
 // rather than an <input> specifically so a long item wraps across multiple
 // lines instead of clipping - a plain <input> can never wrap regardless of
@@ -3568,6 +3597,10 @@ function renderNoteCard(note) {
     <textarea class="note-body-input" data-note-body="${note.id}" rows="${note.body ? "2" : "1"}" placeholder="Take a note..." aria-label="Note body">${escapeHtml(note.body || "")}</textarea>
     ${note.reminder ? `<div class="note-reminder">Reminder · ${formatDateTime(note.reminder)}</div>` : ""}
     ${linkedBillName(note) ? `<div class="note-reminder note-linked-bill">🧾 Linked to ${escapeHtml(linkedBillName(note))}</div>` : ""}
+    ${noteLinkedImages(note.id).length ? `<div class="note-image-gallery">${noteLinkedImages(note.id).map((item) => `<div class="note-image-thumb">
+      <button type="button" class="note-image-open" data-documents-open-file="${item.id}" aria-label="Open photo">${documentThumbnailHtml(item)}</button>
+      <button type="button" class="note-image-remove danger-button" data-note-image-remove="${item.id}" aria-label="Remove photo">×</button>
+    </div>`).join("")}</div>` : ""}
     ${note.showChecklist ? open.map(checklistRow).join("") : ""}
     ${note.showChecklist ? `<form class="note-add-item-form" data-add-note-item="${note.id}">
       <div class="note-item-combobox">
@@ -3582,6 +3615,7 @@ function renderNoteCard(note) {
       <details class="note-toolbar-popover"><summary title="Set reminder" aria-label="Set reminder">◷</summary><div class="note-toolbar-popover-panel"><label>Reminder date<input type="date" data-note-reminder-date="${note.id}" value="${escapeHtml((note.reminder || "").slice(0, 10))}"></label><label>Time<input type="text" inputmode="numeric" class="time24-input" placeholder="HH:MM" maxlength="5" data-note-reminder-time="${note.id}" value="${escapeHtml((note.reminder || "").slice(11, 16))}"></label></div></details>
       <div class="note-toolbar-labels">${renderNoteLabelPicker(note, true)}</div>
       ${renderNoteBillLinkPicker(note)}
+      <label class="note-icon-button note-photo-upload" title="Add a photo" aria-label="Add a photo to this note">📷<input type="file" accept="image/*" data-note-photo-upload="${note.id}" hidden></label>
       <button data-archive-note="${note.id}" type="button" title="${note.archived ? "Unarchive" : "Archive"}" aria-label="${note.archived ? "Unarchive note" : "Archive note"}">↓</button>
       <details class="note-more-menu"><summary title="More actions" aria-label="More actions">⋮</summary><div class="note-more-menu-panel">
         <button data-duplicate-note="${note.id}" type="button">Make a copy</button>
@@ -8631,6 +8665,40 @@ function bindViewEvents() {
     });
   });
 
+  document.querySelectorAll("[data-note-photo-upload]").forEach((input) => {
+    input.addEventListener("change", async () => {
+      const file = input.files?.[0];
+      const noteId = input.dataset.notePhotoUpload;
+      input.value = "";
+      if (!file) return;
+      if (!file.type.startsWith("image/")) {
+        showToast("Choose an image file to attach.");
+        return;
+      }
+      try {
+        const documentId = await uploadDocumentFile(file, null);
+        await api(`/api/documents/${documentId}`, { method: "PATCH", body: JSON.stringify({ noteId }) });
+        await loadDocumentsData(false);
+        render();
+      } catch (error) {
+        showToast(error.message || "Couldn't attach that photo");
+      }
+    });
+  });
+
+  document.querySelectorAll("[data-note-image-remove]").forEach((button) => {
+    button.addEventListener("click", async () => {
+      if (!(await showConfirm("Remove this photo from the note? This cannot be undone.", { confirmLabel: "Remove" }))) return;
+      try {
+        await api(`/api/documents/${button.dataset.noteImageRemove}`, { method: "DELETE" });
+        await loadDocumentsData(false);
+        render();
+      } catch (error) {
+        showToast(error.message);
+      }
+    });
+  });
+
   document.querySelectorAll("[data-archive-note]").forEach((button) => {
     button.addEventListener("click", () => {
       const note = state.notes.entries.find((item) => item.id === button.dataset.archiveNote);
@@ -11885,6 +11953,81 @@ function bindViewEvents() {
   $("#sideAddAnniversaryButton")?.addEventListener("click", () => focusCalendarType("anniversary"));
   $("#addReminderButton")?.addEventListener("click", () => focusCalendarType("reminder"));
   $("#sideAddReminderButton")?.addEventListener("click", () => focusCalendarType("reminder"));
+
+  $("#calendarPhotoReminderButton")?.addEventListener("click", () => $("#calendarPhotoReminderInput")?.click());
+  $("#calendarPhotoReminderInput")?.addEventListener("change", async (event) => {
+    const file = event.target.files?.[0];
+    event.target.value = "";
+    if (!file) return;
+    if (!file.type.startsWith("image/")) {
+      showToast("Choose an image file (JPEG, PNG, WEBP, or HEIC).");
+      return;
+    }
+    let dataUrl;
+    try {
+      dataUrl = await new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(reader.result);
+        reader.onerror = () => reject(reader.error);
+        reader.readAsDataURL(file);
+      });
+    } catch (_error) {
+      showToast("Couldn't read that photo - try again.");
+      return;
+    }
+    const commaIndex = dataUrl.indexOf(",");
+    const imageBase64 = dataUrl.slice(commaIndex + 1);
+    showToast("Reading photo…", { type: "info" });
+    let draft;
+    try {
+      draft = await api("/api/calendar/reminder-from-image", {
+        method: "POST",
+        body: JSON.stringify({ imageBase64, mimeType: file.type })
+      });
+    } catch (error) {
+      showToast(error.message || "Couldn't read that photo");
+      return;
+    }
+    calendarPhotoReminderDraft = { ...draft, previewDataUrl: dataUrl };
+    render();
+    $("#reminderFromImageDialog")?.showModal();
+  });
+
+  $("#closeReminderFromImageDialog")?.addEventListener("click", () => {
+    calendarPhotoReminderDraft = null;
+    $("#reminderFromImageDialog")?.close();
+  });
+
+  $("#reminderFromImageForm")?.addEventListener("submit", (event) => {
+    event.preventDefault();
+    const data = Object.fromEntries(new FormData(event.currentTarget));
+    const title = String(data.title || "").trim();
+    const date = String(data.date || "");
+    if (!title || !date) return;
+    const time = String(data.time || "09:00");
+    const dateTime = `${date}T${time}`;
+    const assignees = resolveAssignees([sessionUser?.email || "Household owner"]);
+    state.calendar.events.push({
+      id: uniqueId("event"),
+      title,
+      date,
+      dateTime,
+      notifyAt: new Date(dateTime).toISOString(),
+      reminderAt: dateTime,
+      monthDay: undefined,
+      type: "reminder",
+      annual: false,
+      location: String(data.location || "").trim(),
+      reminderDays: undefined,
+      recurrence: "once",
+      assignees
+    });
+    calendarFeedback = "Reminder added from photo.";
+    calendarPhotoReminderDraft = null;
+    autosaveState();
+    $("#reminderFromImageDialog")?.close();
+    render();
+  });
 
   document.querySelectorAll("[data-calendar-filter-owner]").forEach((button) => {
     button.addEventListener("click", () => {
