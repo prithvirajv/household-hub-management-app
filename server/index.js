@@ -41,6 +41,12 @@ const DB_NAME = String(process.env.DB_NAME || "").trim();
 const MEMORY_DB = String(process.env.MEMORY_DB || "false").toLowerCase() === "true";
 const DEMO_EMAIL = "demo@familyloop.net";
 const LEGACY_DEMO_EMAIL = "demo@householdhub.app";
+// Provisions the first admin account on deploy (see seedAdminUser) and
+// keeps that one email reserved from public signup - it's a bootstrap
+// identity, not the sole source of admin access. Admin status itself lives
+// on the is_admin DB column and is promotable/demotable by any existing
+// admin via PATCH /api/admin/users/:id (requireAdmin), self-demotion
+// excepted.
 const ADMIN_EMAIL = String(process.env.ADMIN_EMAIL || "").trim().toLowerCase();
 const ADMIN_PASSWORD = String(process.env.ADMIN_PASSWORD || "");
 const ADMIN_NAME = String(process.env.ADMIN_NAME || "FamilyLoop Administrator").trim();
@@ -55,15 +61,6 @@ const GOOGLE_MAPS_API_KEY = String(process.env.GOOGLE_MAPS_API_KEY || "").trim()
 // public keys (fetched automatically by the library) and our client ID.
 const googleAuthClient = GOOGLE_CLIENT_ID ? new OAuth2Client(GOOGLE_CLIENT_ID) : null;
 
-// The single source of truth for "is this the platform administrator" --
-// checked directly against the configured email rather than trusting the
-// is_admin DB column in isolation, so admin access can never depend on that
-// column being in a state it shouldn't be (it's already kept in sync with
-// this same email on every schema migration and blocked from being toggled
-// via the API, but this makes the actual policy explicit at the point of use).
-function isPlatformAdminEmail(email) {
-  return Boolean(ADMIN_EMAIL) && String(email || "").trim().toLowerCase() === ADMIN_EMAIL;
-}
 const SMTP_HOST = String(process.env.SMTP_HOST || "").trim();
 const SMTP_PORT = Number(process.env.SMTP_PORT || 587);
 const SMTP_SECURE = String(process.env.SMTP_SECURE || "false").toLowerCase() === "true";
@@ -747,7 +744,7 @@ async function databasePrimaryOwnerId(client, householdId) {
 }
 
 function publicUser(row) {
-  return row ? { id: row.id, email: row.email, name: row.name, isAdmin: isPlatformAdminEmail(row.email), phone: row.phone || "", carrier: row.carrier || "", emailVerified: Boolean(row.email_verified_at), accessLevel: row.access_level || "edit" } : null;
+  return row ? { id: row.id, email: row.email, name: row.name, isAdmin: Boolean(row.is_admin), phone: row.phone || "", carrier: row.carrier || "", emailVerified: Boolean(row.email_verified_at), accessLevel: row.access_level || "edit" } : null;
 }
 
 function normalizePhoneAndCarrier(rawPhone, rawCarrier) {
@@ -822,8 +819,14 @@ async function migrate() {
     "UPDATE households SET app_state = replace(app_state::text, $1, $2)::jsonb WHERE app_state::text LIKE $3",
     [LEGACY_DEMO_EMAIL, DEMO_EMAIL, `%${LEGACY_DEMO_EMAIL}%`]
   );
+  // Seeds the deployment-configured admin, but - unlike the old blanket
+  // `is_admin = (email = $1)`, which force-reset EVERY user's flag to match
+  // only this one email on every single boot - never touches any other
+  // user's is_admin. Admin status is now a persistent per-user fact
+  // (promoted/demoted via PATCH /api/admin/users/:id by an existing admin),
+  // not something resynced from one env var on every deploy.
   if (ADMIN_EMAIL) {
-    await pool.query("UPDATE users SET is_admin = (email = $1)", [ADMIN_EMAIL]);
+    await pool.query("UPDATE users SET is_admin = true WHERE email = $1", [ADMIN_EMAIL]);
   } else {
     await pool.query("UPDATE users SET is_admin = false WHERE email = $1", [DEMO_EMAIL]);
   }
@@ -1239,7 +1242,7 @@ async function requireAdmin(req, res, next) {
       clearSession(res);
       return res.status(401).json({ error: "Authentication required" });
     }
-    if (!session.is_admin || !isPlatformAdminEmail(session.email)) return res.status(403).json({ error: "Admin access required" });
+    if (!session.is_admin) return res.status(403).json({ error: "Admin access required" });
     refreshSession(res, session.id);
     req.sessionUser = session;
     return next();
@@ -1253,7 +1256,7 @@ function adminUserRow(user) {
     id: user.id,
     email: user.email,
     name: user.name,
-    isAdmin: isPlatformAdminEmail(user.email),
+    isAdmin: Boolean(user.is_admin),
     disabled: Boolean(user.disabled_at),
     loginCount: Number(user.login_count || 0),
     lastLoginAt: user.last_login_at || null,
@@ -2433,12 +2436,14 @@ app.patch("/api/admin/users/:id", requireAdmin, async (req, res, next) => {
   try {
     const userId = req.params.id;
     const { disabled, isAdmin, name, password } = req.body || {};
-    if (typeof isAdmin === "boolean") {
-      return res.status(403).json({ error: "Administrator access is managed by the private deployment secret" });
-    }
     if (userId === req.sessionUser.id && disabled === true) {
       return res.status(400).json({ error: "You cannot disable your own admin login" });
     }
+    // Any admin can promote or demote any OTHER user, but never themselves -
+    // this is the only guard against a self-inflicted lockout (there's no
+    // separate "last admin standing" check because it isn't needed: the
+    // acting admin can only ever demote someone else, never their own
+    // account, so at least one admin always remains after this call).
     if (userId === req.sessionUser.id && isAdmin === false) {
       return res.status(400).json({ error: "You cannot remove your own admin access" });
     }
@@ -2447,6 +2452,7 @@ app.patch("/api/admin/users/:id", requireAdmin, async (req, res, next) => {
       const user = memoryDb.users.find((item) => item.id === userId);
       if (!user) return res.status(404).json({ error: "User not found" });
       if (typeof disabled === "boolean") user.disabled_at = disabled ? new Date().toISOString() : null;
+      if (typeof isAdmin === "boolean") user.is_admin = isAdmin;
       if (typeof name === "string" && name.trim()) user.name = name.trim();
       if (typeof password === "string" && password.length >= 8) user.password_hash = await bcrypt.hash(password, 12);
       return res.json(adminUserRow(user));
@@ -2457,6 +2463,10 @@ app.patch("/api/admin/users/:id", requireAdmin, async (req, res, next) => {
     if (typeof disabled === "boolean") {
       values.push(disabled);
       updates.push(`disabled_at = CASE WHEN $${values.length} THEN now() ELSE NULL END`);
+    }
+    if (typeof isAdmin === "boolean") {
+      values.push(isAdmin);
+      updates.push(`is_admin = $${values.length}`);
     }
     if (typeof name === "string" && name.trim()) {
       values.push(name.trim());

@@ -125,6 +125,69 @@ test("configured private administrator can sign in and is the sole admin", async
   assert.deepEqual(users.body.filter((user) => user.isAdmin).map((user) => user.email), [adminEmail]);
 });
 
+test("an admin can promote another user to admin, and the new admin has full peer access", async () => {
+  const promotedEmail = "promoted-admin@example.com";
+  const signup = await request("/api/auth/signup", {
+    method: "POST",
+    body: JSON.stringify({ email: promotedEmail, password: "Promoted-Admin-Password-123!", name: "Soon Admin", householdName: "Soon Admin Household", country: "US" })
+  });
+  assert.equal(signup.status, 201);
+  assert.equal(signup.body.user.isAdmin, false);
+
+  const adminSignin = await request("/api/auth/signin", {
+    method: "POST",
+    body: JSON.stringify({ email: adminEmail, password: initialPassword })
+  });
+  assert.equal(adminSignin.status, 200);
+
+  const usersBefore = await request("/api/admin/users", { headers: { cookie: adminSignin.cookie } });
+  const target = usersBefore.body.find((user) => user.email === promotedEmail);
+  assert.ok(target);
+  assert.equal(target.isAdmin, false);
+
+  const promote = await request(`/api/admin/users/${target.id}`, {
+    method: "PATCH",
+    headers: { cookie: adminSignin.cookie },
+    body: JSON.stringify({ isAdmin: true })
+  });
+  assert.equal(promote.status, 200);
+  assert.equal(promote.body.isAdmin, true);
+
+  // A fresh sign-in picks up the promotion (isAdmin is read from the DB at
+  // session time, not cached from signup).
+  const promotedSignin = await request("/api/auth/signin", {
+    method: "POST",
+    body: JSON.stringify({ email: promotedEmail, password: "Promoted-Admin-Password-123!" })
+  });
+  assert.equal(promotedSignin.status, 200);
+  assert.equal(promotedSignin.body.user.isAdmin, true);
+
+  const promotedSession = await request("/api/admin/session", { headers: { cookie: promotedSignin.cookie } });
+  assert.equal(promotedSession.status, 200);
+
+  const usersAfter = await request("/api/admin/users", { headers: { cookie: adminSignin.cookie } });
+  assert.deepEqual(usersAfter.body.filter((user) => user.isAdmin).map((user) => user.email).sort(), [adminEmail, promotedEmail].sort());
+
+  // The newly promoted admin has full peer access, including demoting others.
+  const demoteBack = await request(`/api/admin/users/${target.id}`, {
+    method: "PATCH",
+    headers: { cookie: promotedSignin.cookie },
+    body: JSON.stringify({ isAdmin: false })
+  });
+  assert.equal(demoteBack.status, 400, "an admin cannot remove their own admin access, even via the promoted admin's own session");
+
+  const demoteOriginal = await request(`/api/admin/users/${target.id}`, {
+    method: "PATCH",
+    headers: { cookie: adminSignin.cookie },
+    body: JSON.stringify({ isAdmin: false })
+  });
+  assert.equal(demoteOriginal.status, 200);
+  assert.equal(demoteOriginal.body.isAdmin, false);
+
+  const demotedSession = await request("/api/admin/session", { headers: { cookie: promotedSignin.cookie } });
+  assert.equal(demotedSession.status, 403, "losing is_admin should immediately lock out the previously-promoted session");
+});
+
 test("authenticated sessions expire after the configured idle window", async () => {
   const signin = await request("/api/auth/signin", {
     method: "POST",
