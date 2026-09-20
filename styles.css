@@ -1635,13 +1635,20 @@ main {
   color: var(--text);
 }
 
+/* The delete button floats in the row's own right edge (like the Accounts/
+   Net worth card corner button) rather than taking a 6th rigid grid column -
+   this row's existing 4-5 columns already have little room to spare in the
+   two-column budget layout (see the minmax() comment above), and one more
+   fixed-width column pushed the whole row's minimum width past what's
+   actually available, silently overflowing the card. */
 .budget-money-row {
   display: grid;
   grid-template-columns: minmax(140px, 1fr) minmax(80px, 100px) minmax(95px, 120px) minmax(95px, 120px);
   gap: 0.75rem;
   align-items: center;
-  padding: 0.55rem 0;
+  padding: 0.55rem 2.1rem 0.55rem 0;
   border-bottom: 1px solid var(--line);
+  position: relative;
 }
 
 .budget-money-row.has-accounts {
@@ -1650,6 +1657,17 @@ main {
 
 .budget-money-row > * {
   min-width: 0;
+}
+
+.budget-money-row .icon-button {
+  position: absolute;
+  right: 0;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 30px;
+  min-width: 30px;
+  height: 30px;
+  min-height: 30px;
 }
 
 .income-recurrence-select {
@@ -6788,6 +6806,21 @@ html[data-theme="dark"] .note-color-coral { background: color-mix(in srgb, #fff0
   .report-row,
   .category-spend-row {
     grid-template-columns: 1fr;
+  }
+
+  /* The floating corner delete button (see .budget-money-row .icon-button
+     above) assumes a single-line row; once the row stacks into several
+     lines here, a vertically-centered button would land in the middle of
+     that stack instead of a sensible corner - back to a plain stacked
+     item instead. */
+  .budget-money-row {
+    padding-right: 0;
+  }
+
+  .budget-money-row .icon-button {
+    position: static;
+    transform: none;
+    justify-self: end;
   }
 
   .transaction-subcategory-adder {

@@ -2413,6 +2413,7 @@ function renderBudget() {
               <strong data-income-remaining="${index}">${exactMoney.format(Number(paycheck.amount || 0) - paycheckAssignedAmount(paycheck))}</strong>
               <select class="income-recurrence-select" data-income-recurrence="${index}" aria-label="How often ${escapeHtml(paycheck.name)} repeats">${Object.entries(paycheckRecurrenceLabels).map(([value, label]) => `<option value="${value}" ${paycheck.recurrence === value ? "selected" : ""}>${label}</option>`).join("")}</select>
               ${state.accounts.length ? `<select class="income-recurrence-select" data-paycheck-deposit-account="${index}" aria-label="Deposit account for ${escapeHtml(paycheck.name)}"><option value="">Not linked</option>${accountOptions(paycheck.depositAccountId || "", { excludeType: "credit_card" })}</select>` : ""}
+              <button class="icon-button danger-button" data-delete-paycheck="${index}" type="button" aria-label="Delete ${escapeHtml(paycheck.name)}">×</button>
             </div>
           `).join("")}
           <button id="addIncomeButton" class="link-button" type="button">Add income</button>
