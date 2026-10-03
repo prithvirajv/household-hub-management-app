@@ -138,6 +138,9 @@ Three distinct isolation levels exist, easy to conflate:
    sees the same Documents/Decisions regardless of which household is
    currently selected. This was a deliberate design correction; see
    `documents-shared.integration.test.js` / `decisions.integration.test.js`.
+   Decision attachments are Documents rows referenced by `documentId` (never
+   inline data URLs): the whole household state is one `PUT /api/state` capped
+   at 1 MB, and an oversized body returns 413.
 3. **Per-user private** (`user_private_data`): Journal and Plan/daily-timeline
    data. Explicitly never written into the shared household blob or the
    shared-modules table — one person's journal entries must never become

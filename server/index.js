@@ -4768,6 +4768,10 @@ app.get("/shared-notes/:token/:slug?", async (req, res, next) => {
 });
 
 app.use((error, _req, res, _next) => {
+  // body-parser rejections are the client's problem, not a server fault: an oversized body (the whole household state is
+  // one PUT, capped at 1 MB) gets a 413 the apps can explain, and unparseable JSON a 400.
+  if (error?.type === "entity.too.large") return res.status(413).json({ error: "That is too much data to save - household data is limited to about 1 MB. Remove some large items and try again." });
+  if (error?.type === "entity.parse.failed") return res.status(400).json({ error: "Invalid request body" });
   console.error(error);
   res.status(500).json({ error: "Something went wrong" });
 });

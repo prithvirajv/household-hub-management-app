@@ -8942,6 +8942,13 @@ html[data-theme="dark"] .note-color-coral { background: color-mix(in srgb, #fff0
   white-space: nowrap;
 }
 
+.decision-attachment-link.link-button {
+  min-height: 0;
+  border: 0;
+  text-align: left;
+  cursor: pointer;
+}
+
 .decision-attachment small {
   color: var(--muted);
 }

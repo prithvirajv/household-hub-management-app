@@ -5040,35 +5040,82 @@ function readFileAsDataUrl(file) {
   });
 }
 
-const DECISION_ATTACHMENT_MAX_BYTES = 5 * 1024 * 1024;
+const DECISION_ATTACHMENT_MAX_BYTES = 25 * 1024 * 1024;
 const DECISION_ATTACHMENT_MAX_COUNT = 5;
 
-// Attachments are stored inline as data URLs (like Journal photos) rather than
-// through the separate Documents/GCS pipeline, because decisions sync across
-// a user's whole set of households (see ensureDecisionsData's caller) while
-// documents are scoped to a single household — keeping attachments inline
-// avoids that mismatch entirely.
-async function filesToDecisionAttachments(fileList, existingCount) {
+// Attachments are real Documents rows (uploaded to storage like any other file) and the decision keeps only a small
+// { id, name, contentType, sizeBytes, documentId } reference. They used to be inline data URLs, but the whole household
+// state is saved in one request that the server caps at 1 MB, so a single attachment made every save fail. Documents are
+// scoped by the household's primary owner, so they read the same from each of the owner's households, just like decisions.
+// Older inline attachments (with a dataUrl) still render and are moved to storage by migrateInlineDecisionAttachments.
+async function filesToDecisionAttachments(fileList, existingCount, decisionTitle) {
   const files = fileList ? [...fileList].slice(0, Math.max(0, DECISION_ATTACHMENT_MAX_COUNT - existingCount)) : [];
   const attachments = [];
   for (const file of files) {
     if (file.size > DECISION_ATTACHMENT_MAX_BYTES) {
-      showToast(`${file.name} is larger than 5MB and was skipped.`);
+      showToast(`${file.name} is larger than 25MB and was skipped.`);
       continue;
     }
     try {
-      const dataUrl = await readFileAsDataUrl(file);
-      attachments.push({ id: uniqueId("attachment"), name: file.name, contentType: file.type || "application/octet-stream", sizeBytes: file.size, dataUrl, createdAt: new Date().toISOString() });
+      const documentId = await uploadDocumentFile(file, null);
+      try {
+        await api(`/api/documents/${documentId}`, { method: "PATCH", body: JSON.stringify({ description: `Attachment on the decision "${decisionTitle || "Untitled"}"` }) });
+      } catch (error) {
+        console.warn("Could not label decision attachment", error);
+      }
+      attachments.push({ id: uniqueId("attachment"), name: file.name, contentType: file.type || "application/octet-stream", sizeBytes: file.size, documentId, createdAt: new Date().toISOString() });
     } catch (error) {
-      console.warn("Could not process attachment", error);
+      showToast(`Couldn't attach ${file.name}: ${error.message || "upload failed"}`);
     }
   }
   return attachments;
 }
 
+// Best-effort: a document that is already gone (404) is exactly the state we want.
+async function deleteDecisionAttachmentFiles(attachments) {
+  for (const attachment of attachments || []) {
+    if (!attachment.documentId) continue;
+    try {
+      await api(`/api/documents/${attachment.documentId}`, { method: "DELETE" });
+    } catch (error) {
+      if (!/not found/i.test(error.message || "")) console.warn("Could not delete decision attachment file", error);
+    }
+  }
+}
+
+let decisionAttachmentMigrationStarted = false;
+// One-time per session: moves any legacy inline (dataUrl) attachment into storage so it stops counting toward the 1 MB
+// household-state limit. Each attachment is swapped only after its upload succeeds; failures leave it inline.
+async function migrateInlineDecisionAttachments() {
+  if (decisionAttachmentMigrationStarted) return;
+  const inline = state.decisions.flatMap((decision) => decision.attachments.filter((attachment) => attachment.dataUrl && !attachment.documentId).map((attachment) => ({ decision, attachment })));
+  if (!inline.length) return;
+  decisionAttachmentMigrationStarted = true;
+  let migrated = 0;
+  for (const { decision, attachment } of inline) {
+    try {
+      const blob = await (await fetch(attachment.dataUrl)).blob();
+      const file = new File([blob], attachment.name, { type: attachment.contentType || blob.type || "application/octet-stream" });
+      const documentId = await uploadDocumentFile(file, null);
+      attachment.documentId = documentId;
+      delete attachment.dataUrl;
+      migrated += 1;
+    } catch (error) {
+      console.warn("Could not move a decision attachment to storage", error);
+    }
+  }
+  if (migrated) {
+    autosaveState();
+    render();
+  }
+}
+
 function decisionAttachmentRow(decisionId, attachment) {
+  const nameHtml = attachment.documentId
+    ? `<button type="button" class="decision-attachment-link link-button" data-open-decision-attachment="${attachment.documentId}">${escapeHtml(attachment.name)}</button>`
+    : `<a class="decision-attachment-link" href="${attachment.dataUrl}" download="${escapeHtml(attachment.name)}">${escapeHtml(attachment.name)}</a>`;
   return `<div class="decision-attachment">
-    <a class="decision-attachment-link" href="${attachment.dataUrl}" download="${escapeHtml(attachment.name)}">${escapeHtml(attachment.name)}</a>
+    ${nameHtml}
     <small>${formatFileSize(attachment.sizeBytes)}</small>
     <button class="icon-button danger-button" data-delete-decision-attachment="${decisionId}:${attachment.id}" type="button" aria-label="Remove ${escapeHtml(attachment.name)}">×</button>
   </div>`;
@@ -12789,33 +12836,55 @@ function bindViewEvents() {
     textarea.addEventListener("input", () => { if (decision) decision.notes = textarea.value; autosaveState(); });
   });
 
+  if (currentView === "decisions") void migrateInlineDecisionAttachments();
+
   document.querySelectorAll("[data-decision-attachment-input]").forEach((input) => {
     input.addEventListener("change", async () => {
       const decision = state.decisions.find((item) => item.id === input.dataset.decisionAttachmentInput);
       if (!decision) return;
-      const newAttachments = await filesToDecisionAttachments(input.files, decision.attachments.length);
+      const files = [...(input.files || [])];
+      input.value = "";
+      if (!files.length) return;
+      showToast("Uploading…", { type: "info" });
+      const newAttachments = await filesToDecisionAttachments(files, decision.attachments.length, decision.title);
+      if (!newAttachments.length) return;
       decision.attachments.push(...newAttachments);
       autosaveState();
       render();
     });
   });
 
+  document.querySelectorAll("[data-open-decision-attachment]").forEach((button) => {
+    button.addEventListener("click", async () => {
+      try {
+        await openDocumentFile(button.dataset.openDecisionAttachment);
+      } catch (error) {
+        showToast(error.message || "Couldn't open that file");
+      }
+    });
+  });
+
   document.querySelectorAll("[data-delete-decision-attachment]").forEach((button) => {
-    button.addEventListener("click", () => {
+    button.addEventListener("click", async () => {
       const [decisionId, attachmentId] = button.dataset.deleteDecisionAttachment.split(":");
       const decision = state.decisions.find((item) => item.id === decisionId);
-      if (!decision) return;
-      decision.attachments = decision.attachments.filter((attachment) => attachment.id !== attachmentId);
+      const attachment = decision?.attachments.find((item) => item.id === attachmentId);
+      if (!decision || !attachment) return;
+      if (attachment.documentId && !(await showConfirm(`Remove ${attachment.name}? The file is deleted from Documents too.`, { confirmLabel: "Remove" }))) return;
+      decision.attachments = decision.attachments.filter((item) => item.id !== attachmentId);
       autosaveState();
       render();
+      await deleteDecisionAttachmentFiles([attachment]);
     });
   });
 
   document.querySelectorAll("[data-delete-decision]").forEach((button) => {
-    button.addEventListener("click", () => {
+    button.addEventListener("click", async () => {
+      const removed = state.decisions.find((item) => item.id === button.dataset.deleteDecision);
       state.decisions = state.decisions.filter((item) => item.id !== button.dataset.deleteDecision);
       autosaveState();
       render();
+      if (removed) await deleteDecisionAttachmentFiles(removed.attachments);
     });
   });
 

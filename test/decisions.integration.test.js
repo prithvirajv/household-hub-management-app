@@ -92,3 +92,44 @@ test("decisions added by an invited household member are visible to the owner ac
   const ownerState = await server.request("/api/state", { headers: { cookie: owner.cookie } });
   assert.deepEqual(ownerState.body.decisions, [decision], "the household owner must see decisions an invited member added");
 });
+
+test("a decision attachment is a Documents reference, so saving stays small and the file is reachable from every household", async () => {
+  const signup = await server.request("/api/auth/signup", {
+    method: "POST",
+    body: JSON.stringify({ email: "decisions-attach@example.com", password: "Decisions-Attach-Password-123!", name: "Decisions Attach", householdName: "First Household", country: "US" })
+  });
+  assert.equal(signup.status, 201);
+  const cookie = signup.cookie;
+  const state = await server.request("/api/state", { headers: { cookie } });
+
+  const upload = await server.request("/api/documents/upload-url", {
+    method: "POST", headers: { cookie },
+    body: JSON.stringify({ name: "quote.pdf", contentType: "application/pdf", sizeBytes: 4 * 1024 * 1024 })
+  });
+  assert.equal(upload.status, 200);
+  const confirm = await server.request(`/api/documents/${upload.body.documentId}/confirm`, { method: "POST", headers: { cookie } });
+  assert.equal(confirm.status, 200);
+
+  const decision = {
+    id: "decision-attach", title: "Kitchen quote", notes: "", status: "open", outcome: "", decidedAt: "", pros: [], cons: [], createdAt: "2026-07-12T00:00:00.000Z",
+    attachments: [{ id: "attachment-1", name: "quote.pdf", contentType: "application/pdf", sizeBytes: 4 * 1024 * 1024, documentId: upload.body.documentId, createdAt: "2026-07-12T00:00:00.000Z" }]
+  };
+  const saved = await server.request("/api/state", { method: "PUT", headers: { cookie }, body: JSON.stringify({ ...state.body, decisions: [decision] }) });
+  assert.equal(saved.status, 200, "a 4MB attachment stored as a reference must not push the household state over the request limit");
+
+  // The old inline representation of the same file cannot be saved at all - the bug this design avoids.
+  const inline = { ...decision, id: "decision-inline", attachments: [{ id: "a2", name: "quote.pdf", contentType: "application/pdf", sizeBytes: 4 * 1024 * 1024, dataUrl: `data:application/pdf;base64,${"A".repeat(4 * 1024 * 1024)}`, createdAt: decision.createdAt }] };
+  const tooBig = await server.request("/api/state", { method: "PUT", headers: { cookie }, body: JSON.stringify({ ...state.body, decisions: [decision, inline] }) });
+  assert.equal(tooBig.status, 413);
+
+  const second = await server.request("/api/households", { method: "POST", headers: { cookie }, body: JSON.stringify({ name: "Second Household", country: "IN" }) });
+  assert.equal(second.status, 201);
+  const secondCookie = combineCookies(cookie, second.cookie);
+  const fromSecond = await server.request("/api/state", { headers: { cookie: secondCookie } });
+  assert.equal(fromSecond.body.decisions[0].attachments[0].documentId, upload.body.documentId);
+  const download = await server.request(`/api/documents/${upload.body.documentId}/download-url`, { headers: { cookie: secondCookie } });
+  assert.equal(download.status, 200, "the attached file must open from the owner's other household too");
+
+  const removed = await server.request(`/api/documents/${upload.body.documentId}`, { method: "DELETE", headers: { cookie: secondCookie } });
+  assert.equal(removed.status, 200);
+});
