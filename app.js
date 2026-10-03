@@ -90,7 +90,8 @@ let reportsCompareLastYear = false;
 // data, so it stays session-local like reportsDensity above. Rates are
 // fetched once per session from a real FX API (see /api/fx-rates) and
 // cached client-side; never a fabricated conversion rate.
-let wealthCurrency = "USD";
+// Empty means "the household's own currency" (no conversion).
+let wealthCurrency = "";
 let wealthFxRates = null;
 let wealthFxLoading = false;
 // A guided-navigation overlay, not a form of its own - each step hands off
@@ -942,11 +943,18 @@ function netWorth() {
 // guessing at a conversion. This only reformats the Wealth net-worth
 // strip's headline numbers, not every dollar amount on the page - a
 // deliberately smaller scope than converting every account/holding row.
+function wealthDisplayCurrency() {
+  return wealthCurrency || state?.household?.currency || "USD";
+}
+
 function wealthMoney(amount) {
-  if (wealthCurrency === "USD" || !wealthFxRates?.[wealthCurrency]) return money.format(amount);
-  const converted = amount * wealthFxRates[wealthCurrency];
+  const home = state?.household?.currency || "USD";
+  const display = wealthDisplayCurrency();
+  if (display === home) return money.format(amount);
+  const converted = convertCurrencyAmount(amount, home, display, wealthFxRates);
+  if (converted === null) return money.format(amount);
   try {
-    return new Intl.NumberFormat(undefined, { style: "currency", currency: wealthCurrency }).format(converted);
+    return new Intl.NumberFormat(undefined, { style: "currency", currency: display }).format(converted);
   } catch (_error) {
     return money.format(amount);
   }
@@ -954,7 +962,7 @@ function wealthMoney(amount) {
 
 async function setWealthCurrency(currency) {
   wealthCurrency = currency;
-  if (currency !== "USD" && !wealthFxRates && !wealthFxLoading) {
+  if (currency !== (state?.household?.currency || "USD") && !wealthFxRates && !wealthFxLoading) {
     wealthFxLoading = true;
     try {
       const response = await api("/api/fx-rates");
@@ -2578,9 +2586,7 @@ function ledgerEntryRow(transaction, index, transferMatch) {
 
 function splitEditorHtml(transaction, index) {
   if (splitEditorLedgerIndex !== index) return "";
-  const allocated = splitEditorRows.reduce((sum, row) => sum + Number(row.amount || 0), 0);
-  const remaining = Math.round((Number(transaction.amount || 0) - allocated) * 100) / 100;
-  const isBalanced = Math.abs(remaining) < 0.005;
+  const { remaining, isBalanced, canSave } = splitEditorSummary(splitEditorRows, transaction.amount);
   const lineOptionsFor = (selectedId) => (selectedId ? "" : `<option value="" disabled selected>Choose a subcategory…</option>`) + allLines().map((line) => `<option value="${line.id}" ${line.id === selectedId ? "selected" : ""}>${line.category} - ${line.name}</option>`).join("");
   return `<div class="split-editor">
     <div class="split-editor-rows">
@@ -2599,7 +2605,7 @@ function splitEditorHtml(transaction, index) {
     <div class="split-editor-actions">
       <button type="button" class="ghost" data-split-editor-cancel>Cancel</button>
       ${transaction.splits?.length ? `<button type="button" class="ghost danger-button" data-split-editor-undo="${index}">Remove split</button>` : ""}
-      <button type="button" data-split-editor-save="${index}" ${!isBalanced || splitEditorRows.length < 2 ? "disabled" : ""}>Save split</button>
+      <button type="button" data-split-editor-save="${index}" ${canSave ? "" : "disabled"}>Save split</button>
     </div>
   </div>`;
 }
@@ -5882,7 +5888,7 @@ function renderWealth() {
           </article>`).join("") : `<div class="onboarding-empty compact-onboarding"><div class="empty-symbol" aria-hidden="true">↓</div><h3>Add a debt when you are ready</h3><p>Track its balance, rate, payment, and the asset it secures.</p></div>`}
         </section>
       </div>
-      <section class="card wealth-holdings"><div class="section-head"><div><span class="card-label">Net worth</span><h3>Assets, investments and liabilities</h3></div><div class="wealth-currency-row"><select id="wealthCurrencySelect" aria-label="Display currency"><option value="USD" ${wealthCurrency === "USD" ? "selected" : ""}>USD</option><option value="EUR" ${wealthCurrency === "EUR" ? "selected" : ""}>EUR</option><option value="GBP" ${wealthCurrency === "GBP" ? "selected" : ""}>GBP</option></select><button id="addNetWorthItemButton" type="button">+ Add holding</button></div></div><div class="net-worth-strip"><strong data-net-worth-total>${wealthMoney(netWorth().total)}</strong><span>Assets <b data-net-worth-assets>${wealthMoney(netWorth().assets)}</b> Liabilities <b data-net-worth-liabilities>${wealthMoney(netWorth().liabilities)}</b></span></div>${wealthCurrency !== "USD" ? `<p class="muted wealth-currency-note">Converted from USD using real exchange rates${wealthFxRates ? "" : " — loading…"}. Individual accounts and holdings below still show USD.</p>` : ""}<div class="net-worth-items">${groupStockHoldings(state.goals.netWorth.assets).map((group) => netWorthStockGroupCard(group)).join("")}${state.goals.netWorth.assets.map((asset, index) => ({ asset, index })).filter(({ asset }) => !isHoldingAssetClass(asset.assetClass)).map(({ asset, index }) => netWorthItemRow(asset, "asset", index)).join("")}${state.goals.netWorth.liabilities.map((item, index) => netWorthItemRow(item, "liability", index)).join("")}</div>${state.goals.netWorth.assets.length || state.goals.netWorth.liabilities.length ? "" : `<div class="empty-inline">No assets, investments or liabilities yet</div>`}</section>
+      <section class="card wealth-holdings"><div class="section-head"><div><span class="card-label">Net worth</span><h3>Assets, investments and liabilities</h3></div><div class="wealth-currency-row"><select id="wealthCurrencySelect" aria-label="Display currency">${[...new Set([state.household.currency || "USD", "USD", "EUR", "GBP", "INR"])].map((code) => `<option value="${code}" ${wealthDisplayCurrency() === code ? "selected" : ""}>${code}</option>`).join("")}</select><button id="addNetWorthItemButton" type="button">+ Add holding</button></div></div><div class="net-worth-strip"><strong data-net-worth-total>${wealthMoney(netWorth().total)}</strong><span>Assets <b data-net-worth-assets>${wealthMoney(netWorth().assets)}</b> Liabilities <b data-net-worth-liabilities>${wealthMoney(netWorth().liabilities)}</b></span></div>${wealthDisplayCurrency() !== (state.household.currency || "USD") ? `<p class="muted wealth-currency-note">Converted from ${state.household.currency || "USD"} using real exchange rates${wealthFxRates ? "" : " — loading…"}. Individual accounts and holdings below still show ${state.household.currency || "USD"}.</p>` : ""}<div class="net-worth-items">${groupStockHoldings(state.goals.netWorth.assets).map((group) => netWorthStockGroupCard(group)).join("")}${state.goals.netWorth.assets.map((asset, index) => ({ asset, index })).filter(({ asset }) => !isHoldingAssetClass(asset.assetClass)).map(({ asset, index }) => netWorthItemRow(asset, "asset", index)).join("")}${state.goals.netWorth.liabilities.map((item, index) => netWorthItemRow(item, "liability", index)).join("")}</div>${state.goals.netWorth.assets.length || state.goals.netWorth.liabilities.length ? "" : `<div class="empty-inline">No assets, investments or liabilities yet</div>`}</section>
     </section>`;
 }
 
@@ -6924,7 +6930,7 @@ function ensureGoalAutoContributions() {
       fund.roundupProcessedCount ||= 0;
       const alreadySeen = fund.roundupProcessedCount;
       if (state.transactions.length <= alreadySeen) return;
-      const newTransactions = state.transactions.slice(alreadySeen);
+      const newTransactions = transactionsSinceWatermark(state.transactions, alreadySeen);
       const roundup = newTransactions.reduce((sum, transaction) => {
         const amount = Number(transaction.amount || 0);
         // Only positive (expense) amounts round up - a refund/income row
@@ -10373,10 +10379,15 @@ function bindViewEvents() {
     const lineId = $("#ledgerBulkLineSelect")?.value;
     if (!lineId) return;
     const snapshot = lineSnapshot(lineId);
+    let skippedSplits = 0;
     ledgerSelectedIndices.forEach((index) => {
       const transaction = state.transactions[index];
-      if (transaction) Object.assign(transaction, { lineId }, snapshot);
+      if (!transaction) return;
+      // A row split across categories has no single category to overwrite; leave it alone rather than corrupt its splits.
+      if (transaction.splits?.length) { skippedSplits += 1; return; }
+      Object.assign(transaction, { lineId }, snapshot);
     });
+    if (skippedSplits) showToast(`${skippedSplits} split transaction${skippedSplits === 1 ? " was" : "s were"} skipped - remove the split first to recategorize.`, { type: "info" });
     ledgerSelectedIndices.clear();
     autosaveState();
     render();
@@ -10447,8 +10458,8 @@ function bindViewEvents() {
     button.addEventListener("click", () => {
       const transaction = state.transactions[Number(button.dataset.splitEditorSave)];
       if (!transaction) return;
+      if (!splitEditorSummary(splitEditorRows, transaction.amount).canSave) return;
       const rows = splitEditorRows.filter((row) => row.lineId).map((row) => ({ lineId: row.lineId, amount: Number(row.amount || 0) }));
-      if (rows.length < 2) return;
       transaction.splits = rows;
       transaction.lineId = "";
       transaction.categoryName = "";

@@ -15,7 +15,8 @@ const {
   annualEventDate, nextAnnualEventDate, annualEventNotifyAt, rollAnnualNotifyAtForward,
   nextPendingChoreOccurrence, currentChoreOccurrenceDate, zonedTimeToUtcIso, choreNotifyAt,
   buildCalendarIcs, parseIcsText, icsEventsToCalendarDrafts, buildCalendarCsv, parseCalendarCsv,
-  parseImageReminderDraft, pgDumpArgs
+  parseImageReminderDraft, pgDumpArgs,
+  normalizeCsvDate, transactionsSinceWatermark, convertCurrencyAmount, splitEditorSummary
 } = require("../lib/shared-logic");
 
 test("layoutTimelineBlocks gives non-overlapping tasks full width", () => {
@@ -2168,4 +2169,38 @@ test("pgDumpArgs targets the Cloud SQL Unix socket when a connection name is set
 test("pgDumpArgs falls back to a plain DATABASE_URL when there's no Cloud SQL connection name", () => {
   const args = pgDumpArgs({ cloudSqlConnectionName: "", dbUser: "", dbName: "", databaseUrl: "postgresql://user:pass@host/db" });
   assert.deepEqual(args, ["postgresql://user:pass@host/db", "--no-owner", "--no-privileges", "-Fc"]);
+});
+
+test("normalizeCsvDate accepts real dates only", () => {
+  assert.equal(normalizeCsvDate("2026-07-04"), "2026-07-04");
+  assert.equal(normalizeCsvDate("7/4/2026"), "2026-07-04");
+  assert.equal(normalizeCsvDate("02/29/2024"), "2024-02-29");
+  for (const bad of ["13/45/2026", "02/30/2026", "02/29/2025", "2026-02-30", "2026-13-01", "0/5/2026", ""]) assert.equal(normalizeCsvDate(bad), "", bad);
+});
+
+test("transactionsSinceWatermark reads the newest-first head, not the already-counted tail", () => {
+  const txns = ["new2", "new1", "old2", "old1"].map((payee) => ({ payee }));
+  assert.deepEqual(transactionsSinceWatermark(txns, 2).map((t) => t.payee), ["new2", "new1"]);
+  assert.deepEqual(transactionsSinceWatermark(txns, 4), []);
+  assert.deepEqual(transactionsSinceWatermark(txns, 9), []);
+  assert.equal(transactionsSinceWatermark(txns, 0).length, 4);
+});
+
+test("convertCurrencyAmount converts from the household currency via USD rates and refuses to guess", () => {
+  const rates = { EUR: 0.5, INR: 80 };
+  assert.equal(convertCurrencyAmount(100, "USD", "EUR", rates), 50);
+  assert.equal(convertCurrencyAmount(160, "INR", "USD", rates), 2);
+  assert.equal(convertCurrencyAmount(80, "INR", "EUR", rates), 0.5);
+  assert.equal(convertCurrencyAmount(5, "EUR", "EUR", null), 5);
+  assert.equal(convertCurrencyAmount(5, "USD", "GBP", rates), null);
+});
+
+test("splitEditorSummary ignores category-less rows so an unbalanced split cannot be saved", () => {
+  const rows = [{ lineId: "a", amount: 40 }, { lineId: "b", amount: 30 }, { lineId: "", amount: 30 }];
+  const bad = splitEditorSummary(rows, 100);
+  assert.equal(bad.remaining, 30);
+  assert.equal(bad.canSave, false);
+  const good = splitEditorSummary([{ lineId: "a", amount: 40 }, { lineId: "b", amount: 60 }, { lineId: "", amount: 0 }], 100);
+  assert.equal(good.canSave, true);
+  assert.equal(splitEditorSummary([{ lineId: "a", amount: 100 }], 100).canSave, false);
 });
