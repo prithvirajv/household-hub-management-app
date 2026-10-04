@@ -2865,6 +2865,7 @@ function renderTransactions() {
               <button id="addTransactionButton" type="button">+ Add transaction</button>
             </div>
           </div>
+          <label class="ai-import-toggle"><input type="checkbox" id="aiImportToggle" ${aiImportEnabled() ? "checked" : ""}> <span>Use AI to categorize imports and add confident rows to the ledger</span></label>
           ${bankImportFeedback ? `<p class="muted" role="status">${escapeHtml(bankImportFeedback)}</p>` : ""}
           ${otherMonthEntries.length ? `<div class="bank-stream-other-months">
             <small>Also pending in:</small>
@@ -2900,6 +2901,7 @@ function renderTransactions() {
               ${transaction.isDeposit ? `<span class="pill" title="Detected as money coming in from this file's Debit/Credit or signed-Amount column">Deposit</span>` : ""}
               ${transaction.isPayment ? `<span class="pill pill-info" title="Looks like a card payoff/autopay - probably belongs in Move to Transfers, not as a regular expense">Card payment</span>` : ""}
               ${transaction.isPending ? `<span class="pill pill-warning" title="Hadn't posted yet in the statement - dated today by default, correct it once your bank assigns a real posting date">Pending</span>` : ""}
+              ${transaction.lineSource === "ai-high" || transaction.lineSource === "ai-low" ? `<span class="pill pill-info" title="${transaction.lineSource === "ai-low" ? "AI was unsure about this subcategory - please check it" : "Subcategory suggested by AI"}">${transaction.lineSource === "ai-low" ? "AI guess - check" : "AI suggested"}</span>` : ""}
               ${transaction.historyMatch ? `<span class="pill pill-info" title="Subcategory pre-filled from how you've categorized this payee (or a similar one) most recently - double-check before accepting">From history</span>` : ""}
               ${transaction.categorizationRuleLineId ? `<span class="pill pill-info" title="Subcategory pre-filled from your 'always categorize this way' rule for this payee">🔒 Rule</span>` : ""}
               ${transaction.categorizationConfidence ? `<span class="pill bank-stream-confidence-${transaction.categorizationConfidence.confidence >= 80 ? "good" : transaction.categorizationConfidence.confidence >= 50 ? "warning" : "danger"}" title="${transaction.categorizationConfidence.sampleSize} past transaction${transaction.categorizationConfidence.sampleSize === 1 ? "" : "s"} from this payee - ${transaction.categorizationConfidence.confidence}% used this same subcategory">${transaction.categorizationConfidence.confidence}% match</span>` : ""}
@@ -6488,7 +6490,8 @@ function renderHelp() {
         "\"Possible duplicate\" and \"Possible transfer\" pills flag likely re-imports and account-to-account movements (like a credit card payment from checking) before you accept them — use the ⇄ icon to move a transfer instead of counting it as an expense.",
         "Tag transactions (e.g. \"Florida trip\") to see them grouped together later in Reports.",
         "A new transaction's Subcategory <strong>and</strong> Wealth account are both pre-filled from how you (or a similar payee) were categorized/linked most recently, in both Bank Stream (a <strong>From history</strong> pill for Subcategory, an <strong>Account from history</strong> pill for the account) and the manual Add transaction form - always worth a glance before accepting, since it's a suggestion, not a guarantee.",
-        "No history for a payee yet? Select <strong>✨ Suggest with AI</strong> for Subcategory, or <strong>✨ Suggest account with AI</strong> for the account (both on the Add transaction form, or their matching ✨ buttons next to an unlinked Bank Stream row) to have it pick from your real budget lines or Wealth accounts - only runs when you ask, one payee at a time, never automatically across a whole import.",
+        "When you import a statement, <strong>AI categorizes it for you</strong> (the checkbox above Bank Stream, on by default): one batched request fills in the Subcategory and account for rows your history couldn't match, and rows it is confident about are added straight to the ledger. Duplicates, refunds, possible transfers, card payments/deposits, pending rows and anything the AI was unsure about stay in Bank Stream to review, marked <strong>AI guess - check</strong> where it wasn't sure. Untick the box to review everything by hand.",
+        "No history for a payee and AI import is off? Select <strong>✨ Suggest with AI</strong> for Subcategory, or <strong>✨ Suggest account with AI</strong> for the account (both on the Add transaction form, or their matching ✨ buttons next to an unlinked Bank Stream row) to have it pick from your real budget lines or Wealth accounts, one payee at a time.",
         "CSV import recognizes exports from Chase, Capital One, Wells Fargo, Discover, Amex, and Citi, among others — both plain checking-style files and credit-card-style files (positive = purchase) are detected automatically. PDF import recognizes both a monthly credit-card statement and a checking/deposit account's \"Account Activity\" print export (e.g. Bank of America's Online Banking print-to-PDF); a still-\"Processing\" row that hasn't posted yet imports dated today with a <strong>Pending</strong> pill, so it isn't lost — just correct the date once your bank posts it for real.",
         "An import auto-links to a Wealth account by matching its name against the file's own name (and, for a checking-account PDF, the account label printed on the statement itself, e.g. \"Adv Plus Banking - 6769\") — if that whole-file match comes up empty, each row still falls back to the per-payee account history/AI suggestion above; if nothing matches at all, use <strong>Set account for all unlinked rows</strong> above the list to assign one account to everything in a single action instead of picking it row by row."
       ] },
@@ -9956,6 +9959,7 @@ function bindViewEvents() {
     const alreadyKnown = [...state.transactions, ...state.transactionInboxDrafts];
     const duplicateCount = rows.filter((row) => isDuplicateTransaction(row, alreadyKnown)).length;
     const rowRefundMatchPool = [...alreadyKnown, ...rows];
+    const newDraftIds = [];
     rows.forEach((row) => {
       const rowRefundMatch = refundMatch(row, rowRefundMatchPool);
       // A refund match (this exact row is the return for a specific
@@ -9971,10 +9975,15 @@ function bindViewEvents() {
       // to every row in this import - only fall back to a per-payee history
       // guess when that whole-file match came up empty.
       const historyAccountId = matchedAccount ? "" : suggestAccountFromHistory(row.payee, state.transactions);
+      const draftId = uniqueId(idPrefix);
+      newDraftIds.push(draftId);
       state.transactionInboxDrafts.unshift({
-        id: uniqueId(idPrefix),
+        id: draftId,
         payee: row.payee,
         amount: row.amount,
+        // Where the category came from - "refund"/"rule"/"history" here, "ai-high"/"ai-low" once the AI pass below fills a gap -
+        // so only trustworthy sources are ever auto-added to the ledger (autoAcceptDecision in shared-logic.js).
+        lineSource: rowRefundMatch?.lineId ? "refund" : ruleLineId ? "rule" : historyLineId ? "history" : "",
         lineId: rowRefundMatch?.lineId || ruleLineId || historyLineId || "",
         accountId: matchedAccount?.id || historyAccountId || "",
         date: row.date,
@@ -9990,7 +9999,12 @@ function bindViewEvents() {
     bankImportFeedback = `Imported ${rows.length} transaction${rows.length === 1 ? "" : "s"} from ${file.name}${matchedAccount ? ` — linked to ${matchedAccount.name}` : " — no matching account found, pick one per row below"}.${duplicateNote}`;
     autosaveState();
     render();
+    if (aiImportEnabled()) void runAiImportPass(newDraftIds, file.name, rows.length);
   }
+
+  $("#aiImportToggle")?.addEventListener("change", (event) => {
+    setAiImportEnabled(event.currentTarget.checked);
+  });
 
   $("#bankStreamCsvInput")?.addEventListener("change", (event) => {
     const file = event.target.files?.[0];
@@ -10203,6 +10217,7 @@ function bindViewEvents() {
       const draft = (state.transactionInboxDrafts || []).find((item) => item.id === select.dataset.bankStreamLine);
       if (draft) {
         draft.lineId = select.value;
+        draft.lineSource = "manual";
         // The "From history" pill describes where the *current* line came
         // from - once someone hand-picks a different one, keeping the pill
         // up would misattribute their own choice to the suggestion.
@@ -10233,6 +10248,7 @@ function bindViewEvents() {
         const { lineId } = await suggestSubcategoryWithAI(draft.payee);
         if (lineId) {
           draft.lineId = lineId;
+          draft.lineSource = "manual";
           draft.historyMatch = false;
           autosaveState();
           render();
@@ -10344,6 +10360,7 @@ function bindViewEvents() {
     const matched = (state.transactionInboxDrafts || []).filter((draft) => draft.historyMatch);
     matched.forEach((draft) => {
       draft.lineId = "";
+      draft.lineSource = "";
       draft.historyMatch = false;
     });
     transactionValidationFeedback = `Cleared the suggested Subcategory on ${matched.length} row${matched.length === 1 ? "" : "s"} - pick each one by hand, or re-suggest with the ✨ AI button.`;
@@ -13437,6 +13454,105 @@ view.addEventListener("click", (event) => {
   }
 });
 
+// The ledger-posting half of accepting a bank stream row, shared by the manual Accept button and the AI import pass: creates the
+// transaction, marks the draft done and logs the activity. Callers handle validation, saving and rendering.
+function postDraftToLedger(inboxItem) {
+  const lineId = inboxItem.lineId || "";
+  const memo = inboxItem.recurringId ? "Recurring bill" : "Accepted bank stream item";
+  state.transactions.unshift(makeTransaction({ date: inboxItem.date, payee: inboxItem.payee, amount: Number(inboxItem.amount), lineId, memo, accountId: inboxItem.accountId || "", orderNumber: inboxItem.orderNumber || "", tags: inboxItem.tags || [] }));
+  state.transactionInboxDone ||= [];
+  if (!state.transactionInboxDone.includes(inboxItem.id)) state.transactionInboxDone.push(inboxItem.id);
+  state.transactionInboxDrafts = (state.transactionInboxDrafts || []).filter((item) => item.id !== inboxItem.id);
+  state.household.activity.unshift(`Assigned ${inboxItem.payee} to ${transactionAssignmentLabel({ lineId })}`);
+}
+
+// ---- AI categorization on import ----
+// After a statement import, one batched AI call per chunk fills in the category and account for rows history could not match, then
+// rows that are safe (autoAcceptDecision) go straight into the ledger; everything else stays in Bank stream for review. A
+// per-viewer preference, on by default, kept in localStorage.
+function aiImportEnabled() {
+  try { return localStorage.getItem("familyloop-ai-import") !== "off"; } catch (_error) { return true; }
+}
+
+function setAiImportEnabled(enabled) {
+  try { localStorage.setItem("familyloop-ai-import", enabled ? "on" : "off"); } catch (_error) { /* preference just won't persist */ }
+}
+
+const AI_IMPORT_CHUNK_SIZE = 50;
+
+async function runAiImportPass(draftIds, fileName, importedCount) {
+  const householdId = currentHouseholdId();
+  const findDraft = (id) => (state.transactionInboxDrafts || []).find((draft) => draft.id === id);
+  const openAccounts = () => state.accounts.filter((account) => !account.closedAt);
+  let aiNote = "";
+  let aiFilled = 0;
+  try {
+    const needAi = draftIds.map(findDraft).filter((draft) => draft && (!draft.lineId || (!draft.accountId && openAccounts().length)));
+    if (needAi.length && allLines().length) {
+      bankImportFeedback = `Imported ${importedCount} from ${fileName}. AI is categorizing ${needAi.length} row${needAi.length === 1 ? "" : "s"}…`;
+      render();
+      const lines = allLines().map((line) => ({ id: line.id, label: `${line.category} - ${line.name}` }));
+      const accounts = openAccounts().map((account) => ({ id: account.id, label: account.type ? `${account.name} (${account.type})` : account.name }));
+      for (let start = 0; start < needAi.length; start += AI_IMPORT_CHUNK_SIZE) {
+        const chunk = needAi.slice(start, start + AI_IMPORT_CHUNK_SIZE);
+        const { results } = await api("/api/transactions/suggest-batch", {
+          method: "POST",
+          body: JSON.stringify({ rows: chunk.map((draft) => ({ id: draft.id, payee: draft.payee, amount: draft.amount, date: draft.date })), lines, accounts })
+        });
+        if (currentHouseholdId() !== householdId) return;
+        results.forEach((result) => {
+          const draft = findDraft(result.id);
+          if (!draft) return;
+          let filled = false;
+          if (!draft.lineId && result.lineId) {
+            draft.lineId = result.lineId;
+            draft.lineSource = result.confidence === "high" ? "ai-high" : "ai-low";
+            filled = true;
+          }
+          if (!draft.accountId && result.accountId) {
+            draft.accountId = result.accountId;
+            draft.accountHistoryMatch = false;
+            filled = true;
+          }
+          if (filled) aiFilled += 1;
+        });
+      }
+    }
+  } catch (error) {
+    aiNote = ` AI categorization wasn't available (${error.message || "unknown error"}) - rows were left for review.`;
+  }
+  if (currentHouseholdId() !== householdId) return;
+
+  // Decide per row against the live ledger and the other pending rows, then post the safe ones.
+  const hasAccounts = openAccounts().length > 0;
+  let added = 0;
+  const reviewReasons = new Map();
+  draftIds.forEach((id) => {
+    const draft = findDraft(id);
+    if (!draft) return;
+    const others = [...state.transactions, ...(state.transactionInboxDrafts || []).filter((other) => other.id !== draft.id)];
+    const decision = autoAcceptDecision(draft, {
+      accountsExist: hasAccounts,
+      possibleDuplicate: isDuplicateTransaction(draft, others),
+      refundMatch: refundMatch(draft, others),
+      transferMatch: findTransferCandidate(draft, others),
+      accountClosedForDate: !accountAllowsDate(draft.accountId, draft.date)
+    });
+    if (decision.accept) {
+      postDraftToLedger(draft);
+      added += 1;
+    } else {
+      reviewReasons.set(decision.reason, (reviewReasons.get(decision.reason) || 0) + 1);
+    }
+  });
+  const remaining = draftIds.length - added;
+  const reasonText = [...reviewReasons.entries()].sort((a, b) => b[1] - a[1]).slice(0, 3).map(([reason, count]) => `${count} ${reason}`).join(", ");
+  bankImportFeedback = `Imported ${importedCount} from ${fileName}.${aiFilled ? ` AI filled in ${aiFilled} row${aiFilled === 1 ? "" : "s"}.` : ""} ${added} added to the ledger${remaining ? `; ${remaining} left in Bank stream to review (${reasonText})` : ""}.${aiNote}`;
+  if (added) state.household.activity.unshift(`Imported ${fileName}: ${added} transaction${added === 1 ? "" : "s"} auto-added with AI categories`);
+  autosaveState();
+  render();
+}
+
 function acceptImportTransaction(button) {
   let inboxItem = transactionInboxItems().find((item) => item.id === button.dataset.acceptImport);
 
@@ -13458,13 +13574,7 @@ function acceptImportTransaction(button) {
   // placeholder) that made a since-fixed bug look worse than it was. A
   // truly-unassigned accept becomes a truly-unassigned ledger entry, which
   // the Insights "N unassigned transactions" nudge already surfaces.
-  const lineId = inboxItem.lineId || "";
-  const memo = inboxItem.recurringId ? "Recurring bill" : "Accepted bank stream item";
-  state.transactions.unshift(makeTransaction({ date: inboxItem.date, payee: inboxItem.payee, amount: Number(inboxItem.amount), lineId, memo, accountId: inboxItem.accountId || "", orderNumber: inboxItem.orderNumber || "", tags: inboxItem.tags || [] }));
-  state.transactionInboxDone ||= [];
-  if (!state.transactionInboxDone.includes(inboxItem.id)) state.transactionInboxDone.push(inboxItem.id);
-  state.transactionInboxDrafts = (state.transactionInboxDrafts || []).filter((item) => item.id !== inboxItem.id);
-  state.household.activity.unshift(`Assigned ${inboxItem.payee} to ${transactionAssignmentLabel({ lineId })}`);
+  postDraftToLedger(inboxItem);
   // Recent transactions only ever shows the month currently being viewed
   // (see budget.month filtering), so an accepted item dated in a different
   // month would otherwise seem to vanish — jump to that month too, the same

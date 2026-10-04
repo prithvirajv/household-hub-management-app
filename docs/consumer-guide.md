@@ -163,12 +163,19 @@ more convenient.
   Subcategory to always categorize that payee this way going forward; it
   overrides the plain history guess (but never a literal refund match) on
   every future import. Select it again to remove the rule.
-- No history for a payee yet? Select **✨ Suggest with AI** for Subcategory,
-  or **✨ Suggest account with AI** for the account (both on the Add
-  transaction form, or their matching ✨ buttons next to an unlinked Bank
-  Stream row) to have it pick from your real budget lines or Wealth
-  accounts — only runs when you ask, one payee at a time, never
-  automatically across a whole import.
+- **AI categorizes imports for you** (the checkbox above Bank Stream, on by
+  default): after an import, one batched request fills in the Subcategory
+  and account for rows your history couldn't match, and rows that are
+  confident (a rule, your history, or a high-confidence AI pick) are added
+  straight to the ledger. Duplicates, refunds, possible transfers, card
+  payments/deposits, pending rows and anything the AI was unsure about stay
+  in Bank Stream for review — unsure ones are marked **AI guess - check**.
+  Untick the box to review everything by hand. The mobile app does the same.
+- No history for a payee and AI import is off? Select **✨ Suggest with AI**
+  for Subcategory, or **✨ Suggest account with AI** for the account (both on
+  the Add transaction form, or their matching ✨ buttons next to an unlinked
+  Bank Stream row) to have it pick from your real budget lines or Wealth
+  accounts, one payee at a time.
 - CSV import recognizes exports from Chase, Capital One, Wells Fargo,
   Discover, Amex, and Citi, among others — both plain checking-style files
   and credit-card-style files (positive = purchase) are detected

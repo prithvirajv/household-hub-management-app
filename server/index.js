@@ -15,7 +15,7 @@ const { Pool } = require("pg");
 const { OAuth2Client } = require("google-auth-library");
 const { countries } = require("countries-list");
 const { defaultState } = require("./default-state");
-const { validateJournalPayload, buildDocumentObjectPath, sanitizeFilename, wouldCreateFolderCycle, collectDescendantFolderIds, SMS_CARRIERS, smsGatewayAddress, rollAnnualNotifyAtForward, choreNotifyAt, parseBankStatementPdfText, extractAccountActivityLabel, isValidEmail, parseImageReminderDraft, pgDumpArgs } = require("../lib/shared-logic");
+const { validateJournalPayload, buildDocumentObjectPath, sanitizeFilename, wouldCreateFolderCycle, collectDescendantFolderIds, SMS_CARRIERS, smsGatewayAddress, rollAnnualNotifyAtForward, choreNotifyAt, parseBankStatementPdfText, extractAccountActivityLabel, isValidEmail, parseImageReminderDraft, parseBatchSuggestions, pgDumpArgs } = require("../lib/shared-logic");
 const pdfParse = require("pdf-parse");
 const ExcelJS = require("exceljs");
 // archiver@8 is an ESM-only rewrite: require("archiver") returns the module
@@ -1414,6 +1414,59 @@ app.post("/api/transactions/suggest-subcategory", requireSession, async (req, re
     if (!response.ok) return res.status(502).json({ error: body?.error?.message || "The AI suggestion service is unavailable right now" });
     const text = body.candidates?.[0]?.content?.parts?.[0]?.text?.trim();
     res.json({ lineId: text && validIds.has(text) ? text : null });
+  } catch (error) {
+    next(error);
+  }
+});
+
+// Batch version of suggest-subcategory + suggest-account for a whole statement import: one model call per chunk of rows instead of
+// one per row (a 200-row statement would otherwise be 200 paid calls). Same trust rules as the single-row endpoints - the reply is
+// validated against the exact row/line/account ids this request sent (parseBatchSuggestions) - and the client still decides what
+// is safe to post (autoAcceptDecision); this endpoint only ever suggests.
+const BATCH_SUGGEST_MAX_ROWS = 60;
+const BATCH_SUGGEST_MAX_LINES = 300;
+const BATCH_SUGGEST_MAX_ACCOUNTS = 100;
+const BATCH_SUGGEST_MAX_PAYEE_CHARS = 200;
+
+app.post("/api/transactions/suggest-batch", requireSession, async (req, res, next) => {
+  try {
+    if (!GEMINI_API_KEY) return res.status(503).json({ error: "AI suggestions are not configured for this deployment" });
+    const rows = Array.isArray(req.body?.rows) ? req.body.rows : [];
+    const lines = Array.isArray(req.body?.lines) ? req.body.lines : [];
+    const accounts = Array.isArray(req.body?.accounts) ? req.body.accounts : [];
+    if (!rows.length) return res.status(400).json({ error: "No transactions to categorize" });
+    if (rows.length > BATCH_SUGGEST_MAX_ROWS) return res.status(400).json({ error: `At most ${BATCH_SUGGEST_MAX_ROWS} transactions per request` });
+    if (!lines.length) return res.status(400).json({ error: "No subcategories to choose from yet - add a budget category first" });
+    if (lines.length > BATCH_SUGGEST_MAX_LINES) return res.status(400).json({ error: "Too many subcategories to suggest from" });
+    if (accounts.length > BATCH_SUGGEST_MAX_ACCOUNTS) return res.status(400).json({ error: "Too many accounts to suggest from" });
+    const cleanRows = rows.map((row) => ({ id: String(row?.id || ""), payee: String(row?.payee || "").trim().slice(0, BATCH_SUGGEST_MAX_PAYEE_CHARS), amount: Number(row?.amount) || 0, date: String(row?.date || "").slice(0, 10) })).filter((row) => row.id && row.payee);
+    if (!cleanRows.length) return res.status(400).json({ error: "No transactions to categorize" });
+    const lineIds = lines.map((line) => String(line?.id || "")).filter(Boolean);
+    const accountIds = accounts.map((account) => String(account?.id || "")).filter(Boolean);
+    const prompt = [
+      "Budget subcategory options (id: label):",
+      ...lines.map((line) => `${line.id}: ${line.label}`),
+      "",
+      accountIds.length ? "Account options (id: label):" : "No account options - leave accountId null.",
+      ...accounts.map((account) => `${account.id}: ${account.label}`),
+      "",
+      "Transactions (id | payee | amount | date). Positive amounts are purchases, negative are refunds or deposits:",
+      ...cleanRows.map((row) => `${row.id} | ${row.payee} | ${row.amount} | ${row.date}`)
+    ].join("\n");
+
+    const response = await fetch(`${GEMINI_API_BASE_URL}/v1beta/models/${encodeURIComponent(GEMINI_MODEL)}:generateContent?key=${encodeURIComponent(GEMINI_API_KEY)}`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        contents: [{ role: "user", parts: [{ text: prompt }] }],
+        systemInstruction: { parts: [{ text: "You are categorizing household bank transactions for a budgeting app. For each transaction choose the single best budget subcategory id and, when account options exist, the account it most likely belongs to. Reply with ONLY a JSON array - no markdown, no explanation - with one object per transaction: {\"id\": the transaction id, \"lineId\": exact subcategory id or null, \"accountId\": exact account id or null, \"confidence\": \"high\" or \"low\"}. Use \"high\" only when the payee clearly belongs to that subcategory; use null and \"low\" when unsure. Never invent ids." }] },
+        generationConfig: { maxOutputTokens: 4000, responseMimeType: "application/json" }
+      })
+    });
+    const body = await response.json().catch(() => ({}));
+    if (!response.ok) return res.status(502).json({ error: body?.error?.message || "The AI suggestion service is unavailable right now" });
+    const text = body.candidates?.[0]?.content?.parts?.[0]?.text || "";
+    res.json({ results: parseBatchSuggestions(text, cleanRows.map((row) => row.id), lineIds, accountIds) });
   } catch (error) {
     next(error);
   }
