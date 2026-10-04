@@ -16,7 +16,7 @@ const {
   nextPendingChoreOccurrence, currentChoreOccurrenceDate, zonedTimeToUtcIso, choreNotifyAt,
   buildCalendarIcs, parseIcsText, icsEventsToCalendarDrafts, buildCalendarCsv, parseCalendarCsv,
   parseImageReminderDraft, pgDumpArgs,
-  normalizeCsvDate, transactionsSinceWatermark, convertCurrencyAmount, splitEditorSummary
+  normalizeCsvDate, transactionsSinceWatermark, convertCurrencyAmount, splitEditorSummary, noteContentSignature, stampChangedNotes, resetNoteBaseline
 } = require("../lib/shared-logic");
 
 test("layoutTimelineBlocks gives non-overlapping tasks full width", () => {
@@ -2203,4 +2203,30 @@ test("splitEditorSummary ignores category-less rows so an unbalanced split canno
   const good = splitEditorSummary([{ lineId: "a", amount: 40 }, { lineId: "b", amount: 60 }, { lineId: "", amount: 0 }], 100);
   assert.equal(good.canSave, true);
   assert.equal(splitEditorSummary([{ lineId: "a", amount: 100 }], 100).canSave, false);
+});
+
+test("stampChangedNotes stamps only notes that were edited or created since the baseline, and never re-stamps an unchanged note", () => {
+  const notes = [
+    { id: "a", title: "Old", body: "x", checklist: [{ id: "i1", text: "milk", done: false }], pinned: false },
+    { id: "b", title: "Untouched", body: "", checklist: [], pinned: false, updatedAt: "2026-01-01T00:00:00.000Z" }
+  ];
+  const baseline = new Map();
+  resetNoteBaseline(notes, baseline);
+  assert.equal(stampChangedNotes(notes, baseline, "2026-07-10T09:00:00.000Z"), 0, "loading alone is not an edit");
+  assert.equal(notes[0].updatedAt, undefined);
+
+  notes[0].checklist[0].done = true;
+  assert.equal(stampChangedNotes(notes, baseline, "2026-07-10T09:05:00.000Z"), 1);
+  assert.equal(notes[0].updatedAt, "2026-07-10T09:05:00.000Z");
+  assert.equal(notes[1].updatedAt, "2026-01-01T00:00:00.000Z");
+
+  assert.equal(stampChangedNotes(notes, baseline, "2026-07-10T09:10:00.000Z"), 0, "stamping does not make the note look changed again");
+  assert.equal(notes[0].updatedAt, "2026-07-10T09:05:00.000Z");
+
+  notes.push({ id: "c", title: "New", body: "", checklist: [], pinned: false });
+  notes[1].pinned = true;
+  assert.equal(stampChangedNotes(notes, baseline, "2026-07-10T09:15:00.000Z"), 2, "a new note and a pin change both count");
+  assert.equal(notes[2].updatedAt, "2026-07-10T09:15:00.000Z");
+  assert.equal(noteContentSignature({ id: "z", a: 1, updatedAt: "x" }), noteContentSignature({ id: "z", a: 1, updatedAt: "y" }));
+  assert.equal(stampChangedNotes(undefined, baseline, "x"), 0);
 });

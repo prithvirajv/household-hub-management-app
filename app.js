@@ -409,6 +409,15 @@ function looksLikeCompleteState(candidate) {
   return Boolean(candidate) && REQUIRED_STATE_KEYS.every((key) => key in candidate);
 }
 
+// Fingerprints of every note as last loaded/saved; stampChangedNotes (shared-logic.js) compares against it so edits made by any
+// handler get an updatedAt without each one setting it.
+const noteBaseline = new Map();
+function resetNotesBaseline() {
+  if (!state) return;
+  ensureNotesData();
+  resetNoteBaseline(state.notes.entries, noteBaseline);
+}
+
 function autosaveState() {
   if (!state) return;
   if (householdSwitchInProgress) return;
@@ -437,6 +446,7 @@ function autosaveState() {
       console.error("Refusing to autosave - state looks incomplete at fire time", state);
       return;
     }
+    stampChangedNotes(state.notes?.entries, noteBaseline, new Date().toISOString());
     api("/api/state", {
       method: "PUT",
       headers: { "X-Household-Id": householdIdAtSchedule || "" },
@@ -458,6 +468,7 @@ function flushPendingAutosave() {
   clearTimeout(autosaveTimer);
   if (!looksLikeCompleteState(state)) return;
   if (sessionUser?.accessLevel === "view") return;
+  stampChangedNotes(state.notes?.entries, noteBaseline, new Date().toISOString());
   api("/api/state", {
     method: "PUT",
     headers: { "X-Household-Id": currentHouseholdId() || "" },
@@ -482,6 +493,7 @@ async function saveStateNow() {
   const householdIdAtCall = currentHouseholdId();
   autosavePending = false;
   clearTimeout(autosaveTimer);
+  stampChangedNotes(state.notes?.entries, noteBaseline, new Date().toISOString());
   await api("/api/state", {
     method: "PUT",
     headers: { "X-Household-Id": householdIdAtCall || "" },
@@ -15201,6 +15213,7 @@ async function loadApp() {
     api("/api/state"),
     api("/api/private-data")
   ]);
+  resetNotesBaseline();
   // A fresh login should always land on today's month - restoring whatever
   // month was last viewed (Budget history browsing, etc.) is only useful
   // within an already-open session, not as the starting point for a new
@@ -15252,6 +15265,7 @@ async function reloadSelectedHousehold() {
     api("/api/state"),
     api("/api/private-data")
   ]);
+  resetNotesBaseline();
   if (migrateInitialMonth()) autosaveState();
   adminData = null;
   sharingAccess = null;
