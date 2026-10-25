@@ -176,6 +176,13 @@ more convenient.
   the Add transaction form, or their matching ✨ buttons next to an unlinked
   Bank Stream row) to have it pick from your real budget lines or Wealth
   accounts, one payee at a time.
+- **Clean up old transactions:** at the bottom of the Transactions page,
+  choose a date (or **Every date**), whether to remove ledger transactions,
+  Bank stream rows or both, and whether to download a CSV backup first. You
+  see exactly how many rows go before confirming. Removal is permanent;
+  budgets show less spent and unlinked account balances change, while linked
+  accounts re-match their bank balance. Removed rows are not re-imported by
+  later syncs.
 - CSV import recognizes exports from Chase, Capital One, Wells Fargo,
   Discover, Amex, and Citi, among others — both plain checking-style files
   and credit-card-style files (positive = purchase) are detected

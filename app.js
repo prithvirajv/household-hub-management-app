@@ -170,6 +170,8 @@ let linkedBusyId = "";
 let linkedMapping = null;
 let linkedPortalLinkId = "";
 let linkedAutoSyncDone = false;
+// Clean up old transactions card (Transactions page): the options last chosen.
+let cleanupOptions = { before: "", all: false, ledger: true, stream: true, backup: true };
 let ledgerAcceptFeedback = "";
 let transactionValidationFeedback = "";
 // Holds { lineIds, perform } between opening the delete-subcategory
@@ -2937,6 +2939,17 @@ function renderTransactions() {
               ${tagChipsHtml(transaction.tags, "data-remove-bank-stream-tag", "data-add-bank-stream-tag", transaction.id)}
             </div>
           `).join("") || `<div class="empty-inline">No bank stream items waiting</div>`}
+        </section>
+        <section class="card cleanup-card">
+          <div class="card-label">Housekeeping</div><h3>Clean up old transactions</h3>
+          <p class="muted">Permanently remove ledger transactions and/or waiting Bank stream rows from before a date. A CSV backup of exactly what is removed can download first. Linked accounts re-match their bank balance afterwards.</p>
+          <label>Remove everything dated before<input type="date" id="cleanupBefore" value="${escapeHtml(cleanupOptions.before)}" ${cleanupOptions.all ? "disabled" : ""}></label>
+          <label class="ai-import-toggle"><input type="checkbox" id="cleanupAll" ${cleanupOptions.all ? "checked" : ""}> <span>Every date (remove them all)</span></label>
+          <label class="ai-import-toggle"><input type="checkbox" id="cleanupLedger" ${cleanupOptions.ledger ? "checked" : ""}> <span>Ledger transactions</span></label>
+          <label class="ai-import-toggle"><input type="checkbox" id="cleanupStream" ${cleanupOptions.stream ? "checked" : ""}> <span>Bank stream rows</span></label>
+          <label class="ai-import-toggle"><input type="checkbox" id="cleanupBackup" ${cleanupOptions.backup ? "checked" : ""}> <span>Download a CSV backup first</span></label>
+          <p class="muted" id="cleanupPreview" role="status"></p>
+          <button type="button" class="danger-button" id="cleanupButton">Review and remove…</button>
         </section>
       </aside>
     </section>`;
@@ -11526,6 +11539,51 @@ function bindViewEvents() {
       autosaveState();
       render();
     });
+  });
+
+  // ---- Clean up old transactions (Transactions page) ----
+  const cleanupSelection = () => ({ before: cleanupOptions.all ? "" : cleanupOptions.before, includeLedger: cleanupOptions.ledger, includeStream: cleanupOptions.stream });
+  const refreshCleanupPreview = () => {
+    const output = $("#cleanupPreview");
+    if (!output) return;
+    const options = cleanupSelection();
+    if (!cleanupOptions.all && !cleanupOptions.before) { output.textContent = "Pick a date, or tick Every date."; return; }
+    if (!options.includeLedger && !options.includeStream) { output.textContent = "Choose what to clean up."; return; }
+    const preview = previewTransactionCleanup(state, options);
+    output.textContent = preview.ledgerCount + preview.streamCount
+      ? `Would remove ${preview.ledgerCount} ledger transaction${preview.ledgerCount === 1 ? "" : "s"} and ${preview.streamCount} Bank stream row${preview.streamCount === 1 ? "" : "s"} (${preview.oldest} to ${preview.newest}).`
+      : "Nothing matches.";
+  };
+  [["#cleanupBefore", "before", "value"], ["#cleanupAll", "all", "checked"], ["#cleanupLedger", "ledger", "checked"], ["#cleanupStream", "stream", "checked"], ["#cleanupBackup", "backup", "checked"]].forEach(([selector, key, prop]) => {
+    $(selector)?.addEventListener("change", (event) => {
+      cleanupOptions[key] = event.currentTarget[prop];
+      if (key === "all") $("#cleanupBefore").disabled = cleanupOptions.all;
+      refreshCleanupPreview();
+    });
+  });
+  refreshCleanupPreview();
+
+  $("#cleanupButton")?.addEventListener("click", async () => {
+    const options = cleanupSelection();
+    if (!cleanupOptions.all && !cleanupOptions.before) { showToast("Pick a date, or tick Every date."); return; }
+    if (!options.includeLedger && !options.includeStream) { showToast("Choose what to clean up."); return; }
+    const preview = previewTransactionCleanup(state, options);
+    if (!preview.ledgerCount && !preview.streamCount) { showToast("Nothing matches that cleanup.", { type: "info" }); return; }
+    const message = `This permanently removes ${preview.ledgerCount} ledger transaction${preview.ledgerCount === 1 ? "" : "s"} and ${preview.streamCount} Bank stream row${preview.streamCount === 1 ? "" : "s"} dated ${options.before ? `before ${options.before}` : "on any date"} (${preview.oldest} to ${preview.newest}). Budgets will show less spent, and unlinked account balances change. ${cleanupOptions.backup ? "A CSV backup will download first." : "No backup will be made."}`;
+    if (!(await showConfirm(message, { title: "Remove these transactions?", confirmLabel: "Remove permanently" }))) return;
+    if (cleanupOptions.backup) downloadTextFile(`familyloop-removed-transactions-${dateKey(new Date())}.csv`, "text/csv", removedTransactionsCsv(preview, accountName));
+    const result = applyTransactionCleanup(state, options);
+    state.transactions = result.transactions;
+    state.transactionInboxDrafts = result.transactionInboxDrafts;
+    state.household.activity.unshift(`Cleaned up ${result.removedLedger} ledger transaction${result.removedLedger === 1 ? "" : "s"} and ${result.removedStream} Bank stream row${result.removedStream === 1 ? "" : "s"}`);
+    await saveStateNow();
+    bankImportFeedback = `Removed ${result.removedLedger} ledger transaction${result.removedLedger === 1 ? "" : "s"} and ${result.removedStream} Bank stream row${result.removedStream === 1 ? "" : "s"}.`;
+    // Linked accounts re-match the bank's balance (sync reconciles opening balances); removed rows are not re-imported.
+    await loadLinkedAccounts(false);
+    for (const link of (linkedAccounts?.links || []).filter((item) => item.status === "active" && Object.keys(item.mappings || {}).length)) {
+      await syncLinkedAccount(link.id, addBankStreamRows, { quiet: true });
+    }
+    render();
   });
 
   // ---- Linked accounts (Wealth page) ----

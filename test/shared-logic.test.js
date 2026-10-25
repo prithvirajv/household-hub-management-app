@@ -2231,7 +2231,7 @@ test("stampChangedNotes stamps only notes that were edited or created since the 
   assert.equal(stampChangedNotes(undefined, baseline, "x"), 0);
 });
 
-const { selectNewLinkedTransactions, rememberLinkedImportedIds, pendingDraftEffect, reconcileOpeningBalance, applyBalanceToHoldingsGroup, matchDebtToBankBalance, mergeBrokeragePositions } = require("../lib/shared-logic");
+const { selectNewLinkedTransactions, rememberLinkedImportedIds, pendingDraftEffect, reconcileOpeningBalance, applyBalanceToHoldingsGroup, matchDebtToBankBalance, previewTransactionCleanup, applyTransactionCleanup, removedTransactionsCsv, mergeBrokeragePositions } = require("../lib/shared-logic");
 
 test("selectNewLinkedTransactions keeps only mapped, not-yet-imported rows and never repeats an id within one sync", () => {
   const mappings = { A1: { accountId: "chk" }, A2: {} };
@@ -2345,4 +2345,30 @@ test("matchDebtToBankBalance sets the amount owed from the bank, updates the lia
   assert.equal(matchDebtToBankBalance({ debts, liabilities, transactions }, { debtId: "tesla", balance: -26524.02 }, signatureOf).changed, false);
   assert.equal(matchDebtToBankBalance({ debts, liabilities, transactions }, { debtId: "missing", balance: -1 }, signatureOf).changed, false);
   assert.equal(matchDebtToBankBalance({ debts, liabilities, transactions }, { debtId: "tesla", balance: NaN }, signatureOf).changed, false);
+});
+
+test("transaction cleanup previews and removes only rows before the cutoff from the chosen places, never mutating input, and backs up exactly what goes", () => {
+  const state = {
+    transactions: [{ date: "2026-01-05", payee: "Old, Shop", amount: 10, categoryName: "Food", subcategoryName: "Groceries", accountId: "a1", tags: ["x", "y"] }, { date: "2026-09-30", payee: "Recent", amount: 5 }, { date: "2026-09-01", payee: 'Say "hi"', amount: 7, memo: "line1\nline2" }],
+    transactionInboxDrafts: [{ date: "2026-02-01", payee: "Old draft", amount: 3 }, { date: "2026-10-02", payee: "New draft", amount: 4 }]
+  };
+  const before = "2026-09-15";
+  const preview = previewTransactionCleanup(state, { before, includeLedger: true, includeStream: true });
+  assert.deepEqual([preview.ledgerCount, preview.streamCount, preview.oldest, preview.newest], [2, 1, "2026-01-05", "2026-09-01"]);
+  assert.deepEqual(previewTransactionCleanup(state, { before, includeLedger: false, includeStream: true }).ledgerCount, 0);
+  assert.deepEqual(previewTransactionCleanup(state, { before: "", includeLedger: true, includeStream: true }).ledgerCount, 3, "no cutoff means every date");
+  assert.equal(previewTransactionCleanup(state, { before: "2020-01-01", includeLedger: true, includeStream: true }).ledgerCount, 0);
+  const result = applyTransactionCleanup(state, { before, includeLedger: true, includeStream: true });
+  assert.deepEqual(result.transactions.map((t) => t.payee), ["Recent"]);
+  assert.deepEqual(result.transactionInboxDrafts.map((t) => t.payee), ["New draft"]);
+  assert.deepEqual([result.removedLedger, result.removedStream], [2, 1]);
+  assert.equal(state.transactions.length, 3, "input not mutated");
+  const ledgerOnly = applyTransactionCleanup(state, { before, includeLedger: true, includeStream: false });
+  assert.equal(ledgerOnly.transactionInboxDrafts.length, 2);
+  const csv = removedTransactionsCsv(preview, (id) => (id === "a1" ? "Checking" : ""));
+  const lines = csv.split("\n");
+  assert.equal(lines[0], "Source,Date,Payee,Amount,Category,Subcategory,Account,Memo,Tags");
+  assert.equal(lines[1], 'Ledger,2026-01-05,"Old, Shop",10,Food,Groceries,Checking,,x; y');
+  assert.ok(csv.includes('"Say ""hi"""') && csv.includes('"line1\nline2"'), "quotes and newlines are escaped");
+  assert.ok(csv.includes("Bank stream,2026-02-01,Old draft,3"));
 });
