@@ -458,6 +458,14 @@ entry. It is read-only: FamilyLoop can never move money or place trades.
   (and go through AI categorization and the safe auto-add), and each mapped
   account's balance is brought in line with the bank's. Pending rows wait
   until they post.
+- **Investment accounts through SimpleFIN (401(k), IRA, ESPP…):** SimpleFIN
+  only reports a total balance for these, so when choosing where the account
+  goes, pick the holdings group under **Investment accounts (match balance)**.
+  The group's total is kept equal to the bank's balance while your individual
+  holdings keep their own shares and prices; one "balance adjustment" holding
+  carries the difference (and disappears if your listed holdings already add
+  up to the balance or more). Whether an institution appears at all depends on
+  SimpleFIN's coverage.
 - **Connect a brokerage (SnapTrade):** opens SnapTrade's secure sign-in;
   afterwards choose a holdings group per brokerage account. Positions,
   prices, cost basis and cash update in place, and holdings you've sold

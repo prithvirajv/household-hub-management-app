@@ -2231,7 +2231,7 @@ test("stampChangedNotes stamps only notes that were edited or created since the 
   assert.equal(stampChangedNotes(undefined, baseline, "x"), 0);
 });
 
-const { selectNewLinkedTransactions, rememberLinkedImportedIds, pendingDraftEffect, reconcileOpeningBalance, mergeBrokeragePositions } = require("../lib/shared-logic");
+const { selectNewLinkedTransactions, rememberLinkedImportedIds, pendingDraftEffect, reconcileOpeningBalance, applyBalanceToHoldingsGroup, mergeBrokeragePositions } = require("../lib/shared-logic");
 
 test("selectNewLinkedTransactions keeps only mapped, not-yet-imported rows and never repeats an id within one sync", () => {
   const mappings = { A1: { accountId: "chk" }, A2: {} };
@@ -2298,4 +2298,32 @@ test("mergeBrokeragePositions adds, updates in place, adopts hand-entered holdin
   const fresh = mergeBrokeragePositions([], { linkId: "L2", positions: [{ ...positions[0], remoteAccountId: "BR-9" }], cash: {}, accounts: [{ remoteId: "BR-9", name: "Roth IRA" }], mappings: { "BR-9": {} } }, createId);
   assert.equal(fresh.assets[0].groupName, "Roth IRA");
   assert.equal(fresh.assets[0].groupId, "linked-L2-BR-9");
+});
+
+test("applyBalanceToHoldingsGroup tops a group up to the bank's balance with one adjustment holding, keeps holdings detail, and never goes negative", () => {
+  let n = 0;
+  const createId = (seed) => `${seed}-${++n}`;
+  const holdings = [
+    { id: "a", name: "QQQM", assetClass: "stock", symbol: "QQQM", shares: 10, price: 100, groupId: "g1", groupName: "Roth IRA", value: 1000 },
+    { id: "b", name: "SPMO", assetClass: "stock", symbol: "SPMO", shares: 5, price: 100, groupId: "g1", groupName: "Roth IRA", value: 500 },
+    { id: "z", name: "House", assetClass: "other", value: 300000 }
+  ];
+  const first = applyBalanceToHoldingsGroup(holdings, { linkId: "L", remoteId: "R", groupId: "g1", groupName: "Roth IRA", balance: 1800 }, createId);
+  assert.equal(first.adjustment, 300);
+  const adjust = first.assets.find((a) => a.linkedTo === "L:R:adjust");
+  assert.deepEqual([adjust.name, adjust.groupId, adjust.value, adjust.shares, adjust.price, adjust.symbol], ["Roth IRA balance adjustment", "g1", 300, 1, 300, ""]);
+  assert.equal(first.assets.filter((a) => a.groupId === "g1").reduce((sum, a) => sum + assetValue(a), 0), 1800, "the group total now equals the bank balance");
+  assert.equal(first.assets.length, 4);
+  assert.equal(holdings.length, 3, "input not mutated");
+
+  const second = applyBalanceToHoldingsGroup(first.assets, { linkId: "L", remoteId: "R", groupId: "g1", groupName: "Roth IRA", balance: 1700 }, createId);
+  assert.equal(second.assets.filter((a) => a.linkedTo === "L:R:adjust").length, 1, "updated in place, not duplicated");
+  assert.equal(second.assets.find((a) => a.linkedTo === "L:R:adjust").value, 200);
+  assert.equal(second.assets.find((a) => a.linkedTo === "L:R:adjust").id, adjust.id);
+
+  const ahead = applyBalanceToHoldingsGroup(first.assets, { linkId: "L", remoteId: "R", groupId: "g1", groupName: "Roth IRA", balance: 1400 }, createId);
+  assert.deepEqual([ahead.adjustment, ahead.assets.some((a) => a.linkedTo === "L:R:adjust")], [0, false], "holdings already exceed the balance: the adjustment is dropped");
+  assert.equal(applyBalanceToHoldingsGroup(holdings, { linkId: "L", remoteId: "R", groupId: "g1", groupName: "Roth IRA", balance: NaN }, createId).adjustment, 0);
+  const empty = applyBalanceToHoldingsGroup([], { linkId: "L", remoteId: "R", groupId: "new-g", groupName: "401(k)", balance: 5000 }, createId);
+  assert.deepEqual([empty.assets[0].groupName, empty.assets[0].value], ["401(k)", 5000]);
 });
