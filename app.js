@@ -1178,30 +1178,30 @@ function accountBalanceTrend(accountId, monthKeys) {
 // Flat/single-point trends (a brand-new account, or one where every month
 // reconstructs to the same balance) render nothing rather than a
 // meaningless dot or a flat line with no story to tell.
-// The per-account balance trend: a readable mini chart rather than a bare line - a filled area, a dot per month with a hover/tap tooltip
-// ("Aug 2026: $1,240"), month labels under it, and Low / High / Change figures beside it. Flat or single-point trends render nothing
-// rather than a meaningless line.
+// The per-account balance trend, kept simple: one line over a light area, a labelled y axis (high / middle / low balance) and a labelled
+// x axis (months), with a hover/tap tooltip per month ("Aug 2026: $1,240"). Flat or single-point trends render nothing rather than a
+// meaningless line.
 function accountSparklineSvg(values, monthKeys = []) {
   if (values.length < 2 || values.every((value) => value === values[0])) return "";
-  const width = 240;
-  const height = 70;
-  const padX = 6;
-  const padY = 8;
+  const width = 200;
+  const height = 60;
   const max = Math.max(...values);
   const min = Math.min(...values);
   const range = max - min || 1;
-  const stepX = (width - padX * 2) / (values.length - 1);
-  const coords = values.map((value, index) => ({ x: padX + stepX * index, y: height - padY - ((value - min) / range) * (height - padY * 2), value, monthKey: monthKeys[index] || "" }));
+  const stepX = width / (values.length - 1);
+  const coords = values.map((value, index) => ({ x: stepX * index, y: height - ((value - min) / range) * height, value, monthKey: monthKeys[index] || "" }));
   const line = coords.map((point) => `${point.x.toFixed(1)},${point.y.toFixed(1)}`).join(" ");
-  const area = `${padX},${height - padY} ${line} ${(width - padX).toFixed(1)},${height - padY}`;
+  const area = `0,${height} ${line} ${width},${height}`;
   const monthName = (monthKey, withYear = false) => (monthKey ? new Date(`${monthKey}-01T00:00:00`).toLocaleDateString("en-US", withYear ? { month: "short", year: "numeric" } : { month: "short" }) : "");
   const change = values[values.length - 1] - values[0];
   const trendUp = change >= 0;
   const labelIndexes = [...new Set([0, Math.round((values.length - 1) / 3), Math.round(((values.length - 1) * 2) / 3), values.length - 1])];
+  const hit = stepX;
   return `<figure class="account-trend ${trendUp ? "account-sparkline-up" : "account-sparkline-down"}" role="img" aria-label="Balance ${trendUp ? "up" : "down"} ${money.format(Math.abs(change))} over ${values.length} months, from ${money.format(values[0])} to ${money.format(values[values.length - 1])}">
-    <svg viewBox="0 0 ${width} ${height}" class="account-sparkline"><polygon class="account-trend-area" points="${area}"></polygon><polyline points="${line}"></polyline>${coords.map((point) => `<circle cx="${point.x.toFixed(1)}" cy="${point.y.toFixed(1)}" r="3"><title>${escapeHtml(monthName(point.monthKey, true))}: ${money.format(point.value)}</title></circle>`).join("")}</svg>
-    <figcaption class="account-trend-months">${labelIndexes.map((index) => `<span>${escapeHtml(monthName(monthKeys[index]))}</span>`).join("")}</figcaption>
-    <div class="account-trend-stats"><span>Low <b>${money.format(min)}</b></span><span>High <b>${money.format(max)}</b></span><span>${monthKeys.length ? `${monthName(monthKeys[0])}–${monthName(monthKeys[monthKeys.length - 1])}` : "Change"} <b>${change >= 0 ? "+" : "-"}${money.format(Math.abs(change))}</b></span></div>
+    <div class="account-trend-y"><span>${money.format(max)}</span><span>${money.format((max + min) / 2)}</span><span>${money.format(min)}</span></div>
+    <svg viewBox="0 0 ${width} ${height}" preserveAspectRatio="none" class="account-sparkline"><line x1="0" y1="0" x2="${width}" y2="0"></line><line x1="0" y1="${height / 2}" x2="${width}" y2="${height / 2}"></line><line x1="0" y1="${height}" x2="${width}" y2="${height}"></line><polygon class="account-trend-area" points="${area}"></polygon><polyline points="${line}"></polyline>${coords.map((point) => `<rect class="account-trend-hit" x="${Math.max(0, point.x - hit / 2).toFixed(1)}" y="0" width="${hit.toFixed(1)}" height="${height}"><title>${escapeHtml(monthName(point.monthKey, true))}: ${money.format(point.value)}</title></rect>`).join("")}</svg>
+    <span></span>
+    <div class="account-trend-x">${labelIndexes.map((index) => `<span>${escapeHtml(monthName(monthKeys[index]))}</span>`).join("")}</div>
   </figure>`;
 }
 

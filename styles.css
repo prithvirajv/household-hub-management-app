@@ -3284,15 +3284,38 @@ button.ghost-accent {
 
 .account-sparkline {
   width: 100%;
-  height: auto;
+  height: 60px;
   display: block;
 }
 
 .account-trend {
   margin: 0;
-  flex: 0 0 min(260px, 100%);
+  flex: 0 0 min(280px, 100%);
   display: grid;
-  gap: 0.2rem;
+  grid-template-columns: auto 1fr;
+  column-gap: 0.5rem;
+  row-gap: 0.15rem;
+  font-size: 0.7rem;
+  color: var(--muted);
+}
+
+.account-trend-y {
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  align-items: flex-end;
+  line-height: 1;
+}
+
+.account-trend-x {
+  display: flex;
+  justify-content: space-between;
+}
+
+.account-sparkline line {
+  stroke: var(--line);
+  stroke-width: 1;
+  vector-effect: non-scaling-stroke;
 }
 
 .account-trend-area {
@@ -3300,38 +3323,16 @@ button.ghost-accent {
   opacity: 0.12;
 }
 
-.account-trend-months {
-  display: flex;
-  justify-content: space-between;
-  font-size: 0.7rem;
-  color: var(--muted);
-}
-
-.account-trend-stats {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.2rem 0.75rem;
-  font-size: 0.72rem;
-  color: var(--muted);
-}
-
-.account-trend-stats b {
-  color: var(--text, inherit);
-}
-
-.account-sparkline circle {
-  fill: var(--surface, #fff);
-  stroke-width: 1.5;
+.account-trend-hit {
+  fill: transparent;
   cursor: help;
 }
 
-.account-sparkline-up .account-trend-area,
-.account-sparkline-up circle {
+.account-sparkline-up .account-trend-area {
   fill: var(--green);
 }
 
-.account-sparkline-down .account-trend-area,
-.account-sparkline-down circle {
+.account-sparkline-down .account-trend-area {
   fill: var(--coral);
 }
 
@@ -3343,13 +3344,11 @@ button.ghost-accent {
   stroke-linecap: round;
 }
 
-.account-sparkline-up polyline,
-.account-sparkline-up circle {
+.account-sparkline-up polyline {
   stroke: var(--green);
 }
 
-.account-sparkline-down polyline,
-.account-sparkline-down circle {
+.account-sparkline-down polyline {
   stroke: var(--coral);
 }
 
