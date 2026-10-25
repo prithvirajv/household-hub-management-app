@@ -2230,3 +2230,72 @@ test("stampChangedNotes stamps only notes that were edited or created since the 
   assert.equal(noteContentSignature({ id: "z", a: 1, updatedAt: "x" }), noteContentSignature({ id: "z", a: 1, updatedAt: "y" }));
   assert.equal(stampChangedNotes(undefined, baseline, "x"), 0);
 });
+
+const { selectNewLinkedTransactions, rememberLinkedImportedIds, pendingDraftEffect, reconcileOpeningBalance, mergeBrokeragePositions } = require("../lib/shared-logic");
+
+test("selectNewLinkedTransactions keeps only mapped, not-yet-imported rows and never repeats an id within one sync", () => {
+  const mappings = { A1: { accountId: "chk" }, A2: {} };
+  const txns = [
+    { externalId: "sf:A1:1", remoteAccountId: "A1", amount: 5 }, { externalId: "sf:A1:2", remoteAccountId: "A1", amount: 6 },
+    { externalId: "sf:A2:9", remoteAccountId: "A2", amount: 7 }, { externalId: "sf:A1:1", remoteAccountId: "A1", amount: 5 }
+  ];
+  const result = selectNewLinkedTransactions(txns, mappings, ["sf:A1:2"]);
+  assert.deepEqual(result.fresh.map((t) => [t.externalId, t.accountId]), [["sf:A1:1", "chk"]]);
+  assert.deepEqual([result.unmapped, result.alreadyImported], [1, 2]);
+});
+
+test("rememberLinkedImportedIds appends new ids without repeats and drops the oldest past the cap", () => {
+  assert.deepEqual(rememberLinkedImportedIds(["a", "b"], ["b", "c"]), ["a", "b", "c"]);
+  const many = Array.from({ length: 3000 }, (_, i) => `id${i}`);
+  const capped = rememberLinkedImportedIds(many, ["new"]);
+  assert.equal(capped.length, 3000);
+  assert.equal(capped[0], "id1");
+  assert.equal(capped[2999], "new");
+});
+
+test("reconcileOpeningBalance makes the derived balance equal the bank's, for assets and for cards, counting pending Bank stream rows", () => {
+  const checking = { id: "chk", type: "checking", openingBalance: 100 };
+  const card = { id: "card", type: "credit_card", openingBalance: 0 };
+  const drafts = [{ accountId: "chk", amount: 40 }, { accountId: "card", amount: 25 }, { accountId: "other", amount: 999 }];
+  const state = { accounts: [checking, card], transactions: [{ accountId: "chk", date: "2026-10-01", amount: 10 }, { accountId: "card", date: "2026-10-01", amount: 60 }] };
+  const base = (id) => accountBalance(id, state, "2026-12-31");
+  assert.equal(base("chk"), 90);
+  assert.equal(pendingDraftEffect(checking, drafts), -40);
+  assert.equal(pendingDraftEffect(card, drafts), 25);
+  const newOpening = reconcileOpeningBalance(checking, base("chk") + pendingDraftEffect(checking, drafts), 1250.5);
+  assert.equal(newOpening, 1300.5);
+  const reconciled = { ...state, accounts: [{ ...checking, openingBalance: newOpening }, card] };
+  assert.equal(accountBalance("chk", reconciled, "2026-12-31") + pendingDraftEffect(checking, drafts), 1250.5);
+  const cardOpening = reconcileOpeningBalance(card, base("card") + pendingDraftEffect(card, drafts), -310);
+  const cardState = { ...state, accounts: [checking, { ...card, openingBalance: cardOpening }] };
+  assert.equal(accountBalance("card", cardState, "2026-12-31") + pendingDraftEffect(card, drafts), 310, "a card the bank reports at -310 is 310 owed");
+  assert.equal(reconcileOpeningBalance(checking, 90, NaN), 100, "an unusable bank balance changes nothing");
+});
+
+test("mergeBrokeragePositions adds, updates in place, adopts hand-entered holdings, removes sold ones and tracks cash", () => {
+  let counter = 0;
+  const createId = (seed) => `${seed}-${++counter}`;
+  const positions = [
+    { remoteAccountId: "BR-1", symbol: "aapl", name: "Apple", units: 10, price: 200, costBasis: 150, holdingType: "stock" },
+    { remoteAccountId: "BR-1", symbol: "VTSAX", name: "Total Market", units: 5, price: 100, costBasis: 90, holdingType: "fund" }
+  ];
+  const accounts = [{ remoteId: "BR-1", name: "Sample Brokerage" }];
+  const handEntered = { id: "mine", name: "Apple", assetClass: "stock", symbol: "AAPL", shares: 1, price: 1, costBasis: 0, groupId: "g1", groupName: "Fidelity", holdingType: "stock", value: 1 };
+  const other = { id: "house", name: "House", assetClass: "other", value: 300000 };
+  const first = mergeBrokeragePositions([handEntered, other], { linkId: "L1", positions, cash: { "BR-1": 125.5 }, accounts, mappings: { "BR-1": { groupId: "g1", groupName: "Fidelity" } } }, createId);
+  assert.deepEqual([first.added, first.updated, first.removed], [1, 1, 0]);
+  const aapl = first.assets.find((a) => a.id === "mine");
+  assert.deepEqual([aapl.shares, aapl.price, aapl.costBasis, aapl.value, aapl.linkedTo, aapl.groupId], [10, 200, 150, 2000, "L1:BR-1", "g1"]);
+  assert.equal(first.assets.find((a) => a.symbol === "VTSAX").holdingType, "fund");
+  assert.equal(first.assets.find((a) => a.assetClass === "cash").value, 125.5);
+  assert.ok(first.assets.includes(other), "unrelated assets are untouched");
+
+  const second = mergeBrokeragePositions(first.assets, { linkId: "L1", positions: [positions[0]], cash: { "BR-1": 0 }, accounts, mappings: { "BR-1": { groupId: "g1", groupName: "Fidelity" } } }, createId);
+  assert.deepEqual([second.added, second.updated, second.removed], [0, 1, 1], "VTSAX was sold");
+  assert.equal(second.assets.find((a) => a.assetClass === "cash").value, 0);
+  assert.equal(first.assets.length, 4, "input not mutated");
+
+  const fresh = mergeBrokeragePositions([], { linkId: "L2", positions: [{ ...positions[0], remoteAccountId: "BR-9" }], cash: {}, accounts: [{ remoteId: "BR-9", name: "Roth IRA" }], mappings: { "BR-9": {} } }, createId);
+  assert.equal(fresh.assets[0].groupName, "Roth IRA");
+  assert.equal(fresh.assets[0].groupId, "linked-L2-BR-9");
+});

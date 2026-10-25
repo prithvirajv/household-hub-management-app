@@ -15,6 +15,7 @@ const { Pool } = require("pg");
 const { OAuth2Client } = require("google-auth-library");
 const { countries } = require("countries-list");
 const { defaultState } = require("./default-state");
+const { registerLinkedAccountRoutes } = require("./linked-accounts");
 const { validateJournalPayload, buildDocumentObjectPath, sanitizeFilename, wouldCreateFolderCycle, collectDescendantFolderIds, SMS_CARRIERS, smsGatewayAddress, rollAnnualNotifyAtForward, choreNotifyAt, parseBankStatementPdfText, extractAccountActivityLabel, isValidEmail, parseImageReminderDraft, parseBatchSuggestions, pgDumpArgs } = require("../lib/shared-logic");
 const pdfParse = require("pdf-parse");
 const ExcelJS = require("exceljs");
@@ -4819,6 +4820,8 @@ app.get("/shared-notes/:token/:slug?", async (req, res, next) => {
     next(error);
   }
 });
+
+registerLinkedAccountRoutes({ app, requireSession, requireEditAccess, MEMORY_DB, memoryDb, pool });
 
 app.use((error, _req, res, _next) => {
   // body-parser rejections are the client's problem, not a server fault: an oversized body (the whole household state is

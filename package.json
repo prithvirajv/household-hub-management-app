@@ -23,7 +23,8 @@
     "google-auth-library": "^9.14.2",
     "nodemailer": "^9.0.1",
     "pdf-parse": "^1.1.1",
-    "pg": "^8.11.3"
+    "pg": "^8.11.3",
+    "snaptrade-typescript-sdk": "^13.1.11"
   },
   "devDependencies": {
     "@playwright/test": "^1.48.2"

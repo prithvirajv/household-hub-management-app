@@ -176,6 +176,22 @@ always-on Cloud SQL instance for this app's traffic level.
    knows it's required.
 4. Redeploy.
 
+## Linked accounts (SimpleFIN Bridge / SnapTrade)
+
+Code: `server/linked-accounts.js`; table `linked_accounts`; UI on the Wealth page. Stored credentials (a SimpleFIN access URL, a SnapTrade
+user secret) are AES-256-GCM encrypted with `LINK_ENCRYPTION_KEY` and never returned to a client.
+
+- `LINK_ENCRYPTION_KEY`: the deploy script reads it from `.env.deploy`, else from Secret Manager (`familyloop-link-encryption-key`), else
+  generates one and stores it on the first deploy. **Losing it makes every stored link unreadable** — users would have to link again.
+  Without it the feature reports "not configured".
+- SimpleFIN needs nothing else (each user buys their own Bridge subscription). SimpleFIN URLs are pinned to `*.simplefin.org` to prevent
+  server-side request forgery.
+- SnapTrade (optional): `SNAPTRADE_CLIENT_ID`, `SNAPTRADE_CONSUMER_KEY` (secret `familyloop-snaptrade-consumer-key`), `SNAPTRADE_MODE`
+  (`personal` = free single-user key, only `SNAPTRADE_PERSONAL_OWNER_EMAIL` may link; `commercial` = per-user registration, billed per
+  connected user). Connections are always requested read-only.
+- Syncs are client-driven (Sync now, or on opening Wealth if stale); there is no background job, so nothing is fetched while nobody has the
+  app open.
+
 ## Incident playbooks
 
 ### GCS uploads silently failing (documents never persist)

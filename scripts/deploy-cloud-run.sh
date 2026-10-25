@@ -57,6 +57,14 @@ GOOGLE_CLIENT_ID="${GOOGLE_CLIENT_ID:-}"
 FINNHUB_API_KEY="${FINNHUB_API_KEY:-}"
 GOOGLE_MAPS_API_KEY="${GOOGLE_MAPS_API_KEY:-}"
 GEMINI_API_KEY="${GEMINI_API_KEY:-}"
+# Linked accounts (SimpleFIN Bridge / SnapTrade). LINK_ENCRYPTION_KEY encrypts the stored bank/brokerage credentials; if it is not set
+# here it is read from Secret Manager, or generated once and stored there on the first deploy - losing it means linked accounts must be
+# linked again. The SnapTrade values are optional: without them only the SimpleFIN side is available.
+LINK_ENCRYPTION_KEY="${LINK_ENCRYPTION_KEY:-}"
+SNAPTRADE_CLIENT_ID="${SNAPTRADE_CLIENT_ID:-}"
+SNAPTRADE_CONSUMER_KEY="${SNAPTRADE_CONSUMER_KEY:-}"
+SNAPTRADE_MODE="${SNAPTRADE_MODE:-personal}"
+SNAPTRADE_PERSONAL_OWNER_EMAIL="${SNAPTRADE_PERSONAL_OWNER_EMAIL:-}"
 
 # Every credential above is stored in Secret Manager, not passed to Cloud Run
 # as a plaintext env var — this script only reads them from the environment
@@ -68,6 +76,8 @@ SMTP_PASS_SECRET="${SMTP_PASS_SECRET:-familyloop-smtp-pass}"
 NOTIFICATION_SECRET_NAME="${NOTIFICATION_SECRET_NAME:-familyloop-notification-secret}"
 FINNHUB_API_KEY_SECRET="${FINNHUB_API_KEY_SECRET:-familyloop-finnhub-api-key}"
 GEMINI_API_KEY_SECRET="${GEMINI_API_KEY_SECRET:-familyloop-gemini-api-key}"
+LINK_ENCRYPTION_KEY_SECRET="${LINK_ENCRYPTION_KEY_SECRET:-familyloop-link-encryption-key}"
+SNAPTRADE_CONSUMER_KEY_SECRET="${SNAPTRADE_CONSUMER_KEY_SECRET:-familyloop-snaptrade-consumer-key}"
 
 if [[ "${USE_CLOUD_SQL}" == "true" && -z "${DB_PASSWORD}" ]]; then
   echo "Set DB_PASSWORD or POSTGRES_PASSWORD for Cloud SQL" >&2
@@ -187,6 +197,16 @@ fi
 if [[ -n "${GEMINI_API_KEY}" ]]; then
   put_secret "${GEMINI_API_KEY_SECRET}" "${GEMINI_API_KEY}"
 fi
+if [[ -z "${LINK_ENCRYPTION_KEY}" ]]; then
+  LINK_ENCRYPTION_KEY="$(gcloud secrets versions access latest --secret="${LINK_ENCRYPTION_KEY_SECRET}" --project "${PROJECT_ID}" 2>/dev/null || true)"
+fi
+if [[ -z "${LINK_ENCRYPTION_KEY}" ]]; then
+  LINK_ENCRYPTION_KEY="$(openssl rand -base64 32)"
+fi
+put_secret "${LINK_ENCRYPTION_KEY_SECRET}" "${LINK_ENCRYPTION_KEY}"
+if [[ -n "${SNAPTRADE_CONSUMER_KEY}" ]]; then
+  put_secret "${SNAPTRADE_CONSUMER_KEY_SECRET}" "${SNAPTRADE_CONSUMER_KEY}"
+fi
 
 gcloud builds submit --tag "${IMAGE}" --project "${PROJECT_ID}" .
 
@@ -203,8 +223,15 @@ fi
 if [[ -n "${GEMINI_API_KEY}" ]]; then
   SECRET_REFS="${SECRET_REFS},GEMINI_API_KEY=${GEMINI_API_KEY_SECRET}:latest"
 fi
+SECRET_REFS="${SECRET_REFS},LINK_ENCRYPTION_KEY=${LINK_ENCRYPTION_KEY_SECRET}:latest"
+if [[ -n "${SNAPTRADE_CONSUMER_KEY}" ]]; then
+  SECRET_REFS="${SECRET_REFS},SNAPTRADE_CONSUMER_KEY=${SNAPTRADE_CONSUMER_KEY_SECRET}:latest"
+fi
 
 ENV_VARS="ADMIN_EMAIL=${ADMIN_EMAIL},ADMIN_NAME=${ADMIN_NAME},APP_BASE_URL=${APP_BASE_URL},EMAIL_FROM=${EMAIL_FROM},SMTP_HOST=${SMTP_HOST},SMTP_PORT=${SMTP_PORT},SMTP_SECURE=${SMTP_SECURE},SMTP_USER=${SMTP_USER},GCS_BUCKET=${GCS_BUCKET},GOOGLE_CLIENT_ID=${GOOGLE_CLIENT_ID},GOOGLE_MAPS_API_KEY=${GOOGLE_MAPS_API_KEY}"
+if [[ -n "${SNAPTRADE_CLIENT_ID}" ]]; then
+  ENV_VARS="${ENV_VARS},SNAPTRADE_CLIENT_ID=${SNAPTRADE_CLIENT_ID},SNAPTRADE_MODE=${SNAPTRADE_MODE},SNAPTRADE_PERSONAL_OWNER_EMAIL=${SNAPTRADE_PERSONAL_OWNER_EMAIL}"
+fi
 DEPLOY_ARGS=(
   "${SERVICE_NAME}"
   --project "${PROJECT_ID}"

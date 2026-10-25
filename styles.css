@@ -9189,3 +9189,32 @@ html[data-theme="dark"] .note-color-coral { background: color-mix(in srgb, #fff0
   width: auto;
   min-height: 0;
 }
+
+.linked-account-row,
+.linked-mapping-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  padding: 0.6rem 0;
+  border-top: 1px solid var(--line);
+}
+
+.linked-account-row small,
+.linked-mapping-row small {
+  display: block;
+  color: var(--muted);
+}
+
+.linked-mapping-panel,
+.linked-link-form {
+  display: grid;
+  gap: 0.6rem;
+  margin-top: 0.75rem;
+  padding-top: 0.75rem;
+  border-top: 1px solid var(--line);
+}
+
+.linked-mapping-row select {
+  max-width: 55%;
+}

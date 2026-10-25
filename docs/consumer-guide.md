@@ -446,6 +446,27 @@ more convenient.
   every holding in a group at once from the card, or one at a time from
   Manage list.
 
+### Linked accounts (automatic balances, transactions and holdings)
+
+On the Wealth page, **Linked accounts** keeps things current without manual
+entry. It is read-only: FamilyLoop can never move money or place trades.
+
+- **Link a bank or card (SimpleFIN Bridge):** create a setup token at
+  bridge.simplefin.org (about $15/year; each token works once), paste it
+  under **Link a bank**, then choose where each account goes — an existing
+  Wealth account, or a new one. New transactions arrive in **Bank stream**
+  (and go through AI categorization and the safe auto-add), and each mapped
+  account's balance is brought in line with the bank's. Pending rows wait
+  until they post.
+- **Connect a brokerage (SnapTrade):** opens SnapTrade's secure sign-in;
+  afterwards choose a holdings group per brokerage account. Positions,
+  prices, cost basis and cash update in place, and holdings you've sold
+  disappear. (Needs the server to have SnapTrade keys.)
+- **Sync now** refreshes a link on demand; opening Wealth also refreshes any
+  link that hasn't synced in six hours. If a bank asks you to sign in again,
+  the link shows **Needs reconnecting** — unlink it and link again.
+- Unlinking keeps everything already imported.
+
 ## Sharing
 
 1. Select **Invite**, choose a preset role (co-owner, adult, viewer, or

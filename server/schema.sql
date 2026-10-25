@@ -302,3 +302,22 @@ CREATE TABLE IF NOT EXISTS note_user_shares (
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   UNIQUE (household_id, note_id, shared_with_user_id)
 );
+
+-- Linked accounts: a SimpleFIN Bridge connection (bank/card balances + transactions) or a SnapTrade brokerage connection (positions).
+-- credentials is AES-256-GCM ciphertext (see server/linked-accounts.js) and is never sent to a client; mappings maps each remote
+-- account id to the local Wealth account / holdings group it feeds.
+CREATE TABLE IF NOT EXISTS linked_accounts (
+  id UUID PRIMARY KEY,
+  household_id UUID NOT NULL REFERENCES households(id) ON DELETE CASCADE,
+  provider TEXT NOT NULL,
+  label TEXT NOT NULL DEFAULT '',
+  credentials TEXT NOT NULL,
+  mappings JSONB NOT NULL DEFAULT '{}'::jsonb,
+  status TEXT NOT NULL DEFAULT 'active',
+  last_sync_at TIMESTAMPTZ,
+  last_error TEXT NOT NULL DEFAULT '',
+  created_by UUID REFERENCES users(id) ON DELETE SET NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS idx_linked_accounts_household_id ON linked_accounts(household_id);

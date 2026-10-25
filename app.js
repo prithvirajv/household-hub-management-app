@@ -162,6 +162,14 @@ let mealsPickerSelectedRecipeId = "";
 // reads as three real meals instead of 28 equal-weight cells.
 let mealsShowSnacks = false;
 let bankImportFeedback = "";
+// Linked accounts (SimpleFIN Bridge / SnapTrade) - see server/linked-accounts.js. linkedMapping is the open "choose where each remote
+// account goes" panel: { linkId, remote: [...], choices: { remoteId: "skip" | "new" | <local account/group id> } }.
+let linkedAccounts = null;
+let linkedFeedback = "";
+let linkedBusyId = "";
+let linkedMapping = null;
+let linkedPortalLinkId = "";
+let linkedAutoSyncDone = false;
 let ledgerAcceptFeedback = "";
 let transactionValidationFeedback = "";
 // Holds { lineIds, perform } between opening the delete-subcategory
@@ -2007,6 +2015,7 @@ function render() {
   bindViewEvents();
   if (currentView === "admin" && !adminData) loadAdminData();
   if (["documents", "wealth", "notes"].includes(currentView) && !documentsData) loadDocumentsData();
+  if (currentView === "wealth" && !linkedAccounts) loadLinkedAccounts();
   if (currentView === "notes" && sharedWithMeNotes === null) loadSharedWithMeNotes();
   if (["sharing", "calendar"].includes(currentView) && !sharingAccess) loadSharingAccess();
   if (currentView === "calendar" && sharedCalendarMembers.length === 0) loadCalendarMembers();
@@ -5865,6 +5874,7 @@ function renderWealth() {
   return `
     <section class="work-grid wealth-layout">
       <div class="main-stack">
+        ${renderLinkedAccountsCard()}
         <section class="card">
           <div class="section-head"><div><span class="card-label">Trend</span><h3>Net worth history</h3></div><b class="${wealthNetWorthChange < 0 ? "danger" : ""}">${wealthNetWorthChange >= 0 ? "+" : ""}${money.format(wealthNetWorthChange)} over ${wealthTrend.length} months</b></div>
           ${netWorthTrendSvg(wealthTrend)}
@@ -9948,13 +9958,13 @@ function bindViewEvents() {
   // Bank Stream draft from an earlier import, or (a return within the same
   // billing cycle) another row in this very batch - so the search pool
   // covers all three instead of only the accepted ledger.
-  function addBankStreamRows(rows, file, idPrefix, extraAccountHint) {
+  function addBankStreamRows(rows, file, idPrefix, extraAccountHint, options = {}) {
     // A checking-account "Account Activity" PDF's own title line names the
     // real account ("Adv Plus Banking - 6769") - the upload's filename is
     // BofA's own generic "...Print Transaction Details.pdf" regardless of
     // which account it's for, so that alone can never match; the content
     // hint is tried first since it's the more specific/reliable signal.
-    const matchedAccount = matchAccountByHints([extraAccountHint, file.name], state.accounts);
+    const matchedAccount = options.accountId ? state.accounts.find((account) => account.id === options.accountId) || null : matchAccountByHints([extraAccountHint, file.name], state.accounts);
     state.transactionInboxDrafts ||= [];
     const alreadyKnown = [...state.transactions, ...state.transactionInboxDrafts];
     const duplicateCount = rows.filter((row) => isDuplicateTransaction(row, alreadyKnown)).length;
@@ -9988,6 +9998,7 @@ function bindViewEvents() {
         accountId: matchedAccount?.id || historyAccountId || "",
         date: row.date,
         orderNumber: row.orderNumber || "",
+        externalId: row.externalId || "",
         isDeposit: !!row.isDeposit,
         isPayment: !!row.isPayment,
         isPending: !!row.isPending,
@@ -11516,6 +11527,125 @@ function bindViewEvents() {
       render();
     });
   });
+
+  // ---- Linked accounts (Wealth page) ----
+  const openLinkedMapping = async (linkId) => {
+    try {
+      const { accounts } = await api(`/api/linked-accounts/${linkId}/remote-accounts`);
+      const link = (linkedAccounts?.links || []).find((item) => item.id === linkId);
+      const choices = {};
+      accounts.forEach((remote) => {
+        const existing = link?.mappings?.[remote.remoteId];
+        choices[remote.remoteId] = existing ? (existing.accountId || existing.groupId || "skip") : "skip";
+      });
+      linkedMapping = { linkId, remote: accounts, choices };
+      linkedFeedback = "";
+    } catch (error) {
+      linkedFeedback = error.message;
+    }
+    await loadLinkedAccounts(false);
+    render();
+  };
+
+  $("#linkedSimplefinForm")?.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    const form = event.currentTarget;
+    const data = Object.fromEntries(new FormData(form));
+    form.querySelector('[type="submit"]').disabled = true;
+    try {
+      const { link } = await api("/api/linked-accounts/simplefin", { method: "POST", body: JSON.stringify({ setupToken: data.setupToken, label: data.label }) });
+      await loadLinkedAccounts(false);
+      await openLinkedMapping(link.id);
+    } catch (error) {
+      linkedFeedback = error.message;
+      render();
+    }
+  });
+
+  $("#linkedSnaptradeButton")?.addEventListener("click", async () => {
+    try {
+      const { link, portalUrl } = await api("/api/linked-accounts/snaptrade", { method: "POST", body: JSON.stringify({ label: "Brokerage", redirectUrl: `${location.origin}/index.html#wealth` }) });
+      linkedPortalLinkId = link.id;
+      window.open(portalUrl, "_blank", "noopener");
+      linkedFeedback = "Finish connecting in the SnapTrade tab, then choose Choose accounts on the new link below.";
+      await loadLinkedAccounts(false);
+    } catch (error) {
+      linkedFeedback = error.message;
+    }
+    render();
+  });
+
+  document.querySelectorAll("[data-linked-portal]").forEach((button) => {
+    button.addEventListener("click", async () => {
+      try {
+        const { portalUrl } = await api(`/api/linked-accounts/${button.dataset.linkedPortal}/portal`, { method: "POST", body: JSON.stringify({ redirectUrl: `${location.origin}/index.html#wealth` }) });
+        window.open(portalUrl, "_blank", "noopener");
+      } catch (error) {
+        linkedFeedback = error.message;
+        render();
+      }
+    });
+  });
+
+  document.querySelectorAll("[data-linked-sync]").forEach((button) => {
+    button.addEventListener("click", () => syncLinkedAccount(button.dataset.linkedSync, addBankStreamRows));
+  });
+
+  document.querySelectorAll("[data-linked-map]").forEach((button) => {
+    button.addEventListener("click", () => openLinkedMapping(button.dataset.linkedMap));
+  });
+
+  document.querySelectorAll("[data-linked-remove]").forEach((button) => {
+    button.addEventListener("click", async () => {
+      const link = (linkedAccounts?.links || []).find((item) => item.id === button.dataset.linkedRemove);
+      if (!(await showConfirm(`Unlink "${link?.label || "this connection"}"? Transactions and holdings already imported stay; nothing new will arrive.`, { confirmLabel: "Unlink" }))) return;
+      try {
+        await api(`/api/linked-accounts/${button.dataset.linkedRemove}`, { method: "DELETE" });
+        if (linkedMapping?.linkId === button.dataset.linkedRemove) linkedMapping = null;
+        linkedFeedback = "Unlinked.";
+        await loadLinkedAccounts(false);
+      } catch (error) {
+        linkedFeedback = error.message;
+      }
+      render();
+    });
+  });
+
+  document.querySelectorAll("[data-linked-choice]").forEach((select) => {
+    select.addEventListener("change", () => { if (linkedMapping) linkedMapping.choices[select.dataset.linkedChoice] = select.value; });
+  });
+
+  $("#linkedMappingCancel")?.addEventListener("click", () => { linkedMapping = null; render(); });
+
+  $("#linkedMappingSave")?.addEventListener("click", async () => {
+    if (!linkedMapping) return;
+    const { linkId, remote, choices } = linkedMapping;
+    const link = (linkedAccounts?.links || []).find((item) => item.id === linkId);
+    if (!link) return;
+    const mappings = {};
+    remote.forEach((entry) => {
+      const choice = choices[entry.remoteId] || "skip";
+      if (choice === "skip") return;
+      if (link.provider === "snaptrade") {
+        const group = choice === "new" ? null : groupStockHoldings(state.goals.netWorth.assets).find((item) => item.groupId === choice);
+        mappings[entry.remoteId] = group ? { groupId: group.groupId, groupName: group.groupName } : { groupName: entry.name };
+      } else {
+        mappings[entry.remoteId] = { accountId: choice === "new" ? createLinkedWealthAccount(entry) : choice };
+      }
+    });
+    try {
+      await api(`/api/linked-accounts/${linkId}/mappings`, { method: "PUT", body: JSON.stringify({ mappings }) });
+      linkedMapping = null;
+      autosaveState();
+      await loadLinkedAccounts(false);
+      await syncLinkedAccount(linkId, addBankStreamRows);
+    } catch (error) {
+      linkedFeedback = error.message;
+      render();
+    }
+  });
+
+  if (currentView === "wealth") maybeAutoSyncLinkedAccounts(addBankStreamRows);
 
   $("#addAccountButton")?.addEventListener("click", () => {
     const name = `New account ${state.accounts.length + 1}`;
@@ -13459,11 +13589,167 @@ view.addEventListener("click", (event) => {
 function postDraftToLedger(inboxItem) {
   const lineId = inboxItem.lineId || "";
   const memo = inboxItem.recurringId ? "Recurring bill" : "Accepted bank stream item";
-  state.transactions.unshift(makeTransaction({ date: inboxItem.date, payee: inboxItem.payee, amount: Number(inboxItem.amount), lineId, memo, accountId: inboxItem.accountId || "", orderNumber: inboxItem.orderNumber || "", tags: inboxItem.tags || [] }));
+  const posted = makeTransaction({ date: inboxItem.date, payee: inboxItem.payee, amount: Number(inboxItem.amount), lineId, memo, accountId: inboxItem.accountId || "", orderNumber: inboxItem.orderNumber || "", tags: inboxItem.tags || [] });
+  if (inboxItem.externalId) posted.externalId = inboxItem.externalId;
+  state.transactions.unshift(posted);
   state.transactionInboxDone ||= [];
   if (!state.transactionInboxDone.includes(inboxItem.id)) state.transactionInboxDone.push(inboxItem.id);
   state.transactionInboxDrafts = (state.transactionInboxDrafts || []).filter((item) => item.id !== inboxItem.id);
   state.household.activity.unshift(`Assigned ${inboxItem.payee} to ${transactionAssignmentLabel({ lineId })}`);
+}
+
+// ---- Linked accounts (SimpleFIN Bridge / SnapTrade) ----
+// The server (server/linked-accounts.js) only fetches and normalizes. This client turns a sync into Bank stream drafts (which then go
+// through the same AI categorization and safe auto-add as a file import), brings mapped account balances in line with the bank, and
+// merges brokerage positions into holdings - all through the normal autosave, so a sync can never race the user's own edits.
+async function loadLinkedAccounts(shouldRender = true) {
+  try {
+    linkedAccounts = await api("/api/linked-accounts");
+  } catch (error) {
+    linkedAccounts = { configured: false, providers: {}, links: [], error: error.message };
+  }
+  if (shouldRender && currentView === "wealth") render();
+}
+
+function linkedProviderLabel(link) {
+  return link.provider === "snaptrade" ? "Brokerage (SnapTrade)" : "Bank (SimpleFIN)";
+}
+
+function linkedStatusText(link) {
+  if (link.status === "needs_reconnect") return "Needs reconnecting - remove it and link again";
+  const when = link.lastSyncAt ? `Last synced ${new Date(link.lastSyncAt).toLocaleString()}` : "Not synced yet";
+  return link.lastError ? `${when} - ${link.lastError}` : when;
+}
+
+function renderLinkedAccountsCard() {
+  if (!linkedAccounts) return `<section class="card linked-accounts-card"><div class="card-label">Linked accounts</div><p class="muted">Loading…</p></section>`;
+  if (!linkedAccounts.configured) return "";
+  const providers = linkedAccounts.providers || {};
+  const links = linkedAccounts.links || [];
+  const mappingPanel = linkedMapping ? renderLinkedMappingPanel() : "";
+  return `<section class="card linked-accounts-card">
+    <div class="section-head"><div><span class="card-label">Linked accounts</span><h3>Keep Wealth up to date automatically</h3></div></div>
+    <p class="muted">Link a bank or card through SimpleFIN Bridge to pull balances and new transactions into Bank stream, or a brokerage through SnapTrade to keep your holdings current. Read-only - FamilyLoop can never move money or place trades.</p>
+    ${linkedFeedback ? `<p class="muted" role="status">${escapeHtml(linkedFeedback)}</p>` : ""}
+    ${links.map((link) => `<div class="linked-account-row">
+      <div><strong>${escapeHtml(link.label)}</strong><small>${linkedProviderLabel(link)} · ${escapeHtml(linkedStatusText(link))}</small></div>
+      <div class="button-row">
+        <button type="button" class="ghost" data-linked-sync="${link.id}" ${linkedBusyId === link.id ? "disabled" : ""}>${linkedBusyId === link.id ? "Working…" : "Sync now"}</button>
+        <button type="button" class="ghost" data-linked-map="${link.id}">Choose accounts</button>
+        ${link.provider === "snaptrade" ? `<button type="button" class="ghost" data-linked-portal="${link.id}">Add brokerage</button>` : ""}
+        <button type="button" class="icon-button danger-button" data-linked-remove="${link.id}" aria-label="Remove ${escapeHtml(link.label)}">×</button>
+      </div>
+    </div>`).join("")}
+    ${mappingPanel}
+    ${providers.simplefin ? `<form id="linkedSimplefinForm" class="linked-link-form">
+      <label>SimpleFIN setup token<input name="setupToken" placeholder="Paste the token from bridge.simplefin.org" autocomplete="off" required></label>
+      <label>Name<input name="label" placeholder="My bank (optional)"></label>
+      <button type="submit">Link a bank</button>
+      <small class="muted">Create a token at <a href="https://bridge.simplefin.org" target="_blank" rel="noopener noreferrer">bridge.simplefin.org</a> (about $15/year). Each token works once.</small>
+    </form>` : ""}
+    ${providers.snaptrade ? `<div class="linked-link-form"><button type="button" id="linkedSnaptradeButton" class="ghost">Connect a brokerage</button><small class="muted">Opens SnapTrade's secure sign-in in a new tab; come back and choose its accounts.</small></div>` : ""}
+  </section>`;
+}
+
+function renderLinkedMappingPanel() {
+  const link = (linkedAccounts?.links || []).find((item) => item.id === linkedMapping.linkId);
+  if (!link) return "";
+  const isBrokerage = link.provider === "snaptrade";
+  const groups = groupStockHoldings(state.goals.netWorth.assets);
+  const options = (remote) => {
+    const selected = linkedMapping.choices[remote.remoteId] || "skip";
+    const chosen = (value) => (selected === value ? "selected" : "");
+    if (isBrokerage) {
+      return `<option value="skip" ${chosen("skip")}>Don't track</option><option value="new" ${chosen("new")}>New holdings group</option>${groups.map((group) => `<option value="${group.groupId}" ${chosen(group.groupId)}>${escapeHtml(group.groupName)}</option>`).join("")}`;
+    }
+    return `<option value="skip" ${chosen("skip")}>Don't import</option><option value="new" ${chosen("new")}>New Wealth account</option>${state.accounts.filter((account) => !account.closedAt).map((account) => `<option value="${account.id}" ${chosen(account.id)}>${escapeHtml(account.name)}</option>`).join("")}`;
+  };
+  return `<div class="linked-mapping-panel">
+    <h4>Where should each account go?</h4>
+    ${linkedMapping.remote.length ? linkedMapping.remote.map((remote) => `<div class="linked-mapping-row">
+      <div><strong>${escapeHtml(remote.name)}</strong><small>${escapeHtml(remote.orgName)}${remote.balance !== null ? ` · ${exactMoney.format(remote.balance)}` : ""}</small></div>
+      <select data-linked-choice="${escapeHtml(remote.remoteId)}" aria-label="Where ${escapeHtml(remote.name)} goes">${options(remote)}</select>
+    </div>`).join("") : `<p class="muted">No accounts found yet.${isBrokerage ? " Finish connecting in the SnapTrade tab, then choose accounts again." : ""}</p>`}
+    <div class="button-row"><button type="button" id="linkedMappingSave">Save and sync</button><button type="button" class="ghost" id="linkedMappingCancel">Cancel</button></div>
+  </div>`;
+}
+
+function createLinkedWealthAccount(remote) {
+  const isCard = remote.balance !== null && remote.balance < 0;
+  const name = remote.orgName ? `${remote.orgName} ${remote.name}` : remote.name;
+  const netWorthId = uniqueId(name);
+  if (isCard) state.goals.netWorth.liabilities.push({ id: netWorthId, name, value: 0 });
+  else state.goals.netWorth.assets.push({ id: netWorthId, name, value: 0, assetClass: "cash" });
+  const account = { id: uniqueId(name), name, type: isCard ? "credit_card" : "checking", openingBalance: 0, netWorthAssetId: isCard ? "" : netWorthId, netWorthLiabilityId: isCard ? netWorthId : "", createdAt: dateKey(new Date()) };
+  state.accounts.push(account);
+  return account.id;
+}
+
+// Applies the SimpleFIN part of a sync payload. addRows is addBankStreamRows (bound inside bindViewEvents).
+function applySimplefinSync(link, payload, addRows) {
+  state.linkedImportedIds ||= [];
+  const knownIds = new Set([...state.linkedImportedIds, ...state.transactions.map((t) => t.externalId).filter(Boolean), ...(state.transactionInboxDrafts || []).map((d) => d.externalId).filter(Boolean)]);
+  const { fresh, unmapped, alreadyImported } = selectNewLinkedTransactions(payload.transactions, link.mappings, knownIds);
+  const posted = fresh.filter((transaction) => !transaction.pending);
+  const pendingSkipped = fresh.length - posted.length;
+  const byAccount = new Map();
+  posted.forEach((transaction) => { byAccount.set(transaction.accountId, [...(byAccount.get(transaction.accountId) || []), transaction]); });
+  byAccount.forEach((rows, accountId) => addRows(rows, { name: `${link.label}` }, "linked-import", "", { accountId }));
+  state.linkedImportedIds = rememberLinkedImportedIds(state.linkedImportedIds, posted.map((transaction) => transaction.externalId));
+  // Bring balances in line with the bank, counting rows still waiting in Bank stream (accepting one later changes nothing).
+  let balancesUpdated = 0;
+  (payload.accounts || []).forEach((remote) => {
+    const accountId = link.mappings[remote.remoteId]?.accountId;
+    const account = accountId ? state.accounts.find((item) => item.id === accountId) : null;
+    if (!account || remote.balance === null) return;
+    const current = currentAccountBalance(account.id) + pendingDraftEffect(account, state.transactionInboxDrafts);
+    const opening = reconcileOpeningBalance(account, current, remote.balance);
+    if (opening !== Number(account.openingBalance || 0)) { account.openingBalance = opening; balancesUpdated += 1; }
+  });
+  return { imported: posted.length, pendingSkipped, unmapped, alreadyImported, balancesUpdated };
+}
+
+function applySnaptradeSync(link, payload) {
+  const result = mergeBrokeragePositions(state.goals.netWorth.assets, { linkId: link.id, positions: payload.positions, cash: payload.cash, accounts: payload.accounts, mappings: link.mappings }, uniqueId);
+  state.goals.netWorth.assets = result.assets;
+  return result;
+}
+
+async function syncLinkedAccount(linkId, addRows, { quiet = false } = {}) {
+  const link = (linkedAccounts?.links || []).find((item) => item.id === linkId);
+  if (!link || linkedBusyId) return;
+  linkedBusyId = linkId;
+  if (!quiet) { linkedFeedback = `Syncing ${link.label}…`; render(); }
+  try {
+    const payload = await api(`/api/linked-accounts/${linkId}/sync`, { method: "POST", body: "{}" });
+    let summary;
+    if (link.provider === "simplefin") {
+      const result = applySimplefinSync(link, payload, addRows);
+      summary = `${link.label}: ${result.imported} new transaction${result.imported === 1 ? "" : "s"} sent to Bank stream${result.balancesUpdated ? `, ${result.balancesUpdated} balance${result.balancesUpdated === 1 ? "" : "s"} updated` : ""}${result.pendingSkipped ? `; ${result.pendingSkipped} pending skipped until they post` : ""}${result.unmapped ? `; ${result.unmapped} from accounts you chose not to import` : ""}.`;
+      if (payload.errors?.length) summary += ` The bank reported: ${payload.errors.join("; ")}`;
+    } else {
+      const result = applySnaptradeSync(link, payload);
+      summary = `${link.label}: ${result.added} holding${result.added === 1 ? "" : "s"} added, ${result.updated} updated, ${result.removed} removed.`;
+    }
+    state.household.activity.unshift(summary);
+    if (!quiet || /new transaction|added|updated|removed/.test(summary)) linkedFeedback = summary;
+    autosaveState();
+    await loadLinkedAccounts(false);
+  } catch (error) {
+    linkedFeedback = `${link.label}: ${error.message}`;
+    await loadLinkedAccounts(false);
+  } finally {
+    linkedBusyId = "";
+    render();
+  }
+}
+
+// On opening Wealth, quietly refresh any link that has not synced in the last 6 hours (once per page load).
+function maybeAutoSyncLinkedAccounts(addRows) {
+  if (linkedAutoSyncDone || !linkedAccounts?.configured || sessionUser?.accessLevel === "view") return;
+  linkedAutoSyncDone = true;
+  const stale = (linkedAccounts.links || []).filter((link) => link.status === "active" && Object.keys(link.mappings || {}).length && (!link.lastSyncAt || Date.now() - new Date(link.lastSyncAt).getTime() > 6 * 3600 * 1000));
+  stale.reduce((chain, link) => chain.then(() => syncLinkedAccount(link.id, addRows, { quiet: true })), Promise.resolve());
 }
 
 // ---- AI categorization on import ----
