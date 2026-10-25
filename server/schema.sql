@@ -321,3 +321,7 @@ CREATE TABLE IF NOT EXISTS linked_accounts (
 );
 
 CREATE INDEX IF NOT EXISTS idx_linked_accounts_household_id ON linked_accounts(household_id);
+
+-- Remote accounts a link has reported that the user has not yet chosen a destination for (or chosen to skip), so the apps can say
+-- "N new accounts found".
+ALTER TABLE linked_accounts ADD COLUMN IF NOT EXISTS new_accounts JSONB NOT NULL DEFAULT '[]'::jsonb;

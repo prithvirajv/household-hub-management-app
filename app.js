@@ -11625,7 +11625,8 @@ function bindViewEvents() {
     const mappings = {};
     remote.forEach((entry) => {
       const choice = choices[entry.remoteId] || "skip";
-      if (choice === "skip") return;
+      // A deliberate "don't import" is remembered, so only accounts added later are reported as new.
+      if (choice === "skip") { mappings[entry.remoteId] = { skipped: true }; return; }
       if (link.provider === "snaptrade") {
         const group = choice === "new" ? null : groupStockHoldings(state.goals.netWorth.assets).find((item) => item.groupId === choice);
         mappings[entry.remoteId] = group ? { groupId: group.groupId, groupName: group.groupName } : { groupName: entry.name };
@@ -13635,10 +13636,10 @@ function renderLinkedAccountsCard() {
     <p class="muted">Link a bank or card through SimpleFIN Bridge to pull balances and new transactions into Bank stream, or a brokerage through SnapTrade to keep your holdings current. Read-only - FamilyLoop can never move money or place trades.</p>
     ${linkedFeedback ? `<p class="muted" role="status">${escapeHtml(linkedFeedback)}</p>` : ""}
     ${links.map((link) => `<div class="linked-account-row">
-      <div><strong>${escapeHtml(link.label)}</strong><small>${linkedProviderLabel(link)} · ${escapeHtml(linkedStatusText(link))}</small></div>
+      <div><strong>${escapeHtml(link.label)}</strong><small>${linkedProviderLabel(link)} · ${escapeHtml(linkedStatusText(link))}</small>${(link.newAccounts || []).length ? `<small class="linked-new-accounts"><b>${link.newAccounts.length} new account${link.newAccounts.length === 1 ? "" : "s"} found</b> (${escapeHtml(link.newAccounts.map((account) => account.name).join(", "))}) - choose where ${link.newAccounts.length === 1 ? "it goes" : "they go"}.</small>` : ""}</div>
       <div class="button-row">
         <button type="button" class="ghost" data-linked-sync="${link.id}" ${linkedBusyId === link.id ? "disabled" : ""}>${linkedBusyId === link.id ? "Working…" : "Sync now"}</button>
-        <button type="button" class="ghost" data-linked-map="${link.id}">Choose accounts</button>
+        <button type="button" class="${(link.newAccounts || []).length ? "" : "ghost"}" data-linked-map="${link.id}">Choose accounts</button>
         ${link.provider === "snaptrade" ? `<button type="button" class="ghost" data-linked-portal="${link.id}">Add brokerage</button>` : ""}
         <button type="button" class="icon-button danger-button" data-linked-remove="${link.id}" aria-label="Remove ${escapeHtml(link.label)}">×</button>
       </div>
@@ -13672,7 +13673,7 @@ function renderLinkedMappingPanel() {
   return `<div class="linked-mapping-panel">
     <h4>Where should each account go?</h4>
     ${linkedMapping.remote.length ? linkedMapping.remote.map((remote) => `<div class="linked-mapping-row">
-      <div><strong>${escapeHtml(remote.name)}</strong><small>${escapeHtml(remote.orgName)}${remote.balance !== null ? ` · ${exactMoney.format(remote.balance)}` : ""}</small></div>
+      <div><strong>${escapeHtml(remote.name)}</strong>${link.mappings && !Object.prototype.hasOwnProperty.call(link.mappings, remote.remoteId) ? ` <span class="pill pill-info">New</span>` : ""}<small>${escapeHtml(remote.orgName)}${remote.balance !== null ? ` · ${exactMoney.format(remote.balance)}` : ""}</small></div>
       <select data-linked-choice="${escapeHtml(remote.remoteId)}" aria-label="Where ${escapeHtml(remote.name)} goes">${options(remote)}</select>
     </div>`).join("") : `<p class="muted">No accounts found yet.${isBrokerage ? " Finish connecting in the SnapTrade tab, then choose accounts again." : ""}</p>`}
     <div class="button-row"><button type="button" id="linkedMappingSave">Save and sync</button><button type="button" class="ghost" id="linkedMappingCancel">Cancel</button></div>

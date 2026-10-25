@@ -470,6 +470,11 @@ entry. It is read-only: FamilyLoop can never move money or place trades.
   afterwards choose a holdings group per brokerage account. Positions,
   prices, cost basis and cash update in place, and holdings you've sold
   disappear. (Needs the server to have SnapTrade keys.)
+- **New accounts:** if you add an account at SimpleFIN or SnapTrade later, the
+  next sync shows "N new accounts found" on the link (and marks them **New**
+  under **Choose accounts**). Until you choose where each goes it is ignored.
+  A "Don't import" choice is remembered, so skipped accounts aren't reported
+  again.
 - **Sync now** refreshes a link on demand; opening Wealth also refreshes any
   link that hasn't synced in six hours. If a bank asks you to sign in again,
   the link shows **Needs reconnecting** — unlink it and link again.

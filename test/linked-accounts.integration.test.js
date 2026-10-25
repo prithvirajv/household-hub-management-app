@@ -3,7 +3,7 @@ const http = require("node:http");
 const test = require("node:test");
 const express = require("express");
 const { startTestServer } = require("./helpers");
-const { registerLinkedAccountRoutes, encryptJson, decryptJson, normalizeSnaptradePositions, normalizeSimplefinTransactions, snaptradeConfig } = require("../server/linked-accounts");
+const { registerLinkedAccountRoutes, findNewAccounts, encryptJson, decryptJson, normalizeSnaptradePositions, normalizeSimplefinTransactions, snaptradeConfig } = require("../server/linked-accounts");
 
 const KEY = "test-link-encryption-key-with-entropy";
 
@@ -48,6 +48,13 @@ test("credentials are encrypted at rest: round-trip works, tampering and a wrong
   const parts = payload.split(":"); parts[3] = Buffer.from("tampered").toString("base64");
   assert.throws(() => decryptJson(KEY, parts.join(":")));
   assert.throws(() => decryptJson(KEY, "garbage"));
+});
+
+test("findNewAccounts reports only accounts with no decision, and a skipped entry counts as a decision", () => {
+  const remote = [{ remoteId: "A", name: "One", orgName: "Bank" }, { remoteId: "B", name: "Two" }, { remoteId: "C", name: "Three" }];
+  assert.deepEqual(findNewAccounts(remote, { A: { accountId: "x" }, B: { skipped: true } }), [{ remoteId: "C", name: "Three", orgName: "" }]);
+  assert.deepEqual(findNewAccounts(remote, {}).length, 3);
+  assert.deepEqual(findNewAccounts([], { A: {} }), []);
 });
 
 test("SimpleFIN transactions flip to the app's sign convention and pending rows are marked", () => {
@@ -131,6 +138,18 @@ test("SimpleFIN link flow end to end: not configured without a key, SSRF-pinned 
     assert.ok(list.body.links[0].lastSyncAt, "a successful sync is recorded");
     assert.equal(list.body.links[0].lastError, "");
     assert.ok(!JSON.stringify(list.body).includes("s3cret"));
+
+    // ACT-2 was left without a decision, so it is reported as new until the user decides (a deliberate skip is remembered).
+    assert.deepEqual(list.body.links[0].newAccounts.map((a) => [a.remoteId, a.name]), [["ACT-2", "Sample Card"]]);
+    const decided = await configured.request(`/api/linked-accounts/${id}/mappings`, { method: "PUT", headers: { cookie }, body: JSON.stringify({ mappings: { "ACT-1": { accountId: "local-checking" }, "ACT-2": { skipped: true } } }) });
+    assert.deepEqual(decided.body.link.newAccounts, []);
+    assert.equal(decided.body.link.mappings["ACT-2"].skipped, true);
+    await configured.request(`/api/linked-accounts/${id}/sync`, { method: "POST", headers: { cookie }, body: "{}" });
+    assert.deepEqual((await configured.request("/api/linked-accounts", { headers: { cookie } })).body.links[0].newAccounts, [], "a skipped account is not reported as new again");
+    // An account added at the bank later has no entry, so it shows up as new on the next sync.
+    await configured.request(`/api/linked-accounts/${id}/mappings`, { method: "PUT", headers: { cookie }, body: JSON.stringify({ mappings: { "ACT-1": { accountId: "local-checking" } } }) });
+    await configured.request(`/api/linked-accounts/${id}/sync`, { method: "POST", headers: { cookie }, body: "{}" });
+    assert.deepEqual((await configured.request("/api/linked-accounts", { headers: { cookie } })).body.links[0].newAccounts.map((a) => a.remoteId), ["ACT-2"]);
 
     const otherCookie = await signup(configured, "links-other@example.com");
     assert.deepEqual((await configured.request("/api/linked-accounts", { headers: { cookie: otherCookie } })).body.links, []);

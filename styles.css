@@ -9218,3 +9218,7 @@ html[data-theme="dark"] .note-color-coral { background: color-mix(in srgb, #fff0
 .linked-mapping-row select {
   max-width: 55%;
 }
+
+.linked-new-accounts {
+  color: var(--gold, #b7791f);
+}
