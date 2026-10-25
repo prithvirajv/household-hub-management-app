@@ -381,7 +381,8 @@ function registerLinkedAccountRoutes({ app, requireSession, requireEditAccess, M
       const accountId = String(value?.accountId || "").slice(0, 120);
       const groupId = String(value?.groupId || "").slice(0, 120);
       const groupName = String(value?.groupName || "").slice(0, 120);
-      if (accountId || groupId) mappings[String(remoteId).slice(0, 200)] = { accountId, groupId, groupName };
+      const debtId = String(value?.debtId || "").slice(0, 120);
+      if (accountId || groupId || debtId) mappings[String(remoteId).slice(0, 200)] = { accountId, groupId, groupName, ...(debtId ? { debtId } : {}) };
       else if (value?.skipped === true) mappings[String(remoteId).slice(0, 200)] = { accountId: "", groupId: "", groupName: "", skipped: true };
     });
     // The client sends a decision (a destination or skipped) for every account it was shown, so nothing is "new" until SimpleFIN/SnapTrade

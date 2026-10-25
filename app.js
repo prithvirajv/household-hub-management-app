@@ -11536,7 +11536,7 @@ function bindViewEvents() {
       const choices = {};
       accounts.forEach((remote) => {
         const existing = link?.mappings?.[remote.remoteId];
-        choices[remote.remoteId] = existing ? (existing.accountId || (existing.groupId ? (link?.provider === "simplefin" ? `group:${existing.groupId}` : existing.groupId) : "skip")) : "skip";
+        choices[remote.remoteId] = existing ? (existing.accountId || (existing.debtId ? `debt:${existing.debtId}` : (existing.groupId ? (link?.provider === "simplefin" ? `group:${existing.groupId}` : existing.groupId) : "skip"))) : "skip";
       });
       linkedMapping = { linkId, remote: accounts, choices };
       linkedFeedback = "";
@@ -11630,6 +11630,9 @@ function bindViewEvents() {
       if (link.provider === "snaptrade") {
         const group = choice === "new" ? null : groupStockHoldings(state.goals.netWorth.assets).find((item) => item.groupId === choice);
         mappings[entry.remoteId] = group ? { groupId: group.groupId, groupName: group.groupName } : { groupName: entry.name };
+      } else if (choice.startsWith("debt:")) {
+        const debt = state.goals.debts.find((item) => item.id === choice.slice(5));
+        if (debt) mappings[entry.remoteId] = { debtId: debt.id };
       } else if (choice.startsWith("group:")) {
         const group = groupStockHoldings(state.goals.netWorth.assets).find((item) => item.groupId === choice.slice(6));
         if (group) mappings[entry.remoteId] = { groupId: group.groupId, groupName: group.groupName };
@@ -13668,7 +13671,7 @@ function renderLinkedMappingPanel() {
     }
     // A bank feed can also drive a holdings group (401(k), IRA, ESPP...): the group's total is matched to the bank's balance while its
     // individual holdings keep their own shares and prices.
-    return `<option value="skip" ${chosen("skip")}>Don't import</option><option value="new" ${chosen("new")}>New Wealth account</option><optgroup label="Wealth accounts">${state.accounts.filter((account) => !account.closedAt).map((account) => `<option value="${account.id}" ${chosen(account.id)}>${escapeHtml(account.name)}</option>`).join("")}</optgroup>${groups.length ? `<optgroup label="Investment accounts (match balance)">${groups.map((group) => `<option value="group:${group.groupId}" ${chosen(`group:${group.groupId}`)}>${escapeHtml(group.groupName)}</option>`).join("")}</optgroup>` : ""}`;
+    return `<option value="skip" ${chosen("skip")}>Don't import</option><option value="new" ${chosen("new")}>New Wealth account</option><optgroup label="Wealth accounts">${state.accounts.filter((account) => !account.closedAt).map((account) => `<option value="${account.id}" ${chosen(account.id)}>${escapeHtml(account.name)}</option>`).join("")}</optgroup>${groups.length ? `<optgroup label="Investment accounts (match balance)">${groups.map((group) => `<option value="group:${group.groupId}" ${chosen(`group:${group.groupId}`)}>${escapeHtml(group.groupName)}</option>`).join("")}</optgroup>` : ""}${state.goals.debts.length ? `<optgroup label="Loans and debts (match balance owed)">${state.goals.debts.map((debt) => `<option value="debt:${debt.id}" ${chosen(`debt:${debt.id}`)}>${escapeHtml(debt.name)}</option>`).join("")}</optgroup>` : ""}`;
   };
   return `<div class="linked-mapping-panel">
     <h4>Where should each account go?</h4>
@@ -13721,7 +13724,17 @@ function applySimplefinSync(link, payload, addRows) {
     state.goals.netWorth.assets = result.assets;
     groupsMatched += 1;
   });
-  return { imported: posted.length, pendingSkipped, unmapped, alreadyImported, balancesUpdated, groupsMatched };
+  // Accounts mapped to a loan/debt: the amount still owed follows the bank (payments already in the ledger are not subtracted again).
+  let debtsMatched = 0;
+  (payload.accounts || []).forEach((remote) => {
+    const debtId = link.mappings[remote.remoteId]?.debtId;
+    if (!debtId || remote.balance === null) return;
+    const result = matchDebtToBankBalance({ debts: state.goals.debts, liabilities: state.goals.netWorth.liabilities, transactions: state.transactions }, { debtId, balance: remote.balance }, transactionSignature);
+    state.goals.debts = result.debts;
+    state.goals.netWorth.liabilities = result.liabilities;
+    debtsMatched += 1;
+  });
+  return { imported: posted.length, pendingSkipped, unmapped, alreadyImported, balancesUpdated, groupsMatched, debtsMatched };
 }
 
 function applySnaptradeSync(link, payload) {
@@ -13740,7 +13753,7 @@ async function syncLinkedAccount(linkId, addRows, { quiet = false } = {}) {
     let summary;
     if (link.provider === "simplefin") {
       const result = applySimplefinSync(link, payload, addRows);
-      summary = `${link.label}: ${result.imported} new transaction${result.imported === 1 ? "" : "s"} sent to Bank stream${result.balancesUpdated ? `, ${result.balancesUpdated} balance${result.balancesUpdated === 1 ? "" : "s"} updated` : ""}${result.groupsMatched ? `, ${result.groupsMatched} investment account${result.groupsMatched === 1 ? "" : "s"} matched to the bank balance` : ""}${result.pendingSkipped ? `; ${result.pendingSkipped} pending skipped until they post` : ""}${result.unmapped ? `; ${result.unmapped} from accounts you chose not to import` : ""}.`;
+      summary = `${link.label}: ${result.imported} new transaction${result.imported === 1 ? "" : "s"} sent to Bank stream${result.balancesUpdated ? `, ${result.balancesUpdated} balance${result.balancesUpdated === 1 ? "" : "s"} updated` : ""}${result.groupsMatched ? `, ${result.groupsMatched} investment account${result.groupsMatched === 1 ? "" : "s"} matched to the bank balance` : ""}${result.debtsMatched ? `, ${result.debtsMatched} loan${result.debtsMatched === 1 ? "" : "s"} matched to the amount owed` : ""}${result.pendingSkipped ? `; ${result.pendingSkipped} pending skipped until they post` : ""}${result.unmapped ? `; ${result.unmapped} from accounts you chose not to import` : ""}.`;
       if (payload.errors?.length) summary += ` The bank reported: ${payload.errors.join("; ")}`;
     } else {
       const result = applySnaptradeSync(link, payload);

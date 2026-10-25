@@ -2231,7 +2231,7 @@ test("stampChangedNotes stamps only notes that were edited or created since the 
   assert.equal(stampChangedNotes(undefined, baseline, "x"), 0);
 });
 
-const { selectNewLinkedTransactions, rememberLinkedImportedIds, pendingDraftEffect, reconcileOpeningBalance, applyBalanceToHoldingsGroup, mergeBrokeragePositions } = require("../lib/shared-logic");
+const { selectNewLinkedTransactions, rememberLinkedImportedIds, pendingDraftEffect, reconcileOpeningBalance, applyBalanceToHoldingsGroup, matchDebtToBankBalance, mergeBrokeragePositions } = require("../lib/shared-logic");
 
 test("selectNewLinkedTransactions keeps only mapped, not-yet-imported rows and never repeats an id within one sync", () => {
   const mappings = { A1: { accountId: "chk" }, A2: {} };
@@ -2326,4 +2326,23 @@ test("applyBalanceToHoldingsGroup tops a group up to the bank's balance with one
   assert.equal(applyBalanceToHoldingsGroup(holdings, { linkId: "L", remoteId: "R", groupId: "g1", groupName: "Roth IRA", balance: NaN }, createId).adjustment, 0);
   const empty = applyBalanceToHoldingsGroup([], { linkId: "L", remoteId: "R", groupId: "new-g", groupName: "401(k)", balance: 5000 }, createId);
   assert.deepEqual([empty.assets[0].groupName, empty.assets[0].value], ["401(k)", 5000]);
+});
+
+test("matchDebtToBankBalance sets the amount owed from the bank, updates the liability, and marks ledger EMIs applied so they are not subtracted again", () => {
+  const signatureOf = (t) => `${t.date}|${t.amount}`;
+  const debts = [{ id: "tesla", name: "Tesla Loan", balance: 26524.02, lineId: "emi-line", appliedPaymentSignatures: ["2026-08-01|702.23"], payments: [{ id: "p" }] }, { id: "other", name: "Other", balance: 100 }];
+  const liabilities = [{ id: "tesla", name: "Tesla Loan", value: 26524.02 }, { id: "other", name: "Other", value: 100 }];
+  const transactions = [{ lineId: "emi-line", date: "2026-08-01", amount: 702.23 }, { lineId: "emi-line", date: "2026-09-01", amount: 702.23 }, { lineId: "elsewhere", date: "2026-09-02", amount: 5 }];
+  const result = matchDebtToBankBalance({ debts, liabilities, transactions }, { debtId: "tesla", balance: -28098.52 }, signatureOf);
+  assert.equal(result.changed, true);
+  assert.equal(result.debts[0].balance, 28098.52);
+  assert.equal(result.liabilities[0].value, 28098.52);
+  assert.deepEqual(result.debts[0].appliedPaymentSignatures.sort(), ["2026-08-01|702.23", "2026-09-01|702.23"]);
+  assert.deepEqual(result.debts[0].payments, [{ id: "p" }], "payment history is untouched");
+  assert.deepEqual([result.debts[1], result.liabilities[1]], [debts[1], liabilities[1]]);
+  assert.equal(debts[0].balance, 26524.02, "input not mutated");
+  assert.equal(matchDebtToBankBalance({ debts, liabilities, transactions }, { debtId: "tesla", balance: 28098.52 }, signatureOf).debts[0].balance, 28098.52, "a positive report still means that much is owed");
+  assert.equal(matchDebtToBankBalance({ debts, liabilities, transactions }, { debtId: "tesla", balance: -26524.02 }, signatureOf).changed, false);
+  assert.equal(matchDebtToBankBalance({ debts, liabilities, transactions }, { debtId: "missing", balance: -1 }, signatureOf).changed, false);
+  assert.equal(matchDebtToBankBalance({ debts, liabilities, transactions }, { debtId: "tesla", balance: NaN }, signatureOf).changed, false);
 });

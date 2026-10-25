@@ -466,6 +466,12 @@ entry. It is read-only: FamilyLoop can never move money or place trades.
   carries the difference (and disappears if your listed holdings already add
   up to the balance or more). Whether an institution appears at all depends on
   SimpleFIN's coverage.
+- **Loans (car, mortgage…) through SimpleFIN:** pick the debt under **Loans and
+  debts (match balance owed)** when choosing where the loan account goes. Each
+  sync sets the debt's remaining balance (and its net-worth liability) to what
+  the bank says you owe; payments already in the ledger aren't subtracted a
+  second time, and the loan account's own transactions aren't imported (the
+  payment already arrives from the account you pay it from).
 - **Connect a brokerage (SnapTrade):** opens SnapTrade's secure sign-in;
   afterwards choose a holdings group per brokerage account. Positions,
   prices, cost basis and cash update in place, and holdings you've sold

@@ -151,6 +151,10 @@ test("SimpleFIN link flow end to end: not configured without a key, SSRF-pinned 
     await configured.request(`/api/linked-accounts/${id}/sync`, { method: "POST", headers: { cookie }, body: "{}" });
     assert.deepEqual((await configured.request("/api/linked-accounts", { headers: { cookie } })).body.links[0].newAccounts.map((a) => a.remoteId), ["ACT-2"]);
 
+    // A loan can be mapped to a debt; the debt id survives alongside account and group mappings.
+    const withDebt = await configured.request(`/api/linked-accounts/${id}/mappings`, { method: "PUT", headers: { cookie }, body: JSON.stringify({ mappings: { "ACT-1": { accountId: "local-checking" }, "ACT-2": { debtId: "tesla-loan" } } }) });
+    assert.deepEqual(withDebt.body.link.mappings["ACT-2"], { accountId: "", groupId: "", groupName: "", debtId: "tesla-loan" });
+
     const otherCookie = await signup(configured, "links-other@example.com");
     assert.deepEqual((await configured.request("/api/linked-accounts", { headers: { cookie: otherCookie } })).body.links, []);
     assert.equal((await configured.request(`/api/linked-accounts/${id}/sync`, { method: "POST", headers: { cookie: otherCookie }, body: "{}" })).status, 404);
