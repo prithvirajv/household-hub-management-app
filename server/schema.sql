@@ -325,3 +325,8 @@ CREATE INDEX IF NOT EXISTS idx_linked_accounts_household_id ON linked_accounts(h
 -- Remote accounts a link has reported that the user has not yet chosen a destination for (or chosen to skip), so the apps can say
 -- "N new accounts found".
 ALTER TABLE linked_accounts ADD COLUMN IF NOT EXISTS new_accounts JSONB NOT NULL DEFAULT '[]'::jsonb;
+
+-- Data fetched ahead of time (the nightly job, or a manual sync not yet applied) waiting for a client to apply it to household state;
+-- the server never writes household state itself, so this is cleared only when a client acknowledges it has saved the result.
+ALTER TABLE linked_accounts ADD COLUMN IF NOT EXISTS staged JSONB NOT NULL DEFAULT '{}'::jsonb;
+ALTER TABLE linked_accounts ADD COLUMN IF NOT EXISTS staged_at TIMESTAMPTZ;

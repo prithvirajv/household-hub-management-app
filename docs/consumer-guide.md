@@ -488,6 +488,11 @@ entry. It is read-only: FamilyLoop can never move money or place trades.
   under **Choose accounts**). Until you choose where each goes it is ignored.
   A "Don't import" choice is remembered, so skipped accounts aren't reported
   again.
+- **Overnight:** every night FamilyLoop fetches your linked accounts for you.
+  The new transactions and balances are applied the next time you open the app
+  (Home, Transactions or Wealth), and your phone gets a notification such as
+  "5 new bank transactions waiting to review" - or a warning when a bank needs
+  you to sign in again.
 - **Sync now** refreshes a link on demand; opening Wealth also refreshes any
   link that hasn't synced in six hours. If a bank asks you to sign in again,
   the link shows **Needs reconnecting** — unlink it and link again.

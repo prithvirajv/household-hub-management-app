@@ -189,8 +189,15 @@ user secret) are AES-256-GCM encrypted with `LINK_ENCRYPTION_KEY` and never retu
 - SnapTrade (optional): `SNAPTRADE_CLIENT_ID`, `SNAPTRADE_CONSUMER_KEY` (secret `familyloop-snaptrade-consumer-key`), `SNAPTRADE_MODE`
   (`personal` = free single-user key, only `SNAPTRADE_PERSONAL_OWNER_EMAIL` may link; `commercial` = per-user registration, billed per
   connected user). Connections are always requested read-only.
-- Syncs are client-driven (Sync now, or on opening Wealth if stale); there is no background job, so nothing is fetched while nobody has the
-  app open.
+- **Nightly sync:** Cloud Scheduler job `familyloop-linked-sync` (created/updated by `scripts/deploy-cloud-run.sh`, 03:30
+  America/New_York) calls `POST /api/internal/linked-accounts/sync-all` with the `NOTIFICATION_SECRET` bearer token. It fetches every active
+  link and **stages** the result in `linked_accounts.staged`; it never writes household state (every client save replaces the whole
+  household, so a server-side write would be erased by the next stale save). A client applies staged data the next time the app is opened
+  (web: Home/Transactions/Wealth; mobile: the Wealth screen, with a banner on open), saves it, and only then acknowledges
+  (`POST /:id/ack`), which clears the staging. Staging accumulates SimpleFIN transactions by id for up to 120 days, so nights nobody
+  opened the app are not lost even beyond the Bridge's 60-day request window. The job also pushes "N new bank transactions waiting" (counting
+  only rows the household has not already imported) and a one-time "needs signing in again" to the household's phones. Manual syncs go
+  through the same staging. Links needing reconnection are skipped until relinked.
 
 ## Incident playbooks
 

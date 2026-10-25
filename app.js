@@ -2017,7 +2017,7 @@ function render() {
   bindViewEvents();
   if (currentView === "admin" && !adminData) loadAdminData();
   if (["documents", "wealth", "notes"].includes(currentView) && !documentsData) loadDocumentsData();
-  if (currentView === "wealth" && !linkedAccounts) loadLinkedAccounts();
+  if (["wealth", "transactions", "home"].includes(currentView) && !linkedAccounts) loadLinkedAccounts();
   if (currentView === "notes" && sharedWithMeNotes === null) loadSharedWithMeNotes();
   if (["sharing", "calendar"].includes(currentView) && !sharingAccess) loadSharingAccess();
   if (currentView === "calendar" && sharedCalendarMembers.length === 0) loadCalendarMembers();
@@ -11710,7 +11710,7 @@ function bindViewEvents() {
     }
   });
 
-  if (currentView === "wealth") maybeAutoSyncLinkedAccounts(addBankStreamRows);
+  if (["wealth", "transactions", "home"].includes(currentView)) maybeAutoSyncLinkedAccounts(addBankStreamRows);
 
   $("#addAccountButton")?.addEventListener("click", () => {
     const name = `New account ${state.accounts.length + 1}`;
@@ -13673,7 +13673,7 @@ async function loadLinkedAccounts(shouldRender = true) {
   } catch (error) {
     linkedAccounts = { configured: false, providers: {}, links: [], error: error.message };
   }
-  if (shouldRender && currentView === "wealth") render();
+  if (shouldRender && ["wealth", "transactions", "home"].includes(currentView)) render();
 }
 
 function linkedProviderLabel(link) {
@@ -13819,7 +13819,9 @@ async function syncLinkedAccount(linkId, addRows, { quiet = false } = {}) {
     }
     state.household.activity.unshift(summary);
     if (!quiet || /new transaction|added|updated|removed/.test(summary)) linkedFeedback = summary;
-    autosaveState();
+    // The server keeps fetched data staged until the result is safely saved, so a failed save cannot lose it; acknowledge only afterwards.
+    await saveStateNow();
+    if (payload.stagedAt) await api(`/api/linked-accounts/${linkId}/ack`, { method: "POST", body: JSON.stringify({ stagedAt: payload.stagedAt }) });
     await loadLinkedAccounts(false);
   } catch (error) {
     linkedFeedback = `${link.label}: ${error.message}`;
@@ -13830,11 +13832,12 @@ async function syncLinkedAccount(linkId, addRows, { quiet = false } = {}) {
   }
 }
 
-// On opening Wealth, quietly refresh any link that has not synced in the last 6 hours (once per page load).
+// On opening Wealth, Transactions or Home, quietly refresh any link with nightly data waiting or that has not synced in 6 hours (once per page load).
 function maybeAutoSyncLinkedAccounts(addRows) {
   if (linkedAutoSyncDone || !linkedAccounts?.configured || sessionUser?.accessLevel === "view") return;
   linkedAutoSyncDone = true;
-  const stale = (linkedAccounts.links || []).filter((link) => link.status === "active" && Object.keys(link.mappings || {}).length && (!link.lastSyncAt || Date.now() - new Date(link.lastSyncAt).getTime() > 6 * 3600 * 1000));
+  // A link also syncs whenever the nightly job has staged data waiting, however recently it last synced.
+  const stale = (linkedAccounts.links || []).filter((link) => link.status === "active" && Object.keys(link.mappings || {}).length && (link.hasStaged || !link.lastSyncAt || Date.now() - new Date(link.lastSyncAt).getTime() > 6 * 3600 * 1000));
   stale.reduce((chain, link) => chain.then(() => syncLinkedAccount(link.id, addRows, { quiet: true })), Promise.resolve());
 }
 

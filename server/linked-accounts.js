@@ -240,16 +240,50 @@ function findNewAccounts(remoteAccounts, mappings) {
   return (remoteAccounts || []).filter((account) => !Object.prototype.hasOwnProperty.call(mappings || {}, account.remoteId)).map((account) => ({ remoteId: account.remoteId, name: account.name, orgName: account.orgName || "" }));
 }
 
+const STAGED_RETENTION_DAYS = 120;
+const STAGED_TRANSACTION_LIMIT = 3000;
+
+// Folds a fresh fetch into what is already staged (not yet applied by any client): SimpleFIN transactions accumulate by id (so nights
+// the app was never opened are not lost, even past the Bridge's 60-day request window), and accounts/balances/errors are the latest
+// snapshot; a SnapTrade payload is a snapshot of positions, so it simply replaces the old one.
+function mergeStagedPayload(staged, payload, nowIso) {
+  const now = new Date(nowIso);
+  const cutoff = new Date(now.getTime() - STAGED_RETENTION_DAYS * 86400 * 1000).toISOString().slice(0, 10);
+  if (payload.provider !== "simplefin") return { merged: { ...payload, stagedAt: nowIso }, newTransactionCount: 0 };
+  const byId = new Map();
+  (staged?.transactions || []).forEach((transaction) => byId.set(transaction.externalId, transaction));
+  let newTransactionCount = 0;
+  (payload.transactions || []).forEach((transaction) => {
+    if (!byId.has(transaction.externalId)) newTransactionCount += 1;
+    byId.set(transaction.externalId, transaction);
+  });
+  let transactions = [...byId.values()].filter((transaction) => transaction.date >= cutoff);
+  if (transactions.length > STAGED_TRANSACTION_LIMIT) transactions = transactions.sort((a, b) => b.date.localeCompare(a.date)).slice(0, STAGED_TRANSACTION_LIMIT);
+  return { merged: { provider: "simplefin", accounts: payload.accounts, transactions, errors: payload.errors || [], stagedAt: nowIso }, newTransactionCount };
+}
+
+// Every linked-feed row id the household already imported: remembered ids, ledger rows and drafts still waiting.
+function knownExternalIds(appState) {
+  const ids = new Set(Array.isArray(appState?.linkedImportedIds) ? appState.linkedImportedIds : []);
+  (appState?.transactions || []).forEach((transaction) => { if (transaction?.externalId) ids.add(transaction.externalId); });
+  (appState?.transactionInboxDrafts || []).forEach((draft) => { if (draft?.externalId) ids.add(draft.externalId); });
+  return ids;
+}
+
 function createStore({ MEMORY_DB, memoryDb, pool }) {
   if (MEMORY_DB) memoryDb.linkedAccounts ||= [];
   const toRow = (row) => ({
     id: row.id, householdId: row.household_id, provider: row.provider, label: row.label, credentials: row.credentials,
-    mappings: row.mappings || {}, newAccounts: row.new_accounts || [], status: row.status, lastSyncAt: row.last_sync_at || null, lastError: row.last_error || "", createdAt: row.created_at
+    mappings: row.mappings || {}, newAccounts: row.new_accounts || [], staged: row.staged || {}, stagedAt: row.staged_at || null, status: row.status, lastSyncAt: row.last_sync_at || null, lastError: row.last_error || "", createdAt: row.created_at
   });
   return {
     async list(householdId) {
       if (MEMORY_DB) return memoryDb.linkedAccounts.filter((row) => row.household_id === householdId).map(toRow);
       return (await pool.query("SELECT * FROM linked_accounts WHERE household_id = $1 ORDER BY created_at", [householdId])).rows.map(toRow);
+    },
+    async listAll() {
+      if (MEMORY_DB) return memoryDb.linkedAccounts.map(toRow);
+      return (await pool.query("SELECT * FROM linked_accounts ORDER BY created_at")).rows.map(toRow);
     },
     async get(householdId, id) {
       if (MEMORY_DB) {
@@ -262,14 +296,14 @@ function createStore({ MEMORY_DB, memoryDb, pool }) {
     async create({ householdId, provider, label, credentials, createdBy }) {
       const id = crypto.randomUUID();
       if (MEMORY_DB) {
-        memoryDb.linkedAccounts.push({ id, household_id: householdId, provider, label, credentials, mappings: {}, new_accounts: [], status: "active", last_sync_at: null, last_error: "", created_by: createdBy, created_at: new Date().toISOString() });
+        memoryDb.linkedAccounts.push({ id, household_id: householdId, provider, label, credentials, mappings: {}, new_accounts: [], staged: {}, staged_at: null, status: "active", last_sync_at: null, last_error: "", created_by: createdBy, created_at: new Date().toISOString() });
       } else {
         await pool.query("INSERT INTO linked_accounts (id, household_id, provider, label, credentials, created_by) VALUES ($1, $2, $3, $4, $5, $6)", [id, householdId, provider, label, credentials, createdBy]);
       }
       return id;
     },
     async update(householdId, id, patch) {
-      const columns = { label: "label", credentials: "credentials", mappings: "mappings", newAccounts: "new_accounts", status: "status", lastSyncAt: "last_sync_at", lastError: "last_error" };
+      const columns = { label: "label", credentials: "credentials", mappings: "mappings", newAccounts: "new_accounts", staged: "staged", stagedAt: "staged_at", status: "status", lastSyncAt: "last_sync_at", lastError: "last_error" };
       const entries = Object.entries(patch).filter(([key]) => columns[key]);
       if (!entries.length) return;
       if (MEMORY_DB) {
@@ -278,7 +312,7 @@ function createStore({ MEMORY_DB, memoryDb, pool }) {
         return;
       }
       const sets = entries.map(([key], index) => `${columns[key]} = $${index + 3}`).join(", ");
-      const values = entries.map(([key, value]) => (key === "mappings" || key === "newAccounts" ? JSON.stringify(value) : value));
+      const values = entries.map(([key, value]) => (key === "mappings" || key === "newAccounts" || key === "staged" ? JSON.stringify(value) : value));
       await pool.query(`UPDATE linked_accounts SET ${sets} WHERE id = $1 AND household_id = $2`, [id, householdId, ...values]);
     },
     async remove(householdId, id) {
@@ -290,7 +324,7 @@ function createStore({ MEMORY_DB, memoryDb, pool }) {
 
 // ---- routes -------------------------------------------------------------------------------------------------------
 
-function registerLinkedAccountRoutes({ app, requireSession, requireEditAccess, MEMORY_DB, memoryDb, pool, env = process.env, snaptradeAdapterFactory = createSnaptradeAdapter, fetchImpl = fetch }) {
+function registerLinkedAccountRoutes({ app, requireSession, requireEditAccess, requireJobSecret, notifyHousehold, loadHouseholdState, MEMORY_DB, memoryDb, pool, env = process.env, snaptradeAdapterFactory = createSnaptradeAdapter, fetchImpl = fetch }) {
   const encryptionKey = String(env.LINK_ENCRYPTION_KEY || "").trim();
   const snaptrade = snaptradeConfig(env);
   const allowInsecureHosts = env.NODE_ENV === "test" && String(env.SIMPLEFIN_ALLOW_TEST_HOSTS || "") === "true";
@@ -300,7 +334,7 @@ function registerLinkedAccountRoutes({ app, requireSession, requireEditAccess, M
 
   const requireConfigured = (req, res, next) => (encryptionKey ? next() : res.status(503).json({ error: "Linked accounts are not configured on this server" }));
   const sessionHouseholdId = (req) => req.sessionUser.household_id;
-  const publicLink = (link) => ({ id: link.id, provider: link.provider, label: link.label, status: link.status, lastSyncAt: link.lastSyncAt, lastError: link.lastError, mappings: link.mappings, newAccounts: link.newAccounts || [] });
+  const publicLink = (link) => ({ id: link.id, provider: link.provider, label: link.label, status: link.status, lastSyncAt: link.lastSyncAt, lastError: link.lastError, mappings: link.mappings, newAccounts: link.newAccounts || [], stagedCount: Array.isArray(link.staged?.transactions) ? link.staged.transactions.length : 0, hasStaged: Boolean(link.stagedAt && Object.keys(link.staged || {}).length) });
   const wrap = (handler) => async (req, res, next) => {
     try { await handler(req, res); } catch (error) {
       if (error.statusCode) return res.status(error.statusCode).json({ error: error.message });
@@ -314,9 +348,11 @@ function registerLinkedAccountRoutes({ app, requireSession, requireEditAccess, M
   };
   const credentialsOf = (link) => decryptJson(encryptionKey, link.credentials);
   const requireSnaptrade = () => { if (!snaptrade) throw clientError("Brokerage linking (SnapTrade) is not configured on this server", 503); };
-  const recordOutcome = (req, link, error, remoteAccounts) => store.update(sessionHouseholdId(req), link.id, error
+  // touchLastSync is false when only listing accounts: that call fetches no transactions, so it must not move the point the next real
+  // fetch starts from (otherwise the first sync after linking would only look back a few days instead of the default 30).
+  const recordOutcome = (req, link, error, remoteAccounts, { touchLastSync = true } = {}) => store.update(sessionHouseholdId(req), link.id, error
     ? { lastError: error.message, ...(error.statusCode === 409 ? { status: "needs_reconnect" } : {}) }
-    : { lastError: "", status: "active", lastSyncAt: new Date().toISOString(), ...(remoteAccounts ? { newAccounts: findNewAccounts(remoteAccounts, link.mappings) } : {}) });
+    : { lastError: "", status: "active", ...(touchLastSync ? { lastSyncAt: new Date().toISOString() } : {}), ...(remoteAccounts ? { newAccounts: findNewAccounts(remoteAccounts, link.mappings) } : {}) });
 
   app.get("/api/linked-accounts", requireSession, wrap(async (req, res) => {
     const links = await store.list(sessionHouseholdId(req));
@@ -364,7 +400,7 @@ function registerLinkedAccountRoutes({ app, requireSession, requireEditAccess, M
       const accounts = link.provider === "simplefin"
         ? (await fetchSimplefinAccounts(credentials.accessUrl, { "balances-only": 1 }, { fetchImpl, allowInsecureHosts })).accounts.map(normalizeSimplefinAccount)
         : await getAdapter().listAccounts(credentials);
-      await recordOutcome(req, link, null, accounts);
+      await recordOutcome(req, link, null, accounts, { touchLastSync: false });
       res.json({ accounts });
     } catch (error) {
       await recordOutcome(req, link, error);
@@ -387,41 +423,113 @@ function registerLinkedAccountRoutes({ app, requireSession, requireEditAccess, M
     });
     // The client sends a decision (a destination or skipped) for every account it was shown, so nothing is "new" until SimpleFIN/SnapTrade
     // reports an account that was not in that list.
-    await store.update(sessionHouseholdId(req), link.id, { mappings, newAccounts: [] });
+    // Changing which accounts are imported restarts the look-back (default 30 days) so a newly chosen account gets its recent history; rows
+    // already imported are skipped by id on the client.
+    await store.update(sessionHouseholdId(req), link.id, { mappings, newAccounts: [], lastSyncAt: null });
     res.json({ link: publicLink({ ...link, mappings, newAccounts: [] }) });
   }));
 
+  // Fetches fresh data for a link: SimpleFIN since the last successful fetch (minus a few days of overlap) or an explicit date, SnapTrade as a
+  // snapshot of positions for the mapped accounts.
+  const fetchLinkPayload = async (link, { sinceDate } = {}) => {
+    const credentials = credentialsOf(link);
+    if (link.provider === "simplefin") {
+      const nowUnix = Math.floor(Date.now() / 1000);
+      const requested = String(sinceDate || "").trim();
+      const requestedUnix = /^\d{4}-\d{2}-\d{2}$/.test(requested) ? Math.floor(Date.parse(`${requested}T00:00:00Z`) / 1000) : null;
+      const lastUnix = link.lastSyncAt ? Math.floor(new Date(link.lastSyncAt).getTime() / 1000) - SIMPLEFIN_OVERLAP_DAYS * 86400 : null;
+      const startUnix = Math.max(requestedUnix ?? lastUnix ?? (nowUnix - SIMPLEFIN_DEFAULT_LOOKBACK_DAYS * 86400), nowUnix - 365 * 86400);
+      const result = await syncSimplefin(credentials.accessUrl, { startUnix, endUnix: nowUnix }, { fetchImpl, allowInsecureHosts });
+      // Only accounts sent to a Wealth account import transactions (investment and loan accounts follow their balance only), so only those are staged.
+      const wanted = new Set(Object.entries(link.mappings || {}).filter(([, mapping]) => mapping && mapping.accountId).map(([remoteId]) => remoteId));
+      return { provider: "simplefin", accounts: result.accounts, transactions: result.transactions.filter((transaction) => wanted.has(transaction.remoteAccountId)), errors: result.errors };
+    }
+    const accounts = await getAdapter().listAccounts(credentials);
+    const mapped = accounts.filter((account) => link.mappings[account.remoteId] && !link.mappings[account.remoteId].skipped);
+    const positions = [];
+    const cash = {};
+    for (const account of mapped) {
+      positions.push(...await getAdapter().positions(credentials, account.remoteId));
+      cash[account.remoteId] = await getAdapter().cash(credentials, account.remoteId);
+    }
+    return { provider: "snaptrade", accounts, positions, cash, errors: [] };
+  };
+
+  // Fetch, fold into whatever is already staged, and remember it before answering - so a response the client never manages to apply is
+  // not lost: it stays staged until the client acknowledges (POST /:id/ack) that it has saved the result.
   app.post("/api/linked-accounts/:id/sync", requireSession, requireEditAccess, requireConfigured, wrap(async (req, res) => {
     const link = await loadLink(req);
     try {
-      const credentials = credentialsOf(link);
-      let payload;
-      if (link.provider === "simplefin") {
-        const nowUnix = Math.floor(Date.now() / 1000);
-        const requested = String(req.body?.sinceDate || "").trim();
-        const requestedUnix = /^\d{4}-\d{2}-\d{2}$/.test(requested) ? Math.floor(Date.parse(`${requested}T00:00:00Z`) / 1000) : null;
-        const lastUnix = link.lastSyncAt ? Math.floor(new Date(link.lastSyncAt).getTime() / 1000) - SIMPLEFIN_OVERLAP_DAYS * 86400 : null;
-        const startUnix = Math.max(requestedUnix ?? lastUnix ?? (nowUnix - SIMPLEFIN_DEFAULT_LOOKBACK_DAYS * 86400), nowUnix - 365 * 86400);
-        const result = await syncSimplefin(credentials.accessUrl, { startUnix, endUnix: nowUnix }, { fetchImpl, allowInsecureHosts });
-        payload = { provider: "simplefin", accounts: result.accounts, transactions: result.transactions, errors: result.errors };
-      } else {
-        const accounts = await getAdapter().listAccounts(credentials);
-        const mapped = accounts.filter((account) => link.mappings[account.remoteId]);
-        const positions = [];
-        const cash = {};
-        for (const account of mapped) {
-          positions.push(...await getAdapter().positions(credentials, account.remoteId));
-          cash[account.remoteId] = await getAdapter().cash(credentials, account.remoteId);
-        }
-        payload = { provider: "snaptrade", accounts, positions, cash, errors: [] };
-      }
+      const payload = await fetchLinkPayload(link, { sinceDate: req.body?.sinceDate });
+      const { merged } = mergeStagedPayload(link.staged, payload, new Date().toISOString());
+      await store.update(sessionHouseholdId(req), link.id, { staged: merged, stagedAt: merged.stagedAt });
       await recordOutcome(req, link, null, payload.accounts);
-      res.json(payload);
+      res.json(merged);
     } catch (error) {
       await recordOutcome(req, link, error);
       throw error;
     }
   }));
+
+  app.post("/api/linked-accounts/:id/ack", requireSession, requireEditAccess, requireConfigured, wrap(async (req, res) => {
+    const link = await loadLink(req);
+    const through = String(req.body?.stagedAt || "");
+    // Only clears what the client actually applied: anything staged after that (a nightly run in between) stays for next time.
+    if (through && link.stagedAt && new Date(link.stagedAt).getTime() <= new Date(through).getTime()) {
+      await store.update(sessionHouseholdId(req), link.id, { staged: {}, stagedAt: null });
+    }
+    res.json({ ok: true });
+  }));
+
+  // Nightly job (Cloud Scheduler, shared-secret): fetch every active link and stage the result. It never writes household state - a
+  // client applies it the next time the app is opened - and it tells the household's phones when there is something new or a bank
+  // connection needs signing in again.
+  if (requireJobSecret) {
+    app.post("/api/internal/linked-accounts/sync-all", requireJobSecret, async (_req, res, next) => {
+      try {
+        if (!encryptionKey) return res.json({ skipped: "Linked accounts are not configured" });
+        const links = (await store.listAll()).filter((link) => link.status === "active" && Object.keys(link.mappings || {}).length && !(link.provider === "snaptrade" && !snaptrade));
+        const summary = { links: links.length, synced: 0, failed: 0, newTransactions: 0, reconnect: 0 };
+        const byHousehold = new Map();
+        for (const link of links) {
+          const entry = byHousehold.get(link.householdId) || { newTransactions: 0, reconnect: [] };
+          byHousehold.set(link.householdId, entry);
+          try {
+            const payload = await fetchLinkPayload(link);
+            const { merged, newTransactionCount: stagedNew } = mergeStagedPayload(link.staged, payload, new Date().toISOString());
+            // Count only rows the household has not already imported (read-only look at its state), so the phone message is not inflated by
+            // rows an app already applied and then cleared from staging.
+            let newTransactionCount = stagedNew;
+            if (loadHouseholdState && stagedNew) {
+              const known = knownExternalIds(await loadHouseholdState(link.householdId));
+              const previouslyStaged = new Set((link.staged?.transactions || []).map((transaction) => transaction.externalId));
+              newTransactionCount = (payload.transactions || []).filter((transaction) => !previouslyStaged.has(transaction.externalId) && !known.has(transaction.externalId)).length;
+            }
+            await store.update(link.householdId, link.id, { staged: merged, stagedAt: merged.stagedAt, lastError: "", status: "active", lastSyncAt: new Date().toISOString(), newAccounts: findNewAccounts(payload.accounts, link.mappings) });
+            entry.newTransactions += newTransactionCount;
+            summary.synced += 1;
+            summary.newTransactions += newTransactionCount;
+          } catch (error) {
+            summary.failed += 1;
+            const needsReconnect = error.statusCode === 409;
+            await store.update(link.householdId, link.id, { lastError: String(error.message || "Sync failed").slice(0, 300), ...(needsReconnect ? { status: "needs_reconnect" } : {}) });
+            if (needsReconnect) { entry.reconnect.push(link.label); summary.reconnect += 1; }
+          }
+        }
+        if (notifyHousehold) {
+          for (const [householdId, entry] of byHousehold) {
+            try {
+              if (entry.newTransactions > 0) await notifyHousehold(householdId, `${entry.newTransactions} new bank transaction${entry.newTransactions === 1 ? "" : "s"} waiting to review`);
+              if (entry.reconnect.length) await notifyHousehold(householdId, `${entry.reconnect.join(", ")} needs signing in again - open Wealth to relink`);
+            } catch (error) { console.warn("Linked-account notification failed", error.message); }
+          }
+        }
+        res.json({ ok: true, ...summary });
+      } catch (error) {
+        next(error);
+      }
+    });
+  }
 
   app.delete("/api/linked-accounts/:id", requireSession, requireEditAccess, wrap(async (req, res) => {
     const link = await loadLink(req);
@@ -434,6 +542,6 @@ function registerLinkedAccountRoutes({ app, requireSession, requireEditAccess, M
 }
 
 module.exports = {
-  registerLinkedAccountRoutes, findNewAccounts, encryptJson, decryptJson, claimSimplefinToken, syncSimplefin, normalizeSimplefinAccount,
+  registerLinkedAccountRoutes, mergeStagedPayload, knownExternalIds, findNewAccounts, encryptJson, decryptJson, claimSimplefinToken, syncSimplefin, normalizeSimplefinAccount,
   normalizeSimplefinTransactions, normalizeSnaptradePositions, snaptradeConfig, assertSimplefinUrl
 };

@@ -267,6 +267,27 @@ if [[ -z "${APP_BASE_URL}" ]]; then
     --update-env-vars "APP_BASE_URL=${SERVICE_URL}"
 fi
 
+
+# Nightly linked-account sync (SimpleFIN / SnapTrade): fetches each active link and stages the result; clients apply it the next time the
+# app is opened (see docs/SOPS.md). Created/updated idempotently here, like the other scheduler jobs but authenticated with the same
+# NOTIFICATION_SECRET bearer token. A failure to manage the job is reported but never fails the deploy.
+LINKED_SYNC_JOB="${LINKED_SYNC_JOB:-familyloop-linked-sync}"
+LINKED_SYNC_SCHEDULE="${LINKED_SYNC_SCHEDULE:-30 3 * * *}"
+LINKED_SYNC_TIME_ZONE="${LINKED_SYNC_TIME_ZONE:-America/New_York}"
+LINKED_SYNC_URI="${APP_BASE_URL:-${SERVICE_URL}}/api/internal/linked-accounts/sync-all"
+SCHEDULER_VERB="create"
+if gcloud scheduler jobs describe "${LINKED_SYNC_JOB}" --project "${PROJECT_ID}" --location "${REGION}" >/dev/null 2>&1; then
+  SCHEDULER_VERB="update"
+fi
+if ! gcloud scheduler jobs "${SCHEDULER_VERB}" http "${LINKED_SYNC_JOB}" \
+  --project "${PROJECT_ID}" --location "${REGION}" \
+  --schedule "${LINKED_SYNC_SCHEDULE}" --time-zone "${LINKED_SYNC_TIME_ZONE}" \
+  --uri "${LINKED_SYNC_URI}" --http-method POST \
+  --headers "Authorization=Bearer ${NOTIFICATION_SECRET},Content-Type=application/json" \
+  --message-body "{}" --attempt-deadline 540s --max-retry-attempts 1 >/dev/null 2>&1; then
+  echo "Warning: could not ${SCHEDULER_VERB} the Cloud Scheduler job ${LINKED_SYNC_JOB}; the nightly linked-account sync will not run." >&2
+fi
+
 echo "Cloud Run URL: ${SERVICE_URL}"
 if [[ "${USE_CLOUD_SQL}" == "true" ]]; then
   echo "Cloud SQL instance: ${CONNECTION_NAME}"

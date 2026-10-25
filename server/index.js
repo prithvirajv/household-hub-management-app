@@ -415,13 +415,13 @@ async function refreshAllHouseholdNotificationJobs() {
   }
 }
 
-async function sendExpoPush(tokens, title) {
+async function sendExpoPush(tokens, title, heading = "FamilyLoop reminder") {
   if (!tokens.length) return { sentCount: 0, invalidTokens: [] };
   try {
     const response = await fetch(EXPO_PUSH_URL, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(tokens.map((token) => ({ to: token, title: "FamilyLoop reminder", body: title, sound: "default" })))
+      body: JSON.stringify(tokens.map((token) => ({ to: token, title: heading, body: title, sound: "default" })))
     });
     const body = await response.json().catch(() => ({}));
     const tickets = Array.isArray(body.data) ? body.data : [];
@@ -437,6 +437,20 @@ async function sendExpoPush(tokens, title) {
     console.error("Expo push send failed:", error.message);
     return { sentCount: 0, invalidTokens: [] };
   }
+}
+
+// Push a short message to every phone registered by a member of the household (used by the nightly linked-account job).
+async function notifyHouseholdMembers(householdId, message) {
+  const userIds = MEMORY_DB
+    ? memoryDb.memberships.filter((item) => item.household_id === householdId).map((item) => item.user_id)
+    : (await pool.query("SELECT user_id FROM household_memberships WHERE household_id = $1", [householdId])).rows.map((row) => row.user_id);
+  if (!userIds.length) return;
+  const devices = MEMORY_DB
+    ? memoryDb.pushDevices.filter((device) => userIds.includes(device.user_id))
+    : (await pool.query("SELECT token FROM push_devices WHERE user_id = ANY($1)", [userIds])).rows;
+  const tokens = [...new Set(devices.map((device) => device.token))];
+  const { invalidTokens } = await sendExpoPush(tokens, message, "FamilyLoop");
+  await prunePushDevices(invalidTokens);
 }
 
 async function prunePushDevices(tokens) {
@@ -4821,7 +4835,7 @@ app.get("/shared-notes/:token/:slug?", async (req, res, next) => {
   }
 });
 
-registerLinkedAccountRoutes({ app, requireSession, requireEditAccess, MEMORY_DB, memoryDb, pool });
+registerLinkedAccountRoutes({ app, requireSession, requireEditAccess, requireJobSecret: requireNotificationSecret, notifyHousehold: notifyHouseholdMembers, loadHouseholdState: loadHouseholdAppState, MEMORY_DB, memoryDb, pool });
 
 app.use((error, _req, res, _next) => {
   // body-parser rejections are the client's problem, not a server fault: an oversized body (the whole household state is

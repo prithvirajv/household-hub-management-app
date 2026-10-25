@@ -3,7 +3,7 @@ const http = require("node:http");
 const test = require("node:test");
 const express = require("express");
 const { startTestServer } = require("./helpers");
-const { registerLinkedAccountRoutes, findNewAccounts, encryptJson, decryptJson, normalizeSnaptradePositions, normalizeSimplefinTransactions, snaptradeConfig } = require("../server/linked-accounts");
+const { registerLinkedAccountRoutes, mergeStagedPayload, knownExternalIds, findNewAccounts, encryptJson, decryptJson, normalizeSnaptradePositions, normalizeSimplefinTransactions, snaptradeConfig } = require("../server/linked-accounts");
 
 const KEY = "test-link-encryption-key-with-entropy";
 
@@ -50,6 +50,24 @@ test("credentials are encrypted at rest: round-trip works, tampering and a wrong
   assert.throws(() => decryptJson(KEY, "garbage"));
 });
 
+test("mergeStagedPayload accumulates SimpleFIN transactions by id across nights, keeps the latest balances, drops stale rows, and replaces SnapTrade snapshots", () => {
+  const now = "2026-10-25T05:00:00.000Z";
+  const first = mergeStagedPayload({}, { provider: "simplefin", accounts: [{ remoteId: "A", balance: 10 }], transactions: [{ externalId: "sf:A:1", date: "2026-10-24", amount: 5 }, { externalId: "sf:A:old", date: "2025-01-01", amount: 1 }], errors: [] }, now);
+  assert.deepEqual([first.newTransactionCount, first.merged.transactions.map((t) => t.externalId)], [2, ["sf:A:1"]], "rows beyond the retention window are dropped");
+  const second = mergeStagedPayload(first.merged, { provider: "simplefin", accounts: [{ remoteId: "A", balance: 25 }], transactions: [{ externalId: "sf:A:1", date: "2026-10-24", amount: 5 }, { externalId: "sf:A:2", date: "2026-10-25", amount: 7 }], errors: ["careful"] }, "2026-10-26T05:00:00.000Z");
+  assert.equal(second.newTransactionCount, 1, "a row already staged is not counted as new again");
+  assert.deepEqual(second.merged.transactions.map((t) => t.externalId), ["sf:A:1", "sf:A:2"]);
+  assert.deepEqual([second.merged.accounts[0].balance, second.merged.errors, second.merged.stagedAt], [25, ["careful"], "2026-10-26T05:00:00.000Z"]);
+  const brokerage = mergeStagedPayload({ provider: "snaptrade", positions: [{ symbol: "OLD" }] }, { provider: "snaptrade", accounts: [], positions: [{ symbol: "NEW" }], cash: {}, errors: [] }, now);
+  assert.deepEqual(brokerage.merged.positions, [{ symbol: "NEW" }]);
+});
+
+test("knownExternalIds gathers remembered ids, ledger rows and waiting drafts, tolerating missing state", () => {
+  const ids = knownExternalIds({ linkedImportedIds: ["sf:A:1"], transactions: [{ externalId: "sf:A:2" }, {}], transactionInboxDrafts: [{ externalId: "sf:A:3" }, null] });
+  assert.deepEqual([...ids].sort(), ["sf:A:1", "sf:A:2", "sf:A:3"]);
+  assert.equal(knownExternalIds(undefined).size, 0);
+});
+
 test("findNewAccounts reports only accounts with no decision, and a skipped entry counts as a decision", () => {
   const remote = [{ remoteId: "A", name: "One", orgName: "Bank" }, { remoteId: "B", name: "Two" }, { remoteId: "C", name: "Three" }];
   assert.deepEqual(findNewAccounts(remote, { A: { accountId: "x" }, B: { skipped: true } }), [{ remoteId: "C", name: "Three", orgName: "" }]);
@@ -84,7 +102,7 @@ test("SnapTrade positions normalize across the new and legacy response shapes an
 test("SimpleFIN link flow end to end: not configured without a key, SSRF-pinned tokens, claim, map, sync, and household isolation", async () => {
   const stub = await startSimplefinStub();
   const unconfigured = await startTestServer();
-  const configured = await startTestServer({ LINK_ENCRYPTION_KEY: KEY, SIMPLEFIN_ALLOW_TEST_HOSTS: "true" });
+  const configured = await startTestServer({ LINK_ENCRYPTION_KEY: KEY, SIMPLEFIN_ALLOW_TEST_HOSTS: "true", NOTIFICATION_SECRET: "job-secret" });
   const pinned = await startTestServer({ LINK_ENCRYPTION_KEY: KEY });
   try {
     const signup = async (server, email) => (await server.request("/api/auth/signup", { method: "POST", body: JSON.stringify({ email, password: "Linked-Accounts-Password-123!", name: "Linker", householdName: `${email} home`, country: "US" }) })).cookie;
@@ -116,10 +134,12 @@ test("SimpleFIN link flow end to end: not configured without a key, SSRF-pinned 
     assert.equal(remote.status, 200);
     assert.deepEqual(remote.body.accounts.map((a) => [a.remoteId, a.name, a.orgName, a.balance]), [["ACT-1", "Everyday Checking", "Sample Bank", 1250.5], ["ACT-2", "Sample Card", "Sample Bank", -310]]);
     assert.ok(stub.requests.some((r) => r.url.includes("balances-only=1")), "listing accounts asks for balances only");
+    assert.equal((await configured.request("/api/linked-accounts", { headers: { cookie } })).body.links[0].lastSyncAt, null, "only listing accounts must not move the point the first real sync looks back from");
 
     const mapped = await configured.request(`/api/linked-accounts/${id}/mappings`, { method: "PUT", headers: { cookie }, body: JSON.stringify({ mappings: { "ACT-1": { accountId: "local-checking" }, "ACT-2": {} } }) });
     assert.equal(mapped.status, 200);
     assert.deepEqual(mapped.body.link.mappings, { "ACT-1": { accountId: "local-checking", groupId: "", groupName: "" } });
+    assert.ok(stub.requests.length > 0);
     assert.equal((await configured.request(`/api/linked-accounts/${id}/mappings`, { method: "PUT", headers: { cookie }, body: JSON.stringify({ mappings: [] }) })).status, 400);
 
     const sync = await configured.request(`/api/linked-accounts/${id}/sync`, { method: "POST", headers: { cookie }, body: JSON.stringify({ sinceDate: "2026-09-01" }) });
@@ -132,6 +152,15 @@ test("SimpleFIN link flow end to end: not configured without a key, SSRF-pinned 
     ]);
     const syncCalls = stub.requests.filter((r) => r.url.startsWith("/simplefin/accounts") && !r.url.includes("balances-only"));
     assert.ok(syncCalls.length >= 1 && syncCalls.every((r) => r.url.includes("pending=1") && r.auth.startsWith("Basic ")), "uses basic auth from the access URL and asks for pending rows");
+
+    // The fetched data stays staged on the server until the client acknowledges it has applied it.
+    assert.ok(typeof sync.body.stagedAt === "string" && sync.body.provider === "simplefin");
+    const staged = await configured.request("/api/linked-accounts", { headers: { cookie } });
+    assert.deepEqual([staged.body.links[0].hasStaged, staged.body.links[0].stagedCount], [true, 3]);
+    await configured.request(`/api/linked-accounts/${id}/ack`, { method: "POST", headers: { cookie }, body: JSON.stringify({ stagedAt: "2000-01-01T00:00:00.000Z" }) });
+    assert.equal((await configured.request("/api/linked-accounts", { headers: { cookie } })).body.links[0].hasStaged, true, "an acknowledgement older than the staged data clears nothing");
+    await configured.request(`/api/linked-accounts/${id}/ack`, { method: "POST", headers: { cookie }, body: JSON.stringify({ stagedAt: sync.body.stagedAt }) });
+    assert.deepEqual([(await configured.request("/api/linked-accounts", { headers: { cookie } })).body.links[0].hasStaged], [false]);
 
     const list = await configured.request("/api/linked-accounts", { headers: { cookie } });
     assert.equal(list.body.links.length, 1);
@@ -150,6 +179,19 @@ test("SimpleFIN link flow end to end: not configured without a key, SSRF-pinned 
     await configured.request(`/api/linked-accounts/${id}/mappings`, { method: "PUT", headers: { cookie }, body: JSON.stringify({ mappings: { "ACT-1": { accountId: "local-checking" } } }) });
     await configured.request(`/api/linked-accounts/${id}/sync`, { method: "POST", headers: { cookie }, body: "{}" });
     assert.deepEqual((await configured.request("/api/linked-accounts", { headers: { cookie } })).body.links[0].newAccounts.map((a) => a.remoteId), ["ACT-2"]);
+
+    // The nightly job (shared-secret) stages every active link's data without touching household state.
+    assert.equal((await configured.request("/api/internal/linked-accounts/sync-all", { method: "POST", body: "{}" })).status, 401);
+    assert.equal((await configured.request("/api/internal/linked-accounts/sync-all", { method: "POST", headers: { authorization: "Bearer wrong" }, body: "{}" })).status, 401);
+    await configured.request(`/api/linked-accounts/${id}/ack`, { method: "POST", headers: { cookie }, body: JSON.stringify({ stagedAt: new Date(Date.now() + 3600000).toISOString() }) });
+    const nightly = await configured.request("/api/internal/linked-accounts/sync-all", { method: "POST", headers: { authorization: "Bearer job-secret" }, body: "{}" });
+    assert.deepEqual([nightly.status, nightly.body.links, nightly.body.synced, nightly.body.failed], [200, 1, 1, 0]);
+    assert.equal(nightly.body.newTransactions, 3);
+    const afterNightly = (await configured.request("/api/linked-accounts", { headers: { cookie } })).body.links[0];
+    assert.deepEqual([afterNightly.hasStaged, afterNightly.stagedCount], [true, 3]);
+    const stateAfterNightly = await configured.request("/api/state", { headers: { cookie } });
+    assert.deepEqual(stateAfterNightly.body.transactionInboxDrafts || [], [], "the job stages data; it never writes household state");
+    await configured.request(`/api/linked-accounts/${id}/ack`, { method: "POST", headers: { cookie }, body: JSON.stringify({ stagedAt: afterNightly.stagedAt || new Date(Date.now() + 60000).toISOString() }) });
 
     // A loan can be mapped to a debt; the debt id survives alongside account and group mappings.
     const withDebt = await configured.request(`/api/linked-accounts/${id}/mappings`, { method: "PUT", headers: { cookie }, body: JSON.stringify({ mappings: { "ACT-1": { accountId: "local-checking" }, "ACT-2": { debtId: "tesla-loan" } } }) });
@@ -215,5 +257,50 @@ test("SnapTrade routes: personal keys are limited to one named owner, syncs retu
     assert.equal((await call(owner.base, `/api/linked-accounts/${id}`, { method: "DELETE" })).status, 200);
   } finally {
     await Promise.all([stranger, owner, unconfigured].map((entry) => new Promise((resolve) => entry.server.close(resolve))));
+  }
+});
+
+test("the nightly job notifies the household about new transactions and about a connection that needs signing in again, once, and keeps going past a failing link", async () => {
+  const messages = [];
+  let mode = "ok";
+  const fetchImpl = async (url, options = {}) => {
+    if (options.method === "POST") return { ok: true, status: 200, text: async () => "http://u:p@127.0.0.1:9/simplefin" };
+    if (mode === "revoked") return { ok: false, status: 403, json: async () => ({}) };
+    const posted = Math.floor(Date.parse("2026-10-24T12:00:00Z") / 1000);
+    return { ok: true, status: 200, json: async () => ({ errors: [], accounts: [{ org: { name: "B" }, id: "A1", name: "Checking", currency: "USD", balance: "5", "balance-date": posted, transactions: [{ id: "t1", posted, amount: "-1", description: "X" }, { id: "t2", posted, amount: "-2", description: "Y" }] }] }) };
+  };
+  const app = express();
+  app.use(express.json());
+  const memoryDb = {};
+  const requireSession = (req, _res, next) => { req.sessionUser = { id: "u1", email: "o@example.com", household_id: "h1", access_level: "edit" }; next(); };
+  const requireJobSecret = (req, res, next) => (req.headers.authorization === "Bearer s" ? next() : res.status(401).json({ error: "no" }));
+  registerLinkedAccountRoutes({ app, requireSession, requireEditAccess: (_q, _r, n) => n(), requireJobSecret, notifyHousehold: async (householdId, message) => { messages.push([householdId, message]); }, MEMORY_DB: true, memoryDb, pool: null, env: { LINK_ENCRYPTION_KEY: KEY, NODE_ENV: "test", SIMPLEFIN_ALLOW_TEST_HOSTS: "true" }, fetchImpl });
+  const server = await new Promise((resolve) => { const s = app.listen(0, "127.0.0.1", () => resolve(s)); });
+  const base = `http://127.0.0.1:${server.address().port}`;
+  const call = async (path, options = {}) => { const res = await fetch(`${base}${path}`, { ...options, headers: { "content-type": "application/json", ...(options.headers || {}) } }); return { status: res.status, body: await res.json().catch(() => ({})) }; };
+  const job = () => call("/api/internal/linked-accounts/sync-all", { method: "POST", headers: { authorization: "Bearer s" }, body: "{}" });
+  try {
+    const token = Buffer.from("http://127.0.0.1:9/simplefin/claim/T").toString("base64");
+    const created = await call("/api/linked-accounts/simplefin", { method: "POST", body: JSON.stringify({ setupToken: token, label: "Bank one" }) });
+    const id = created.body.link.id;
+    assert.equal((await job()).body.links, 0, "a link with no accounts chosen yet is not synced");
+    await call(`/api/linked-accounts/${id}/mappings`, { method: "PUT", body: JSON.stringify({ mappings: { A1: { accountId: "chk" } } }) });
+
+    const first = await job();
+    assert.deepEqual([first.body.synced, first.body.newTransactions], [1, 2]);
+    assert.deepEqual(messages, [["h1", "2 new bank transactions waiting to review"]]);
+    await job();
+    assert.equal(messages.length, 1, "a night with nothing new sends nothing");
+
+    mode = "revoked";
+    const failing = await job();
+    assert.deepEqual([failing.body.failed, failing.body.reconnect], [1, 1]);
+    assert.equal(messages[1][1], "Bank one needs signing in again - open Wealth to relink");
+    assert.equal((await call("/api/linked-accounts")).body.links[0].status, "needs_reconnect");
+    const again = await job();
+    assert.equal(again.body.links, 0, "a link that needs reconnecting is not retried (or announced) every night");
+    assert.equal(messages.length, 2);
+  } finally {
+    await new Promise((resolve) => server.close(resolve));
   }
 });
