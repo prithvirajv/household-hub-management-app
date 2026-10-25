@@ -1178,22 +1178,31 @@ function accountBalanceTrend(accountId, monthKeys) {
 // Flat/single-point trends (a brand-new account, or one where every month
 // reconstructs to the same balance) render nothing rather than a
 // meaningless dot or a flat line with no story to tell.
-function accountSparklineSvg(values) {
+// The per-account balance trend: a readable mini chart rather than a bare line - a filled area, a dot per month with a hover/tap tooltip
+// ("Aug 2026: $1,240"), month labels under it, and Low / High / Change figures beside it. Flat or single-point trends render nothing
+// rather than a meaningless line.
+function accountSparklineSvg(values, monthKeys = []) {
   if (values.length < 2 || values.every((value) => value === values[0])) return "";
-  const width = 90;
-  const height = 28;
-  const padding = 2;
+  const width = 240;
+  const height = 70;
+  const padX = 6;
+  const padY = 8;
   const max = Math.max(...values);
   const min = Math.min(...values);
   const range = max - min || 1;
-  const stepX = (width - padding * 2) / (values.length - 1);
-  const points = values.map((value, index) => {
-    const x = padding + stepX * index;
-    const y = height - padding - ((value - min) / range) * (height - padding * 2);
-    return `${x.toFixed(1)},${y.toFixed(1)}`;
-  }).join(" ");
-  const trendUp = values[values.length - 1] >= values[0];
-  return `<svg viewBox="0 0 ${width} ${height}" class="account-sparkline ${trendUp ? "account-sparkline-up" : "account-sparkline-down"}" role="img" aria-label="${trendUp ? "Balance trending up" : "Balance trending down"} over the last ${values.length} months"><polyline points="${points}"></polyline></svg>`;
+  const stepX = (width - padX * 2) / (values.length - 1);
+  const coords = values.map((value, index) => ({ x: padX + stepX * index, y: height - padY - ((value - min) / range) * (height - padY * 2), value, monthKey: monthKeys[index] || "" }));
+  const line = coords.map((point) => `${point.x.toFixed(1)},${point.y.toFixed(1)}`).join(" ");
+  const area = `${padX},${height - padY} ${line} ${(width - padX).toFixed(1)},${height - padY}`;
+  const monthName = (monthKey, withYear = false) => (monthKey ? new Date(`${monthKey}-01T00:00:00`).toLocaleDateString("en-US", withYear ? { month: "short", year: "numeric" } : { month: "short" }) : "");
+  const change = values[values.length - 1] - values[0];
+  const trendUp = change >= 0;
+  const labelIndexes = [...new Set([0, Math.round((values.length - 1) / 3), Math.round(((values.length - 1) * 2) / 3), values.length - 1])];
+  return `<figure class="account-trend ${trendUp ? "account-sparkline-up" : "account-sparkline-down"}" role="img" aria-label="Balance ${trendUp ? "up" : "down"} ${money.format(Math.abs(change))} over ${values.length} months, from ${money.format(values[0])} to ${money.format(values[values.length - 1])}">
+    <svg viewBox="0 0 ${width} ${height}" class="account-sparkline"><polygon class="account-trend-area" points="${area}"></polygon><polyline points="${line}"></polyline>${coords.map((point) => `<circle cx="${point.x.toFixed(1)}" cy="${point.y.toFixed(1)}" r="3"><title>${escapeHtml(monthName(point.monthKey, true))}: ${money.format(point.value)}</title></circle>`).join("")}</svg>
+    <figcaption class="account-trend-months">${labelIndexes.map((index) => `<span>${escapeHtml(monthName(monthKeys[index]))}</span>`).join("")}</figcaption>
+    <div class="account-trend-stats"><span>Low <b>${money.format(min)}</b></span><span>High <b>${money.format(max)}</b></span><span>${monthKeys.length ? `${monthName(monthKeys[0])}–${monthName(monthKeys[monthKeys.length - 1])}` : "Change"} <b>${change >= 0 ? "+" : "-"}${money.format(Math.abs(change))}</b></span></div>
+  </figure>`;
 }
 
 // Fixed, sensible display order (assets first, liabilities last) rather
@@ -6025,7 +6034,8 @@ function accountItemRow(account, index) {
   // Closed accounts stop accruing new history worth trending, and a
   // just-added account has no past months behind it yet - both skip the
   // sparkline computation rather than rendering a flat/misleading line.
-  const sparkline = account.closedAt ? "" : accountSparklineSvg(accountBalanceTrend(account.id, trailingMonthKeys(6)));
+  const trendMonths = trailingMonthKeys(12);
+  const sparkline = account.closedAt ? "" : accountSparklineSvg(accountBalanceTrend(account.id, trendMonths), trendMonths);
   return `<article class="account-item ${isLiability ? "liability" : ""}" draggable="true" data-drag-account="${account.id}">
     <div class="debt-edit-grid">
       <label class="debt-name-field">Account name<input data-account-name="${index}" value="${escapeHtml(account.name)}" aria-label="Account name"></label>

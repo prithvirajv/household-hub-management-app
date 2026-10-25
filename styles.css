@@ -3283,23 +3283,73 @@ button.ghost-accent {
 }
 
 .account-sparkline {
-  width: 90px;
-  height: 28px;
-  flex-shrink: 0;
+  width: 100%;
+  height: auto;
+  display: block;
+}
+
+.account-trend {
+  margin: 0;
+  flex: 0 0 min(260px, 100%);
+  display: grid;
+  gap: 0.2rem;
+}
+
+.account-trend-area {
+  stroke: none;
+  opacity: 0.12;
+}
+
+.account-trend-months {
+  display: flex;
+  justify-content: space-between;
+  font-size: 0.7rem;
+  color: var(--muted);
+}
+
+.account-trend-stats {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.2rem 0.75rem;
+  font-size: 0.72rem;
+  color: var(--muted);
+}
+
+.account-trend-stats b {
+  color: var(--text, inherit);
+}
+
+.account-sparkline circle {
+  fill: var(--surface, #fff);
+  stroke-width: 1.5;
+  cursor: help;
+}
+
+.account-sparkline-up .account-trend-area,
+.account-sparkline-up circle {
+  fill: var(--green);
+}
+
+.account-sparkline-down .account-trend-area,
+.account-sparkline-down circle {
+  fill: var(--coral);
 }
 
 .account-sparkline polyline {
   fill: none;
-  stroke-width: 1.5;
+  vector-effect: non-scaling-stroke;
+  stroke-width: 2;
   stroke-linejoin: round;
   stroke-linecap: round;
 }
 
-.account-sparkline-up polyline {
+.account-sparkline-up polyline,
+.account-sparkline-up circle {
   stroke: var(--green);
 }
 
-.account-sparkline-down polyline {
+.account-sparkline-down polyline,
+.account-sparkline-down circle {
   stroke: var(--coral);
 }
 
