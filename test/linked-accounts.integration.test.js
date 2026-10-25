@@ -62,6 +62,15 @@ test("mergeStagedPayload accumulates SimpleFIN transactions by id across nights,
   assert.deepEqual(brokerage.merged.positions, [{ symbol: "NEW" }]);
 });
 
+test("an explicit history import keeps rows older than the normal 120-day staging window", () => {
+  const now = "2026-10-25T05:00:00.000Z";
+  const payload = { provider: "simplefin", accounts: [], transactions: [{ externalId: "sf:A:jan", date: "2026-01-15", amount: 5 }, { externalId: "sf:A:oct", date: "2026-10-20", amount: 6 }], errors: [] };
+  assert.deepEqual(mergeStagedPayload({}, payload, now).merged.transactions.map((t) => t.externalId), ["sf:A:oct"], "the nightly job only keeps the last 120 days");
+  assert.deepEqual(mergeStagedPayload({}, payload, now, { sinceDate: "2026-01-01" }).merged.transactions.map((t) => t.externalId), ["sf:A:jan", "sf:A:oct"]);
+  assert.deepEqual(mergeStagedPayload({}, payload, now, { sinceDate: "2026-10-01" }).merged.transactions.map((t) => t.externalId), ["sf:A:oct"], "a recent start date never widens the window");
+  assert.deepEqual(mergeStagedPayload({}, payload, now, { sinceDate: "garbage" }).merged.transactions.map((t) => t.externalId), ["sf:A:oct"]);
+});
+
 test("knownExternalIds gathers remembered ids, ledger rows and waiting drafts, tolerating missing state", () => {
   const ids = knownExternalIds({ linkedImportedIds: ["sf:A:1"], transactions: [{ externalId: "sf:A:2" }, {}], transactionInboxDrafts: [{ externalId: "sf:A:3" }, null] });
   assert.deepEqual([...ids].sort(), ["sf:A:1", "sf:A:2", "sf:A:3"]);

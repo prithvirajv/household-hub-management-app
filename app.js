@@ -170,6 +170,7 @@ let linkedBusyId = "";
 let linkedMapping = null;
 let linkedPortalLinkId = "";
 let linkedAutoSyncDone = false;
+let linkedHistoryFrom = `${new Date().getFullYear()}-01-01`;
 // Clean up old transactions card (Transactions page): the options last chosen.
 let cleanupOptions = { before: "", all: false, ledger: true, stream: true, backup: true };
 let ledgerAcceptFeedback = "";
@@ -11649,6 +11650,18 @@ function bindViewEvents() {
     button.addEventListener("click", () => syncLinkedAccount(button.dataset.linkedSync, addBankStreamRows));
   });
 
+  document.querySelectorAll("[data-linked-history-date]").forEach((input) => {
+    input.addEventListener("change", () => { linkedHistoryFrom = input.value; });
+  });
+  document.querySelectorAll("[data-linked-history]").forEach((button) => {
+    button.addEventListener("click", async () => {
+      const from = linkedHistoryFrom;
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(from)) { showToast("Pick the date to import from."); return; }
+      if (!(await showConfirm(`Fetch every transaction from ${from} onward for the accounts you chose? New rows go to Bank stream (the AI categorization and safe auto-add apply). Rows you removed earlier come back.`, { title: "Import history", confirmLabel: "Import", danger: false }))) return;
+      await syncLinkedAccount(button.dataset.linkedHistory, addBankStreamRows, { sinceDate: from });
+    });
+  });
+
   document.querySelectorAll("[data-linked-map]").forEach((button) => {
     button.addEventListener("click", () => openLinkedMapping(button.dataset.linkedMap));
   });
@@ -13704,6 +13717,11 @@ function renderLinkedAccountsCard() {
         ${link.provider === "snaptrade" ? `<button type="button" class="ghost" data-linked-portal="${link.id}">Add brokerage</button>` : ""}
         <button type="button" class="icon-button danger-button" data-linked-remove="${link.id}" aria-label="Remove ${escapeHtml(link.label)}">×</button>
       </div>
+      ${link.provider === "simplefin" && Object.keys(link.mappings || {}).length ? `<div class="linked-history-row">
+        <label>Import older transactions from<input type="date" data-linked-history-date value="${escapeHtml(linkedHistoryFrom)}"></label>
+        <button type="button" class="ghost" data-linked-history="${link.id}">Import history</button>
+        <small>How far back it goes depends on the bank (often 3-12 months). Rows you already have or removed with Clean up are brought in again; pending rows wait.</small>
+      </div>` : ""}
     </div>`).join("")}
     ${mappingPanel}
     ${providers.simplefin ? `<form id="linkedSimplefinForm" class="linked-link-form">
@@ -13753,12 +13771,17 @@ function createLinkedWealthAccount(remote) {
 }
 
 // Applies the SimpleFIN part of a sync payload. addRows is addBankStreamRows (bound inside bindViewEvents).
-function applySimplefinSync(link, payload, addRows) {
+function applySimplefinSync(link, payload, addRows, { ignoreRemembered = false } = {}) {
   state.linkedImportedIds ||= [];
-  const knownIds = new Set([...state.linkedImportedIds, ...state.transactions.map((t) => t.externalId).filter(Boolean), ...(state.transactionInboxDrafts || []).map((d) => d.externalId).filter(Boolean)]);
+  // A history import is an explicit request, so rows imported before and since removed (Clean up, or dismissed) come back; only what is
+  // currently in the ledger or waiting in Bank stream is skipped.
+  const knownIds = new Set([...(ignoreRemembered ? [] : state.linkedImportedIds), ...state.transactions.map((t) => t.externalId).filter(Boolean), ...(state.transactionInboxDrafts || []).map((d) => d.externalId).filter(Boolean)]);
   const { fresh, unmapped, alreadyImported } = selectNewLinkedTransactions(payload.transactions, link.mappings, knownIds);
   const posted = fresh.filter((transaction) => !transaction.pending);
   const pendingSkipped = fresh.length - posted.length;
+  // The whole household is saved in one request the server caps at about 1 MB; refuse a pull that would push it over rather than make
+  // every later save fail.
+  if (JSON.stringify(state).length + posted.length * 400 > 900000) throw new Error(`Importing ${posted.length} transactions would push your household data past the size the server can save. Import a shorter range (a later start date), or clean up old transactions first.`);
   const byAccount = new Map();
   posted.forEach((transaction) => { byAccount.set(transaction.accountId, [...(byAccount.get(transaction.accountId) || []), transaction]); });
   byAccount.forEach((rows, accountId) => addRows(rows, { name: `${link.label}` }, "linked-import", "", { accountId }));
@@ -13801,16 +13824,16 @@ function applySnaptradeSync(link, payload) {
   return result;
 }
 
-async function syncLinkedAccount(linkId, addRows, { quiet = false } = {}) {
+async function syncLinkedAccount(linkId, addRows, { quiet = false, sinceDate = "" } = {}) {
   const link = (linkedAccounts?.links || []).find((item) => item.id === linkId);
   if (!link || linkedBusyId) return;
   linkedBusyId = linkId;
   if (!quiet) { linkedFeedback = `Syncing ${link.label}…`; render(); }
   try {
-    const payload = await api(`/api/linked-accounts/${linkId}/sync`, { method: "POST", body: "{}" });
+    const payload = await api(`/api/linked-accounts/${linkId}/sync`, { method: "POST", body: JSON.stringify(sinceDate ? { sinceDate } : {}) });
     let summary;
     if (link.provider === "simplefin") {
-      const result = applySimplefinSync(link, payload, addRows);
+      const result = applySimplefinSync(link, payload, addRows, { ignoreRemembered: Boolean(sinceDate) });
       summary = `${link.label}: ${result.imported} new transaction${result.imported === 1 ? "" : "s"} sent to Bank stream${result.balancesUpdated ? `, ${result.balancesUpdated} balance${result.balancesUpdated === 1 ? "" : "s"} updated` : ""}${result.groupsMatched ? `, ${result.groupsMatched} investment account${result.groupsMatched === 1 ? "" : "s"} matched to the bank balance` : ""}${result.debtsMatched ? `, ${result.debtsMatched} loan${result.debtsMatched === 1 ? "" : "s"} matched to the amount owed` : ""}${result.pendingSkipped ? `; ${result.pendingSkipped} pending skipped until they post` : ""}${result.unmapped ? `; ${result.unmapped} from accounts you chose not to import` : ""}.`;
       if (payload.errors?.length) summary += ` The bank reported: ${payload.errors.join("; ")}`;
     } else {

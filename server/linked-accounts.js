@@ -246,9 +246,11 @@ const STAGED_TRANSACTION_LIMIT = 3000;
 // Folds a fresh fetch into what is already staged (not yet applied by any client): SimpleFIN transactions accumulate by id (so nights
 // the app was never opened are not lost, even past the Bridge's 60-day request window), and accounts/balances/errors are the latest
 // snapshot; a SnapTrade payload is a snapshot of positions, so it simply replaces the old one.
-function mergeStagedPayload(staged, payload, nowIso) {
+function mergeStagedPayload(staged, payload, nowIso, { sinceDate } = {}) {
   const now = new Date(nowIso);
-  const cutoff = new Date(now.getTime() - STAGED_RETENTION_DAYS * 86400 * 1000).toISOString().slice(0, 10);
+  let cutoff = new Date(now.getTime() - STAGED_RETENTION_DAYS * 86400 * 1000).toISOString().slice(0, 10);
+  // An explicit "import history from <date>" must not have the older part pruned straight back out again.
+  if (/^\d{4}-\d{2}-\d{2}$/.test(String(sinceDate || "")) && sinceDate < cutoff) cutoff = sinceDate;
   if (payload.provider !== "simplefin") return { merged: { ...payload, stagedAt: nowIso }, newTransactionCount: 0 };
   const byId = new Map();
   (staged?.transactions || []).forEach((transaction) => byId.set(transaction.externalId, transaction));
@@ -461,7 +463,7 @@ function registerLinkedAccountRoutes({ app, requireSession, requireEditAccess, r
     const link = await loadLink(req);
     try {
       const payload = await fetchLinkPayload(link, { sinceDate: req.body?.sinceDate });
-      const { merged } = mergeStagedPayload(link.staged, payload, new Date().toISOString());
+      const { merged } = mergeStagedPayload(link.staged, payload, new Date().toISOString(), { sinceDate: req.body?.sinceDate });
       await store.update(sessionHouseholdId(req), link.id, { staged: merged, stagedAt: merged.stagedAt });
       await recordOutcome(req, link, null, payload.accounts);
       res.json(merged);

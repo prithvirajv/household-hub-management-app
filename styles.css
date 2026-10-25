@@ -9222,3 +9222,16 @@ html[data-theme="dark"] .note-color-coral { background: color-mix(in srgb, #fff0
 .linked-new-accounts {
   color: var(--gold, #b7791f);
 }
+
+.linked-history-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 0.6rem;
+  margin-top: 0.5rem;
+}
+
+.linked-history-row small {
+  flex-basis: 100%;
+  color: var(--muted);
+}

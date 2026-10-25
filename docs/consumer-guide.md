@@ -488,6 +488,13 @@ entry. It is read-only: FamilyLoop can never move money or place trades.
   under **Choose accounts**). Until you choose where each goes it is ignored.
   A "Don't import" choice is remembered, so skipped accounts aren't reported
   again.
+- **Import history:** under a bank link, **Import older transactions from**
+  a date (for example January 1) fetches everything from then on for the
+  accounts you chose; it goes to Bank stream like any import. How far back
+  it reaches depends on the bank (often 3-12 months), rows already in the
+  ledger or waiting in Bank stream are skipped, and rows you removed earlier
+  (Clean up) come back. If you're replacing hand-entered history, clean it up
+  first so the two don't double up.
 - **Overnight:** every night FamilyLoop fetches your linked accounts for you.
   The new transactions and balances are applied the next time you open the app
   (Home, Transactions or Wealth), and your phone gets a notification such as
