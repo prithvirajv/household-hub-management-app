@@ -1449,6 +1449,8 @@ app.post("/api/transactions/suggest-batch", requireSession, async (req, res, nex
     const rows = Array.isArray(req.body?.rows) ? req.body.rows : [];
     const lines = Array.isArray(req.body?.lines) ? req.body.lines : [];
     const accounts = Array.isArray(req.body?.accounts) ? req.body.accounts : [];
+    // Tags the household already uses, so the model reuses them instead of inventing near-duplicates.
+    const knownTags = (Array.isArray(req.body?.tags) ? req.body.tags : []).map((tag) => String(tag || "").trim().slice(0, 40)).filter(Boolean).slice(0, 60);
     if (!rows.length) return res.status(400).json({ error: "No transactions to categorize" });
     if (rows.length > BATCH_SUGGEST_MAX_ROWS) return res.status(400).json({ error: `At most ${BATCH_SUGGEST_MAX_ROWS} transactions per request` });
     if (!lines.length) return res.status(400).json({ error: "No subcategories to choose from yet - add a budget category first" });
@@ -1465,6 +1467,8 @@ app.post("/api/transactions/suggest-batch", requireSession, async (req, res, nex
       accountIds.length ? "Account options (id: label):" : "No account options - leave accountId null.",
       ...accounts.map((account) => `${account.id}: ${account.label}`),
       "",
+      knownTags.length ? `Tags already in use (reuse one when it fits): ${knownTags.join(", ")}` : "No tags are in use yet.",
+      "",
       "Transactions (id | payee | amount | date). Positive amounts are purchases, negative are refunds or deposits:",
       ...cleanRows.map((row) => `${row.id} | ${row.payee} | ${row.amount} | ${row.date}`)
     ].join("\n");
@@ -1474,8 +1478,8 @@ app.post("/api/transactions/suggest-batch", requireSession, async (req, res, nex
       headers: { "content-type": "application/json" },
       body: JSON.stringify({
         contents: [{ role: "user", parts: [{ text: prompt }] }],
-        systemInstruction: { parts: [{ text: "You are categorizing household bank transactions for a budgeting app. For each transaction choose the single best budget subcategory id and, when account options exist, the account it most likely belongs to. Reply with ONLY a JSON array - no markdown, no explanation - with one object per transaction: {\"id\": the transaction id, \"lineId\": exact subcategory id or null, \"accountId\": exact account id or null, \"confidence\": \"high\" or \"low\"}. Use \"high\" only when the payee clearly belongs to that subcategory; use null and \"low\" when unsure. Never invent ids." }] },
-        generationConfig: { maxOutputTokens: 4000, responseMimeType: "application/json" }
+        systemInstruction: { parts: [{ text: "You are categorizing household bank transactions for a budgeting app. For each transaction choose the single best budget subcategory id and, when account options exist, the account it most likely belongs to. Reply with ONLY a JSON array - no markdown, no explanation - with one object per transaction: {\"id\": the transaction id, \"lineId\": exact subcategory id or null, \"accountId\": exact account id or null, \"confidence\": \"high\" or \"low\", \"tags\": array of at most 2 short lowercase tags (1-2 words, e.g. \"subscription\", \"florida trip\", \"reimbursable\") that help find this transaction later, preferring tags already in use, or [] when none clearly apply}. Use \"high\" only when the payee clearly belongs to that subcategory; use null and \"low\" when unsure. Never invent ids." }] },
+        generationConfig: { maxOutputTokens: 8000, responseMimeType: "application/json" }
       })
     });
     const body = await response.json().catch(() => ({}));

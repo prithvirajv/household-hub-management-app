@@ -2886,7 +2886,8 @@ function renderTransactions() {
               <button id="addTransactionButton" type="button">+ Add transaction</button>
             </div>
           </div>
-          <label class="ai-import-toggle"><input type="checkbox" id="aiImportToggle" ${aiImportEnabled() ? "checked" : ""}> <span>Use AI to categorize imports and add confident rows to the ledger</span></label>
+          <label class="ai-import-toggle"><input type="checkbox" id="aiImportToggle" ${aiImportEnabled() ? "checked" : ""}> <span>Use AI to categorize and tag imports and add them to the ledger; anything it is unsure about stays in Bank stream for review</span></label>
+          ${(state.transactionInboxDrafts || []).length ? `<div class="button-row"><button type="button" class="ghost" id="bankStreamAiProcess" ${aiImportRunning ? "disabled" : ""}>${aiImportRunning ? "Working…" : `Let AI categorize and add the ${(state.transactionInboxDrafts || []).length} waiting row${(state.transactionInboxDrafts || []).length === 1 ? "" : "s"}`}</button><small class="muted">Confident rows go to the ledger with a category and tags; the rest stay here for review.</small></div>` : ""}
           ${bankImportFeedback ? `<p class="muted" role="status">${escapeHtml(bankImportFeedback)}</p>` : ""}
           ${otherMonthEntries.length ? `<div class="bank-stream-other-months">
             <small>Also pending in:</small>
@@ -10037,6 +10038,11 @@ function bindViewEvents() {
     if (aiImportEnabled()) void runAiImportPass(newDraftIds, file.name, rows.length);
   }
 
+  $("#bankStreamAiProcess")?.addEventListener("click", () => {
+    const ids = (state.transactionInboxDrafts || []).map((draft) => draft.id);
+    if (ids.length) void runAiImportPass(ids, "Bank stream", ids.length, { rerun: true });
+  });
+
   $("#aiImportToggle")?.addEventListener("change", (event) => {
     setAiImportEnabled(event.currentTarget.checked);
   });
@@ -13678,7 +13684,12 @@ function postDraftToLedger(inboxItem) {
   const lineId = inboxItem.lineId || "";
   const memo = inboxItem.recurringId ? "Recurring bill" : "Accepted bank stream item";
   const posted = makeTransaction({ date: inboxItem.date, payee: inboxItem.payee, amount: Number(inboxItem.amount), lineId, memo, accountId: inboxItem.accountId || "", orderNumber: inboxItem.orderNumber || "", tags: inboxItem.tags || [] });
-  if (inboxItem.externalId) posted.externalId = inboxItem.externalId;
+  if (inboxItem.externalId) {
+    posted.externalId = inboxItem.externalId;
+    // The account's balance was already matched to the bank (including this row), so posting it must not move the total.
+    const account = state.accounts.find((item) => item.id === inboxItem.accountId);
+    if (account && Number.isFinite(Number(inboxItem.amount)) && inboxItem.date <= dateKey(new Date())) account.openingBalance = Math.round((Number(account.openingBalance || 0) + openingShiftForPostedRow(account, inboxItem)) * 100) / 100;
+  }
   state.transactions.unshift(posted);
   state.transactionInboxDone ||= [];
   if (!state.transactionInboxDone.includes(inboxItem.id)) state.transactionInboxDone.push(inboxItem.id);
@@ -13796,14 +13807,14 @@ function applySimplefinSync(link, payload, addRows, { ignoreRemembered = false }
   posted.forEach((transaction) => { byAccount.set(transaction.accountId, [...(byAccount.get(transaction.accountId) || []), transaction]); });
   byAccount.forEach((rows, accountId) => addRows(rows, { name: `${link.label}` }, "linked-import", "", { accountId }));
   state.linkedImportedIds = rememberLinkedImportedIds(state.linkedImportedIds, posted.map((transaction) => transaction.externalId));
-  // Bring balances in line with the bank, counting rows still waiting in Bank stream (accepting one later changes nothing).
+  // Bring balances in line with the bank. The ledger alone is matched to the bank's figure (so the balance shown is the bank's), and a
+  // row posted from Bank stream later hands its amount back through the opening balance (postDraftToLedger), keeping it there.
   let balancesUpdated = 0;
   (payload.accounts || []).forEach((remote) => {
     const accountId = link.mappings[remote.remoteId]?.accountId;
     const account = accountId ? state.accounts.find((item) => item.id === accountId) : null;
     if (!account || remote.balance === null) return;
-    const current = currentAccountBalance(account.id) + pendingDraftEffect(account, state.transactionInboxDrafts);
-    const opening = reconcileOpeningBalance(account, current, remote.balance);
+    const opening = reconcileOpeningBalance(account, currentAccountBalance(account.id), remote.balance);
     if (opening !== Number(account.openingBalance || 0)) { account.openingBalance = opening; balancesUpdated += 1; }
   });
   // Accounts mapped to a holdings group: match the group's total to the bank balance (individual holdings keep their own detail).
@@ -13888,7 +13899,24 @@ function setAiImportEnabled(enabled) {
 
 const AI_IMPORT_CHUNK_SIZE = 50;
 
-async function runAiImportPass(draftIds, fileName, importedCount) {
+let aiImportRunning = false;
+let aiImportQueue = Promise.resolve();
+
+// Passes run one at a time: they all edit the same Bank stream, and two linked accounts syncing back to back would otherwise interleave.
+function runAiImportPass(draftIds, fileName, importedCount, { rerun = false } = {}) {
+  aiImportQueue = aiImportQueue.then(async () => {
+    aiImportRunning = true;
+    try {
+      await runAiImportPassOnce(draftIds, fileName, importedCount, rerun);
+    } catch (_error) { /* a failed pass leaves the rows in Bank stream */ } finally {
+      aiImportRunning = false;
+    }
+  });
+  return aiImportQueue;
+}
+
+async function runAiImportPassOnce(draftIds, fileName, importedCount, rerun) {
+  const lead = rerun ? `Checked ${importedCount} waiting row${importedCount === 1 ? "" : "s"}.` : `Imported ${importedCount} from ${fileName}.`;
   const householdId = currentHouseholdId();
   const findDraft = (id) => (state.transactionInboxDrafts || []).find((draft) => draft.id === id);
   const openAccounts = () => state.accounts.filter((account) => !account.closedAt);
@@ -13897,15 +13925,16 @@ async function runAiImportPass(draftIds, fileName, importedCount) {
   try {
     const needAi = draftIds.map(findDraft).filter((draft) => draft && (!draft.lineId || (!draft.accountId && openAccounts().length)));
     if (needAi.length && allLines().length) {
-      bankImportFeedback = `Imported ${importedCount} from ${fileName}. AI is categorizing ${needAi.length} row${needAi.length === 1 ? "" : "s"}…`;
+      bankImportFeedback = `${lead} AI is categorizing ${needAi.length} row${needAi.length === 1 ? "" : "s"}…`;
       render();
       const lines = allLines().map((line) => ({ id: line.id, label: `${line.category} - ${line.name}` }));
       const accounts = openAccounts().map((account) => ({ id: account.id, label: account.type ? `${account.name} (${account.type})` : account.name }));
+      const knownTags = [...new Set(state.transactions.flatMap((transaction) => transaction.tags || []))].slice(0, 60);
       for (let start = 0; start < needAi.length; start += AI_IMPORT_CHUNK_SIZE) {
         const chunk = needAi.slice(start, start + AI_IMPORT_CHUNK_SIZE);
         const { results } = await api("/api/transactions/suggest-batch", {
           method: "POST",
-          body: JSON.stringify({ rows: chunk.map((draft) => ({ id: draft.id, payee: draft.payee, amount: draft.amount, date: draft.date })), lines, accounts })
+          body: JSON.stringify({ rows: chunk.map((draft) => ({ id: draft.id, payee: draft.payee, amount: draft.amount, date: draft.date })), lines, accounts, tags: knownTags })
         });
         if (currentHouseholdId() !== householdId) return;
         results.forEach((result) => {
@@ -13922,6 +13951,7 @@ async function runAiImportPass(draftIds, fileName, importedCount) {
             draft.accountHistoryMatch = false;
             filled = true;
           }
+          if (result.tags?.length && !(draft.tags || []).length) { draft.tags = addTagsDeduped([], result.tags.join(",")); filled = true; }
           if (filled) aiFilled += 1;
         });
       }
@@ -13944,7 +13974,11 @@ async function runAiImportPass(draftIds, fileName, importedCount) {
       possibleDuplicate: isDuplicateTransaction(draft, others),
       refundMatch: refundMatch(draft, others),
       transferMatch: findTransferCandidate(draft, others),
-      accountClosedForDate: !accountAllowsDate(draft.accountId, draft.date)
+      accountClosedForDate: !accountAllowsDate(draft.accountId, draft.date),
+      // Imported statement rows (a file or a linked bank) are the bank's own record, deposits and payments included; only a deposit that
+      // duplicates a recorded paycheck is held back, along with the duplicate/refund/transfer/low-confidence cases above.
+      bankFeed: true,
+      paycheckMatch: matchesRecordedPaycheck(draft, state.paycheckOccurrences)
     });
     if (decision.accept) {
       postDraftToLedger(draft);
@@ -13955,8 +13989,8 @@ async function runAiImportPass(draftIds, fileName, importedCount) {
   });
   const remaining = draftIds.length - added;
   const reasonText = [...reviewReasons.entries()].sort((a, b) => b[1] - a[1]).slice(0, 3).map(([reason, count]) => `${count} ${reason}`).join(", ");
-  bankImportFeedback = `Imported ${importedCount} from ${fileName}.${aiFilled ? ` AI filled in ${aiFilled} row${aiFilled === 1 ? "" : "s"}.` : ""} ${added} added to the ledger${remaining ? `; ${remaining} left in Bank stream to review (${reasonText})` : ""}.${aiNote}`;
-  if (added) state.household.activity.unshift(`Imported ${fileName}: ${added} transaction${added === 1 ? "" : "s"} auto-added with AI categories`);
+  bankImportFeedback = `${lead}${aiFilled ? ` AI filled in ${aiFilled} row${aiFilled === 1 ? "" : "s"}.` : ""} ${added} added to the ledger${remaining ? `; ${remaining} left in Bank stream to review (${reasonText})` : ""}.${aiNote}`;
+  if (added) state.household.activity.unshift(`${rerun ? "Bank stream" : `Imported ${fileName}`}: ${added} transaction${added === 1 ? "" : "s"} auto-added with AI categories`);
   autosaveState();
   render();
 }

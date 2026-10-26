@@ -2,7 +2,7 @@ const assert = require("node:assert/strict");
 const http = require("node:http");
 const test = require("node:test");
 const { startTestServer } = require("./helpers");
-const { parseBatchSuggestions, autoAcceptDecision } = require("../lib/shared-logic");
+const { parseBatchSuggestions, autoAcceptDecision, matchesRecordedPaycheck, openingShiftForPostedRow, cleanSuggestedTags } = require("../lib/shared-logic");
 
 async function startGeminiStub(reply) {
   const requests = [];
@@ -30,10 +30,10 @@ test("parseBatchSuggestions only trusts ids that were offered, tolerates fences,
   ]) + "\n```";
   const results = parseBatchSuggestions(text, ["r1", "r2", "r3", "r4"], ["groceries", "utilities"], ["checking"]);
   assert.deepEqual(results, [
-    { id: "r1", lineId: "groceries", accountId: "checking", confidence: "high" },
-    { id: "r2", lineId: null, accountId: null, confidence: "low" },
-    { id: "r3", lineId: "utilities", accountId: null, confidence: "low" },
-    { id: "r4", lineId: null, accountId: null, confidence: "low" }
+    { id: "r1", lineId: "groceries", accountId: "checking", confidence: "high", tags: [] },
+    { id: "r2", lineId: null, accountId: null, confidence: "low", tags: [] },
+    { id: "r3", lineId: "utilities", accountId: null, confidence: "low", tags: [] },
+    { id: "r4", lineId: null, accountId: null, confidence: "low", tags: [] }
   ]);
   assert.deepEqual(parseBatchSuggestions("not json", ["r1"], [], []), []);
   assert.deepEqual(parseBatchSuggestions("[{broken", ["r1"], [], []), []);
@@ -80,8 +80,8 @@ test("suggest-batch endpoint validates input, requires a session, and returns on
     const ok = await post(payload);
     assert.equal(ok.status, 200);
     assert.deepEqual(ok.body.results, [
-      { id: "r1", lineId: "groceries", accountId: "checking", confidence: "high" },
-      { id: "r2", lineId: null, accountId: null, confidence: "low" }
+      { id: "r1", lineId: "groceries", accountId: "checking", confidence: "high", tags: [] },
+      { id: "r2", lineId: null, accountId: null, confidence: "low", tags: [] }
     ]);
     assert.equal(stub.requests.length, 1, "one model call for the whole batch");
     assert.ok(stub.requests[0].includes("Kroger") && stub.requests[0].includes("Food - Groceries"));
@@ -106,4 +106,42 @@ test("suggest-batch endpoint is disabled without an API key and surfaces an upst
     const res = await server.request("/api/transactions/suggest-batch", { method: "POST", headers: { cookie: signup.cookie }, body: JSON.stringify({ rows: [{ id: "r1", payee: "x", amount: 1, date: "2026-07-01" }], lines: [{ id: "a", label: "A" }] }) });
     assert.equal(res.status, 502);
   } finally { await server.stop(); await stub.stop(); }
+});
+
+test("suggested tags are kept short, plain, deduplicated and limited to two", () => {
+  assert.deepEqual(cleanSuggestedTags(["Subscription", "subscription", "<b>Florida trip</b>", "third"]), ["Subscription", "bFlorida tripb"]);
+  assert.deepEqual(cleanSuggestedTags(["  a very long tag that goes on and on and on  "]), ["a very long tag that goe"]);
+  assert.deepEqual(cleanSuggestedTags("nope"), []);
+  const results = parseBatchSuggestions(JSON.stringify([{ id: "r1", lineId: "groceries", accountId: null, confidence: "high", tags: ["weekly", "costco", "extra"] }]), ["r1"], ["groceries"], []);
+  assert.deepEqual(results[0].tags, ["weekly", "costco"]);
+});
+
+test("a linked bank feed also posts deposits and payments, but still holds back duplicates of a recorded paycheck", () => {
+  const draft = { lineId: "salary", accountId: "checking", lineSource: "ai-high", isDeposit: true, amount: -2500, date: "2026-03-13" };
+  const ctx = { accountsExist: true, possibleDuplicate: false, refundMatch: null, transferMatch: null, accountClosedForDate: false };
+  assert.equal(autoAcceptDecision(draft, ctx).reason, "payment or deposit");
+  assert.equal(autoAcceptDecision(draft, { ...ctx, bankFeed: true }).accept, true);
+  assert.equal(autoAcceptDecision({ ...draft, isDeposit: false, isPayment: true }, { ...ctx, bankFeed: true }).accept, true);
+  assert.equal(autoAcceptDecision(draft, { ...ctx, bankFeed: true, paycheckMatch: true }).reason, "matches a recorded paycheck");
+  assert.equal(autoAcceptDecision({ ...draft, lineSource: "ai-low" }, { ...ctx, bankFeed: true }).reason, "low confidence");
+});
+
+test("matchesRecordedPaycheck needs the same account, about the same amount and a nearby payday", () => {
+  const occurrences = [{ depositAccountId: "checking", amount: 2500, date: "2026-03-13" }];
+  const deposit = { accountId: "checking", amount: -2500, date: "2026-03-14" };
+  assert.equal(matchesRecordedPaycheck(deposit, occurrences), true);
+  assert.equal(matchesRecordedPaycheck({ ...deposit, amount: -2530 }, occurrences), true);
+  assert.equal(matchesRecordedPaycheck({ ...deposit, amount: -2700 }, occurrences), false);
+  assert.equal(matchesRecordedPaycheck({ ...deposit, date: "2026-03-25" }, occurrences), false);
+  assert.equal(matchesRecordedPaycheck({ ...deposit, accountId: "savings" }, occurrences), false);
+  assert.equal(matchesRecordedPaycheck({ ...deposit, amount: 2500 }, occurrences), false);
+});
+
+test("posting a linked row hands its amount back through the opening balance so the synced balance holds", () => {
+  const checking = { id: "checking", type: "checking", openingBalance: 100 };
+  const card = { id: "card", type: "credit_card", openingBalance: 100 };
+  // Money out of checking lowers its balance, so the opening balance rises by the same amount; a card purchase raises what is owed.
+  assert.equal(openingShiftForPostedRow(checking, { amount: 40 }), 40);
+  assert.equal(openingShiftForPostedRow(checking, { amount: -2500 }), -2500);
+  assert.equal(openingShiftForPostedRow(card, { amount: 40 }), -40);
 });

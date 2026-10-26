@@ -164,13 +164,17 @@ more convenient.
   overrides the plain history guess (but never a literal refund match) on
   every future import. Select it again to remove the rule.
 - **AI categorizes imports for you** (the checkbox above Bank Stream, on by
-  default): after an import, one batched request fills in the Subcategory
-  and account for rows your history couldn't match, and rows that are
-  confident (a rule, your history, or a high-confidence AI pick) are added
-  straight to the ledger. Duplicates, refunds, possible transfers, card
-  payments/deposits, pending rows and anything the AI was unsure about stay
-  in Bank Stream for review — unsure ones are marked **AI guess - check**.
-  Untick the box to review everything by hand. The mobile app does the same.
+  default): after an import (a CSV/PDF you upload, or a linked bank), one
+  batched request fills in the Subcategory, the account and up to two **tags**
+  (reusing tags you already use) for rows your history couldn't match, and
+  rows that are confident (a rule, your history, or a high-confidence AI pick)
+  go straight to the ledger, deposits and card payments included. Duplicates,
+  refunds, possible transfers, pending rows, a deposit that matches a paycheck
+  you already recorded (it would count the income twice) and anything the AI
+  was unsure about stay in Bank Stream for review — unsure ones are marked
+  **AI guess - check**. Already have rows waiting? Select **Let AI categorize
+  and add the N waiting rows** in Bank Stream. Untick the box to review
+  everything by hand. The mobile app does the same.
 - No history for a payee and AI import is off? Select **✨ Suggest with AI**
   for Subcategory, or **✨ Suggest account with AI** for the account (both on
   the Add transaction form, or their matching ✨ buttons next to an unlinked
@@ -461,9 +465,11 @@ entry. It is read-only: FamilyLoop can never move money or place trades.
 - **Link a bank or card (SimpleFIN Bridge):** create a setup token at
   bridge.simplefin.org (about $15/year; each token works once), paste it
   under **Link a bank**, then choose where each account goes — an existing
-  Wealth account, or a new one. New transactions arrive in **Bank stream**
-  (and go through AI categorization and the safe auto-add), and each mapped
-  account's balance is brought in line with the bank's. Pending rows wait
+  Wealth account, or a new one. New transactions are categorized and tagged by AI and added
+  to the ledger; anything uncertain waits in **Bank stream** for review. Each
+  mapped account's balance is brought in line with the bank's, and stays there
+  as you review waiting rows (the opening balance absorbs whatever your ledger
+  doesn't know about, such as history before the first sync). Pending rows wait
   until they post.
 - **Investment accounts through SimpleFIN (401(k), IRA, ESPP…):** SimpleFIN
   only reports a total balance for these, so when choosing where the account
