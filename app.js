@@ -6028,6 +6028,43 @@ function netWorthStockGroupCard(group) {
 
 const accountTypeColors = { checking: "var(--blue)", savings: "var(--green)", cash: "var(--gold)", credit_card: "var(--coral)", other: "var(--muted)" };
 
+// Where an account's balance comes from, so a large opening balance can be explained: for an account fed by a bank, the opening balance
+// is whatever its records (ledger rows, paychecks deposited to it, transfers) don't explain. Rows with an externalId came from the bank;
+// anything else dated the same period is a likely duplicate of them.
+function accountBalanceParts(account) {
+  const today = dateKey(new Date());
+  const rows = state.transactions.filter((transaction) => transaction.accountId === account.id && transaction.date <= today);
+  const sum = (items, pick) => Math.round(items.reduce((total, item) => total + pick(item), 0) * 100) / 100;
+  const bank = rows.filter((transaction) => transaction.externalId);
+  const other = rows.filter((transaction) => !transaction.externalId);
+  const paychecks = (state.paycheckOccurrences || []).filter((occurrence) => occurrence.depositAccountId === account.id && occurrence.date <= today);
+  const transfersIn = (state.transfers || []).filter((transfer) => transfer.toAccountId === account.id && transfer.date <= today);
+  const transfersOut = (state.transfers || []).filter((transfer) => transfer.fromAccountId === account.id && transfer.date <= today);
+  const sign = account.type === "credit_card" ? 1 : -1;
+  return {
+    bank: { count: bank.length, amount: sign * sum(bank, (t) => Number(t.amount || 0)) },
+    other: { count: other.length, amount: sign * sum(other, (t) => Number(t.amount || 0)) },
+    paychecks: { count: paychecks.length, amount: sum(paychecks, (o) => Number(o.amount || 0)) },
+    transfers: { count: transfersIn.length + transfersOut.length, amount: sum(transfersIn, (t) => Number(t.amount || 0)) - sum(transfersOut, (t) => Number(t.amount || 0)) }
+  };
+}
+
+function accountBalanceExplainer(account) {
+  if (account.type === "credit_card") return "";
+  const parts = accountBalanceParts(account);
+  if (!parts.bank.count) return "";
+  const signed = (value) => `${value < 0 ? "-" : "+"}${money.format(Math.abs(value))}`;
+  const lines = [
+    `Opening balance ${signed(Number(account.openingBalance || 0))} (what's left to reach the bank's balance)`,
+    `${parts.bank.count} bank row${parts.bank.count === 1 ? "" : "s"} ${signed(parts.bank.amount)}`
+  ];
+  if (parts.other.count) lines.push(`${parts.other.count} other ledger row${parts.other.count === 1 ? "" : "s"} ${signed(parts.other.amount)} (not from the bank - possible duplicates)`);
+  if (parts.paychecks.count) lines.push(`${parts.paychecks.count} recorded paycheck deposit${parts.paychecks.count === 1 ? "" : "s"} ${signed(parts.paychecks.amount)} (also in the bank rows - counted twice)`);
+  if (parts.transfers.count) lines.push(`${parts.transfers.count} transfer${parts.transfers.count === 1 ? "" : "s"} ${signed(parts.transfers.amount)}`);
+  const doubled = parts.paychecks.amount > 0 || parts.other.amount !== 0;
+  return `<details class="account-explainer"><summary>Why is the opening balance ${Number(account.openingBalance || 0) < 0 ? "negative" : "this amount"}?</summary><ul>${lines.map((line) => `<li>${escapeHtml(line)}</li>`).join("")}</ul>${doubled ? `<p class="muted">Bank rows are the real history, so a paycheck deposit or ledger row that repeats one of them inflates this account's records and is absorbed by the opening balance. Remove the repeats (or point the paycheck at no deposit account) and the opening balance will settle at what the account held before the first bank row.</p>` : `<p class="muted">Nothing here repeats the bank rows; the opening balance is simply what the account held before the first bank row.</p>`}</details>`;
+}
+
 function accountItemRow(account, index) {
   const balance = currentAccountBalance(account.id);
   const isLiability = account.type === "credit_card";
@@ -6051,6 +6088,7 @@ function accountItemRow(account, index) {
       ${sparkline}
       ${account.closedAt ? `<span class="pill pill-warning" title="No new transactions can be added after ${formatShortDate(account.closedAt)}">Closed ${formatShortDate(account.closedAt)}</span>` : ""}
     </div>
+    ${accountBalanceExplainer(account)}
     <button class="icon-button danger-button card-close-button" data-delete-account="${index}" type="button" aria-label="Remove ${escapeHtml(account.name)}">×</button>
   </article>`;
 }
@@ -13897,7 +13935,7 @@ function setAiImportEnabled(enabled) {
   try { localStorage.setItem("familyloop-ai-import", enabled ? "on" : "off"); } catch (_error) { /* preference just won't persist */ }
 }
 
-const AI_IMPORT_CHUNK_SIZE = 50;
+const AI_IMPORT_CHUNK_SIZE = 25;
 
 let aiImportRunning = false;
 let aiImportQueue = Promise.resolve();
@@ -13908,11 +13946,22 @@ function runAiImportPass(draftIds, fileName, importedCount, { rerun = false } = 
     aiImportRunning = true;
     try {
       await runAiImportPassOnce(draftIds, fileName, importedCount, rerun);
-    } catch (_error) { /* a failed pass leaves the rows in Bank stream */ } finally {
+    } catch (error) {
+      bankImportFeedback = `The AI import pass stopped (${error?.message || "unknown error"}); the rows are still in Bank stream.`;
+      render();
+    } finally {
       aiImportRunning = false;
     }
   });
   return aiImportQueue;
+}
+
+// Each AI call gets this long before the pass gives up on it; the rows it covered stay in Bank stream and the pass moves on.
+const AI_IMPORT_CALL_TIMEOUT_MS = 45000;
+
+function withTimeout(promise, ms, message) {
+  let timer;
+  return Promise.race([promise, new Promise((_resolve, reject) => { timer = setTimeout(() => reject(new Error(message)), ms); })]).finally(() => clearTimeout(timer));
 }
 
 async function runAiImportPassOnce(draftIds, fileName, importedCount, rerun) {
@@ -13920,22 +13969,67 @@ async function runAiImportPassOnce(draftIds, fileName, importedCount, rerun) {
   const householdId = currentHouseholdId();
   const findDraft = (id) => (state.transactionInboxDrafts || []).find((draft) => draft.id === id);
   const openAccounts = () => state.accounts.filter((account) => !account.closedAt);
+  const hasAccounts = openAccounts().length > 0;
   let aiNote = "";
   let aiFilled = 0;
+  let added = 0;
+  const reviewReasons = new Map();
+  const settled = new Set();
+
+  // Decides each row against the live ledger and the other waiting rows, and posts the safe ones. Rows already decided are skipped, so
+  // this runs after every AI chunk and the ledger fills as the pass goes instead of only at the very end.
+  const postSafeRows = (ids) => {
+    ids.forEach((id) => {
+      if (settled.has(id)) return;
+      const draft = findDraft(id);
+      if (!draft) return;
+      settled.add(id);
+      const others = [...state.transactions, ...(state.transactionInboxDrafts || []).filter((other) => other.id !== draft.id)];
+      const decision = autoAcceptDecision(draft, {
+        accountsExist: hasAccounts,
+        possibleDuplicate: isDuplicateTransaction(draft, others),
+        refundMatch: refundMatch(draft, others),
+        transferMatch: findTransferCandidate(draft, others),
+        accountClosedForDate: !accountAllowsDate(draft.accountId, draft.date),
+        // Imported statement rows (a file or a linked bank) are the bank's own record, deposits and payments included; only a deposit that
+        // duplicates a recorded paycheck is held back, along with the duplicate/refund/transfer/low-confidence cases above.
+        bankFeed: true,
+        paycheckMatch: matchesRecordedPaycheck(draft, state.paycheckOccurrences)
+      });
+      if (decision.accept) {
+        postDraftToLedger(draft);
+        added += 1;
+      } else {
+        reviewReasons.set(decision.reason, (reviewReasons.get(decision.reason) || 0) + 1);
+      }
+    });
+  };
+  const progress = (text) => { bankImportFeedback = `${lead} ${text}`; autosaveState(); render(); };
+
   try {
     const needAi = draftIds.map(findDraft).filter((draft) => draft && (!draft.lineId || (!draft.accountId && openAccounts().length)));
+    const needAiIds = new Set(needAi.map((draft) => draft.id));
+    // Rows a rule or history already categorized go in right away, before any AI call.
+    postSafeRows(draftIds.filter((id) => !needAiIds.has(id)));
+    if (added) progress(`${added} added to the ledger so far.`);
     if (needAi.length && allLines().length) {
-      bankImportFeedback = `${lead} AI is categorizing ${needAi.length} row${needAi.length === 1 ? "" : "s"}…`;
-      render();
       const lines = allLines().map((line) => ({ id: line.id, label: `${line.category} - ${line.name}` }));
       const accounts = openAccounts().map((account) => ({ id: account.id, label: account.type ? `${account.name} (${account.type})` : account.name }));
       const knownTags = [...new Set(state.transactions.flatMap((transaction) => transaction.tags || []))].slice(0, 60);
       for (let start = 0; start < needAi.length; start += AI_IMPORT_CHUNK_SIZE) {
         const chunk = needAi.slice(start, start + AI_IMPORT_CHUNK_SIZE);
-        const { results } = await api("/api/transactions/suggest-batch", {
-          method: "POST",
-          body: JSON.stringify({ rows: chunk.map((draft) => ({ id: draft.id, payee: draft.payee, amount: draft.amount, date: draft.date })), lines, accounts, tags: knownTags })
-        });
+        progress(`AI is categorizing rows ${start + 1}-${start + chunk.length} of ${needAi.length} (${added} added to the ledger so far)…`);
+        let results = [];
+        try {
+          ({ results } = await withTimeout(api("/api/transactions/suggest-batch", {
+            method: "POST",
+            body: JSON.stringify({ rows: chunk.map((draft) => ({ id: draft.id, payee: draft.payee, amount: draft.amount, date: draft.date })), lines, accounts, tags: knownTags })
+          }), AI_IMPORT_CALL_TIMEOUT_MS, "the AI took too long to answer"));
+        } catch (error) {
+          // One failed chunk must not stop the others: its rows stay in Bank stream and the pass carries on.
+          aiNote = ` AI categorization failed for some rows (${error.message || "unknown error"}) - they were left for review.`;
+          if (/not configured|HTTP 503/i.test(String(error.message))) break;
+        }
         if (currentHouseholdId() !== householdId) return;
         results.forEach((result) => {
           const draft = findDraft(result.id);
@@ -13954,42 +14048,18 @@ async function runAiImportPassOnce(draftIds, fileName, importedCount, rerun) {
           if (result.tags?.length && !(draft.tags || []).length) { draft.tags = addTagsDeduped([], result.tags.join(",")); filled = true; }
           if (filled) aiFilled += 1;
         });
+        postSafeRows(chunk.map((draft) => draft.id));
       }
     }
   } catch (error) {
-    aiNote = ` AI categorization wasn't available (${error.message || "unknown error"}) - rows were left for review.`;
+    aiNote = ` The import pass stopped (${error.message || "unknown error"}) - the remaining rows were left for review.`;
   }
   if (currentHouseholdId() !== householdId) return;
+  postSafeRows(draftIds);
 
-  // Decide per row against the live ledger and the other pending rows, then post the safe ones.
-  const hasAccounts = openAccounts().length > 0;
-  let added = 0;
-  const reviewReasons = new Map();
-  draftIds.forEach((id) => {
-    const draft = findDraft(id);
-    if (!draft) return;
-    const others = [...state.transactions, ...(state.transactionInboxDrafts || []).filter((other) => other.id !== draft.id)];
-    const decision = autoAcceptDecision(draft, {
-      accountsExist: hasAccounts,
-      possibleDuplicate: isDuplicateTransaction(draft, others),
-      refundMatch: refundMatch(draft, others),
-      transferMatch: findTransferCandidate(draft, others),
-      accountClosedForDate: !accountAllowsDate(draft.accountId, draft.date),
-      // Imported statement rows (a file or a linked bank) are the bank's own record, deposits and payments included; only a deposit that
-      // duplicates a recorded paycheck is held back, along with the duplicate/refund/transfer/low-confidence cases above.
-      bankFeed: true,
-      paycheckMatch: matchesRecordedPaycheck(draft, state.paycheckOccurrences)
-    });
-    if (decision.accept) {
-      postDraftToLedger(draft);
-      added += 1;
-    } else {
-      reviewReasons.set(decision.reason, (reviewReasons.get(decision.reason) || 0) + 1);
-    }
-  });
   const remaining = draftIds.length - added;
   const reasonText = [...reviewReasons.entries()].sort((a, b) => b[1] - a[1]).slice(0, 3).map(([reason, count]) => `${count} ${reason}`).join(", ");
-  bankImportFeedback = `${lead}${aiFilled ? ` AI filled in ${aiFilled} row${aiFilled === 1 ? "" : "s"}.` : ""} ${added} added to the ledger${remaining ? `; ${remaining} left in Bank stream to review (${reasonText})` : ""}.${aiNote}`;
+  bankImportFeedback = `${lead}${aiFilled ? ` AI filled in ${aiFilled} row${aiFilled === 1 ? "" : "s"}.` : ""} ${added} added to the ledger${remaining ? `; ${remaining} left in Bank stream to review${reasonText ? ` (${reasonText})` : ""}` : ""}.${aiNote}`;
   if (added) state.household.activity.unshift(`${rerun ? "Bank stream" : `Imported ${fileName}`}: ${added} transaction${added === 1 ? "" : "s"} auto-added with AI categories`);
   autosaveState();
   render();
