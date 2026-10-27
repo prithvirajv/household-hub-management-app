@@ -543,6 +543,18 @@ entry. It is read-only: FamilyLoop can never move money or place trades.
   from; anything earlier has to come from a statement. A link's first sync
   always happens in the app (never overnight), so you see that explanation
   first.
+- **Is last night's sync complete?** Each bank-fed account in Wealth shows
+  an end tag next to "Synced from": **Synced through <date>** - how far the
+  bank's data for it runs (it turns amber and says "behind" if the bank hasn't
+  reported anything in two days). Each link's status line says what the
+  overnight run did: complete (with how many came in and how many were added),
+  waiting for you, or did not finish and why. If anything is off - a
+  connection that needs signing in, a run that failed, rows fetched but not
+  loaded, an account that is behind - a red **The overnight sync needs a look**
+  card appears on Home (with **Sync now**) and your phone is told. A second
+  run a few hours after the main one retries anything that didn't finish. The
+  Home AI summary also reports the sync: whether it finished, what is missing
+  (months not imported, accounts behind, rows waiting) and useful FYIs.
 - **Import history:** under a bank link, **Import older transactions from**
   a date (for example January 1) fetches everything from then on for the
   accounts you chose; it goes to Bank stream like any import. How far back

@@ -337,3 +337,5 @@ ALTER TABLE linked_accounts ADD COLUMN IF NOT EXISTS new_accounts JSONB NOT NULL
 -- the server never writes household state itself, so this is cleared only when a client acknowledges it has saved the result.
 ALTER TABLE linked_accounts ADD COLUMN IF NOT EXISTS staged JSONB NOT NULL DEFAULT '{}'::jsonb;
 ALTER TABLE linked_accounts ADD COLUMN IF NOT EXISTS staged_at TIMESTAMPTZ;
+-- What the last overnight run did for this link ({at, ok, stage, error, applied, imported, added, left}); read by the apps to show whether the sync completed.
+ALTER TABLE linked_accounts ADD COLUMN IF NOT EXISTS last_run JSONB NOT NULL DEFAULT '{}'::jsonb;

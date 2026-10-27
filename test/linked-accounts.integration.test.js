@@ -299,8 +299,12 @@ test("the nightly job notifies the household about new transactions and about a 
     await call(`/api/linked-accounts/${id}/sync`, { method: "POST", body: "{}" });
     await call(`/api/linked-accounts/${id}/ack`, { method: "POST", body: JSON.stringify({ stagedAt: new Date(Date.now() + 3600000).toISOString() }) });
 
+    const retryJob = () => call("/api/internal/linked-accounts/sync-all", { method: "POST", headers: { authorization: "Bearer s" }, body: JSON.stringify({ retry: true }) });
     const first = await job();
     assert.deepEqual([first.body.synced, first.body.newTransactions], [1, 2]);
+    const ran = (await call("/api/linked-accounts")).body.links[0].lastRun;
+    assert.deepEqual([ran.ok, ran.stage, ran.newRows, typeof ran.at], [true, "fetched", 2, "string"], "each run records what it did for the link");
+    assert.equal((await retryJob()).body.links, 0, "the retry run leaves a link whose overnight run finished cleanly alone");
     assert.deepEqual(messages, [["h1", "2 new bank transactions waiting to review"]]);
     await job();
     assert.equal(messages.length, 1, "a night with nothing new sends nothing");
@@ -308,6 +312,8 @@ test("the nightly job notifies the household about new transactions and about a 
     mode = "revoked";
     const failing = await job();
     assert.deepEqual([failing.body.failed, failing.body.reconnect], [1, 1]);
+    const failedRun = (await call("/api/linked-accounts")).body.links[0].lastRun;
+    assert.deepEqual([failedRun.ok, failedRun.stage, failedRun.reconnect], [false, "fetch", true], "a run that could not fetch says so");
     assert.equal(messages[1][1], "Bank one needs signing in again - open Wealth to relink");
     assert.equal((await call("/api/linked-accounts")).body.links[0].status, "needs_reconnect");
     const again = await job();
@@ -364,6 +370,12 @@ test("the nightly job applies new bank transactions to the household without the
     const balance = accountBalance("local-checking", { accounts: after.body.accounts, transactions: after.body.transactions, paychecks: after.body.paychecks, paycheckOccurrences: after.body.paycheckOccurrences, transfers: after.body.transfers, ious: after.body.ious || [] }, new Date().toISOString().slice(0, 10));
     assert.equal(Math.round(balance * 100) / 100, 1250.5, "the account's balance follows the bank");
     assert.deepEqual([(await server.request("/api/linked-accounts", { headers: { cookie } })).body.links[0].hasStaged], [false], "applied data is no longer staged");
+    const nightRun = (await server.request("/api/linked-accounts", { headers: { cookie } })).body.links[0].lastRun;
+    assert.deepEqual([nightRun.ok, nightRun.stage, nightRun.imported, nightRun.added], [true, "applied", 2, 2], "the link records that the night's data was loaded, with the counts");
+    const checking = after.body.accounts.find((account) => account.id === "local-checking");
+    assert.equal(checking.syncedFrom, "2026-10-02", "the account's start tag is its earliest bank row");
+    assert.match(checking.syncedThrough, /^\d{4}-\d{2}-\d{2}$/, "and the end tag says how far the bank's data runs");
+    assert.ok(checking.lastSyncedAt);
     assert.equal(after.body.household.activity[0].includes("added to the ledger overnight"), true);
 
     // The household can turn it off: the job then only stages, as before.

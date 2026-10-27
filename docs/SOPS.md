@@ -199,6 +199,12 @@ user secret) are AES-256-GCM encrypted with `LINK_ENCRYPTION_KEY` and never retu
   opened (`POST /:id/ack` clears it), as before. Manual syncs from the app still stage and apply client-side; both paths skip ids the household
   already has, so they never double up. The job pushes "N new bank transactions added to your ledger (M need a look)" (or "waiting to review"
   when it did not apply) and a one-time "needs signing in again". Links needing reconnection are skipped until relinked.
+- **Proving the night's sync loaded:** every link records its run in `linked_accounts.last_run` (`{at, ok, stage: fetched|applied|waiting|fetch|apply,
+  imported, added, left, error}`, returned by `GET /api/linked-accounts`); each bank-fed account carries `syncedFrom` / `syncedThrough` /
+  `lastSyncedAt` in the household state. The apps show them (status line, "Synced through" tag, a Home card when something is off), the Home AI
+  summary is given them, and a failed run sends a phone notification. A second Cloud Scheduler job `familyloop-linked-sync-retry` (06:30 ET,
+  body `{"retry":true}`, created by `scripts/deploy-cloud-run.sh`) re-runs only links whose last run did not finish cleanly or is over 8 hours
+  old.
 - **State versioning (why the server can write household state safely):** `households.state_version` is bumped by every write to
   `app_state`; the overnight job reads it and writes only if it is unchanged (retrying up to 3 times, reusing AI answers already fetched), and
   re-lays the owner's shared modules at write time so a note edited from another household meanwhile is not lost. `households.applied_version`

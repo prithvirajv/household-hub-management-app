@@ -2416,7 +2416,8 @@ function homeBriefingFacts() {
     actions.length ? `Needs attention today: ${actions.slice(0, 8).map((item) => `${item.title} (${item.kind}, ${item.overdue ? "past due" : "due today"})`).join("; ")}.` : "Nothing is past due or due today.",
     week.length ? `Coming up this week: ${week.map((day) => `${day.label}: ${day.items.map((item) => item.title).join(", ")}`).join("; ")}.` : "",
     bills.length ? `Bills and goals open: ${bills.map((reminder) => `${reminder.title} - ${reminder.detail}`).join("; ")}.` : "",
-    plan.length ? `The viewer's plan today has ${plan.length} task${plan.length === 1 ? "" : "s"}, ${plan.filter((task) => task.done).length} done.` : ""
+    plan.length ? `The viewer's plan today has ${plan.length} task${plan.length === 1 ? "" : "s"}, ${plan.filter((task) => task.done).length} done.` : "",
+    ...bankSyncFacts()
   ].filter(Boolean).join("\n").slice(0, 5800);
 
   const chips = [
@@ -2426,6 +2427,32 @@ function homeBriefingFacts() {
     uncategorized ? `${uncategorized} need a category` : ""
   ].filter(Boolean);
   return { text, chips };
+}
+
+// Plain-language facts about the bank sync for the briefing: whether last night's run finished for each link, how far each bank-fed account's
+// data runs, months that were not imported, and rows still needing attention - so the summary can say what is missing and give FYIs.
+function bankSyncFacts() {
+  const links = linkedAccounts?.links || [];
+  const fed = (state.accounts || []).filter((account) => account.syncedFrom || account.syncedThrough);
+  if (!links.length && !fed.length) return [];
+  const day = (value) => new Date(`${value}T00:00:00`).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
+  const facts = ["Bank sync:"];
+  links.forEach((link) => {
+    const run = link.lastRun || {};
+    const when = run.at ? new Date(run.at).toLocaleString("en-US", { weekday: "short", hour: "numeric", minute: "2-digit" }) : "";
+    if (link.status === "needs_reconnect") facts.push(`- Connection "${link.label}" needs signing in again; nothing new can sync until then.`);
+    else if (!run.at) facts.push(`- Connection "${link.label}" has not had an overnight run yet.`);
+    else if (run.ok === false) facts.push(`- Connection "${link.label}": the overnight run (${when}) did NOT finish - ${run.error || "unknown problem"}.`);
+    else if (run.stage === "waiting") facts.push(`- Connection "${link.label}": fetched overnight (${when}) but the new transactions are waiting for the household to open the app.`);
+    else if (run.stage === "applied") facts.push(`- Connection "${link.label}": the overnight run (${when}) completed - ${run.imported || 0} new from the bank, ${run.added || 0} added to the ledger${run.left ? `, ${run.left} held for review` : ""}.`);
+    else facts.push(`- Connection "${link.label}": fetched overnight (${when}); not loaded yet.`);
+  });
+  const behind = dateKey(new Date(Date.now() - 2 * 86400000));
+  fed.slice(0, 10).forEach((account) => {
+    facts.push(`- ${account.name}: bank records ${account.syncedFrom ? `from ${day(account.syncedFrom)} ` : ""}${account.syncedThrough ? `through ${day(account.syncedThrough)}${account.syncedThrough < behind ? " (BEHIND - the bank has not reported anything newer)" : ""}` : ""}.`);
+  });
+  (state.historyGapNotices || []).forEach((notice) => facts.push(`- NOT imported (the bank did not return it; needs a statement import): ${accountName(notice.accountId) || notice.accountName}, ${historyGapMonths(notice)}.`));
+  return facts;
 }
 
 function homeBriefingCacheKey() {
@@ -2497,6 +2524,7 @@ function renderHome() {
     <section class="work-grid">
       <div class="main-stack">
         ${renderHomeBriefingCard()}
+        ${renderBankSyncHealthCard()}
         ${renderHistoryGapCard()}
         ${renderDetectedSalaryCard()}
         ${renderPlanSuggestionsCard()}
@@ -6331,6 +6359,7 @@ function accountItemRow(account, index) {
       ${sparkline}
       ${account.closedAt ? `<span class="pill pill-warning" title="No new transactions can be added after ${formatShortDate(account.closedAt)}">Closed ${formatShortDate(account.closedAt)}</span>` : ""}
       ${account.syncedFrom ? `<span class="pill pill-info account-synced-tag" title="Fed by your bank: its records are complete from this date. For anything earlier, import a statement (Transactions, then Import a statement).">Synced from ${escapeHtml(new Date(`${account.syncedFrom}T00:00:00`).toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" }))}</span>` : ""}
+      ${account.syncedThrough ? (() => { const behind = account.syncedThrough < dateKey(new Date(Date.now() - 2 * 86400000)); return `<span class="pill ${behind ? "pill-warning" : "pill-info"} account-synced-tag" title="${behind ? "The bank has not reported anything newer than this for the account - check the connection, or sync now." : "The bank's data for this account is loaded through this date."}">Synced through ${escapeHtml(new Date(`${account.syncedThrough}T00:00:00`).toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" }))}${behind ? " - behind" : ""}</span>`; })() : ""}
     </div>
     <button class="icon-button danger-button card-close-button" data-delete-account="${index}" type="button" aria-label="Remove ${escapeHtml(account.name)}">×</button>
   </article>`;
@@ -8519,6 +8548,7 @@ function bindViewEvents() {
     dismissBudgetReminder(`plan:${lineId}`);
   }));
   document.querySelectorAll("[data-plan-keep]").forEach((button) => button.addEventListener("click", () => dismissBudgetReminder(`plan:${button.dataset.planKeep}`)));
+  document.querySelectorAll("[data-home-sync-link]").forEach((button) => button.addEventListener("click", () => syncLinkedAccount(button.dataset.homeSyncLink, addBankStreamRows)));
   document.querySelectorAll("[data-ack-history-gap]").forEach((button) => button.addEventListener("click", () => {
     state.historyGapNotices = (state.historyGapNotices || []).filter((notice) => notice.id !== button.dataset.ackHistoryGap);
     autosaveState();
@@ -14020,10 +14050,50 @@ function linkedProviderLabel(link) {
   return link.provider === "snaptrade" ? "Brokerage (SnapTrade)" : "Bank (SimpleFIN)";
 }
 
+// What the last overnight run did for a link, in words: loaded (with the counts), waiting for you, or failed (with the reason).
+function linkedRunSummary(link) {
+  const run = link.lastRun || {};
+  if (!run.at) return "";
+  const time = new Date(run.at).toLocaleString();
+  if (run.ok === false) return `Overnight sync ${time} did not finish: ${run.error || "unknown problem"}`;
+  if (run.stage === "waiting") return `Overnight sync ${time}: ${run.reason || "new transactions are waiting for you to open the app."}`;
+  if (run.stage === "applied") return `Overnight sync ${time}: complete - ${run.imported || 0} new from the bank, ${run.added || 0} added to the ledger${run.left ? `, ${run.left} need a look` : ""}.`;
+  return `Overnight sync ${time}: fetched${run.newRows ? ` ${run.newRows} new` : ""} - not loaded yet.`;
+}
+
 function linkedStatusText(link) {
   if (link.status === "needs_reconnect") return "Needs reconnecting - remove it and link again";
   const when = link.lastSyncAt ? `Last synced ${new Date(link.lastSyncAt).toLocaleString()}` : "Not synced yet";
-  return link.lastError ? `${when} - ${link.lastError}` : when;
+  const base = link.lastError ? `${when} - ${link.lastError}` : when;
+  const run = linkedRunSummary(link);
+  return run ? `${base} · ${run}` : base;
+}
+
+// Home: what needs attention about the bank sync - a connection that needs signing in, an overnight run that did not finish or is waiting for
+// the app, or a bank-fed account whose data is more than two days old. Empty when everything loaded.
+function bankSyncProblems() {
+  const problems = [];
+  (linkedAccounts?.links || []).forEach((link) => {
+    const run = link.lastRun || {};
+    if (link.status === "needs_reconnect") problems.push({ title: link.label, detail: "needs signing in again - remove it and link it again under Wealth" });
+    else if (run.ok === false) problems.push({ title: link.label, detail: `did not finish overnight: ${run.error || "unknown problem"}`, sync: link.id });
+    else if (run.stage === "waiting") problems.push({ title: link.label, detail: run.reason || "new transactions are waiting for you to open the app", sync: link.id });
+    else if (link.hasStaged && link.status === "active") problems.push({ title: link.label, detail: "has fetched transactions that are not loaded yet", sync: link.id });
+  });
+  const stale = dateKey(new Date(Date.now() - 2 * 86400000));
+  (state.accounts || []).filter((account) => account.syncedThrough && account.syncedThrough < stale && !account.closedAt).forEach((account) => {
+    problems.push({ title: account.name, detail: `the bank has data only through ${new Date(`${account.syncedThrough}T00:00:00`).toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" })}` });
+  });
+  return problems;
+}
+
+function renderBankSyncHealthCard() {
+  const problems = bankSyncProblems();
+  if (!problems.length) return "";
+  return `<section class="card history-gap-card" role="alert">
+    <div class="card-label">Bank sync</div><h3>The overnight sync needs a look</h3>
+    ${problems.map((problem) => `<div class="compact-row"><div><strong>${escapeHtml(problem.title)}</strong><small>${escapeHtml(problem.detail)}</small></div>${problem.sync ? `<button class="pill-button" data-home-sync-link="${escapeHtml(problem.sync)}" type="button">Sync now</button>` : ""}</div>`).join("")}
+  </section>`;
 }
 
 function renderLinkedAccountsCard() {
@@ -14115,6 +14185,7 @@ function applySimplefinSync(link, payload, addRows, { ignoreRemembered = false }
   byAccount.forEach((rows, accountId) => addRows(rows, { name: `${link.label}` }, "linked-import", "", { accountId }));
   state.linkedImportedIds = rememberLinkedImportedIds(state.linkedImportedIds, posted.map((transaction) => transaction.externalId));
   updateAccountsSyncedFrom(state.accounts, link.mappings, payload.coverage, [...state.transactions, ...(state.transactionInboxDrafts || [])], dateKey(new Date()));
+  markAccountsSynced(state.accounts, link.mappings, payload.accounts, dateKey(new Date()), new Date().toISOString());
   // Bring balances in line with the bank. The ledger alone is matched to the bank's figure (so the balance shown is the bank's), and a
   // row posted from Bank stream later hands its amount back through the opening balance (postDraftToLedger), keeping it there.
   let balancesUpdated = 0;

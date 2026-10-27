@@ -197,8 +197,8 @@ test("rows with different bank transaction ids are never duplicates of each othe
 
 test("parseHomeBriefing keeps a plain, size-limited summary and rejects anything unusable", () => {
   const { parseHomeBriefing } = require("../lib/shared-logic");
-  const reply = "```json\n" + JSON.stringify({ headline: "A <b>busy</b> Tuesday", points: ["One", " ", "Two", "Three", "Four", "Five"], tip: "Pay the electric bill." }) + "\n```";
-  assert.deepEqual(parseHomeBriefing(reply), { headline: "A busy Tuesday", points: ["One", "Two", "Three", "Four"], tip: "Pay the electric bill." });
+  const reply = "```json\n" + JSON.stringify({ headline: "A <b>busy</b> Tuesday", points: ["One", " ", "Two", "Three", "Four", "Five", "Six"], tip: "Pay the electric bill." }) + "\n```";
+  assert.deepEqual(parseHomeBriefing(reply), { headline: "A busy Tuesday", points: ["One", "Two", "Three", "Four", "Five"], tip: "Pay the electric bill." });
   assert.equal(parseHomeBriefing("not json"), null);
   assert.equal(parseHomeBriefing("[1,2]"), null);
   assert.equal(parseHomeBriefing(JSON.stringify({ headline: "", points: [], tip: "x" })), null);
@@ -219,6 +219,7 @@ test("home briefing endpoint needs a session and a context, forwards the facts, 
     assert.equal(ok.body.briefing.headline, "You have spent $120.00 of $400.00.");
     assert.deepEqual(ok.body.briefing.points, ["Groceries is the biggest category."]);
     assert.ok(stub.requests[0].includes("$120.00 spent of $400.00 planned"));
+    assert.ok(stub.requests[0].includes("Never say a sync completed unless the facts say so"), "the AI is told to report the bank sync: whether it finished, what is missing, and FYIs");
   } finally { await server.stop(); await stub.stop(); }
   const noKey = await startTestServer();
   try {
@@ -293,4 +294,13 @@ test("an account's synced-from date takes the coverage a sync reports, never mov
   assert.deepEqual(accounts.map((a) => a.syncedFrom), ["2026-04-01", "2026-02-01", "2026-07-02", "2026-10-27"], "coverage wins, an earlier date is kept, a bare account takes its earliest bank row (a hand-entered one does not count), else today");
   assert.equal(changed, 3);
   assert.equal(updateAccountsSyncedFrom(accounts, mappings, {}, rows, "2026-10-27"), 0, "nothing moves on a plain sync");
+});
+
+test("an account's synced-through date is the bank's own balance date, never in the future, and today when the bank gives none", () => {
+  const { markAccountsSynced } = require("../lib/shared-logic");
+  const accounts = [{ id: "a" }, { id: "b" }, { id: "c" }, { id: "d" }];
+  const mappings = { RA: { accountId: "a" }, RB: { accountId: "b" }, RC: { accountId: "c" }, RD: { groupId: "g" } };
+  markAccountsSynced(accounts, mappings, [{ remoteId: "RA", balanceDate: "2026-10-24" }, { remoteId: "RB", balanceDate: "2026-12-01" }, { remoteId: "RC", balanceDate: "" }, { remoteId: "RD", balanceDate: "2026-10-26" }], "2026-10-27", "2026-10-27T07:30:00Z");
+  assert.deepEqual(accounts.map((a) => a.syncedThrough), ["2026-10-24", "2026-10-27", "2026-10-27", undefined]);
+  assert.equal(accounts[0].lastSyncedAt, "2026-10-27T07:30:00Z");
 });

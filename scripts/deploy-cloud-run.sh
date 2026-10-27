@@ -268,28 +268,31 @@ if [[ -z "${APP_BASE_URL}" ]]; then
 fi
 
 
-# Nightly linked-account sync (SimpleFIN / SnapTrade): fetches each active link and stages the result; clients apply it the next time the
-# app is opened (see docs/SOPS.md). Created/updated idempotently here, like the other scheduler jobs but authenticated with the same
-# NOTIFICATION_SECRET bearer token. A failure to manage the job is reported but never fails the deploy.
-LINKED_SYNC_JOB="${LINKED_SYNC_JOB:-familyloop-linked-sync}"
-LINKED_SYNC_SCHEDULE="${LINKED_SYNC_SCHEDULE:-30 3 * * *}"
+# Nightly linked-account sync (SimpleFIN / SnapTrade): fetches each active link, stages the result and applies it to the household on the
+# server, recording what each link's run did (see docs/SOPS.md). Created/updated idempotently here, like the other scheduler jobs but
+# authenticated with the same NOTIFICATION_SECRET bearer token. A failure to manage the job is reported but never fails the deploy.
 LINKED_SYNC_TIME_ZONE="${LINKED_SYNC_TIME_ZONE:-America/New_York}"
 LINKED_SYNC_URI="${APP_BASE_URL:-${SERVICE_URL}}/api/internal/linked-accounts/sync-all"
-# "create" takes --headers; "update" only has --update-headers (it rejects --headers, which is why updates used to fail silently).
-SCHEDULER_VERB="create"
-SCHEDULER_HEADERS_FLAG="--headers"
-if gcloud scheduler jobs describe "${LINKED_SYNC_JOB}" --project "${PROJECT_ID}" --location "${REGION}" >/dev/null 2>&1; then
-  SCHEDULER_VERB="update"
-  SCHEDULER_HEADERS_FLAG="--update-headers"
-fi
-if ! gcloud scheduler jobs "${SCHEDULER_VERB}" http "${LINKED_SYNC_JOB}" \
-  --project "${PROJECT_ID}" --location "${REGION}" \
-  --schedule "${LINKED_SYNC_SCHEDULE}" --time-zone "${LINKED_SYNC_TIME_ZONE}" \
-  --uri "${LINKED_SYNC_URI}" --http-method POST \
-  "${SCHEDULER_HEADERS_FLAG}" "Authorization=Bearer ${NOTIFICATION_SECRET},Content-Type=application/json" \
-  --message-body "{}" --attempt-deadline 540s --max-retry-attempts 1 >/dev/null 2>&1; then
-  echo "Warning: could not ${SCHEDULER_VERB} the Cloud Scheduler job ${LINKED_SYNC_JOB}; the nightly linked-account sync will not run." >&2
-fi
+# Creates or updates one scheduler job. "create" takes --headers; "update" only has --update-headers (it rejects --headers, which is why
+# updates used to fail silently).
+upsert_linked_sync_job() {
+  local job_name="$1" schedule="$2" body="$3" verb="create" headers_flag="--headers"
+  if gcloud scheduler jobs describe "${job_name}" --project "${PROJECT_ID}" --location "${REGION}" >/dev/null 2>&1; then
+    verb="update"
+    headers_flag="--update-headers"
+  fi
+  if ! gcloud scheduler jobs "${verb}" http "${job_name}" \
+    --project "${PROJECT_ID}" --location "${REGION}" \
+    --schedule "${schedule}" --time-zone "${LINKED_SYNC_TIME_ZONE}" \
+    --uri "${LINKED_SYNC_URI}" --http-method POST \
+    "${headers_flag}" "Authorization=Bearer ${NOTIFICATION_SECRET},Content-Type=application/json" \
+    --message-body "${body}" --attempt-deadline 540s --max-retry-attempts 1 >/dev/null 2>&1; then
+    echo "Warning: could not ${verb} the Cloud Scheduler job ${job_name}; the linked-account sync it runs will not happen." >&2
+  fi
+}
+# The main run, and a retry a few hours later that only picks up links whose overnight run did not finish cleanly (a bank that was down).
+upsert_linked_sync_job "${LINKED_SYNC_JOB:-familyloop-linked-sync}" "${LINKED_SYNC_SCHEDULE:-30 3 * * *}" "{}"
+upsert_linked_sync_job "${LINKED_SYNC_RETRY_JOB:-familyloop-linked-sync-retry}" "${LINKED_SYNC_RETRY_SCHEDULE:-30 6 * * *}" '{"retry":true}'
 
 echo "Cloud Run URL: ${SERVICE_URL}"
 if [[ "${USE_CLOUD_SQL}" == "true" ]]; then

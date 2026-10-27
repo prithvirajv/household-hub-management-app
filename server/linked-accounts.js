@@ -339,7 +339,7 @@ function createStore({ MEMORY_DB, memoryDb, pool }) {
   if (MEMORY_DB) memoryDb.linkedAccounts ||= [];
   const toRow = (row) => ({
     id: row.id, householdId: row.household_id, provider: row.provider, label: row.label, credentials: row.credentials,
-    mappings: row.mappings || {}, newAccounts: row.new_accounts || [], staged: row.staged || {}, stagedAt: row.staged_at || null, status: row.status, lastSyncAt: row.last_sync_at || null, lastError: row.last_error || "", createdAt: row.created_at
+    mappings: row.mappings || {}, newAccounts: row.new_accounts || [], staged: row.staged || {}, stagedAt: row.staged_at || null, lastRun: row.last_run || {}, status: row.status, lastSyncAt: row.last_sync_at || null, lastError: row.last_error || "", createdAt: row.created_at
   });
   return {
     async list(householdId) {
@@ -368,7 +368,7 @@ function createStore({ MEMORY_DB, memoryDb, pool }) {
       return id;
     },
     async update(householdId, id, patch) {
-      const columns = { label: "label", credentials: "credentials", mappings: "mappings", newAccounts: "new_accounts", staged: "staged", stagedAt: "staged_at", status: "status", lastSyncAt: "last_sync_at", lastError: "last_error" };
+      const columns = { label: "label", credentials: "credentials", mappings: "mappings", newAccounts: "new_accounts", staged: "staged", stagedAt: "staged_at", lastRun: "last_run", status: "status", lastSyncAt: "last_sync_at", lastError: "last_error" };
       const entries = Object.entries(patch).filter(([key]) => columns[key]);
       if (!entries.length) return;
       if (MEMORY_DB) {
@@ -377,7 +377,7 @@ function createStore({ MEMORY_DB, memoryDb, pool }) {
         return;
       }
       const sets = entries.map(([key], index) => `${columns[key]} = $${index + 3}`).join(", ");
-      const values = entries.map(([key, value]) => (key === "mappings" || key === "newAccounts" || key === "staged" ? JSON.stringify(value) : value));
+      const values = entries.map(([key, value]) => (key === "mappings" || key === "newAccounts" || key === "staged" || key === "lastRun" ? JSON.stringify(value) : value));
       await pool.query(`UPDATE linked_accounts SET ${sets} WHERE id = $1 AND household_id = $2`, [id, householdId, ...values]);
     },
     async remove(householdId, id) {
@@ -399,7 +399,7 @@ function registerLinkedAccountRoutes({ app, requireSession, requireEditAccess, r
 
   const requireConfigured = (req, res, next) => (encryptionKey ? next() : res.status(503).json({ error: "Linked accounts are not configured on this server" }));
   const sessionHouseholdId = (req) => req.sessionUser.household_id;
-  const publicLink = (link) => ({ id: link.id, provider: link.provider, label: link.label, status: link.status, lastSyncAt: link.lastSyncAt, lastError: link.lastError, mappings: link.mappings, newAccounts: link.newAccounts || [], stagedCount: Array.isArray(link.staged?.transactions) ? link.staged.transactions.length : 0, hasStaged: Boolean(link.stagedAt && Object.keys(link.staged || {}).length) });
+  const publicLink = (link) => ({ id: link.id, provider: link.provider, label: link.label, status: link.status, lastSyncAt: link.lastSyncAt, lastError: link.lastError, lastRun: link.lastRun || {}, mappings: link.mappings, newAccounts: link.newAccounts || [], stagedCount: Array.isArray(link.staged?.transactions) ? link.staged.transactions.length : 0, hasStaged: Boolean(link.stagedAt && Object.keys(link.staged || {}).length) });
   const wrap = (handler) => async (req, res, next) => {
     try { await handler(req, res); } catch (error) {
       if (error.statusCode) return res.status(error.statusCode).json({ error: error.message });
@@ -558,9 +558,10 @@ function registerLinkedAccountRoutes({ app, requireSession, requireEditAccess, r
     const aiCache = new Map();
     for (let attempt = 0; attempt < 3; attempt += 1) {
       const links = (await store.list(householdId)).filter((link) => link.status === "active" && link.stagedAt && Object.keys(link.staged || {}).length);
-      if (!links.length) return null;
+      if (!links.length) return { applied: 0, skipped: "nothing", perLink: {} };
       const loaded = await stateStore.load(householdId);
-      if (!loaded || loaded.state?.linkedAutoApply === false) return null;
+      if (!loaded) return null;
+      if (loaded.state?.linkedAutoApply === false) return { applied: 0, skipped: "off", perLink: {} };
       const working = structuredClone(loaded.state);
       const outcomes = [];
       for (const link of links) {
@@ -574,7 +575,9 @@ function registerLinkedAccountRoutes({ app, requireSession, requireEditAccess, r
       for (const outcome of outcomes.filter((item) => item.error)) {
         await store.update(householdId, outcome.link.id, { lastError: `Could not apply new transactions automatically: ${String(outcome.error.message || "").slice(0, 200)}` });
       }
-      if (!applied.length) return { applied: 0, added: 0, left: 0, imported: 0 };
+      const perLink = {};
+      outcomes.forEach((outcome) => { perLink[outcome.link.id] = outcome.error ? { error: String(outcome.error.message || "").slice(0, 200) } : { imported: outcome.result.imported, added: outcome.result.added, left: outcome.result.left, uncategorized: outcome.result.uncategorized }; });
+      if (!applied.length) return { applied: 0, added: 0, left: 0, imported: 0, perLink };
       if (!(await stateStore.saveIfVersion(householdId, working, loaded.version))) continue;
       for (const { link } of applied) {
         const fresh = await store.get(householdId, link.id);
@@ -583,9 +586,9 @@ function registerLinkedAccountRoutes({ app, requireSession, requireEditAccess, r
       const total = applied.reduce((sum, { result }) => ({ applied: sum.applied + 1, imported: sum.imported + result.imported, added: sum.added + result.added, left: sum.left + result.left, uncategorized: sum.uncategorized + result.uncategorized }), { applied: 0, imported: 0, added: 0, left: 0, uncategorized: 0 });
       // Counts only (no names or amounts): the record of what each night did, for when a morning looks wrong.
       console.log(`Overnight linked apply: household ${householdId} ${JSON.stringify({ ...total, reasons: Object.fromEntries(applied.flatMap(({ result }) => Object.entries(result.reasons))), aiNote: applied.map(({ result }) => result.aiNote).filter(Boolean)[0] || "" })}`);
-      return total;
+      return { ...total, perLink };
     }
-    return null;
+    return { applied: 0, skipped: "conflict", perLink: {} };
   };
 
   // Makes up for a night when the AI was busy: bank rows that went into the ledger marked "Needs a category" are offered to the AI again.
@@ -609,20 +612,27 @@ function registerLinkedAccountRoutes({ app, requireSession, requireEditAccess, r
   // (autoApplyHousehold above; a household that turned that off, or an apply that failed, leaves it staged for the app to apply when it is
   // next opened). It tells the household's phones what was added, or that a bank connection needs signing in again.
   if (requireJobSecret) {
-    app.post("/api/internal/linked-accounts/sync-all", requireJobSecret, async (_req, res, next) => {
+    app.post("/api/internal/linked-accounts/sync-all", requireJobSecret, async (req, res, next) => {
       try {
         if (!encryptionKey) return res.json({ skipped: "Linked accounts are not configured" });
+        // The retry run (a second schedule a few hours after the main one) only picks up links whose last run did not finish cleanly or is old,
+        // so a bank that was down overnight is tried again before the morning rather than waiting a whole day.
+        const retry = Boolean(req.body?.retry);
+        const freshEnough = (link) => link.lastRun?.ok === true && link.lastRun.at && Date.now() - new Date(link.lastRun.at).getTime() < 8 * 3600 * 1000;
         // A link that has never synced (or whose accounts were just changed) waits for its first sync in the app, where a bank that returns less
         // history than asked for is explained and has to be acknowledged before anything is imported.
-        const links = (await store.listAll()).filter((link) => link.status === "active" && Object.keys(link.mappings || {}).length && !(link.provider === "snaptrade" && !snaptrade) && (link.provider !== "simplefin" || link.lastSyncAt));
+        const links = (await store.listAll()).filter((link) => link.status === "active" && Object.keys(link.mappings || {}).length && !(link.provider === "snaptrade" && !snaptrade) && (link.provider !== "simplefin" || link.lastSyncAt) && !(retry && freshEnough(link)));
         const summary = { links: links.length, synced: 0, failed: 0, newTransactions: 0, reconnect: 0 };
         const byHousehold = new Map();
+        const runs = new Map();
         for (const link of links) {
-          const entry = byHousehold.get(link.householdId) || { newTransactions: 0, reconnect: [] };
+          const entry = byHousehold.get(link.householdId) || { newTransactions: 0, reconnect: [], failed: [], links: [] };
           byHousehold.set(link.householdId, entry);
+          entry.links.push(link);
+          const at = new Date().toISOString();
           try {
             const payload = await fetchLinkPayload(link);
-            const { merged, newTransactionCount: stagedNew } = mergeStagedPayload(link.staged, payload, new Date().toISOString());
+            const { merged, newTransactionCount: stagedNew } = mergeStagedPayload(link.staged, payload, at);
             // Count only rows the household has not already imported (read-only look at its state), so the phone message is not inflated by
             // rows an app already applied and then cleared from staging.
             let newTransactionCount = stagedNew;
@@ -631,15 +641,18 @@ function registerLinkedAccountRoutes({ app, requireSession, requireEditAccess, r
               const previouslyStaged = new Set((link.staged?.transactions || []).map((transaction) => transaction.externalId));
               newTransactionCount = (payload.transactions || []).filter((transaction) => !previouslyStaged.has(transaction.externalId) && !known.has(transaction.externalId)).length;
             }
-            await store.update(link.householdId, link.id, { staged: merged, stagedAt: merged.stagedAt, lastError: "", status: "active", lastSyncAt: new Date().toISOString(), newAccounts: findNewAccounts(payload.accounts, link.mappings) });
+            runs.set(link.id, { at, ok: true, stage: "fetched", accounts: (payload.accounts || []).length, newRows: newTransactionCount, ...(retry ? { retry: true } : {}) });
+            await store.update(link.householdId, link.id, { staged: merged, stagedAt: merged.stagedAt, lastError: "", status: "active", lastSyncAt: at, newAccounts: findNewAccounts(payload.accounts, link.mappings), lastRun: runs.get(link.id) });
             entry.newTransactions += newTransactionCount;
             summary.synced += 1;
             summary.newTransactions += newTransactionCount;
           } catch (error) {
             summary.failed += 1;
             const needsReconnect = error.statusCode === 409;
-            await store.update(link.householdId, link.id, { lastError: String(error.message || "Sync failed").slice(0, 300), ...(needsReconnect ? { status: "needs_reconnect" } : {}) });
-            if (needsReconnect) { entry.reconnect.push(link.label); summary.reconnect += 1; }
+            const reason = String(error.message || "Sync failed").slice(0, 300);
+            runs.set(link.id, { at, ok: false, stage: "fetch", error: reason, ...(needsReconnect ? { reconnect: true } : {}), ...(retry ? { retry: true } : {}) });
+            await store.update(link.householdId, link.id, { lastError: reason, lastRun: runs.get(link.id), ...(needsReconnect ? { status: "needs_reconnect" } : {}) });
+            if (needsReconnect) { entry.reconnect.push(link.label); summary.reconnect += 1; } else entry.failed.push(`${link.label}: ${reason}`);
           }
         }
         for (const [householdId, entry] of byHousehold) {
@@ -647,8 +660,26 @@ function registerLinkedAccountRoutes({ app, requireSession, requireEditAccess, r
             const outcome = await autoApplyHousehold(householdId);
             if (outcome?.applied) { entry.autoApplied = outcome; summary.autoApplied = (summary.autoApplied || 0) + outcome.added; }
             await fillHousehold(householdId);
+            // What each link ended the night with, so the apps can show whether the data really is loaded: applied, waiting for a person, or failed.
+            for (const link of entry.links) {
+              const run = runs.get(link.id);
+              if (!run?.ok) continue;
+              const result = outcome?.perLink?.[link.id];
+              const finished = result?.error
+                ? { ...run, ok: false, stage: "apply", error: `Could not load the new transactions: ${result.error}` }
+                : result ? { ...run, stage: "applied", imported: result.imported, added: result.added, left: result.left }
+                : outcome?.skipped === "off" ? { ...run, stage: "waiting", reason: "Automatic loading is switched off, so the new transactions wait for you to open the app." }
+                : outcome?.skipped === "conflict" ? { ...run, ok: false, stage: "apply", error: "Your household was being edited while it loaded, so loading it was postponed." }
+                : outcome ? { ...run, stage: "applied", imported: 0, added: 0, left: 0 } : run;
+              runs.set(link.id, finished);
+              await store.update(householdId, link.id, { lastRun: finished });
+              if (!finished.ok) entry.failed.push(`${link.label}: ${finished.error}`);
+            }
           } catch (error) {
             console.warn("Automatic apply of linked transactions failed", error.message);
+            for (const link of entry.links) {
+              if (runs.get(link.id)?.ok) { const failed = { ...runs.get(link.id), ok: false, stage: "apply", error: `Could not load the new transactions: ${String(error.message || "").slice(0, 200)}` }; runs.set(link.id, failed); await store.update(householdId, link.id, { lastRun: failed }).catch(() => undefined); entry.failed.push(`${link.label}: ${failed.error}`); }
+            }
           }
         }
         if (notifyHousehold) {
@@ -657,6 +688,7 @@ function registerLinkedAccountRoutes({ app, requireSession, requireEditAccess, r
               if (entry.autoApplied?.imported > 0) await notifyHousehold(householdId, `${entry.autoApplied.added} new bank transaction${entry.autoApplied.added === 1 ? "" : "s"} added to your ledger${entry.autoApplied.left ? `, ${entry.autoApplied.left} need a look` : ""}`);
               else if (entry.newTransactions > 0) await notifyHousehold(householdId, `${entry.newTransactions} new bank transaction${entry.newTransactions === 1 ? "" : "s"} waiting to review`);
               if (entry.reconnect.length) await notifyHousehold(householdId, `${entry.reconnect.join(", ")} needs signing in again - open Wealth to relink`);
+              if (entry.failed.length) await notifyHousehold(householdId, `Overnight bank sync did not finish: ${entry.failed.join("; ").slice(0, 180)}`);
             } catch (error) { console.warn("Linked-account notification failed", error.message); }
           }
         }
