@@ -1473,6 +1473,41 @@ const BATCH_SUGGEST_MAX_LINES = 300;
 const BATCH_SUGGEST_MAX_ACCOUNTS = 100;
 const BATCH_SUGGEST_MAX_PAYEE_CHARS = 200;
 
+// One batched Gemini call that categorizes cleaned rows (see the endpoint below for the validation that produces them). Shared by the
+// endpoint and the overnight bank sync; every id in the answer is checked against what was offered. Throws with statusCode 502 when the
+// AI service fails and 503 when it is not configured.
+async function geminiBatchSuggest({ cleanRows, lines, accounts, knownTags }) {
+  if (!GEMINI_API_KEY) { const failure = new Error("AI suggestions are not configured for this deployment"); failure.statusCode = 503; throw failure; }
+  const lineIds = lines.map((line) => String(line?.id || "")).filter(Boolean);
+  const accountIds = accounts.map((account) => String(account?.id || "")).filter(Boolean);
+  const prompt = [
+    "Budget subcategory options (id: label):",
+    ...lines.map((line) => `${line.id}: ${line.label}`),
+    "",
+    accountIds.length ? "Account options (id: label):" : "No account options - leave accountId null.",
+    ...accounts.map((account) => `${account.id}: ${account.label}`),
+    "",
+    knownTags.length ? `Tags already in use (reuse one when it fits): ${knownTags.join(", ")}` : "No tags are in use yet.",
+    "",
+    "Transactions (id | payee | amount | date). Positive amounts are purchases, negative are refunds or deposits:",
+    ...cleanRows.map((row) => `${row.id} | ${row.payee} | ${row.amount} | ${row.date}`)
+  ].join("\n");
+
+  const response = await fetch(`${GEMINI_API_BASE_URL}/v1beta/models/${encodeURIComponent(GEMINI_MODEL)}:generateContent?key=${encodeURIComponent(GEMINI_API_KEY)}`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      contents: [{ role: "user", parts: [{ text: prompt }] }],
+      systemInstruction: { parts: [{ text: "You are categorizing household bank transactions for a budgeting app. For each transaction choose the single best budget subcategory id and, when account options exist, the account it most likely belongs to. Reply with ONLY a JSON array - no markdown, no explanation - with one object per transaction: {\"id\": the transaction id, \"lineId\": exact subcategory id or null, \"accountId\": exact account id or null, \"confidence\": \"high\" or \"low\", \"tags\": array of at most 2 short lowercase tags (1-2 words, e.g. \"subscription\", \"florida trip\", \"reimbursable\") that help find this transaction later, preferring tags already in use, or [] when none clearly apply}. Use \"high\" only when the payee clearly belongs to that subcategory; use null and \"low\" when unsure. Never invent ids." }] },
+      generationConfig: { maxOutputTokens: 8000, responseMimeType: "application/json" }
+    })
+  });
+  const body = await response.json().catch(() => ({}));
+  if (!response.ok) { const failure = new Error(body?.error?.message || "The AI suggestion service is unavailable right now"); failure.statusCode = 502; throw failure; }
+  const text = body.candidates?.[0]?.content?.parts?.[0]?.text || "";
+  return parseBatchSuggestions(text, cleanRows.map((row) => row.id), lineIds, accountIds);
+}
+
 app.post("/api/transactions/suggest-batch", requireSession, async (req, res, next) => {
   try {
     if (!GEMINI_API_KEY) return res.status(503).json({ error: "AI suggestions are not configured for this deployment" });
@@ -1488,34 +1523,14 @@ app.post("/api/transactions/suggest-batch", requireSession, async (req, res, nex
     if (accounts.length > BATCH_SUGGEST_MAX_ACCOUNTS) return res.status(400).json({ error: "Too many accounts to suggest from" });
     const cleanRows = rows.map((row) => ({ id: String(row?.id || ""), payee: String(row?.payee || "").trim().slice(0, BATCH_SUGGEST_MAX_PAYEE_CHARS), amount: Number(row?.amount) || 0, date: String(row?.date || "").slice(0, 10) })).filter((row) => row.id && row.payee);
     if (!cleanRows.length) return res.status(400).json({ error: "No transactions to categorize" });
-    const lineIds = lines.map((line) => String(line?.id || "")).filter(Boolean);
-    const accountIds = accounts.map((account) => String(account?.id || "")).filter(Boolean);
-    const prompt = [
-      "Budget subcategory options (id: label):",
-      ...lines.map((line) => `${line.id}: ${line.label}`),
-      "",
-      accountIds.length ? "Account options (id: label):" : "No account options - leave accountId null.",
-      ...accounts.map((account) => `${account.id}: ${account.label}`),
-      "",
-      knownTags.length ? `Tags already in use (reuse one when it fits): ${knownTags.join(", ")}` : "No tags are in use yet.",
-      "",
-      "Transactions (id | payee | amount | date). Positive amounts are purchases, negative are refunds or deposits:",
-      ...cleanRows.map((row) => `${row.id} | ${row.payee} | ${row.amount} | ${row.date}`)
-    ].join("\n");
-
-    const response = await fetch(`${GEMINI_API_BASE_URL}/v1beta/models/${encodeURIComponent(GEMINI_MODEL)}:generateContent?key=${encodeURIComponent(GEMINI_API_KEY)}`, {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({
-        contents: [{ role: "user", parts: [{ text: prompt }] }],
-        systemInstruction: { parts: [{ text: "You are categorizing household bank transactions for a budgeting app. For each transaction choose the single best budget subcategory id and, when account options exist, the account it most likely belongs to. Reply with ONLY a JSON array - no markdown, no explanation - with one object per transaction: {\"id\": the transaction id, \"lineId\": exact subcategory id or null, \"accountId\": exact account id or null, \"confidence\": \"high\" or \"low\", \"tags\": array of at most 2 short lowercase tags (1-2 words, e.g. \"subscription\", \"florida trip\", \"reimbursable\") that help find this transaction later, preferring tags already in use, or [] when none clearly apply}. Use \"high\" only when the payee clearly belongs to that subcategory; use null and \"low\" when unsure. Never invent ids." }] },
-        generationConfig: { maxOutputTokens: 8000, responseMimeType: "application/json" }
-      })
-    });
-    const body = await response.json().catch(() => ({}));
-    if (!response.ok) return res.status(502).json({ error: body?.error?.message || "The AI suggestion service is unavailable right now" });
-    const text = body.candidates?.[0]?.content?.parts?.[0]?.text || "";
-    res.json({ results: parseBatchSuggestions(text, cleanRows.map((row) => row.id), lineIds, accountIds) });
+    let results;
+    try {
+      results = await geminiBatchSuggest({ cleanRows, lines, accounts, knownTags });
+    } catch (error) {
+      if (error.statusCode) return res.status(error.statusCode).json({ error: error.message });
+      throw error;
+    }
+    res.json({ results });
   } catch (error) {
     next(error);
   }
@@ -3492,10 +3507,11 @@ app.get("/api/state", requireSession, async (req, res, next) => {
         shared = { owner_user_id: ownerId, app_state: sharedModulesFromState(household.app_state) };
         memoryDb.sharedModules.push(shared);
       }
+      res.set("X-State-Version", String(household.state_version || 0));
       return res.json(applySharedModules(household.app_state, shared.app_state));
     }
 
-    const result = await pool.query("SELECT app_state FROM households WHERE id = $1", [req.sessionUser.household_id]);
+    const result = await pool.query("SELECT app_state, state_version FROM households WHERE id = $1", [req.sessionUser.household_id]);
     const ownerId = await databasePrimaryOwnerId(pool, req.sessionUser.household_id);
     let sharedResult = await pool.query("SELECT app_state FROM user_shared_modules WHERE owner_user_id = $1", [ownerId]);
     if (sharedResult.rowCount === 0) {
@@ -3506,7 +3522,20 @@ app.get("/api/state", requireSession, async (req, res, next) => {
         [ownerId, sharedModulesFromState(result.rows[0].app_state)]
       );
     }
+    res.set("X-State-Version", String(result.rows[0].state_version || 0));
     res.json(applySharedModules(result.rows[0].app_state, sharedResult.rows[0].app_state));
+  } catch (error) {
+    next(error);
+  }
+});
+
+// A cheap way for an open app to learn that the household was written by someone else (another device, or the overnight bank sync) so it
+// can reload instead of later saving a stale copy over it.
+app.get("/api/state/version", requireSession, async (req, res, next) => {
+  try {
+    if (MEMORY_DB) return res.json({ version: memoryDb.households.find((item) => item.id === req.sessionUser.household_id)?.state_version || 0 });
+    const result = await pool.query("SELECT state_version FROM households WHERE id = $1", [req.sessionUser.household_id]);
+    res.json({ version: Number(result.rows[0]?.state_version || 0) });
   } catch (error) {
     next(error);
   }
@@ -3539,27 +3568,39 @@ app.put("/api/state", requireSession, requireEditAccess, async (req, res, next) 
     if (missingKeys.length > 0) {
       return res.status(400).json({ error: `Save rejected: state is missing required field(s) ${missingKeys.join(", ")}` });
     }
+    // A client that names the version it loaded (X-Base-Version) is refused when the household has been written since - by another device
+    // or by the overnight bank sync - so it reloads instead of overwriting that work. Clients that send no version (older mobile builds)
+    // save unconditionally, as before.
+    const baseHeader = req.get("X-Base-Version");
+    const baseVersion = baseHeader !== undefined && /^\d+$/.test(baseHeader) ? Number(baseHeader) : null;
+    const staleResponse = () => res.status(409).json({ error: "This household was updated elsewhere (for example new bank transactions applied overnight), so your screen was refreshed - repeat your last change if it is missing." });
     if (MEMORY_DB) {
       const household = memoryDb.households.find((item) => item.id === req.sessionUser.household_id);
+      if (baseVersion !== null && baseVersion !== (household.state_version || 0)) return staleResponse();
       household.app_state = req.body;
+      household.state_version = (household.state_version || 0) + 1;
       const ownerId = memoryPrimaryOwnerId(req.sessionUser.household_id);
       const shared = memoryDb.sharedModules.find((item) => item.owner_user_id === ownerId);
       if (shared) shared.app_state = sharedModulesFromState(req.body);
       else memoryDb.sharedModules.push({ owner_user_id: ownerId, app_state: sharedModulesFromState(req.body) });
       await syncNotificationJobs({ householdId: req.sessionUser.household_id, appState: req.body, user: req.sessionUser });
+      res.set("X-State-Version", String(household.state_version));
       return res.json({ ok: true });
     }
 
     const ownerId = await databasePrimaryOwnerId(pool, req.sessionUser.household_id);
-    await Promise.all([
-      pool.query("UPDATE households SET app_state = $1, updated_at = now() WHERE id = $2", [req.body, req.sessionUser.household_id]),
-      pool.query(
-        `INSERT INTO user_shared_modules (owner_user_id, app_state, updated_at) VALUES ($1, $2, now())
-         ON CONFLICT (owner_user_id) DO UPDATE SET app_state = EXCLUDED.app_state, updated_at = now()`,
-        [ownerId, sharedModulesFromState(req.body)]
-      )
-    ]);
+    const written = await pool.query(
+      "UPDATE households SET app_state = $1, updated_at = now(), state_version = state_version + 1 WHERE id = $2 AND ($3::bigint IS NULL OR state_version = $3::bigint) RETURNING state_version",
+      [req.body, req.sessionUser.household_id, baseVersion]
+    );
+    if (written.rowCount === 0) return staleResponse();
+    await pool.query(
+      `INSERT INTO user_shared_modules (owner_user_id, app_state, updated_at) VALUES ($1, $2, now())
+       ON CONFLICT (owner_user_id) DO UPDATE SET app_state = EXCLUDED.app_state, updated_at = now()`,
+      [ownerId, sharedModulesFromState(req.body)]
+    );
     await syncNotificationJobs({ householdId: req.sessionUser.household_id, appState: req.body, user: req.sessionUser });
+    res.set("X-State-Version", String(written.rows[0].state_version));
     res.json({ ok: true });
   } catch (error) {
     next(error);
@@ -3787,6 +3828,45 @@ async function loadHouseholdAppState(householdId) {
   return result.rows[0]?.app_state;
 }
 
+// The overnight bank sync reads a household the way GET /api/state serves it (the owner's shared modules - notes, meals, calendar,
+// decisions - laid over the household's own row) together with the version it read, and writes back only if nobody wrote in between.
+// The shared modules are re-read and laid over again at write time, so a note edited from another household while the sync was busy
+// is not overwritten by the copy the sync read earlier.
+async function loadHouseholdStateVersioned(householdId) {
+  if (MEMORY_DB) {
+    const household = memoryDb.households.find((item) => item.id === householdId);
+    if (!household) return null;
+    const shared = memoryDb.sharedModules.find((item) => item.owner_user_id === memoryPrimaryOwnerId(householdId));
+    return { state: applySharedModules(household.app_state, shared?.app_state), version: household.state_version || 0 };
+  }
+  const result = await pool.query("SELECT app_state, state_version FROM households WHERE id = $1", [householdId]);
+  if (!result.rows[0]) return null;
+  const ownerId = await databasePrimaryOwnerId(pool, householdId);
+  const shared = await pool.query("SELECT app_state FROM user_shared_modules WHERE owner_user_id = $1", [ownerId]);
+  return { state: applySharedModules(result.rows[0].app_state, shared.rows[0]?.app_state), version: Number(result.rows[0].state_version || 0) };
+}
+
+async function saveHouseholdStateIfVersion(householdId, appState, version) {
+  if (MEMORY_DB) {
+    const household = memoryDb.households.find((item) => item.id === householdId);
+    if (!household || (household.state_version || 0) !== version) return false;
+    const shared = memoryDb.sharedModules.find((item) => item.owner_user_id === memoryPrimaryOwnerId(householdId));
+    await saveHouseholdAppState(householdId, applySharedModules(appState, shared?.app_state));
+    return true;
+  }
+  const ownerId = await databasePrimaryOwnerId(pool, householdId);
+  const shared = await pool.query("SELECT app_state FROM user_shared_modules WHERE owner_user_id = $1", [ownerId]);
+  const next = applySharedModules(appState, shared.rows[0]?.app_state);
+  const written = await pool.query("UPDATE households SET app_state = $1, updated_at = now(), state_version = state_version + 1 WHERE id = $2 AND state_version = $3::bigint", [next, householdId, version]);
+  if (written.rowCount === 0) return false;
+  await pool.query(
+    `INSERT INTO user_shared_modules (owner_user_id, app_state, updated_at) VALUES ($1, $2, now())
+     ON CONFLICT (owner_user_id) DO UPDATE SET app_state = EXCLUDED.app_state, updated_at = now()`,
+    [ownerId, sharedModulesFromState(next)]
+  );
+  return true;
+}
+
 async function findHouseholdNoteById(householdId, noteId) {
   if (!noteId) return null;
   const appState = await loadHouseholdAppState(householdId);
@@ -3903,6 +3983,7 @@ async function saveHouseholdAppState(householdId, appState) {
     const household = memoryDb.households.find((item) => item.id === householdId);
     if (!household) return;
     household.app_state = appState;
+    household.state_version = (household.state_version || 0) + 1;
     const ownerId = memoryPrimaryOwnerId(householdId);
     const shared = memoryDb.sharedModules.find((item) => item.owner_user_id === ownerId);
     if (shared) shared.app_state = sharedModulesFromState(appState);
@@ -3911,7 +3992,7 @@ async function saveHouseholdAppState(householdId, appState) {
   }
   const ownerId = await databasePrimaryOwnerId(pool, householdId);
   await Promise.all([
-    pool.query("UPDATE households SET app_state = $1, updated_at = now() WHERE id = $2", [appState, householdId]),
+    pool.query("UPDATE households SET app_state = $1, updated_at = now(), state_version = state_version + 1 WHERE id = $2", [appState, householdId]),
     pool.query(
       `INSERT INTO user_shared_modules (owner_user_id, app_state, updated_at) VALUES ($1, $2, now())
        ON CONFLICT (owner_user_id) DO UPDATE SET app_state = EXCLUDED.app_state, updated_at = now()`,
@@ -4869,7 +4950,13 @@ app.get("/shared-notes/:token/:slug?", async (req, res, next) => {
   }
 });
 
-registerLinkedAccountRoutes({ app, requireSession, requireEditAccess, requireJobSecret: requireNotificationSecret, notifyHousehold: notifyHouseholdMembers, loadHouseholdState: loadHouseholdAppState, MEMORY_DB, memoryDb, pool });
+registerLinkedAccountRoutes({
+  app, requireSession, requireEditAccess, requireJobSecret: requireNotificationSecret, notifyHousehold: notifyHouseholdMembers, loadHouseholdState: loadHouseholdAppState,
+  stateStore: { load: loadHouseholdStateVersioned, saveIfVersion: saveHouseholdStateIfVersion },
+  // The AI answers the overnight apply asks for: the same batched categorization the app uses, validated against what was offered.
+  suggestBatch: GEMINI_API_KEY ? async (rows, lines, accounts, knownTags) => geminiBatchSuggest({ cleanRows: rows.map((row) => ({ id: String(row.id), payee: String(row.payee || "").trim().slice(0, BATCH_SUGGEST_MAX_PAYEE_CHARS), amount: Number(row.amount) || 0, date: String(row.date || "").slice(0, 10) })).filter((row) => row.id && row.payee), lines, accounts, knownTags }) : null,
+  MEMORY_DB, memoryDb, pool
+});
 
 app.use((error, _req, res, _next) => {
   // body-parser rejections are the client's problem, not a server fault: an oversized body (the whole household state is

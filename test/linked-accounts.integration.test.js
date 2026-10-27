@@ -189,7 +189,7 @@ test("SimpleFIN link flow end to end: not configured without a key, SSRF-pinned 
     await configured.request(`/api/linked-accounts/${id}/sync`, { method: "POST", headers: { cookie }, body: "{}" });
     assert.deepEqual((await configured.request("/api/linked-accounts", { headers: { cookie } })).body.links[0].newAccounts.map((a) => a.remoteId), ["ACT-2"]);
 
-    // The nightly job (shared-secret) stages every active link's data without touching household state.
+    // The nightly job (shared-secret) stages every active link's data and then applies it to the household (see the overnight-apply test).
     assert.equal((await configured.request("/api/internal/linked-accounts/sync-all", { method: "POST", body: "{}" })).status, 401);
     assert.equal((await configured.request("/api/internal/linked-accounts/sync-all", { method: "POST", headers: { authorization: "Bearer wrong" }, body: "{}" })).status, 401);
     await configured.request(`/api/linked-accounts/${id}/ack`, { method: "POST", headers: { cookie }, body: JSON.stringify({ stagedAt: new Date(Date.now() + 3600000).toISOString() }) });
@@ -197,9 +197,9 @@ test("SimpleFIN link flow end to end: not configured without a key, SSRF-pinned 
     assert.deepEqual([nightly.status, nightly.body.links, nightly.body.synced, nightly.body.failed], [200, 1, 1, 0]);
     assert.equal(nightly.body.newTransactions, 3);
     const afterNightly = (await configured.request("/api/linked-accounts", { headers: { cookie } })).body.links[0];
-    assert.deepEqual([afterNightly.hasStaged, afterNightly.stagedCount], [true, 3]);
+    assert.deepEqual([afterNightly.hasStaged, afterNightly.stagedCount], [false, 0], "what the job applied is no longer staged");
     const stateAfterNightly = await configured.request("/api/state", { headers: { cookie } });
-    assert.deepEqual(stateAfterNightly.body.transactionInboxDrafts || [], [], "the job stages data; it never writes household state");
+    assert.deepEqual((stateAfterNightly.body.transactionInboxDrafts || []).map((draft) => draft.externalId).sort(), ["sf:ACT-1:T1", "sf:ACT-1:T2"], "with no AI here, rows nothing in the household can categorize wait in Bank stream");
     await configured.request(`/api/linked-accounts/${id}/ack`, { method: "POST", headers: { cookie }, body: JSON.stringify({ stagedAt: afterNightly.stagedAt || new Date(Date.now() + 60000).toISOString() }) });
 
     // A loan can be mapped to a debt; the debt id survives alongside account and group mappings.
@@ -311,5 +311,64 @@ test("the nightly job notifies the household about new transactions and about a 
     assert.equal(messages.length, 2);
   } finally {
     await new Promise((resolve) => server.close(resolve));
+  }
+});
+
+
+test("the nightly job applies new bank transactions to the household without the app: ledger, balances and versions", async () => {
+  const stub = await startSimplefinStub();
+  const server = await startTestServer({ LINK_ENCRYPTION_KEY: KEY, SIMPLEFIN_ALLOW_TEST_HOSTS: "true", NOTIFICATION_SECRET: "job-secret" });
+  try {
+    const signup = await server.request("/api/auth/signup", { method: "POST", body: JSON.stringify({ email: "overnight@example.com", password: "Linked-Accounts-Password-123!", name: "Night", householdName: "Overnight home", country: "US" }) });
+    const cookie = signup.cookie;
+    const get = () => server.request("/api/state", { headers: { cookie } });
+    const loaded = await get();
+    const version = Number(loaded.headers.get("x-state-version"));
+    assert.ok(Number.isInteger(version));
+    const state = loaded.body;
+    state.budget.categories = [{ name: "Food", color: "#2f6f4e", lines: [{ id: "groceries", name: "Groceries", planned: 400 }] }];
+    const line = state.budget.categories[0].lines[0];
+    state.accounts = [{ id: "local-checking", name: "Checking", type: "checking", openingBalance: 0, netWorthAssetId: "", netWorthLiabilityId: "", createdAt: "2026-01-01" }];
+    // History for the grocer, so the household's own habits can categorize it without any AI.
+    state.transactions = [{ date: "2026-09-01", payee: "SAMPLE GROCER", amount: 30, lineId: line.id, memo: "", accountId: "local-checking", orderNumber: "", tags: [], categoryName: "x", subcategoryName: line.name }];
+    const saved = await server.request("/api/state", { method: "PUT", headers: { cookie, "x-base-version": String(version) }, body: JSON.stringify(state) });
+    assert.equal(saved.status, 200);
+    assert.equal(Number(saved.headers.get("x-state-version")), version + 1);
+    assert.equal((await server.request("/api/state", { method: "PUT", headers: { cookie, "x-base-version": String(version) }, body: JSON.stringify(state) })).status, 409, "a save based on an older version is refused");
+
+    const created = await server.request("/api/linked-accounts/simplefin", { method: "POST", headers: { cookie }, body: JSON.stringify({ setupToken: stub.setupToken, label: "My bank" }) });
+    const id = created.body.link.id;
+    await server.request(`/api/linked-accounts/${id}/mappings`, { method: "PUT", headers: { cookie }, body: JSON.stringify({ mappings: { "ACT-1": { accountId: "local-checking" }, "ACT-2": { skipped: true } } }) });
+
+    const nightly = await server.request("/api/internal/linked-accounts/sync-all", { method: "POST", headers: { authorization: "Bearer job-secret" }, body: "{}" });
+    assert.deepEqual([nightly.status, nightly.body.synced, nightly.body.failed, nightly.body.autoApplied], [200, 1, 0, 1]);
+
+    const after = await get();
+    assert.ok(Number(after.headers.get("x-state-version")) > version + 1, "the server's own write bumps the version");
+    const grocer = after.body.transactions.find((transaction) => transaction.externalId === "sf:ACT-1:T1");
+    assert.deepEqual([grocer.payee, grocer.amount, grocer.lineId, grocer.accountId], ["SAMPLE GROCER", 40.25, line.id, "local-checking"], "a row the household's history can categorize went straight into the ledger");
+    assert.deepEqual(after.body.transactionInboxDrafts.map((draft) => draft.externalId), ["sf:ACT-1:T2"], "the payroll row has no history and no AI here, so it waits for review");
+    assert.ok(after.body.linkedImportedIds.includes("sf:ACT-1:T1") && after.body.linkedImportedIds.includes("sf:ACT-1:T2"));
+    const { accountBalance } = require("../lib/shared-logic");
+    const balance = accountBalance("local-checking", { accounts: after.body.accounts, transactions: after.body.transactions, paychecks: after.body.paychecks, paycheckOccurrences: after.body.paycheckOccurrences, transfers: after.body.transfers, ious: after.body.ious || [] }, new Date().toISOString().slice(0, 10));
+    assert.equal(Math.round(balance * 100) / 100, 1250.5, "the account's balance follows the bank");
+    assert.deepEqual([(await server.request("/api/linked-accounts", { headers: { cookie } })).body.links[0].hasStaged], [false], "applied data is no longer staged");
+    assert.equal(after.body.household.activity[0].includes("added to the ledger overnight"), true);
+
+    // The household can turn it off: the job then only stages, as before.
+    after.body.linkedAutoApply = false;
+    await server.request("/api/state", { method: "PUT", headers: { cookie, "x-base-version": after.headers.get("x-state-version") }, body: JSON.stringify(after.body) });
+    await server.request(`/api/linked-accounts/${id}/mappings`, { method: "PUT", headers: { cookie }, body: JSON.stringify({ mappings: { "ACT-1": { accountId: "local-checking" } } }) });
+    await server.request("/api/internal/linked-accounts/sync-all", { method: "POST", headers: { authorization: "Bearer job-secret" }, body: "{}" });
+    const off = (await server.request("/api/linked-accounts", { headers: { cookie } })).body.links[0];
+    assert.deepEqual([off.hasStaged, (await get()).body.transactions.length], [true, after.body.transactions.length], "with auto-apply off the rows stay staged and the state is untouched");
+
+    // A client that did not send a version (an older mobile build) still saves, and the version moves on.
+    const unversioned = await get();
+    assert.equal((await server.request("/api/state", { method: "PUT", headers: { cookie }, body: JSON.stringify(unversioned.body) })).status, 200);
+    assert.equal((await server.request("/api/state/version", { headers: { cookie } })).body.version, Number(unversioned.headers.get("x-state-version")) + 1);
+  } finally {
+    await server.stop();
+    await stub.stop();
   }
 });

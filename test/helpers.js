@@ -63,6 +63,7 @@ async function startTestServer(env = {}) {
       return {
         status: response.status,
         body,
+        headers: response.headers,
         cookie: setCookies.map((cookie) => cookie.split(";")[0]).join("; ")
       };
     }

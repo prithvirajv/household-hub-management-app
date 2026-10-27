@@ -540,11 +540,21 @@ entry. It is read-only: FamilyLoop can never move money or place trades.
   ledger or waiting in Bank stream are skipped, and rows you removed earlier
   (Clean up) come back. If you're replacing hand-entered history, clean it up
   first so the two don't double up.
-- **Overnight:** every night FamilyLoop fetches your linked accounts for you.
-  The new transactions and balances are applied the next time you open the app
-  (Home, Transactions or Wealth), and your phone gets a notification such as
-  "5 new bank transactions waiting to review" - or a warning when a bank needs
-  you to sign in again.
+- **Overnight, without opening the app:** every night FamilyLoop fetches your
+  linked accounts and applies them for you - new transactions are categorized
+  (your rules and history first, then AI) and the ones that are safe go
+  straight into the ledger, balances follow the bank, a steady salary is
+  recorded as a paycheck, and anything doubtful (a possible duplicate or
+  transfer, a pending row, no account) waits in Bank stream with the reason.
+  Your phone gets a notification such as "5 new bank transactions added to your
+  ledger, 1 needs a look" - or a warning when a bank needs you to sign in
+  again. Rows the AI could not reach wait for the next try rather than going in
+  uncategorized. Untick **Add new bank transactions to the ledger overnight**
+  on the Linked accounts card to go back to applying them yourself when you
+  open the app. If you have FamilyLoop open while this happens, it notices
+  within a minute (or when you come back to the tab) and refreshes; if you
+  save in that moment your screen refreshes instead, so repeat the change if
+  it is missing.
 - **Sync now** refreshes a link on demand; opening Wealth also refreshes any
   link that hasn't synced in six hours. If a bank asks you to sign in again,
   the link shows **Needs reconnecting** — unlink it and link again.

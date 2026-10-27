@@ -191,13 +191,22 @@ user secret) are AES-256-GCM encrypted with `LINK_ENCRYPTION_KEY` and never retu
   connected user). Connections are always requested read-only.
 - **Nightly sync:** Cloud Scheduler job `familyloop-linked-sync` (created/updated by `scripts/deploy-cloud-run.sh`, 03:30
   America/New_York) calls `POST /api/internal/linked-accounts/sync-all` with the `NOTIFICATION_SECRET` bearer token. It fetches every active
-  link and **stages** the result in `linked_accounts.staged`; it never writes household state (every client save replaces the whole
-  household, so a server-side write would be erased by the next stale save). A client applies staged data the next time the app is opened
-  (web: Home/Transactions/Wealth; mobile: the Wealth screen, with a banner on open), saves it, and only then acknowledges
-  (`POST /:id/ack`), which clears the staging. Staging accumulates SimpleFIN transactions by id for up to 120 days, so nights nobody
-  opened the app are not lost even beyond the Bridge's 60-day request window. The job also pushes "N new bank transactions waiting" (counting
-  only rows the household has not already imported) and a one-time "needs signing in again" to the household's phones. Manual syncs go
-  through the same staging. Links needing reconnection are skipped until relinked.
+  link and **stages** the result in `linked_accounts.staged` (accumulating SimpleFIN transactions by id for up to 120 days), then **applies
+  it to each household's state on the server** (`autoApplyHousehold` in `server/linked-accounts.js`, pipeline in `lib/linked-apply.js`:
+  drafts, balance reconcile, salary detection, AI categorization via the same Gemini batch call as the app, safe rows into the ledger). Staged
+  data is cleared only after the save lands. A household can switch it off (`linkedAutoApply: false` in its state, a checkbox on the Linked
+  accounts card); then, or if an apply fails (the link shows the error), data stays staged and a client applies it when the app is next
+  opened (`POST /:id/ack` clears it), as before. Manual syncs from the app still stage and apply client-side; both paths skip ids the household
+  already has, so they never double up. The job pushes "N new bank transactions added to your ledger (M need a look)" (or "waiting to review"
+  when it did not apply) and a one-time "needs signing in again". Links needing reconnection are skipped until relinked.
+- **State versioning (why the server can write household state safely):** `households.state_version` is bumped by every write to
+  `app_state`. `GET /api/state` returns it in `X-State-Version` (`GET /api/state/version` is the cheap poll); the apps send it back on
+  `PUT /api/state` as `X-Base-Version`, and a save based on an older version gets **409** ("updated elsewhere") instead of overwriting - the web
+  app then reloads and tells the person. Clients that send no version (older mobile builds) still save unconditionally, so until a mobile
+  build that sends it ships, a stale phone save can erase an overnight apply (the next night's overlap window re-delivers the last three
+  days; use Import history for older rows). The overnight job reads the household with the owner's shared modules laid over it, writes only if
+  the version it read is still current (retrying up to 3 times, reusing AI answers already fetched), and re-lays the shared modules at write
+  time so a note edited from another household meanwhile is not lost.
 
 ## Incident playbooks
 

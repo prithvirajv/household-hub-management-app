@@ -370,6 +370,11 @@ function api(path, options = {}) {
   }).then(async (response) => {
     const contentType = response.headers.get("content-type") || "";
     const body = contentType.includes("application/json") ? await response.json() : await response.text();
+    // The household's version travels on every load and save of its state (see putState), so a save can say which version it was based on.
+    if (path === "/api/state" && response.ok) {
+      const version = response.headers.get("X-State-Version");
+      if (version !== null && /^\d+$/.test(version)) stateVersion = Number(version);
+    }
     if (response.status === 401 && !path.startsWith("/api/auth/")) {
       await handleAuthExpired();
     }
@@ -429,6 +434,62 @@ function resetNotesBaseline() {
   resetNoteBaseline(state.notes.entries, noteBaseline);
 }
 
+// Saving the household. Every save names the version it was based on (X-Base-Version); if someone else wrote since - another device, or the
+// overnight bank sync, which now applies new transactions on the server - the server refuses it and this screen reloads the latest instead
+// of overwriting that work. Saves go one after another so each one carries the version the previous one produced.
+let stateVersion = null;
+let stateSaveChain = Promise.resolve();
+let stateSavesInFlight = 0;
+
+function putState(householdId, { keepalive = false } = {}) {
+  const send = () => {
+    stateSavesInFlight += 1;
+    return api("/api/state", {
+      method: "PUT",
+      headers: { "X-Household-Id": householdId || "", ...(stateVersion !== null ? { "X-Base-Version": String(stateVersion) } : {}) },
+      body: JSON.stringify(state),
+      keepalive
+    }).finally(() => { stateSavesInFlight -= 1; });
+  };
+  if (keepalive) return send();
+  const result = stateSaveChain.then(send, send);
+  stateSaveChain = result.catch(() => {});
+  return result.catch((error) => {
+    if (/updated elsewhere/i.test(String(error?.message))) void refreshStateFromServer(true);
+    throw error;
+  });
+}
+
+async function refreshStateFromServer(announce) {
+  if (householdSwitchInProgress || !sessionUser) return;
+  const householdId = currentHouseholdId();
+  try {
+    const fresh = await api("/api/state");
+    if (currentHouseholdId() !== householdId) return;
+    state = fresh;
+    autosavePending = false;
+    clearTimeout(autosaveTimer);
+    resetNotesBaseline();
+    render();
+    if (announce) showToast("Your household was updated (new bank transactions or a change from another device) - showing the latest.", { type: "info" });
+  } catch (error) {
+    console.warn("Could not refresh the household", error);
+  }
+}
+
+// An open app notices a write from elsewhere within a minute (or when its tab comes back to the front) and reloads, unless it has changes
+// of its own still on their way to the server or the person is in the middle of typing.
+async function checkStateVersion() {
+  if (!sessionUser || stateVersion === null || householdSwitchInProgress || autosavePending || stateSavesInFlight) return;
+  if (document.activeElement?.matches?.("input, textarea, select, [contenteditable]")) return;
+  try {
+    const { version } = await api("/api/state/version");
+    if (version !== stateVersion && !autosavePending && !stateSavesInFlight) await refreshStateFromServer(true);
+  } catch (_error) { /* offline or signed out - the next tick tries again */ }
+}
+setInterval(checkStateVersion, 60000);
+document.addEventListener("visibilitychange", () => { if (document.visibilityState === "visible") void checkStateVersion(); });
+
 function autosaveState() {
   if (!state) return;
   if (householdSwitchInProgress) return;
@@ -458,11 +519,7 @@ function autosaveState() {
       return;
     }
     stampChangedNotes(state.notes?.entries, noteBaseline, new Date().toISOString());
-    api("/api/state", {
-      method: "PUT",
-      headers: { "X-Household-Id": householdIdAtSchedule || "" },
-      body: JSON.stringify(state)
-    }).catch((error) => {
+    putState(householdIdAtSchedule).catch((error) => {
       console.warn("Autosave failed", error);
     });
   }, 350);
@@ -480,12 +537,7 @@ function flushPendingAutosave() {
   if (!looksLikeCompleteState(state)) return;
   if (sessionUser?.accessLevel === "view") return;
   stampChangedNotes(state.notes?.entries, noteBaseline, new Date().toISOString());
-  api("/api/state", {
-    method: "PUT",
-    headers: { "X-Household-Id": currentHouseholdId() || "" },
-    body: JSON.stringify(state),
-    keepalive: true
-  }).catch((error) => {
+  putState(currentHouseholdId(), { keepalive: true }).catch((error) => {
     console.warn("Flush autosave failed", error);
   });
 }
@@ -505,11 +557,7 @@ async function saveStateNow() {
   autosavePending = false;
   clearTimeout(autosaveTimer);
   stampChangedNotes(state.notes?.entries, noteBaseline, new Date().toISOString());
-  await api("/api/state", {
-    method: "PUT",
-    headers: { "X-Household-Id": householdIdAtCall || "" },
-    body: JSON.stringify(state)
-  });
+  await putState(householdIdAtCall);
 }
 
 function showToast(message, { type = "error" } = {}) {
@@ -2221,12 +2269,6 @@ const HOME_ACTION_KIND_ICON = { Chore: "🧹", Birthday: "🎂", Anniversary: "�
 // rows are folded into it: waiting rows are skipped and uncategorized ones already in the ledger are taken out (the account keeps the
 // bank's balance through its opening balance), so the same money is never counted as income twice. Everything folded in is kept on the
 // paycheck so Undo can put it back. A raise is followed once two deposits agree on the new amount.
-function dismissDraftQuietly(draft) {
-  state.transactionInboxDone ||= [];
-  if (!state.transactionInboxDone.includes(draft.id)) state.transactionInboxDone.push(draft.id);
-  state.transactionInboxDrafts = (state.transactionInboxDrafts || []).filter((item) => item.id !== draft.id);
-}
-
 function shiftOpeningForLedgerRow(row, direction) {
   const account = state.accounts.find((item) => item.id === row.accountId);
   if (!account || !Number.isFinite(Number(row.amount)) || row.date > dateKey(new Date())) return;
@@ -2234,52 +2276,7 @@ function shiftOpeningForLedgerRow(row, direction) {
 }
 
 function autoAddDetectedSalaries() {
-  const today = dateKey(new Date());
-  state.salaryDetectionIgnored ||= [];
-  let changed = false;
-
-  // Deposits of a salary already recorded from the deposits: skip the waiting rows, and follow a raise.
-  state.paychecks.filter((paycheck) => paycheck.autoDetected).forEach((paycheck) => {
-    const waiting = (state.transactionInboxDrafts || []).filter((draft) => salaryDepositMatchesPaycheck(draft, paycheck)).sort((a, b) => a.date.localeCompare(b.date));
-    if (!waiting.length) return;
-    waiting.forEach((draft) => { (paycheck.autoDetected.dismissed ||= []).push(draft); dismissDraftQuietly(draft); });
-    const latest = -Number(waiting[waiting.length - 1].amount);
-    const detected = paycheck.autoDetected;
-    if (Math.abs(latest - paycheck.amount) <= paycheck.amount * 0.02) delete detected.pendingAmount;
-    else if (detected.pendingAmount && Math.abs(latest - detected.pendingAmount) <= detected.pendingAmount * 0.005) {
-      const previous = paycheck.amount;
-      paycheck.amount = detected.pendingAmount;
-      (state.paycheckOccurrences || []).forEach((occurrence) => { if (occurrence.seriesId === paycheck.id && occurrence.amount === previous) occurrence.amount = paycheck.amount; });
-      delete detected.pendingAmount;
-      state.household.activity.unshift(`${paycheck.name}: amount updated to ${money.format(paycheck.amount)} to match your deposits`);
-    } else detected.pendingAmount = latest;
-    changed = true;
-  });
-
-  // A salary the deposits show that nothing records yet.
-  const rows = [...state.transactions, ...(state.transactionInboxDrafts || [])];
-  detectSalaryDeposits(rows, today).forEach((detection) => {
-    const id = `${detection.accountId}|${detection.key}`;
-    if (state.salaryDetectionIgnored.includes(id)) return;
-    if (state.paychecks.some((paycheck) => paycheck.autoDetected?.key === detection.key && paycheck.autoDetected.accountId === detection.accountId)) return;
-    if (salaryAlreadyRecorded(detection, state.paychecks)) return;
-    const paycheck = {
-      id: uniqueId("paycheck"), name: `${detection.name} (from your deposits)`, date: detection.anchorDate, amount: detection.amount, recurrence: detection.recurrence,
-      assignedLineIds: [], depositAccountId: "",
-      autoDetected: { key: detection.key, accountId: detection.accountId, detectedAt: new Date().toISOString(), acknowledged: false, removed: [], dismissed: [] }
-    };
-    const matches = (row) => salaryDepositMatchesPaycheck(row, paycheck);
-    state.transactions = state.transactions.filter((transaction) => {
-      if (!transaction.externalId || transaction.lineId || (transaction.splits || []).length || !matches(transaction)) return true;
-      paycheck.autoDetected.removed.push(transaction);
-      shiftOpeningForLedgerRow(transaction, -1);
-      return false;
-    });
-    (state.transactionInboxDrafts || []).filter(matches).forEach((draft) => { paycheck.autoDetected.dismissed.push(draft); dismissDraftQuietly(draft); });
-    state.paychecks.push(paycheck);
-    state.household.activity.unshift(`Income added from your deposits: ${paycheck.name}, ${money.format(paycheck.amount)} ${paycheckRecurrenceLabels[paycheck.recurrence].toLowerCase()}`);
-    changed = true;
-  });
+  const changed = applyDetectedSalariesToState(state, dateKey(new Date()), uniqueId);
   if (changed) state.budget.income = budgetIncomeFromPaychecks();
   return changed;
 }
@@ -11995,6 +11992,11 @@ function bindViewEvents() {
     });
   });
 
+  $("#linkedAutoApplyToggle")?.addEventListener("change", (event) => {
+    state.linkedAutoApply = event.currentTarget.checked;
+    autosaveState();
+  });
+
   document.querySelectorAll("[data-linked-sync]").forEach((button) => {
     button.addEventListener("click", () => syncLinkedAccount(button.dataset.linkedSync, addBankStreamRows));
   });
@@ -14078,6 +14080,7 @@ function renderLinkedAccountsCard() {
         <small>How far back it goes depends on the bank (often 3-12 months). Rows you already have or removed with Clean up are brought in again; pending rows wait.</small>
       </div>` : ""}
     </div>`).join("")}
+    ${links.length ? `<label class="ai-import-toggle"><input type="checkbox" id="linkedAutoApplyToggle" ${state.linkedAutoApply === false ? "" : "checked"}> <span>Add new bank transactions to the ledger overnight, without opening the app (categorized with AI; anything doubtful waits in Bank stream, and the day's summary is sent to your phone)</span></label>` : ""}
     ${mappingPanel}
     ${providers.simplefin ? `<form id="linkedSimplefinForm" class="linked-link-form">
       <label>SimpleFIN setup token<input name="setupToken" placeholder="Paste the token from bridge.simplefin.org" autocomplete="off" required></label>

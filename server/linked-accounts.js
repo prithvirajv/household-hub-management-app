@@ -2,12 +2,15 @@
 // can update without manual entry. Everything here is READ-ONLY toward the outside world (SimpleFIN is read-only by design; SnapTrade
 // connections are requested with connectionType "read", and no trading endpoint is ever called).
 //
-// The server never writes household state itself: a sync returns normalized data and the client (web/mobile) turns it into Bank stream
-// drafts and balance/holding updates through its normal whole-state save, so a sync can never race a user's own edits.
+// A sync returns normalized data and the client (web/mobile) turns it into Bank stream drafts and balance/holding updates through its
+// normal whole-state save. The nightly job also applies what it staged itself (lib/linked-apply.js), so new transactions reach the ledger
+// without anyone opening the app; it writes only with the household's version it read (a save from anyone else in between makes it start
+// again), and clients that name the version they loaded are refused, not merged over, when it wrote first.
 //
 // Credentials (a SimpleFIN access URL, a SnapTrade userSecret) are encrypted at rest with AES-256-GCM using LINK_ENCRYPTION_KEY, and
 // are never returned to the client. Without the key the whole feature reports "not configured" rather than storing anything in clear.
 const crypto = require("node:crypto");
+const { applyLinkedPayload } = require("../lib/linked-apply");
 
 const SIMPLEFIN_WINDOW_DAYS = 55; // the Bridge caps one request at 60 days
 const SIMPLEFIN_DEFAULT_LOOKBACK_DAYS = 30;
@@ -326,7 +329,7 @@ function createStore({ MEMORY_DB, memoryDb, pool }) {
 
 // ---- routes -------------------------------------------------------------------------------------------------------
 
-function registerLinkedAccountRoutes({ app, requireSession, requireEditAccess, requireJobSecret, notifyHousehold, loadHouseholdState, MEMORY_DB, memoryDb, pool, env = process.env, snaptradeAdapterFactory = createSnaptradeAdapter, fetchImpl = fetch }) {
+function registerLinkedAccountRoutes({ app, requireSession, requireEditAccess, requireJobSecret, notifyHousehold, loadHouseholdState, stateStore = null, suggestBatch = null, MEMORY_DB, memoryDb, pool, env = process.env, snaptradeAdapterFactory = createSnaptradeAdapter, fetchImpl = fetch }) {
   const encryptionKey = String(env.LINK_ENCRYPTION_KEY || "").trim();
   const snaptrade = snaptradeConfig(env);
   const allowInsecureHosts = env.NODE_ENV === "test" && String(env.SIMPLEFIN_ALLOW_TEST_HOSTS || "") === "true";
@@ -483,9 +486,45 @@ function registerLinkedAccountRoutes({ app, requireSession, requireEditAccess, r
     res.json({ ok: true });
   }));
 
-  // Nightly job (Cloud Scheduler, shared-secret): fetch every active link and stage the result. It never writes household state - a
-  // client applies it the next time the app is opened - and it tells the household's phones when there is something new or a bank
-  // connection needs signing in again.
+  // Applies whatever is staged for a household straight to its saved state (new rows into Bank stream, balances to the bank, salary to a
+  // paycheck, AI categories, safe rows into the ledger) so nobody has to open the app. The household is read with its version and written
+  // back only if nobody saved in between (the AI calls take a while); if someone did, it starts again from their version, reusing the
+  // answers it already has. Staged data is cleared only after the save lands, and a household can switch this off (linkedAutoApply: false).
+  const autoApplyHousehold = async (householdId) => {
+    if (!stateStore) return null;
+    const aiCache = new Map();
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      const links = (await store.list(householdId)).filter((link) => link.status === "active" && link.stagedAt && Object.keys(link.staged || {}).length);
+      if (!links.length) return null;
+      const loaded = await stateStore.load(householdId);
+      if (!loaded || loaded.state?.linkedAutoApply === false) return null;
+      const working = structuredClone(loaded.state);
+      const outcomes = [];
+      for (const link of links) {
+        try {
+          outcomes.push({ link, result: await applyLinkedPayload(working, link, link.staged, { suggest: suggestBatch, aiCache }) });
+        } catch (error) {
+          outcomes.push({ link, error });
+        }
+      }
+      const applied = outcomes.filter((outcome) => outcome.result);
+      for (const outcome of outcomes.filter((item) => item.error)) {
+        await store.update(householdId, outcome.link.id, { lastError: `Could not apply new transactions automatically: ${String(outcome.error.message || "").slice(0, 200)}` });
+      }
+      if (!applied.length) return { applied: 0, added: 0, left: 0, imported: 0 };
+      if (!(await stateStore.saveIfVersion(householdId, working, loaded.version))) continue;
+      for (const { link } of applied) {
+        const fresh = await store.get(householdId, link.id);
+        if (fresh?.stagedAt && link.stagedAt && new Date(fresh.stagedAt).getTime() <= new Date(link.stagedAt).getTime()) await store.update(householdId, link.id, { staged: {}, stagedAt: null });
+      }
+      return applied.reduce((total, { result }) => ({ applied: total.applied + 1, imported: total.imported + result.imported, added: total.added + result.added, left: total.left + result.left, uncategorized: total.uncategorized + result.uncategorized }), { applied: 0, imported: 0, added: 0, left: 0, uncategorized: 0 });
+    }
+    return null;
+  };
+
+  // Nightly job (Cloud Scheduler, shared-secret): fetch every active link and stage the result, then apply it to each household's state
+  // (autoApplyHousehold above; a household that turned that off, or an apply that failed, leaves it staged for the app to apply when it is
+  // next opened). It tells the household's phones what was added, or that a bank connection needs signing in again.
   if (requireJobSecret) {
     app.post("/api/internal/linked-accounts/sync-all", requireJobSecret, async (_req, res, next) => {
       try {
@@ -518,10 +557,19 @@ function registerLinkedAccountRoutes({ app, requireSession, requireEditAccess, r
             if (needsReconnect) { entry.reconnect.push(link.label); summary.reconnect += 1; }
           }
         }
+        for (const [householdId, entry] of byHousehold) {
+          try {
+            const outcome = await autoApplyHousehold(householdId);
+            if (outcome?.applied) { entry.autoApplied = outcome; summary.autoApplied = (summary.autoApplied || 0) + outcome.added; }
+          } catch (error) {
+            console.warn("Automatic apply of linked transactions failed", error.message);
+          }
+        }
         if (notifyHousehold) {
           for (const [householdId, entry] of byHousehold) {
             try {
-              if (entry.newTransactions > 0) await notifyHousehold(householdId, `${entry.newTransactions} new bank transaction${entry.newTransactions === 1 ? "" : "s"} waiting to review`);
+              if (entry.autoApplied?.imported > 0) await notifyHousehold(householdId, `${entry.autoApplied.added} new bank transaction${entry.autoApplied.added === 1 ? "" : "s"} added to your ledger${entry.autoApplied.left ? `, ${entry.autoApplied.left} need a look` : ""}`);
+              else if (entry.newTransactions > 0) await notifyHousehold(householdId, `${entry.newTransactions} new bank transaction${entry.newTransactions === 1 ? "" : "s"} waiting to review`);
               if (entry.reconnect.length) await notifyHousehold(householdId, `${entry.reconnect.join(", ")} needs signing in again - open Wealth to relink`);
             } catch (error) { console.warn("Linked-account notification failed", error.message); }
           }

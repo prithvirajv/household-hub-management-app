@@ -34,6 +34,11 @@ CREATE TABLE IF NOT EXISTS households (
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
+-- Bumped on every write to app_state. A save that names the version it was based on is refused when someone else (another device, or the
+-- overnight linked-account job) wrote in between, so a stale tab can never silently overwrite what the server applied.
+ALTER TABLE households
+  ADD COLUMN IF NOT EXISTS state_version BIGINT NOT NULL DEFAULT 0;
+
 ALTER TABLE users
   ADD COLUMN IF NOT EXISTS default_household_id UUID;
 
