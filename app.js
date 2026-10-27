@@ -3044,7 +3044,7 @@ function renderTransactions() {
   const unlinkedDraftCount = allImported.filter((transaction) => !transaction.accountId).length;
   // Rows waiting on a yes/no that can be settled in one go: both halves of a transfer between two of the household's own accounts, and
   // rows that are certainly a transaction already recorded. Counted over every month, like the other bulk tools below.
-  const bulkTransferPairs = planBulkTransfers(state.transactionInboxDrafts || []);
+  const bulkTransferPairs = planBulkTransfers(state.transactionInboxDrafts || [], state.accounts);
   const bulkDuplicateSkips = planBulkDuplicateSkips(state.transactionInboxDrafts || [], state.transactions);
   // A payee-history bug (fixed) briefly let a shared generic prefix - e.g.
   // "Zelle payment to X" and "Zelle payment from Y" - cross-contaminate
@@ -10756,7 +10756,7 @@ function bindViewEvents() {
   });
 
   $("#bankStreamBulkTransfers")?.addEventListener("click", async () => {
-    const pairs = planBulkTransfers(state.transactionInboxDrafts || []);
+    const pairs = planBulkTransfers(state.transactionInboxDrafts || [], state.accounts);
     if (!pairs.length) return;
     const total = pairs.reduce((sum, pair) => sum + Math.abs(Number(pair.out.amount)), 0);
     const lines = pairs.slice(0, 8).map((pair) => `${formatShortDate(pair.out.date)}  ${exactMoney.format(Math.abs(Number(pair.out.amount)))}  ${accountName(pair.out.accountId)} → ${accountName(pair.in.accountId)}`);
@@ -10764,7 +10764,7 @@ function bindViewEvents() {
     const confirmed = await showConfirm(`Move ${pairs.length} pair${pairs.length === 1 ? "" : "s"} (${exactMoney.format(total)} in all) to Transfers? Each pair becomes one transfer from the account the money left to the account it landed in, and both waiting rows are cleared. Nothing in the Ledger is touched.\n\n${lines.join("\n")}${more}`, { title: "Move to Transfers", confirmLabel: `Move ${pairs.length}`, danger: false });
     if (!confirmed) return;
     // Plan again after the dialog: rows may have changed (a sync or another tab) while it was open.
-    const current = planBulkTransfers(state.transactionInboxDrafts || []);
+    const current = planBulkTransfers(state.transactionInboxDrafts || [], state.accounts);
     const gone = new Set();
     state.transfers ||= [];
     state.transactionInboxDone ||= [];

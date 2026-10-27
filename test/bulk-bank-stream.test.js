@@ -44,3 +44,12 @@ test("duplicates: the same bank id as a recorded or earlier row, or the same amo
   ];
   assert.deepEqual(planBulkDuplicateSkips(drafts, ledger).map((d) => d.id), ["1", "2", "6"], "a different bank id is a different transaction; two untagged waiting rows are not judged against each other");
 });
+
+test("person-to-person payments, direct deposits and card-to-card matches are never paired as transfers", () => {
+  const accounts = [{ id: "chk", type: "checking" }, { id: "card1", type: "credit_card" }, { id: "card2", type: "credit_card" }, { id: "chk2", type: "checking" }];
+  assert.deepEqual(planBulkTransfers([draft("a", "Zelle payment to Sam", 1500, "2026-09-08", "chk"), draft("b", "TRANSFER FROM ACCT", -1500, "2026-09-08", "chk2")], accounts), []);
+  assert.deepEqual(planBulkTransfers([draft("c", "TRANSFER TO MBR", 1500, "2026-09-09", "chk"), draft("d", "Zelle payment from Sam", -1500, "2026-09-09", "chk2")], accounts), []);
+  assert.deepEqual(planBulkTransfers([draft("e", "SAMPLE PAYROLL DIRECT DEP", -4800, "2026-08-03", "chk"), draft("f", "SAMPLE DIRECT DEPOSIT", 4800, "2026-08-03", "card1")], accounts), []);
+  assert.deepEqual(planBulkTransfers([draft("g", "SAMPLE SHOP A", 7.25, "2026-09-03", "card1"), draft("h", "SAMPLE SHOP B", -7.25, "2026-09-03", "card2")], accounts), []);
+  assert.equal(planBulkTransfers([draft("i", "CARD AUTOPAY", 100, "2026-09-03", "chk"), draft("j", "AUTOPAY THANK YOU", -100, "2026-09-03", "card1")], accounts).length, 1);
+});
