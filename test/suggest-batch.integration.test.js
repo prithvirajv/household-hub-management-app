@@ -186,3 +186,11 @@ test("from a bank feed a row with no category (or an unsure AI guess) still goes
   assert.equal(autoAcceptDecision(row, { ...ctx, bankFeed: false }).reason, "no category");
   assert.equal(autoAcceptDecision({ ...row, lineId: "dining", lineSource: "ai-low" }, { ...ctx, bankFeed: false }).reason, "low confidence");
 });
+
+test("rows with different bank transaction ids are never duplicates of each other; the same id always is; a hand-entered row still can be", () => {
+  const { isDuplicateTransaction } = require("../lib/shared-logic");
+  const yesterday = { externalId: "sf:a:1", amount: 10, date: "2026-07-09" };
+  assert.equal(isDuplicateTransaction({ externalId: "sf:a:2", amount: 10, date: "2026-07-10" }, [yesterday]), false, "two real $10 purchases");
+  assert.equal(isDuplicateTransaction({ externalId: "sf:a:1", amount: 10, date: "2026-07-12" }, [yesterday]), true, "same bank id");
+  assert.equal(isDuplicateTransaction({ externalId: "sf:a:2", amount: 10, date: "2026-07-10" }, [{ amount: 10, date: "2026-07-10" }]), true, "a hand-entered row with the same amount and date");
+});

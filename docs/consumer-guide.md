@@ -176,7 +176,7 @@ more convenient.
   credit on a card) that matches an earlier $12 purchase on the same account
   goes in under that purchase's Subcategory as a negative amount, so it nets the
   spending back out and lowers what the card owes; its note says which purchase
-  it reverses. Duplicates, possible transfers, pending rows, rows with no
+  it reverses. Possible duplicates (the same amount within two days of a row you typed or imported from a file; two rows from a linked bank are never duplicates of each other, and a row the bank re-sends is recognized by its own id and skipped), possible transfers, pending rows, rows with no
   account, a return whose purchase is on a different account or still waiting
   in Bank Stream, and a deposit that matches a paycheck you already recorded (it
   would count the income twice) stay in Bank Stream, each marked **Held:** with
