@@ -511,6 +511,14 @@ test("a slow SimpleFIN range is split and retried instead of losing the import; 
   await assert.rejects(() => syncSimplefin("https://u:p@bridge.simplefin.org/simplefin", { startUnix: start, endUnix: end, allowPartial: true }, { fetchImpl: async () => ({ ok: false, status: 524, json: async () => ({}) }) }), /did not answer .* Nothing was imported; try again in a few minutes/);
   // A request that never answers is given up on (the real timeout is a minute; the test stub just throws like an abort).
   await assert.rejects(() => syncSimplefin("https://u:p@bridge.simplefin.org/simplefin", { startUnix: start, endUnix: start + 10 * day, allowPartial: false }, { fetchImpl: async () => { throw new Error("aborted"); } }), /took too long to answer/);
+  // A dropped connection (the Bridge resetting it) is a different, honestly named failure, asked again once after a pause before giving up.
+  let drops = 0;
+  const resets = async () => { drops += 1; const error = new TypeError("fetch failed"); error.cause = { code: "ECONNRESET" }; throw error; };
+  await assert.rejects(() => syncSimplefin("https://u:p@bridge.simplefin.org/simplefin", { startUnix: start, endUnix: start + 10 * day, allowPartial: false }, { fetchImpl: resets }), /SimpleFIN dropped the connection \(ECONNRESET\)/);
+  assert.equal(drops, 1, "a sync that may not be partial does not retry");
+  drops = 0;
+  await assert.rejects(() => syncSimplefin("https://u:p@bridge.simplefin.org/simplefin", { startUnix: start, endUnix: start + 10 * day, allowPartial: true }, { fetchImpl: resets, retryPauseMs: 1 }), /did not answer \(SimpleFIN dropped the connection \(ECONNRESET\)/);
+  assert.ok(drops >= 2, "a history import asks the same range again after the pause (then smaller pieces) before it reports the failure");
 
   // Failed stretches become whole-month gaps for every mapped account, and rows in those months are left out.
   const payload = { provider: "simplefin", accounts: [{ remoteId: "A1", name: "Checking" }, { remoteId: "A2", name: "Card" }], errors: [], transactions: [

@@ -96,7 +96,12 @@ async function fetchSimplefinAccounts(accessUrl, params, { fetchImpl = fetch, al
   try {
     response = await fetchImpl(request.url, { headers: request.headers, signal: AbortSignal.timeout(SIMPLEFIN_REQUEST_TIMEOUT_MS) });
   } catch (error) {
-    throw clientError("SimpleFIN took too long to answer.", 504);
+    // A request that never answered is a timeout; anything else (the Bridge resetting the connection, DNS, TLS) is a dropped connection.
+    const timedOut = error?.name === "TimeoutError" || error?.name === "AbortError" || /abort|timeout/i.test(String(error?.message));
+    const reason = String(error?.cause?.code || error?.code || "");
+    const failure = clientError(timedOut ? "SimpleFIN took too long to answer." : `SimpleFIN dropped the connection${reason ? ` (${reason})` : ""} - its servers may be having trouble.`, timedOut ? 504 : 502);
+    failure.dropped = !timedOut;
+    throw failure;
   }
   if (response.status === 401 || response.status === 403) throw clientError("SimpleFIN no longer accepts this connection - remove it and link again.", 409);
   if (!response.ok) throw clientError(`SimpleFIN is unavailable right now (HTTP ${response.status}).`, 502);
@@ -153,6 +158,7 @@ async function syncSimplefin(accessUrl, { startUnix, endUnix, allowPartial = fal
   const queue = [];
   for (let start = startUnix; start < endUnix; start += windowSeconds) queue.push({ start, end: Math.min(start + windowSeconds, endUnix), depth: 0 });
   const failedWindows = [];
+  const retriedDrop = new Set();
   let succeeded = 0;
   let lastFailure = null;
   while (queue.length) {
@@ -164,7 +170,12 @@ async function syncSimplefin(accessUrl, { startUnix, endUnix, allowPartial = fal
       if (error.statusCode === 409) throw error;
       lastFailure = error;
       console.warn(`SimpleFIN window ${new Date(start * 1000).toISOString().slice(0, 10)}..${new Date(end * 1000).toISOString().slice(0, 10)} failed: ${error.message}`);
-      if (allowPartial && depth < 2 && end - start > 7 * 86400) {
+      if (allowPartial && error.dropped && !retriedDrop.has(`${start}-${end}`)) {
+        // A dropped connection says nothing about the size of the range: ask again once, after a short pause, before splitting it.
+        retriedDrop.add(`${start}-${end}`);
+        await new Promise((resolve) => setTimeout(resolve, options.retryPauseMs ?? 3000));
+        queue.unshift({ start, end, depth });
+      } else if (allowPartial && depth < 2 && end - start > 7 * 86400) {
         const middle = Math.floor((start + end) / 2);
         queue.unshift({ start, end: middle, depth: depth + 1 }, { start: middle, end, depth: depth + 1 });
       } else if (allowPartial) {
