@@ -2496,6 +2496,7 @@ function renderHome() {
     <section class="work-grid">
       <div class="main-stack">
         ${renderHomeBriefingCard()}
+        ${renderHistoryGapCard()}
         ${renderDetectedSalaryCard()}
         ${renderPlanSuggestionsCard()}
         <section class="card">
@@ -8516,6 +8517,11 @@ function bindViewEvents() {
     dismissBudgetReminder(`plan:${lineId}`);
   }));
   document.querySelectorAll("[data-plan-keep]").forEach((button) => button.addEventListener("click", () => dismissBudgetReminder(`plan:${button.dataset.planKeep}`)));
+  document.querySelectorAll("[data-ack-history-gap]").forEach((button) => button.addEventListener("click", () => {
+    state.historyGapNotices = (state.historyGapNotices || []).filter((notice) => notice.id !== button.dataset.ackHistoryGap);
+    autosaveState();
+    render();
+  }));
   maybeDetectSalaries();
   maybeOpenCurrentMonth();
   $("#homeAddChoreButton")?.addEventListener("click", () => goToViewAndRun("calendar", () => focusCalendarType("chore")));
@@ -14144,6 +14150,38 @@ function applySnaptradeSync(link, payload) {
   return result;
 }
 
+// A bank that returned only part of the history a history import asked for (see trimPartialHistory on the server): the months it only half
+// covers are left out whole, and the person has to say they understand before anything else is imported. The same text stays on Home as a
+// reminder until they mark the statement import done.
+function historyGapMonths(gap) {
+  return gap.fromMonth === gap.toMonth ? formatMonth(gap.fromMonth) : `${formatMonth(gap.fromMonth)} to ${formatMonth(gap.toMonth)}`;
+}
+
+function historyGapDialogText(gaps, nameOf) {
+  const lines = gaps.map((gap) => `• ${nameOf(gap.remoteId) || gap.name}: ${historyGapMonths(gap)} will NOT be imported (the bank's rows only start on ${gap.oldestReturned})`);
+  return `The bank did not return all the history you asked for.\n\n${lines.join("\n")}\n\nThose whole months are left out on purpose - half a month would make the ledger wrong and double up when you import it yourself. After this, import those months for ${gaps.length === 1 ? "that account" : "those accounts"} from a bank statement: Transactions, then Import a statement, and pick the account.\n\nImport everything else now?`;
+}
+
+function recordHistoryGapNotices(link, gaps) {
+  state.historyGapNotices ||= [];
+  gaps.forEach((gap) => {
+    const accountId = link.mappings[gap.remoteId]?.accountId || "";
+    if (state.historyGapNotices.some((notice) => notice.accountId === accountId && notice.fromMonth === gap.fromMonth && notice.toMonth === gap.toMonth)) return;
+    state.historyGapNotices.push({ id: uniqueId("history-gap"), accountId, accountName: accountName(accountId) || gap.name, fromMonth: gap.fromMonth, toMonth: gap.toMonth, oldestReturned: gap.oldestReturned, createdAt: new Date().toISOString() });
+  });
+}
+
+function renderHistoryGapCard() {
+  const notices = state.historyGapNotices || [];
+  if (!notices.length) return "";
+  return `<section class="card history-gap-card" role="alert">
+    <div class="card-label">Action needed</div><h3>Some bank history is missing - import it from a statement</h3>
+    <p class="muted">The bank did not return these months, so they were left out rather than half-filled. For each, go to Transactions, choose Import a statement, and pick the account. Mark it done once you have.</p>
+    ${notices.map((notice) => `<div class="compact-row"><div><strong>${escapeHtml(accountName(notice.accountId) || notice.accountName)}</strong><small>${escapeHtml(historyGapMonths(notice))} · the bank's rows start on ${escapeHtml(notice.oldestReturned)}</small></div>
+      <div class="button-row"><button class="pill-button" data-goto-view="transactions" type="button">Import a statement</button><button class="ghost" data-ack-history-gap="${escapeHtml(notice.id)}" type="button">I've imported it</button></div></div>`).join("")}
+  </section>`;
+}
+
 async function syncLinkedAccount(linkId, addRows, { quiet = false, sinceDate = "" } = {}) {
   const link = (linkedAccounts?.links || []).find((item) => item.id === linkId);
   if (!link || linkedBusyId) return;
@@ -14152,11 +14190,24 @@ async function syncLinkedAccount(linkId, addRows, { quiet = false, sinceDate = "
   try {
     const payload = await api(`/api/linked-accounts/${linkId}/sync`, { method: "POST", body: JSON.stringify(sinceDate ? { sinceDate } : {}) });
     let summary;
+    if (link.provider === "simplefin" && payload.historyGaps?.length) {
+      linkedBusyId = "";
+      render();
+      const proceed = await showConfirm(historyGapDialogText(payload.historyGaps, (remoteId) => accountName(link.mappings[remoteId]?.accountId)), { title: "Part of that history is missing", confirmLabel: "Import the rest", cancelLabel: "Cancel - import nothing", danger: false });
+      linkedBusyId = linkId;
+      if (!proceed) {
+        // Nothing is applied; clearing what the server staged keeps the overnight job from importing it behind the person's back.
+        if (payload.stagedAt) await api(`/api/linked-accounts/${linkId}/ack`, { method: "POST", body: JSON.stringify({ stagedAt: payload.stagedAt }) });
+        linkedFeedback = `${link.label}: nothing was imported. The bank's history for the accounts above is incomplete - import those months from a statement, or ask for a later start date.`;
+        await loadLinkedAccounts(false);
+        return;
+      }
+      recordHistoryGapNotices(link, payload.historyGaps);
+    }
     if (link.provider === "simplefin") {
       const result = applySimplefinSync(link, payload, addRows, { ignoreRemembered: Boolean(sinceDate) });
-      result.coverage = historyCoverageNotes(payload.accounts, link.mappings, sinceDate, accountName);
       summary = `${link.label}: ${result.imported} new transaction${result.imported === 1 ? "" : "s"} sent to Bank stream${result.balancesUpdated ? `, ${result.balancesUpdated} balance${result.balancesUpdated === 1 ? "" : "s"} updated` : ""}${result.groupsMatched ? `, ${result.groupsMatched} investment account${result.groupsMatched === 1 ? "" : "s"} matched to the bank balance` : ""}${result.debtsMatched ? `, ${result.debtsMatched} loan${result.debtsMatched === 1 ? "" : "s"} matched to the amount owed` : ""}${result.pendingSkipped ? `; ${result.pendingSkipped} pending skipped until they post` : ""}${result.unmapped ? `; ${result.unmapped} from accounts you chose not to import` : ""}.`;
-      if (result.coverage.length) summary += ` Less history than you asked for: ${result.coverage.join("; ")} - that is all the bank holds (it varies by bank), or all it would send.`;
+      if (payload.historyGaps?.length) summary += " Some months were left out because the bank did not return them - see Home for what to import from a statement.";
       if (payload.errors?.length) summary += ` The bank reported: ${payload.errors.join("; ")}`;
     } else {
       const result = applySnaptradeSync(link, payload);

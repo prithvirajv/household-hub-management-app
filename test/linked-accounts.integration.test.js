@@ -3,7 +3,7 @@ const http = require("node:http");
 const test = require("node:test");
 const express = require("express");
 const { startTestServer } = require("./helpers");
-const { registerLinkedAccountRoutes, mergeStagedPayload, knownExternalIds, findNewAccounts, encryptJson, decryptJson, normalizeSnaptradePositions, normalizeSimplefinTransactions, snaptradeConfig } = require("../server/linked-accounts");
+const { registerLinkedAccountRoutes, trimPartialHistory, mergeStagedPayload, knownExternalIds, findNewAccounts, encryptJson, decryptJson, normalizeSnaptradePositions, normalizeSimplefinTransactions, snaptradeConfig } = require("../server/linked-accounts");
 
 const KEY = "test-link-encryption-key-with-entropy";
 
@@ -372,4 +372,34 @@ test("the nightly job applies new bank transactions to the household without the
     await server.stop();
     await stub.stop();
   }
+});
+
+
+test("a history import leaves out the whole months a bank only partly returned and reports them; a quiet account or a bank that starts on time is left alone", () => {
+  const row = (remoteAccountId, date, n) => ({ externalId: `sf:${remoteAccountId}:${date}:${n}`, remoteAccountId, date, payee: "P", amount: 5, pending: false });
+  const dates = ["2026-03-09", "2026-03-20", "2026-04-02", "2026-05-11", "2026-06-03", "2026-07-07"];
+  const payload = {
+    provider: "simplefin",
+    accounts: [{ remoteId: "A", name: "DCU Prithvi" }, { remoteId: "B", name: "Quiet savings" }, { remoteId: "C", name: "Good bank" }, { remoteId: "D", name: "Starts on the 2nd" }],
+    transactions: [
+      ...dates.map((date, i) => row("A", date, i)),
+      row("B", "2026-08-20", 1), row("B", "2026-09-20", 2),
+      ...["2026-01-02", "2026-02-10", "2026-03-10", "2026-04-10", "2026-05-10"].map((date, i) => row("C", date, i)),
+      ...["2026-03-02", "2026-03-15", "2026-04-15", "2026-05-15", "2026-06-15"].map((date, i) => row("D", date, i))
+    ],
+    errors: []
+  };
+  const { payload: trimmed, gaps } = trimPartialHistory(payload, "2026-01-01");
+  assert.deepEqual(gaps, [
+    { remoteId: "A", name: "DCU Prithvi", fromMonth: "2026-01", toMonth: "2026-03", oldestReturned: "2026-03-09", skippedRows: 2 },
+    { remoteId: "D", name: "Starts on the 2nd", fromMonth: "2026-01", toMonth: "2026-02", oldestReturned: "2026-03-02", skippedRows: 0 }
+  ]);
+  const kept = (id) => trimmed.transactions.filter((t) => t.remoteAccountId === id).map((t) => t.date);
+  assert.deepEqual(kept("A"), ["2026-04-02", "2026-05-11", "2026-06-03", "2026-07-07"], "March, a partly covered month, is left out whole");
+  assert.equal(kept("B").length, 2, "an account with only a couple of rows is not flagged");
+  assert.equal(kept("C").length, 5, "a bank that starts within three weeks of the date asked for is complete");
+  assert.equal(kept("D").length, 5, "rows starting on the 2nd of a month count that month as covered");
+  assert.deepEqual(trimPartialHistory(payload, "").gaps, [], "only a history import trims anything");
+  assert.equal(trimPartialHistory(payload, "").payload, payload);
+  assert.equal(trimPartialHistory({ ...payload, provider: "snaptrade" }, "2026-01-01").gaps.length, 0);
 });

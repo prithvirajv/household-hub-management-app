@@ -260,12 +260,3 @@ test("salary detection finds a steady payer on a regular cadence and ignores eve
   assert.equal(salaryAlreadyRecorded(salary, [{ amount: 2490, recurrence: "monthly" }]), false);
   assert.equal(salaryAlreadyRecorded(salary, [{ amount: 2490, recurrence: "biweekly", endDate: "2026-06-30" }]), false, "an ended paycheck does not count");
 });
-
-test("history coverage names the accounts whose bank returned less than was asked for", () => {
-  const { historyCoverageNotes } = require("../lib/shared-logic");
-  const remote = [{ remoteId: "A", name: "Checking", oldestTransactionDate: "2026-01-04" }, { remoteId: "B", name: "Card", oldestTransactionDate: "2026-03-09" }, { remoteId: "C", name: "Empty", oldestTransactionDate: "" }, { remoteId: "D", name: "Unmapped", oldestTransactionDate: "2026-09-01" }, { remoteId: "E", name: "Old server" }];
-  const mappings = { A: { accountId: "a" }, B: { accountId: "b" }, C: { accountId: "c" }, E: { accountId: "e" } };
-  const nameOf = (id) => ({ a: "Checking", b: "DCU Prithvi", c: "Savings" })[id] || "";
-  assert.deepEqual(historyCoverageNotes(remote, mappings, "2026-01-01", nameOf), ["DCU Prithvi: rows only go back to 2026-03-09", "Savings: no rows at all in that range"]);
-  assert.deepEqual(historyCoverageNotes(remote, mappings, "", nameOf), []);
-});

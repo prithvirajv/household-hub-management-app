@@ -251,6 +251,51 @@ function findNewAccounts(remoteAccounts, mappings) {
 const STAGED_RETENTION_DAYS = 120;
 const STAGED_TRANSACTION_LIMIT = 3000;
 
+// A history import asks for everything since a date, but a bank often holds less. For an account whose rows start well after the date asked
+// for, the month the rows start in is only partly covered, and importing half a month would leave the ledger wrong in a way that is hard to
+// spot - and double up when the person later imports that month from a statement. So rows dated before the first fully covered month are
+// left out, and each such account is reported (the months missing, and where the bank's rows really start) so the person can import those
+// months from a statement instead. A month counts as covered when the bank's rows start on its first three days or before. An account whose
+// rows start within three weeks of the requested date, with only a few rows, or with none at all, is left alone.
+const HISTORY_GAP_SLACK_DAYS = 21;
+// An account with only a few rows in the whole range (a savings account with the odd interest credit) simply had nothing happen for weeks;
+// that is not the bank holding less, so only an account with real activity is reported.
+const HISTORY_GAP_MIN_ROWS = 5;
+
+function trimPartialHistory(payload, sinceDate) {
+  if (payload?.provider !== "simplefin" || !/^\d{4}-\d{2}-\d{2}$/.test(String(sinceDate || ""))) return { payload, gaps: [] };
+  const oldestByAccount = new Map();
+  const rowCounts = new Map();
+  (payload.transactions || []).filter((transaction) => !transaction.pending).forEach((transaction) => {
+    rowCounts.set(transaction.remoteAccountId, (rowCounts.get(transaction.remoteAccountId) || 0) + 1);
+    const current = oldestByAccount.get(transaction.remoteAccountId);
+    if (!current || transaction.date < current) oldestByAccount.set(transaction.remoteAccountId, transaction.date);
+  });
+  const since = Date.parse(`${sinceDate}T00:00:00Z`);
+  const firstCovered = new Map();
+  const gaps = [];
+  for (const [remoteId, oldest] of oldestByAccount) {
+    if (Date.parse(`${oldest}T00:00:00Z`) - since <= HISTORY_GAP_SLACK_DAYS * 86400000 || (rowCounts.get(remoteId) || 0) < HISTORY_GAP_MIN_ROWS) continue;
+    const [year, month, day] = oldest.split("-").map(Number);
+    // The month the rows start in counts only if they start in its first days; otherwise the first covered month is the next one.
+    const next = day <= 3 ? { year, month } : month === 12 ? { year: year + 1, month: 1 } : { year, month: month + 1 };
+    const boundary = `${next.year}-${String(next.month).padStart(2, "0")}-01`;
+    firstCovered.set(remoteId, boundary);
+    const lastMissing = next.month === 1 ? `${next.year - 1}-12` : `${next.year}-${String(next.month - 1).padStart(2, "0")}`;
+    const account = (payload.accounts || []).find((item) => item.remoteId === remoteId);
+    gaps.push({ remoteId, name: account?.name || "Account", fromMonth: sinceDate.slice(0, 7), toMonth: lastMissing, oldestReturned: oldest, skippedRows: 0 });
+  }
+  if (!gaps.length) return { payload, gaps };
+  const transactions = (payload.transactions || []).filter((transaction) => {
+    const boundary = firstCovered.get(transaction.remoteAccountId);
+    if (!boundary || transaction.date >= boundary) return true;
+    gaps.find((gap) => gap.remoteId === transaction.remoteAccountId).skippedRows += 1;
+    return false;
+  });
+  // A gap that only just misses the start (covered from the first month asked for) has nothing to report.
+  return { payload: { ...payload, transactions }, gaps: gaps.filter((gap) => gap.toMonth >= gap.fromMonth) };
+}
+
 // Folds a fresh fetch into what is already staged (not yet applied by any client): SimpleFIN transactions accumulate by id (so nights
 // the app was never opened are not lost, even past the Bridge's 60-day request window), and accounts/balances/errors are the latest
 // snapshot; a SnapTrade payload is a snapshot of positions, so it simply replaces the old one.
@@ -470,11 +515,12 @@ function registerLinkedAccountRoutes({ app, requireSession, requireEditAccess, r
   app.post("/api/linked-accounts/:id/sync", requireSession, requireEditAccess, requireConfigured, wrap(async (req, res) => {
     const link = await loadLink(req);
     try {
-      const payload = await fetchLinkPayload(link, { sinceDate: req.body?.sinceDate });
+      const fetched = await fetchLinkPayload(link, { sinceDate: req.body?.sinceDate });
+      const { payload, gaps } = trimPartialHistory(fetched, req.body?.sinceDate);
       const { merged } = mergeStagedPayload(link.staged, payload, new Date().toISOString(), { sinceDate: req.body?.sinceDate });
       await store.update(sessionHouseholdId(req), link.id, { staged: merged, stagedAt: merged.stagedAt });
       await recordOutcome(req, link, null, payload.accounts);
-      res.json(merged);
+      res.json(gaps.length ? { ...merged, historyGaps: gaps } : merged);
     } catch (error) {
       await recordOutcome(req, link, error);
       throw error;
@@ -597,6 +643,6 @@ function registerLinkedAccountRoutes({ app, requireSession, requireEditAccess, r
 }
 
 module.exports = {
-  registerLinkedAccountRoutes, mergeStagedPayload, knownExternalIds, findNewAccounts, encryptJson, decryptJson, claimSimplefinToken, syncSimplefin, normalizeSimplefinAccount,
+  registerLinkedAccountRoutes, trimPartialHistory, mergeStagedPayload, knownExternalIds, findNewAccounts, encryptJson, decryptJson, claimSimplefinToken, syncSimplefin, normalizeSimplefinAccount,
   normalizeSimplefinTransactions, normalizeSnaptradePositions, snaptradeConfig, assertSimplefinUrl
 };
