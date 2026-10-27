@@ -275,15 +275,18 @@ LINKED_SYNC_JOB="${LINKED_SYNC_JOB:-familyloop-linked-sync}"
 LINKED_SYNC_SCHEDULE="${LINKED_SYNC_SCHEDULE:-30 3 * * *}"
 LINKED_SYNC_TIME_ZONE="${LINKED_SYNC_TIME_ZONE:-America/New_York}"
 LINKED_SYNC_URI="${APP_BASE_URL:-${SERVICE_URL}}/api/internal/linked-accounts/sync-all"
+# "create" takes --headers; "update" only has --update-headers (it rejects --headers, which is why updates used to fail silently).
 SCHEDULER_VERB="create"
+SCHEDULER_HEADERS_FLAG="--headers"
 if gcloud scheduler jobs describe "${LINKED_SYNC_JOB}" --project "${PROJECT_ID}" --location "${REGION}" >/dev/null 2>&1; then
   SCHEDULER_VERB="update"
+  SCHEDULER_HEADERS_FLAG="--update-headers"
 fi
 if ! gcloud scheduler jobs "${SCHEDULER_VERB}" http "${LINKED_SYNC_JOB}" \
   --project "${PROJECT_ID}" --location "${REGION}" \
   --schedule "${LINKED_SYNC_SCHEDULE}" --time-zone "${LINKED_SYNC_TIME_ZONE}" \
   --uri "${LINKED_SYNC_URI}" --http-method POST \
-  --headers "Authorization=Bearer ${NOTIFICATION_SECRET},Content-Type=application/json" \
+  "${SCHEDULER_HEADERS_FLAG}" "Authorization=Bearer ${NOTIFICATION_SECRET},Content-Type=application/json" \
   --message-body "{}" --attempt-deadline 540s --max-retry-attempts 1 >/dev/null 2>&1; then
   echo "Warning: could not ${SCHEDULER_VERB} the Cloud Scheduler job ${LINKED_SYNC_JOB}; the nightly linked-account sync will not run." >&2
 fi

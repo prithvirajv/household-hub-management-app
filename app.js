@@ -2709,7 +2709,8 @@ function renderTransactions() {
       ]),
       categorizationConfidence: transaction.lineId ? payeeCategorizationConfidence(transaction.payee, state.transactions) : null,
       categorizationRuleLineId: categorizationRuleForPayee(transaction.payee)
-    }));
+    }))
+    .map((transaction) => ({ ...transaction, heldReason: bankStreamHeldReason(transaction) }));
   // Recent transactions is already filtered to the viewed month, so filter
   // Bank stream to match — otherwise a pending item from a different month
   // sits next to a ledger list it can never be compared against. Sorted per
@@ -2920,6 +2921,7 @@ function renderTransactions() {
           ${imported.map((transaction) => `
             <div class="bank-stream-row" data-bank-stream-row="${transaction.id}">
               ${transaction.recurringId ? `<span class="pill">Recurring</span>` : ""}
+              ${transaction.heldReason ? `<span class="pill pill-warning" title="Why this row was not added to the ledger automatically. Press the green check to add it yourself.">Held: ${escapeHtml(transaction.heldReason)}</span>` : ""}
               ${transaction.isDeposit ? `<span class="pill" title="Detected as money coming in from this file's Debit/Credit or signed-Amount column">Deposit</span>` : ""}
               ${transaction.isPayment ? `<span class="pill pill-info" title="Looks like a card payoff/autopay - probably belongs in Move to Transfers, not as a regular expense">Card payment</span>` : ""}
               ${transaction.isPending ? `<span class="pill pill-warning" title="Hadn't posted yet in the statement - dated today by default, correct it once your bank assigns a real posting date">Pending</span>` : ""}
@@ -11778,6 +11780,7 @@ function bindViewEvents() {
   });
 
   if (["wealth", "transactions", "home"].includes(currentView)) maybeAutoSyncLinkedAccounts(addBankStreamRows);
+  maybeCatchUpBankStream();
 
   $("#addAccountButton")?.addEventListener("click", () => {
     const name = `New account ${state.accounts.length + 1}`;
@@ -13939,6 +13942,34 @@ const AI_IMPORT_CHUNK_SIZE = 25;
 
 let aiImportRunning = false;
 let aiImportQueue = Promise.resolve();
+let bankStreamCatchUpDone = false;
+
+// The same decision the import pass makes, shown on each waiting row so it is clear why it did not go to the ledger.
+function bankStreamHeldReason(transaction) {
+  if (transaction.recurringId) return "";
+  const decision = autoAcceptDecision(transaction, {
+    accountsExist: state.accounts.some((account) => !account.closedAt),
+    possibleDuplicate: transaction.possibleDuplicate,
+    refundMatch: transaction.refundMatch,
+    refundMatchPosted: !!transaction.refundMatch && state.transactions.includes(transaction.refundMatch),
+    transferMatch: transaction.transferMatch,
+    accountClosedForDate: !accountAllowsDate(transaction.accountId, transaction.date),
+    bankFeed: true,
+    paycheckMatch: matchesRecordedPaycheck(transaction, state.paycheckOccurrences)
+  });
+  if (decision.accept) return "not checked yet";
+  return { "no category": "no subcategory yet", "no account": "no account yet", "unverified category": "category not confirmed" }[decision.reason] || decision.reason;
+}
+
+// Once per page load, rows still waiting that no pass has decided (no category, or a category nothing vouches for) get a pass of their own,
+// so rows imported before a deploy, or while the page was closed mid-pass, do not sit in Bank stream waiting for a button press.
+function maybeCatchUpBankStream() {
+  if (bankStreamCatchUpDone || currentView !== "transactions" || !sessionUser || sessionUser.accessLevel === "view" || !aiImportEnabled()) return;
+  const waiting = (state.transactionInboxDrafts || []).filter((draft) => !draft.isPending);
+  if (!waiting.length) return;
+  bankStreamCatchUpDone = true;
+  void runAiImportPass(waiting.map((draft) => draft.id), "Bank stream", waiting.length, { rerun: true });
+}
 
 // Passes run one at a time: they all edit the same Bank stream, and two linked accounts syncing back to back would otherwise interleave.
 function runAiImportPass(draftIds, fileName, importedCount, { rerun = false } = {}) {
@@ -14015,6 +14046,12 @@ async function runAiImportPassOnce(draftIds, fileName, importedCount, rerun) {
   const progress = (text) => { bankImportFeedback = `${lead} ${text}`; autosaveState(); render(); };
 
   try {
+    // Rows saved before categories recorded where they came from: vouch for a category the household's own rule or history gives.
+    draftIds.map(findDraft).forEach((draft) => {
+      if (!draft?.lineId || draft.lineSource) return;
+      if (categorizationRuleForPayee(draft.payee) === draft.lineId) draft.lineSource = "rule";
+      else if (suggestSubcategoryFromHistory(draft.payee, state.transactions) === draft.lineId) draft.lineSource = "history";
+    });
     // A return of a purchase already in the ledger takes that purchase's category and account without asking the AI.
     draftIds.map(findDraft).forEach((draft) => {
       if (!draft || Number(draft.amount) >= 0) return;
