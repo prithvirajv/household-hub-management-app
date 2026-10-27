@@ -9284,12 +9284,6 @@ html[data-theme="dark"] .note-color-coral { background: color-mix(in srgb, #fff0
   flex-basis: 100%;
   color: var(--muted);
 }
-
-.account-explainer { margin-top: 8px; font-size: 0.85rem; }
-.account-explainer summary { cursor: pointer; color: var(--muted, #6b6459); }
-.account-explainer ul { margin: 6px 0 4px 18px; padding: 0; }
-.account-explainer p { margin: 4px 0 0; }
-
 /* A ledger row posted without a category: a full-width note under the row's fields (the row is a fixed grid with no room inline). */
 .ledger-entry-row .ledger-needs-category {
   grid-column: 1 / -1;

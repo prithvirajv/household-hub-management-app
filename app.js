@@ -6306,43 +6306,6 @@ function netWorthStockGroupCard(group) {
 
 const accountTypeColors = { checking: "var(--blue)", savings: "var(--green)", cash: "var(--gold)", credit_card: "var(--coral)", other: "var(--muted)" };
 
-// Where an account's balance comes from, so a large opening balance can be explained: for an account fed by a bank, the opening balance
-// is whatever its records (ledger rows, paychecks deposited to it, transfers) don't explain. Rows with an externalId came from the bank;
-// anything else dated the same period is a likely duplicate of them.
-function accountBalanceParts(account) {
-  const today = dateKey(new Date());
-  const rows = state.transactions.filter((transaction) => transaction.accountId === account.id && transaction.date <= today);
-  const sum = (items, pick) => Math.round(items.reduce((total, item) => total + pick(item), 0) * 100) / 100;
-  const bank = rows.filter((transaction) => transaction.externalId);
-  const other = rows.filter((transaction) => !transaction.externalId);
-  const paychecks = (state.paycheckOccurrences || []).filter((occurrence) => occurrence.depositAccountId === account.id && occurrence.date <= today);
-  const transfersIn = (state.transfers || []).filter((transfer) => transfer.toAccountId === account.id && transfer.date <= today);
-  const transfersOut = (state.transfers || []).filter((transfer) => transfer.fromAccountId === account.id && transfer.date <= today);
-  const sign = account.type === "credit_card" ? 1 : -1;
-  return {
-    bank: { count: bank.length, amount: sign * sum(bank, (t) => Number(t.amount || 0)) },
-    other: { count: other.length, amount: sign * sum(other, (t) => Number(t.amount || 0)) },
-    paychecks: { count: paychecks.length, amount: sum(paychecks, (o) => Number(o.amount || 0)) },
-    transfers: { count: transfersIn.length + transfersOut.length, amount: sum(transfersIn, (t) => Number(t.amount || 0)) - sum(transfersOut, (t) => Number(t.amount || 0)) }
-  };
-}
-
-function accountBalanceExplainer(account) {
-  if (account.type === "credit_card") return "";
-  const parts = accountBalanceParts(account);
-  if (!parts.bank.count) return "";
-  const signed = (value) => `${value < 0 ? "-" : "+"}${money.format(Math.abs(value))}`;
-  const lines = [
-    `Opening balance ${signed(Number(account.openingBalance || 0))} (what's left to reach the bank's balance)`,
-    `${parts.bank.count} bank row${parts.bank.count === 1 ? "" : "s"} ${signed(parts.bank.amount)}`
-  ];
-  if (parts.other.count) lines.push(`${parts.other.count} other ledger row${parts.other.count === 1 ? "" : "s"} ${signed(parts.other.amount)} (not from the bank - possible duplicates)`);
-  if (parts.paychecks.count) lines.push(`${parts.paychecks.count} recorded paycheck deposit${parts.paychecks.count === 1 ? "" : "s"} ${signed(parts.paychecks.amount)} (also in the bank rows - counted twice)`);
-  if (parts.transfers.count) lines.push(`${parts.transfers.count} transfer${parts.transfers.count === 1 ? "" : "s"} ${signed(parts.transfers.amount)}`);
-  const doubled = parts.paychecks.amount > 0 || parts.other.amount !== 0;
-  return `<details class="account-explainer"><summary>Why is the opening balance ${Number(account.openingBalance || 0) < 0 ? "negative" : "this amount"}?</summary><ul>${lines.map((line) => `<li>${escapeHtml(line)}</li>`).join("")}</ul>${doubled ? `<p class="muted">Bank rows are the real history, so a paycheck deposit or ledger row that repeats one of them inflates this account's records and is absorbed by the opening balance. Remove the repeats (or point the paycheck at no deposit account) and the opening balance will settle at what the account held before the first bank row.</p>` : `<p class="muted">Nothing here repeats the bank rows; the opening balance is simply what the account held before the first bank row.</p>`}</details>`;
-}
-
 function accountItemRow(account, index) {
   const balance = currentAccountBalance(account.id);
   const isLiability = account.type === "credit_card";
@@ -6366,7 +6329,6 @@ function accountItemRow(account, index) {
       ${sparkline}
       ${account.closedAt ? `<span class="pill pill-warning" title="No new transactions can be added after ${formatShortDate(account.closedAt)}">Closed ${formatShortDate(account.closedAt)}</span>` : ""}
     </div>
-    ${accountBalanceExplainer(account)}
     <button class="icon-button danger-button card-close-button" data-delete-account="${index}" type="button" aria-label="Remove ${escapeHtml(account.name)}">×</button>
   </article>`;
 }
