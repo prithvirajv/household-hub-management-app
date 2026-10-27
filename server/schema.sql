@@ -34,10 +34,12 @@ CREATE TABLE IF NOT EXISTS households (
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
--- Bumped on every write to app_state. A save that names the version it was based on is refused when someone else (another device, or the
--- overnight linked-account job) wrote in between, so a stale tab can never silently overwrite what the server applied.
+-- state_version is bumped by every write to app_state (the overnight job reads it, and writes only if it is unchanged). applied_version is
+-- bumped only when the server itself applies linked-account data; apps send it back with a save (X-Base-Version) and are refused when it moved,
+-- so a stale screen can never silently overwrite what the server applied. Ordinary saves from several tabs or devices do not move it.
 ALTER TABLE households
-  ADD COLUMN IF NOT EXISTS state_version BIGINT NOT NULL DEFAULT 0;
+  ADD COLUMN IF NOT EXISTS state_version BIGINT NOT NULL DEFAULT 0,
+  ADD COLUMN IF NOT EXISTS applied_version BIGINT NOT NULL DEFAULT 0;
 
 ALTER TABLE users
   ADD COLUMN IF NOT EXISTS default_household_id UUID;

@@ -1493,7 +1493,7 @@ async function geminiBatchSuggest({ cleanRows, lines, accounts, knownTags }) {
     ...cleanRows.map((row) => `${row.id} | ${row.payee} | ${row.amount} | ${row.date}`)
   ].join("\n");
 
-  const response = await fetch(`${GEMINI_API_BASE_URL}/v1beta/models/${encodeURIComponent(GEMINI_MODEL)}:generateContent?key=${encodeURIComponent(GEMINI_API_KEY)}`, {
+  const request = () => fetch(`${GEMINI_API_BASE_URL}/v1beta/models/${encodeURIComponent(GEMINI_MODEL)}:generateContent?key=${encodeURIComponent(GEMINI_API_KEY)}`, {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify({
@@ -1502,8 +1502,18 @@ async function geminiBatchSuggest({ cleanRows, lines, accounts, knownTags }) {
       generationConfig: { maxOutputTokens: 8000, responseMimeType: "application/json" }
     })
   });
-  const body = await response.json().catch(() => ({}));
-  if (!response.ok) { const failure = new Error(body?.error?.message || "The AI suggestion service is unavailable right now"); failure.statusCode = 502; throw failure; }
+  // A busy or rate-limited AI service (429, 5xx - a long import sends many requests back to back) is asked again a couple of times, a little
+  // later each time, before the rows are given up on; the reason is logged so a persistent failure can be told apart from a busy moment.
+  let response;
+  let body;
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    response = await request();
+    body = await response.json().catch(() => ({}));
+    if (response.ok || ![429, 500, 502, 503, 504].includes(response.status)) break;
+    console.warn(`Gemini batch suggest attempt ${attempt + 1} failed: HTTP ${response.status} ${String(body?.error?.message || "").slice(0, 200)}`);
+    if (attempt < 2) await new Promise((resolve) => setTimeout(resolve, attempt === 0 ? 1500 : 4000));
+  }
+  if (!response.ok) { const failure = new Error(body?.error?.message || "The AI suggestion service is unavailable right now"); failure.statusCode = 502; console.warn(`Gemini batch suggest gave up: HTTP ${response.status} ${String(body?.error?.message || "").slice(0, 200)}`); throw failure; }
   const text = body.candidates?.[0]?.content?.parts?.[0]?.text || "";
   return parseBatchSuggestions(text, cleanRows.map((row) => row.id), lineIds, accountIds);
 }
@@ -3507,11 +3517,11 @@ app.get("/api/state", requireSession, async (req, res, next) => {
         shared = { owner_user_id: ownerId, app_state: sharedModulesFromState(household.app_state) };
         memoryDb.sharedModules.push(shared);
       }
-      res.set("X-State-Version", String(household.state_version || 0));
+      res.set("X-State-Version", String(household.applied_version || 0));
       return res.json(applySharedModules(household.app_state, shared.app_state));
     }
 
-    const result = await pool.query("SELECT app_state, state_version FROM households WHERE id = $1", [req.sessionUser.household_id]);
+    const result = await pool.query("SELECT app_state, applied_version FROM households WHERE id = $1", [req.sessionUser.household_id]);
     const ownerId = await databasePrimaryOwnerId(pool, req.sessionUser.household_id);
     let sharedResult = await pool.query("SELECT app_state FROM user_shared_modules WHERE owner_user_id = $1", [ownerId]);
     if (sharedResult.rowCount === 0) {
@@ -3522,20 +3532,20 @@ app.get("/api/state", requireSession, async (req, res, next) => {
         [ownerId, sharedModulesFromState(result.rows[0].app_state)]
       );
     }
-    res.set("X-State-Version", String(result.rows[0].state_version || 0));
+    res.set("X-State-Version", String(result.rows[0].applied_version || 0));
     res.json(applySharedModules(result.rows[0].app_state, sharedResult.rows[0].app_state));
   } catch (error) {
     next(error);
   }
 });
 
-// A cheap way for an open app to learn that the household was written by someone else (another device, or the overnight bank sync) so it
-// can reload instead of later saving a stale copy over it.
+// A cheap way for an open app to learn that the server applied linked-account data to the household (the overnight bank sync) so it can
+// reload instead of later saving a stale copy over it.
 app.get("/api/state/version", requireSession, async (req, res, next) => {
   try {
-    if (MEMORY_DB) return res.json({ version: memoryDb.households.find((item) => item.id === req.sessionUser.household_id)?.state_version || 0 });
-    const result = await pool.query("SELECT state_version FROM households WHERE id = $1", [req.sessionUser.household_id]);
-    res.json({ version: Number(result.rows[0]?.state_version || 0) });
+    if (MEMORY_DB) return res.json({ version: memoryDb.households.find((item) => item.id === req.sessionUser.household_id)?.applied_version || 0 });
+    const result = await pool.query("SELECT applied_version FROM households WHERE id = $1", [req.sessionUser.household_id]);
+    res.json({ version: Number(result.rows[0]?.applied_version || 0) });
   } catch (error) {
     next(error);
   }
@@ -3568,15 +3578,15 @@ app.put("/api/state", requireSession, requireEditAccess, async (req, res, next) 
     if (missingKeys.length > 0) {
       return res.status(400).json({ error: `Save rejected: state is missing required field(s) ${missingKeys.join(", ")}` });
     }
-    // A client that names the version it loaded (X-Base-Version) is refused when the household has been written since - by another device
-    // or by the overnight bank sync - so it reloads instead of overwriting that work. Clients that send no version (older mobile builds)
-    // save unconditionally, as before.
+    // A client that names the version it loaded (X-Base-Version) is refused when the server has applied linked-account data to the household
+    // since (the overnight bank sync), so it reloads instead of overwriting that. Saves from other tabs or devices do not count: those are
+    // last-writer-wins as they always were. Clients that send no version (older mobile builds) save unconditionally.
     const baseHeader = req.get("X-Base-Version");
     const baseVersion = baseHeader !== undefined && /^\d+$/.test(baseHeader) ? Number(baseHeader) : null;
     const staleResponse = () => res.status(409).json({ error: "This household was updated elsewhere (for example new bank transactions applied overnight), so your screen was refreshed - repeat your last change if it is missing." });
     if (MEMORY_DB) {
       const household = memoryDb.households.find((item) => item.id === req.sessionUser.household_id);
-      if (baseVersion !== null && baseVersion !== (household.state_version || 0)) return staleResponse();
+      if (baseVersion !== null && baseVersion !== (household.applied_version || 0)) return staleResponse();
       household.app_state = req.body;
       household.state_version = (household.state_version || 0) + 1;
       const ownerId = memoryPrimaryOwnerId(req.sessionUser.household_id);
@@ -3584,13 +3594,13 @@ app.put("/api/state", requireSession, requireEditAccess, async (req, res, next) 
       if (shared) shared.app_state = sharedModulesFromState(req.body);
       else memoryDb.sharedModules.push({ owner_user_id: ownerId, app_state: sharedModulesFromState(req.body) });
       await syncNotificationJobs({ householdId: req.sessionUser.household_id, appState: req.body, user: req.sessionUser });
-      res.set("X-State-Version", String(household.state_version));
+      res.set("X-State-Version", String(household.applied_version || 0));
       return res.json({ ok: true });
     }
 
     const ownerId = await databasePrimaryOwnerId(pool, req.sessionUser.household_id);
     const written = await pool.query(
-      "UPDATE households SET app_state = $1, updated_at = now(), state_version = state_version + 1 WHERE id = $2 AND ($3::bigint IS NULL OR state_version = $3::bigint) RETURNING state_version",
+      "UPDATE households SET app_state = $1, updated_at = now(), state_version = state_version + 1 WHERE id = $2 AND ($3::bigint IS NULL OR applied_version = $3::bigint) RETURNING applied_version",
       [req.body, req.sessionUser.household_id, baseVersion]
     );
     if (written.rowCount === 0) return staleResponse();
@@ -3600,7 +3610,7 @@ app.put("/api/state", requireSession, requireEditAccess, async (req, res, next) 
       [ownerId, sharedModulesFromState(req.body)]
     );
     await syncNotificationJobs({ householdId: req.sessionUser.household_id, appState: req.body, user: req.sessionUser });
-    res.set("X-State-Version", String(written.rows[0].state_version));
+    res.set("X-State-Version", String(written.rows[0].applied_version));
     res.json({ ok: true });
   } catch (error) {
     next(error);
@@ -3828,7 +3838,7 @@ async function loadHouseholdAppState(householdId) {
   return result.rows[0]?.app_state;
 }
 
-// The overnight bank sync reads a household the way GET /api/state serves it (the owner's shared modules - notes, meals, calendar,
+// The overnight bank sync reads a household (with state_version, which every write moves) the way GET /api/state serves it (the owner's shared modules - notes, meals, calendar,
 // decisions - laid over the household's own row) together with the version it read, and writes back only if nobody wrote in between.
 // The shared modules are re-read and laid over again at write time, so a note edited from another household while the sync was busy
 // is not overwritten by the copy the sync read earlier.
@@ -3852,12 +3862,13 @@ async function saveHouseholdStateIfVersion(householdId, appState, version) {
     if (!household || (household.state_version || 0) !== version) return false;
     const shared = memoryDb.sharedModules.find((item) => item.owner_user_id === memoryPrimaryOwnerId(householdId));
     await saveHouseholdAppState(householdId, applySharedModules(appState, shared?.app_state));
+    household.applied_version = (household.applied_version || 0) + 1;
     return true;
   }
   const ownerId = await databasePrimaryOwnerId(pool, householdId);
   const shared = await pool.query("SELECT app_state FROM user_shared_modules WHERE owner_user_id = $1", [ownerId]);
   const next = applySharedModules(appState, shared.rows[0]?.app_state);
-  const written = await pool.query("UPDATE households SET app_state = $1, updated_at = now(), state_version = state_version + 1 WHERE id = $2 AND state_version = $3::bigint", [next, householdId, version]);
+  const written = await pool.query("UPDATE households SET app_state = $1, updated_at = now(), state_version = state_version + 1, applied_version = applied_version + 1 WHERE id = $2 AND state_version = $3::bigint", [next, householdId, version]);
   if (written.rowCount === 0) return false;
   await pool.query(
     `INSERT INTO user_shared_modules (owner_user_id, app_state, updated_at) VALUES ($1, $2, now())

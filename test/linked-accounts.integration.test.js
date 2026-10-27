@@ -333,8 +333,8 @@ test("the nightly job applies new bank transactions to the household without the
     state.transactions = [{ date: "2026-09-01", payee: "SAMPLE GROCER", amount: 30, lineId: line.id, memo: "", accountId: "local-checking", orderNumber: "", tags: [], categoryName: "x", subcategoryName: line.name }];
     const saved = await server.request("/api/state", { method: "PUT", headers: { cookie, "x-base-version": String(version) }, body: JSON.stringify(state) });
     assert.equal(saved.status, 200);
-    assert.equal(Number(saved.headers.get("x-state-version")), version + 1);
-    assert.equal((await server.request("/api/state", { method: "PUT", headers: { cookie, "x-base-version": String(version) }, body: JSON.stringify(state) })).status, 409, "a save based on an older version is refused");
+    assert.equal(Number(saved.headers.get("x-state-version")), version, "an ordinary save does not move the version apps compare - several tabs or devices saving never refuse each other");
+    assert.equal((await server.request("/api/state", { method: "PUT", headers: { cookie, "x-base-version": String(version) }, body: JSON.stringify(state) })).status, 200);
 
     const created = await server.request("/api/linked-accounts/simplefin", { method: "POST", headers: { cookie }, body: JSON.stringify({ setupToken: stub.setupToken, label: "My bank" }) });
     const id = created.body.link.id;
@@ -344,7 +344,8 @@ test("the nightly job applies new bank transactions to the household without the
     assert.deepEqual([nightly.status, nightly.body.synced, nightly.body.failed, nightly.body.autoApplied], [200, 1, 0, 1]);
 
     const after = await get();
-    assert.ok(Number(after.headers.get("x-state-version")) > version + 1, "the server's own write bumps the version");
+    assert.equal(Number(after.headers.get("x-state-version")), version + 1, "the server's own write moves the version");
+    assert.equal((await server.request("/api/state", { method: "PUT", headers: { cookie, "x-base-version": String(version) }, body: JSON.stringify(state) })).status, 409, "a screen loaded before the overnight apply is refused instead of overwriting it");
     const grocer = after.body.transactions.find((transaction) => transaction.externalId === "sf:ACT-1:T1");
     assert.deepEqual([grocer.payee, grocer.amount, grocer.lineId, grocer.accountId], ["SAMPLE GROCER", 40.25, line.id, "local-checking"], "a row the household's history can categorize went straight into the ledger");
     assert.deepEqual(after.body.transactionInboxDrafts.map((draft) => draft.externalId), ["sf:ACT-1:T2"], "the payroll row has no history and no AI here, so it waits for review");
@@ -363,10 +364,10 @@ test("the nightly job applies new bank transactions to the household without the
     const off = (await server.request("/api/linked-accounts", { headers: { cookie } })).body.links[0];
     assert.deepEqual([off.hasStaged, (await get()).body.transactions.length], [true, after.body.transactions.length], "with auto-apply off the rows stay staged and the state is untouched");
 
-    // A client that did not send a version (an older mobile build) still saves, and the version moves on.
+    // A client that did not send a version (an older mobile build) still saves.
     const unversioned = await get();
     assert.equal((await server.request("/api/state", { method: "PUT", headers: { cookie }, body: JSON.stringify(unversioned.body) })).status, 200);
-    assert.equal((await server.request("/api/state/version", { headers: { cookie } })).body.version, Number(unversioned.headers.get("x-state-version")) + 1);
+    assert.equal((await server.request("/api/state/version", { headers: { cookie } })).body.version, Number(unversioned.headers.get("x-state-version")));
   } finally {
     await server.stop();
     await stub.stop();

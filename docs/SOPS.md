@@ -200,13 +200,18 @@ user secret) are AES-256-GCM encrypted with `LINK_ENCRYPTION_KEY` and never retu
   already has, so they never double up. The job pushes "N new bank transactions added to your ledger (M need a look)" (or "waiting to review"
   when it did not apply) and a one-time "needs signing in again". Links needing reconnection are skipped until relinked.
 - **State versioning (why the server can write household state safely):** `households.state_version` is bumped by every write to
-  `app_state`. `GET /api/state` returns it in `X-State-Version` (`GET /api/state/version` is the cheap poll); the apps send it back on
-  `PUT /api/state` as `X-Base-Version`, and a save based on an older version gets **409** ("updated elsewhere") instead of overwriting - the web
-  app then reloads and tells the person. Clients that send no version (older mobile builds) still save unconditionally, so until a mobile
-  build that sends it ships, a stale phone save can erase an overnight apply (the next night's overlap window re-delivers the last three
-  days; use Import history for older rows). The overnight job reads the household with the owner's shared modules laid over it, writes only if
-  the version it read is still current (retrying up to 3 times, reusing AI answers already fetched), and re-lays the shared modules at write
-  time so a note edited from another household meanwhile is not lost.
+  `app_state`; the overnight job reads it and writes only if it is unchanged (retrying up to 3 times, reusing AI answers already fetched), and
+  re-lays the owner's shared modules at write time so a note edited from another household meanwhile is not lost. `households.applied_version`
+  is bumped **only** when the server itself applies linked-account data. `GET /api/state` returns it in `X-State-Version` (`GET
+  /api/state/version` is the cheap poll); the apps send it back on `PUT /api/state` as `X-Base-Version`, and a save based on an older value
+  gets **409** ("updated elsewhere") instead of overwriting the overnight apply - the web app then reloads and tells the person. Ordinary saves
+  from several tabs or devices never move it (they are last-writer-wins, as before: an earlier version of this check compared every write and
+  threw away imports whenever a second tab saved). Clients that send no version (older mobile builds) save unconditionally, so until a mobile
+  build that sends it ships, a stale phone save can erase an overnight apply (the next night's overlap window re-delivers the last three days;
+  use Import history for older rows).
+- **AI categorization limits:** `geminiBatchSuggest` retries a 429/5xx up to twice (1.5 s, then 4 s) and logs each failed attempt
+  (`Gemini batch suggest attempt N failed: HTTP ...`) - a burst of 502s on `/api/transactions/suggest-batch` in the logs means the AI service
+  is rate-limiting or down; rows then wait in Bank stream and the next pass retries them.
 
 ## Incident playbooks
 
