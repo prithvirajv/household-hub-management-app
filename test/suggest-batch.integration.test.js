@@ -260,3 +260,26 @@ test("salary detection finds a steady payer on a regular cadence and ignores eve
   assert.equal(salaryAlreadyRecorded(salary, [{ amount: 2490, recurrence: "monthly" }]), false);
   assert.equal(salaryAlreadyRecorded(salary, [{ amount: 2490, recurrence: "biweekly", endDate: "2026-06-30" }]), false, "an ended paycheck does not count");
 });
+
+test("a busy main AI model is not waited on: the next model answers", async () => {
+  const calls = [];
+  const stub = http.createServer((req, res) => {
+    let body = "";
+    req.on("data", (chunk) => { body += chunk; });
+    req.on("end", () => {
+      calls.push(req.url.split("?")[0]);
+      if (req.url.includes("main-model")) { res.writeHead(503, { "Content-Type": "application/json" }); return res.end(JSON.stringify({ error: { message: "This model is currently experiencing high demand." } })); }
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ candidates: [{ content: { parts: [{ text: JSON.stringify([{ id: "r1", lineId: "groceries", accountId: null, confidence: "high" }]) }] } }] }));
+    });
+  });
+  await new Promise((resolve) => stub.listen(0, "127.0.0.1", resolve));
+  const server = await startTestServer({ GEMINI_API_KEY: "k", GEMINI_API_BASE_URL: `http://127.0.0.1:${stub.address().port}`, GEMINI_MODEL: "main-model", GEMINI_FALLBACK_MODELS: "backup-model" });
+  try {
+    const signup = await server.request("/api/auth/signup", { method: "POST", body: JSON.stringify({ email: "fallback@example.com", password: "Fallback-Password-123!", name: "F", householdName: "F", country: "US" }) });
+    const res = await server.request("/api/transactions/suggest-batch", { method: "POST", headers: { cookie: signup.cookie }, body: JSON.stringify({ rows: [{ id: "r1", payee: "Kroger", amount: 5, date: "2026-07-01" }], lines: [{ id: "groceries", label: "Food - Groceries" }], accounts: [] }) });
+    assert.equal(res.status, 200);
+    assert.deepEqual(res.body.results.map((r) => [r.id, r.lineId]), [["r1", "groceries"]]);
+    assert.deepEqual(calls.map((url) => url.split("/").pop()), ["main-model:generateContent", "backup-model:generateContent"], "the busy model is tried once, then the backup answers");
+  } finally { await server.stop(); await new Promise((resolve) => stub.close(resolve)); }
+});

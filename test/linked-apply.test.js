@@ -46,15 +46,29 @@ test("an overnight apply puts safe rows in the ledger, holds the rest with their
   assert.equal(state.transactions.filter((t) => t.externalId).length, 4);
 });
 
-test("when the AI cannot be reached the rows that need it wait instead of all going in uncategorized", async () => {
+test("when the AI cannot be reached the rows still go into the ledger marked Needs a category, and a later pass categorizes them", async () => {
   const state = baseState();
   const payload = { provider: "simplefin", accounts: [{ remoteId: "A1", balance: 100 }], transactions: [row("1", "NEW CAFE", 12, "2026-10-21"), row("2", "OTHER", 9, "2026-10-22")] };
-  const failing = await applyLinkedPayload(state, link, payload, { suggest: async () => { throw new Error("HTTP 503"); }, createId: ids(), todayKey: TODAY });
-  assert.deepEqual([failing.added, failing.left, failing.reasons], [0, 2, { "AI did not answer": 2 }]);
-  assert.equal(state.transactions.length, 0);
+  const failing = await applyLinkedPayload(state, link, payload, { suggest: async () => { throw new Error("HTTP 503 high demand"); }, createId: ids(), todayKey: TODAY });
+  assert.deepEqual([failing.added, failing.uncategorized, failing.left], [2, 2, 0]);
+  assert.match(failing.aiNote, /HTTP 503/);
+  assert.deepEqual(state.transactions.map((t) => [t.lineId, t.memo]), [["", "Needs a category"], ["", "Needs a category"]]);
+  assert.equal(Math.round(balance(state, "chk") * 100) / 100, 100, "the balance is the bank's either way");
+  // Same with no AI configured at all.
   const noAi = baseState();
   const waiting = await applyLinkedPayload(noAi, link, payload, { suggest: null, createId: ids(), todayKey: TODAY });
-  assert.deepEqual([waiting.added, waiting.left], [0, 2], "with no AI configured the same rows wait");
+  assert.deepEqual([waiting.added, waiting.uncategorized], [2, 2]);
+
+  // The AI is back: the next pass categorizes what it is sure of and leaves the rest marked.
+  const { fillUncategorizedLedgerRows } = require("../lib/linked-apply");
+  const asked = [];
+  const filled = await fillUncategorizedLedgerRows(state, { suggest: async (rows) => { asked.push(rows.length); return rows.map((r) => (r.payee === "NEW CAFE" ? { id: r.id, lineId: "dining", accountId: null, confidence: "high", tags: ["coffee"] } : { id: r.id, lineId: "groceries", accountId: null, confidence: "low", tags: [] })); } });
+  assert.equal(filled, 1);
+  const cafe = state.transactions.find((t) => t.payee === "NEW CAFE");
+  assert.deepEqual([cafe.lineId, cafe.memo, cafe.tags, cafe.subcategoryName], ["dining", "Categorized by AI", ["coffee"], "Dining"]);
+  assert.equal(state.transactions.find((t) => t.payee === "OTHER").memo, "Needs a category", "an unsure answer leaves the mark");
+  assert.equal(await fillUncategorizedLedgerRows(state, { suggest: null }), 0);
+  assert.deepEqual(asked, [2]);
 });
 
 test("answers already fetched are reused when the pass is run again after the household changed under it", async () => {

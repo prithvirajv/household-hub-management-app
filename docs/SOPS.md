@@ -209,9 +209,13 @@ user secret) are AES-256-GCM encrypted with `LINK_ENCRYPTION_KEY` and never retu
   threw away imports whenever a second tab saved). Clients that send no version (older mobile builds) save unconditionally, so until a mobile
   build that sends it ships, a stale phone save can erase an overnight apply (the next night's overlap window re-delivers the last three days;
   use Import history for older rows).
-- **AI categorization limits:** `geminiBatchSuggest` retries a 429/5xx up to twice (1.5 s, then 4 s) and logs each failed attempt
-  (`Gemini batch suggest attempt N failed: HTTP ...`) - a burst of 502s on `/api/transactions/suggest-batch` in the logs means the AI service
-  is rate-limiting or down; rows then wait in Bank stream and the next pass retries them.
+- **AI categorization limits:** `geminiBatchSuggest` goes to the next model (`GEMINI_FALLBACK_MODELS`, default `gemini-2.5-flash,gemini-2.5-flash-lite`)
+  on a 429/5xx/404, then once more round the list after a pause, and logs each failed attempt (`Gemini batch suggest <model> attempt N failed:
+  HTTP ...`). "This model is currently experiencing high demand" 503s from the main model are common and last minutes. Rows the AI could not
+  categorize still go into the ledger as "Needs a category"; after each night's apply, `fillUncategorizedLedgerRows` asks the AI again for those
+  (up to 75 a night, high-confidence answers only) and marks them "Categorized by AI".
+- **Reading what a night did:** each household's apply logs `Overnight linked apply: household <id> {applied, imported, added, left, uncategorized,
+  reasons, aiNote}` (counts only) and `Overnight AI fill-in: ... categorized N`; the sync-all request itself is logged with its latency.
 
 ## Incident playbooks
 

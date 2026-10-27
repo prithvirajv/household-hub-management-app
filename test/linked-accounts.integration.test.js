@@ -199,7 +199,8 @@ test("SimpleFIN link flow end to end: not configured without a key, SSRF-pinned 
     const afterNightly = (await configured.request("/api/linked-accounts", { headers: { cookie } })).body.links[0];
     assert.deepEqual([afterNightly.hasStaged, afterNightly.stagedCount], [false, 0], "what the job applied is no longer staged");
     const stateAfterNightly = await configured.request("/api/state", { headers: { cookie } });
-    assert.deepEqual((stateAfterNightly.body.transactionInboxDrafts || []).map((draft) => draft.externalId).sort(), ["sf:ACT-1:T1", "sf:ACT-1:T2"], "with no AI here, rows nothing in the household can categorize wait in Bank stream");
+    assert.deepEqual((stateAfterNightly.body.transactions || []).filter((t) => t.externalId).map((t) => [t.externalId, t.memo]).sort(), [["sf:ACT-1:T1", "Needs a category"], ["sf:ACT-1:T2", "Needs a category"]], "with no AI here, rows nothing in the household can categorize still go into the ledger, marked");
+    assert.deepEqual(stateAfterNightly.body.transactionInboxDrafts || [], []);
     await configured.request(`/api/linked-accounts/${id}/ack`, { method: "POST", headers: { cookie }, body: JSON.stringify({ stagedAt: afterNightly.stagedAt || new Date(Date.now() + 60000).toISOString() }) });
 
     // A loan can be mapped to a debt; the debt id survives alongside account and group mappings.
@@ -341,14 +342,15 @@ test("the nightly job applies new bank transactions to the household without the
     await server.request(`/api/linked-accounts/${id}/mappings`, { method: "PUT", headers: { cookie }, body: JSON.stringify({ mappings: { "ACT-1": { accountId: "local-checking" }, "ACT-2": { skipped: true } } }) });
 
     const nightly = await server.request("/api/internal/linked-accounts/sync-all", { method: "POST", headers: { authorization: "Bearer job-secret" }, body: "{}" });
-    assert.deepEqual([nightly.status, nightly.body.synced, nightly.body.failed, nightly.body.autoApplied], [200, 1, 0, 1]);
+    assert.deepEqual([nightly.status, nightly.body.synced, nightly.body.failed, nightly.body.autoApplied], [200, 1, 0, 2]);
 
     const after = await get();
     assert.equal(Number(after.headers.get("x-state-version")), version + 1, "the server's own write moves the version");
     assert.equal((await server.request("/api/state", { method: "PUT", headers: { cookie, "x-base-version": String(version) }, body: JSON.stringify(state) })).status, 409, "a screen loaded before the overnight apply is refused instead of overwriting it");
     const grocer = after.body.transactions.find((transaction) => transaction.externalId === "sf:ACT-1:T1");
     assert.deepEqual([grocer.payee, grocer.amount, grocer.lineId, grocer.accountId], ["SAMPLE GROCER", 40.25, line.id, "local-checking"], "a row the household's history can categorize went straight into the ledger");
-    assert.deepEqual(after.body.transactionInboxDrafts.map((draft) => draft.externalId), ["sf:ACT-1:T2"], "the payroll row has no history and no AI here, so it waits for review");
+    const payroll = after.body.transactions.find((transaction) => transaction.externalId === "sf:ACT-1:T2");
+    assert.deepEqual([payroll.lineId, payroll.memo, after.body.transactionInboxDrafts.length], ["", "Needs a category", 0], "the payroll row has no history and no AI here, so it goes in marked Needs a category");
     assert.ok(after.body.linkedImportedIds.includes("sf:ACT-1:T1") && after.body.linkedImportedIds.includes("sf:ACT-1:T2"));
     const { accountBalance } = require("../lib/shared-logic");
     const balance = accountBalance("local-checking", { accounts: after.body.accounts, transactions: after.body.transactions, paychecks: after.body.paychecks, paycheckOccurrences: after.body.paycheckOccurrences, transfers: after.body.transfers, ious: after.body.ious || [] }, new Date().toISOString().slice(0, 10));

@@ -10,7 +10,7 @@
 // Credentials (a SimpleFIN access URL, a SnapTrade userSecret) are encrypted at rest with AES-256-GCM using LINK_ENCRYPTION_KEY, and
 // are never returned to the client. Without the key the whole feature reports "not configured" rather than storing anything in clear.
 const crypto = require("node:crypto");
-const { applyLinkedPayload } = require("../lib/linked-apply");
+const { applyLinkedPayload, fillUncategorizedLedgerRows } = require("../lib/linked-apply");
 
 const SIMPLEFIN_WINDOW_DAYS = 40; // the Bridge hard-caps one request at 60 days and warns above 45 ("exceeds recommended range"); stay under both
 const SIMPLEFIN_DEFAULT_LOOKBACK_DAYS = 30;
@@ -568,9 +568,29 @@ function registerLinkedAccountRoutes({ app, requireSession, requireEditAccess, r
         const fresh = await store.get(householdId, link.id);
         if (fresh?.stagedAt && link.stagedAt && new Date(fresh.stagedAt).getTime() <= new Date(link.stagedAt).getTime()) await store.update(householdId, link.id, { staged: {}, stagedAt: null });
       }
-      return applied.reduce((total, { result }) => ({ applied: total.applied + 1, imported: total.imported + result.imported, added: total.added + result.added, left: total.left + result.left, uncategorized: total.uncategorized + result.uncategorized }), { applied: 0, imported: 0, added: 0, left: 0, uncategorized: 0 });
+      const total = applied.reduce((sum, { result }) => ({ applied: sum.applied + 1, imported: sum.imported + result.imported, added: sum.added + result.added, left: sum.left + result.left, uncategorized: sum.uncategorized + result.uncategorized }), { applied: 0, imported: 0, added: 0, left: 0, uncategorized: 0 });
+      // Counts only (no names or amounts): the record of what each night did, for when a morning looks wrong.
+      console.log(`Overnight linked apply: household ${householdId} ${JSON.stringify({ ...total, reasons: Object.fromEntries(applied.flatMap(({ result }) => Object.entries(result.reasons))), aiNote: applied.map(({ result }) => result.aiNote).filter(Boolean)[0] || "" })}`);
+      return total;
     }
     return null;
+  };
+
+  // Makes up for a night when the AI was busy: bank rows that went into the ledger marked "Needs a category" are offered to the AI again.
+  const fillHousehold = async (householdId) => {
+    if (!stateStore || !suggestBatch) return 0;
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      const loaded = await stateStore.load(householdId);
+      if (!loaded || loaded.state?.linkedAutoApply === false) return 0;
+      const working = structuredClone(loaded.state);
+      const filled = await fillUncategorizedLedgerRows(working, { suggest: suggestBatch });
+      if (!filled) return 0;
+      if (await stateStore.saveIfVersion(householdId, working, loaded.version)) {
+        console.log(`Overnight AI fill-in: household ${householdId} categorized ${filled}`);
+        return filled;
+      }
+    }
+    return 0;
   };
 
   // Nightly job (Cloud Scheduler, shared-secret): fetch every active link and stage the result, then apply it to each household's state
@@ -612,6 +632,7 @@ function registerLinkedAccountRoutes({ app, requireSession, requireEditAccess, r
           try {
             const outcome = await autoApplyHousehold(householdId);
             if (outcome?.applied) { entry.autoApplied = outcome; summary.autoApplied = (summary.autoApplied || 0) + outcome.added; }
+            await fillHousehold(householdId);
           } catch (error) {
             console.warn("Automatic apply of linked transactions failed", error.message);
           }

@@ -194,8 +194,9 @@ more convenient.
   account, a return whose purchase is on a different account or still waiting
   in Bank Stream, and a deposit that matches a paycheck you already recorded (it
   would count the income twice) stay in Bank Stream, each marked **Held:** with
-  the reason. If the AI could not be reached, the rows wait for the next try
-  instead of going in uncategorized. Already have rows waiting? Select **Let AI
+  the reason. If the AI is busy or cannot be reached (it is tried on a second
+  model first), the rows still go into the ledger marked **Needs a category**,
+  and the overnight job gives them a category once the AI answers again. Already have rows waiting? Select **Let AI
   categorize and add the N waiting rows** in Bank Stream (it also runs once when
   you open Transactions). Untick the box to review everything by hand. The mobile app does the same.
 - No history for a payee and AI import is off? Select **✨ Suggest with AI**
@@ -548,8 +549,8 @@ entry. It is read-only: FamilyLoop can never move money or place trades.
   transfer, a pending row, no account) waits in Bank stream with the reason.
   Your phone gets a notification such as "5 new bank transactions added to your
   ledger, 1 needs a look" - or a warning when a bank needs you to sign in
-  again. Rows the AI could not reach wait for the next try rather than going in
-  uncategorized. Untick **Add new bank transactions to the ledger overnight**
+  again. Rows the AI could not reach still go in, marked "Needs a category", and
+  are categorized by the next night's run. Untick **Add new bank transactions to the ledger overnight**
   on the Linked accounts card to go back to applying them yourself when you
   open the app. If you have FamilyLoop open while this happens, it notices
   within a minute (or when you come back to the tab) and refreshes; if you

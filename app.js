@@ -14316,7 +14316,6 @@ async function runAiImportPassOnce(draftIds, fileName, importedCount, rerun) {
   let aiFilled = 0;
   let added = 0;
   let uncategorizedAdded = 0;
-  const aiFailedIds = new Set();
   const reviewReasons = new Map();
   const settled = new Set();
 
@@ -14347,11 +14346,7 @@ async function runAiImportPassOnce(draftIds, fileName, importedCount, rerun) {
         bankFeed: true,
         paycheckMatch: matchesRecordedPaycheck(draft, state.paycheckOccurrences)
       });
-      // A row the AI never answered for (a failed or timed-out call) is kept for the next pass instead of going in without a category.
-      if (decision.accept && decision.uncategorized && aiFailedIds.has(id)) {
-        settled.delete(id);
-        reviewReasons.set("AI did not answer", (reviewReasons.get("AI did not answer") || 0) + 1);
-      } else if (decision.accept) {
+      if (decision.accept) {
         if (returnOfPosted) draft.postMemo = refundMemo(returnOf);
         if (decision.uncategorized) { draft.lineId = ""; draft.lineSource = ""; draft.postMemo = "Needs a category"; uncategorizedAdded += 1; }
         postDraftToLedger(draft);
@@ -14398,9 +14393,9 @@ async function runAiImportPassOnce(draftIds, fileName, importedCount, rerun) {
           }), AI_IMPORT_CALL_TIMEOUT_MS, "the AI took too long to answer"));
         } catch (error) {
           // One failed chunk must not stop the others: its rows stay in Bank stream and the pass carries on.
-          aiNote = ` AI categorization failed for some rows (${error.message || "unknown error"}) - they were left for review.`;
-          chunk.forEach((draft) => aiFailedIds.add(draft.id));
-          if (/not configured|HTTP 503/i.test(String(error.message))) { needAi.forEach((draft) => aiFailedIds.add(draft.id)); break; }
+          aiNote = ` AI categorization failed for some rows (${error.message || "unknown error"}) - they went in marked "Needs a category".`;
+          // The rows still go into the ledger marked "Needs a category"; the overnight job categorizes them once the AI answers again.
+          if (/not configured/i.test(String(error.message))) break;
         }
         if (currentHouseholdId() !== householdId) return;
         results.forEach((result) => {

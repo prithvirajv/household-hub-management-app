@@ -85,6 +85,8 @@ const GEMINI_API_BASE_URL = String(process.env.GEMINI_API_BASE_URL || "").trim()
 // key - confirmed against the real API, not assumed. gemini-3.1-flash-lite
 // is the cheapest tier that's actually reachable.
 const GEMINI_MODEL = String(process.env.GEMINI_MODEL || "").trim() || "gemini-3.1-flash-lite";
+// When the main model answers "high demand" (503) or is rate limited, categorization asks these next instead of giving up on the rows.
+const GEMINI_FALLBACK_MODELS = String(process.env.GEMINI_FALLBACK_MODELS || "gemini-2.5-flash,gemini-2.5-flash-lite").split(",").map((model) => model.trim()).filter((model) => model && model !== GEMINI_MODEL);
 const SESSION_IDLE_MS = Math.max(
   1000,
   Number(process.env.SESSION_IDLE_MS || "") || Number(process.env.SESSION_IDLE_MINUTES || 30) * 60 * 1000
@@ -1493,7 +1495,7 @@ async function geminiBatchSuggest({ cleanRows, lines, accounts, knownTags }) {
     ...cleanRows.map((row) => `${row.id} | ${row.payee} | ${row.amount} | ${row.date}`)
   ].join("\n");
 
-  const request = () => fetch(`${GEMINI_API_BASE_URL}/v1beta/models/${encodeURIComponent(GEMINI_MODEL)}:generateContent?key=${encodeURIComponent(GEMINI_API_KEY)}`, {
+  const request = (model) => fetch(`${GEMINI_API_BASE_URL}/v1beta/models/${encodeURIComponent(model)}:generateContent?key=${encodeURIComponent(GEMINI_API_KEY)}`, {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify({
@@ -1502,16 +1504,19 @@ async function geminiBatchSuggest({ cleanRows, lines, accounts, knownTags }) {
       generationConfig: { maxOutputTokens: 8000, responseMimeType: "application/json" }
     })
   });
-  // A busy or rate-limited AI service (429, 5xx - a long import sends many requests back to back) is asked again a couple of times, a little
-  // later each time, before the rows are given up on; the reason is logged so a persistent failure can be told apart from a busy moment.
+  // A busy or rate-limited AI model (429, 5xx - "high demand" 503s are common and last minutes) is not waited on: the same request goes to the
+  // next model in the list, then once more round the list after a pause, before the rows are given up on. Every failed attempt is logged with
+  // its reason so a persistent failure can be told apart from a busy moment. A model that does not exist (404) is skipped like a busy one.
+  const models = [GEMINI_MODEL, ...GEMINI_FALLBACK_MODELS];
   let response;
   let body;
-  for (let attempt = 0; attempt < 3; attempt += 1) {
-    response = await request();
+  for (let attempt = 0; attempt < models.length + 1; attempt += 1) {
+    const model = models[attempt % models.length];
+    response = await request(model);
     body = await response.json().catch(() => ({}));
-    if (response.ok || ![429, 500, 502, 503, 504].includes(response.status)) break;
-    console.warn(`Gemini batch suggest attempt ${attempt + 1} failed: HTTP ${response.status} ${String(body?.error?.message || "").slice(0, 200)}`);
-    if (attempt < 2) await new Promise((resolve) => setTimeout(resolve, attempt === 0 ? 1500 : 4000));
+    if (response.ok || ![404, 429, 500, 502, 503, 504].includes(response.status)) break;
+    console.warn(`Gemini batch suggest ${model} attempt ${attempt + 1} failed: HTTP ${response.status} ${String(body?.error?.message || "").slice(0, 200)}`);
+    if (attempt + 1 === models.length) await new Promise((resolve) => setTimeout(resolve, 3000));
   }
   if (!response.ok) { const failure = new Error(body?.error?.message || "The AI suggestion service is unavailable right now"); failure.statusCode = 502; console.warn(`Gemini batch suggest gave up: HTTP ${response.status} ${String(body?.error?.message || "").slice(0, 200)}`); throw failure; }
   const text = body.candidates?.[0]?.content?.parts?.[0]?.text || "";
