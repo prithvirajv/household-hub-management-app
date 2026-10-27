@@ -14209,6 +14209,10 @@ async function syncLinkedAccount(linkId, addRows, { quiet = false, sinceDate = "
       summary = `${link.label}: ${result.imported} new transaction${result.imported === 1 ? "" : "s"} sent to Bank stream${result.balancesUpdated ? `, ${result.balancesUpdated} balance${result.balancesUpdated === 1 ? "" : "s"} updated` : ""}${result.groupsMatched ? `, ${result.groupsMatched} investment account${result.groupsMatched === 1 ? "" : "s"} matched to the bank balance` : ""}${result.debtsMatched ? `, ${result.debtsMatched} loan${result.debtsMatched === 1 ? "" : "s"} matched to the amount owed` : ""}${result.pendingSkipped ? `; ${result.pendingSkipped} pending skipped until they post` : ""}${result.unmapped ? `; ${result.unmapped} from accounts you chose not to import` : ""}.`;
       if (payload.historyGaps?.length) summary += " Some months were left out because the bank did not return them - see Home for what to import from a statement.";
       if (payload.errors?.length) summary += ` The bank reported: ${payload.errors.join("; ")}`;
+      // A history import that comes back short while the bank is complaining is not a quiet success: say so in a window, with the bank's own words.
+      if (sinceDate && payload.errors?.length && result.imported < 25) {
+        await showConfirm(`Only ${result.imported} transaction${result.imported === 1 ? "" : "s"} came back for that history import, and the bank said:\n\n${payload.errors.map((message) => `• ${message}`).join("\n")}\n\nSimpleFIN limits how many requests one connection can make per day (a history import uses several), and banks differ in how much history they hold. If the limit is the cause, try again tomorrow; otherwise import the missing months from a statement.`, { title: "The import came back short", confirmLabel: "OK", cancelLabel: "Close", danger: false });
+      }
     } else {
       const result = applySnaptradeSync(link, payload);
       summary = `${link.label}: ${result.added} holding${result.added === 1 ? "" : "s"} added, ${result.updated} updated, ${result.removed} removed.`;

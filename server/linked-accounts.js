@@ -12,7 +12,7 @@
 const crypto = require("node:crypto");
 const { applyLinkedPayload, fillUncategorizedLedgerRows } = require("../lib/linked-apply");
 
-const SIMPLEFIN_WINDOW_DAYS = 40; // the Bridge hard-caps one request at 60 days and warns above 45 ("exceeds recommended range"); stay under both
+const SIMPLEFIN_WINDOW_DAYS = 55; // the Bridge hard-caps one request at 60 days and only warns above 45 (data still comes back); every request counts against its daily limit, so use few
 const SIMPLEFIN_DEFAULT_LOOKBACK_DAYS = 30;
 const SIMPLEFIN_OVERLAP_DAYS = 3; // re-ask a few days we already saw; the client drops rows it already imported
 const BROKERAGE_KINDS_AS_FUND = new Set(["mutualfund"]);
@@ -138,6 +138,8 @@ async function syncSimplefin(accessUrl, { startUnix, endUnix }, options = {}) {
     const end = Math.min(start + windowSeconds, endUnix);
     const result = await fetchSimplefinAccounts(accessUrl, { "start-date": start, "end-date": end, pending: 1 }, options);
     errors.push(...result.errors);
+    // What each request returned (counts and the Bridge's own messages, no credentials): the record for when an import comes back short.
+    console.log(`SimpleFIN window ${new Date(start * 1000).toISOString().slice(0, 10)}..${new Date(end * 1000).toISOString().slice(0, 10)}: ${result.accounts.length} accounts, ${result.accounts.reduce((sum, account) => sum + (account.transactions || []).length, 0)} transactions${result.errors.length ? `, messages: ${result.errors.map((message) => String(message).slice(0, 160)).join(" | ")}` : ""}`);
     result.accounts.forEach((account) => {
       const existing = accounts.get(String(account.id));
       if (!existing) { accounts.set(String(account.id), { ...account, transactions: [...(account.transactions || [])] }); return; }
