@@ -90,6 +90,13 @@ more convenient.
    quick visual for where every dollar is headed, alongside the detailed
    table below it.
 
+**A new month builds itself**
+- The first time you open FamilyLoop in a new month it moves to that month,
+  using last month's planned amounts, with income taken from your paychecks.
+- On Home, **Last month vs this month's plan** lists lines where last month's
+  spending was well above (or far below) the plan. **Plan $X** sets the
+  planned amount to what you actually spent; **Keep** leaves it.
+
 **Get the most out of it**
 - Build out every category before you start assigning transactions — an
   unassigned transaction can't tell you if you're over or under budget in
@@ -229,6 +236,22 @@ more convenient.
    lines until it's fully assigned.
 4. Optionally set **Deposit to account** (under Wealth) so that account's
    balance reflects the deposit automatically.
+
+**Income from your linked accounts (automatic)**
+- When a linked account shows the same payer depositing a similar amount on a
+  steady schedule (weekly, every two weeks or monthly, at least three
+  deposits, still current), FamilyLoop adds it as a paycheck named after the
+  payer, so the budget's income follows what is actually paid. Transfers,
+  Zelle/Venmo-style payments, refunds and interest are never treated as salary,
+  and a paycheck you already entered by hand for about the same amount is left
+  as it is.
+- Home shows **Added from the salary in your accounts** with **Keep** and
+  **Undo**. The bank's own deposit rows are folded in so the money isn't
+  counted twice: waiting rows are skipped, and uncategorized ones already in
+  the ledger are taken out (the account keeps the bank's balance). Undo puts
+  every one of them back and stops that payer being detected again.
+- If the pay changes, the paycheck follows once two deposits agree on the new
+  amount. Pay that arrives twice a month is not guessed at - add it by hand.
 
 **Get the most out of it**
 - Setting a deposit account means you don't need a matching manual

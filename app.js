@@ -2215,6 +2215,161 @@ function renderOnboardingWizard() {
 // list's plain colored dot meaning the same thing two different ways.
 const HOME_ACTION_KIND_ICON = { Chore: "🧹", Birthday: "🎂", Anniversary: "💍", Reminder: "⏰" };
 
+// ---- Income from linked deposits ----
+// Salary credited to a linked account is the household's income. When the deposits show a steady payer (detectSalaryDeposits in
+// lib/shared-logic.js), it is recorded as a paycheck - so the budget's income follows what is actually paid - and the bank's own deposit
+// rows are folded into it: waiting rows are skipped and uncategorized ones already in the ledger are taken out (the account keeps the
+// bank's balance through its opening balance), so the same money is never counted as income twice. Everything folded in is kept on the
+// paycheck so Undo can put it back. A raise is followed once two deposits agree on the new amount.
+function dismissDraftQuietly(draft) {
+  state.transactionInboxDone ||= [];
+  if (!state.transactionInboxDone.includes(draft.id)) state.transactionInboxDone.push(draft.id);
+  state.transactionInboxDrafts = (state.transactionInboxDrafts || []).filter((item) => item.id !== draft.id);
+}
+
+function shiftOpeningForLedgerRow(row, direction) {
+  const account = state.accounts.find((item) => item.id === row.accountId);
+  if (!account || !Number.isFinite(Number(row.amount)) || row.date > dateKey(new Date())) return;
+  account.openingBalance = Math.round((Number(account.openingBalance || 0) + direction * openingShiftForPostedRow(account, row)) * 100) / 100;
+}
+
+function autoAddDetectedSalaries() {
+  const today = dateKey(new Date());
+  state.salaryDetectionIgnored ||= [];
+  let changed = false;
+
+  // Deposits of a salary already recorded from the deposits: skip the waiting rows, and follow a raise.
+  state.paychecks.filter((paycheck) => paycheck.autoDetected).forEach((paycheck) => {
+    const waiting = (state.transactionInboxDrafts || []).filter((draft) => salaryDepositMatchesPaycheck(draft, paycheck)).sort((a, b) => a.date.localeCompare(b.date));
+    if (!waiting.length) return;
+    waiting.forEach((draft) => { (paycheck.autoDetected.dismissed ||= []).push(draft); dismissDraftQuietly(draft); });
+    const latest = -Number(waiting[waiting.length - 1].amount);
+    const detected = paycheck.autoDetected;
+    if (Math.abs(latest - paycheck.amount) <= paycheck.amount * 0.02) delete detected.pendingAmount;
+    else if (detected.pendingAmount && Math.abs(latest - detected.pendingAmount) <= detected.pendingAmount * 0.005) {
+      const previous = paycheck.amount;
+      paycheck.amount = detected.pendingAmount;
+      (state.paycheckOccurrences || []).forEach((occurrence) => { if (occurrence.seriesId === paycheck.id && occurrence.amount === previous) occurrence.amount = paycheck.amount; });
+      delete detected.pendingAmount;
+      state.household.activity.unshift(`${paycheck.name}: amount updated to ${money.format(paycheck.amount)} to match your deposits`);
+    } else detected.pendingAmount = latest;
+    changed = true;
+  });
+
+  // A salary the deposits show that nothing records yet.
+  const rows = [...state.transactions, ...(state.transactionInboxDrafts || [])];
+  detectSalaryDeposits(rows, today).forEach((detection) => {
+    const id = `${detection.accountId}|${detection.key}`;
+    if (state.salaryDetectionIgnored.includes(id)) return;
+    if (state.paychecks.some((paycheck) => paycheck.autoDetected?.key === detection.key && paycheck.autoDetected.accountId === detection.accountId)) return;
+    if (salaryAlreadyRecorded(detection, state.paychecks)) return;
+    const paycheck = {
+      id: uniqueId("paycheck"), name: `${detection.name} (from your deposits)`, date: detection.anchorDate, amount: detection.amount, recurrence: detection.recurrence,
+      assignedLineIds: [], depositAccountId: "",
+      autoDetected: { key: detection.key, accountId: detection.accountId, detectedAt: new Date().toISOString(), acknowledged: false, removed: [], dismissed: [] }
+    };
+    const matches = (row) => salaryDepositMatchesPaycheck(row, paycheck);
+    state.transactions = state.transactions.filter((transaction) => {
+      if (!transaction.externalId || transaction.lineId || (transaction.splits || []).length || !matches(transaction)) return true;
+      paycheck.autoDetected.removed.push(transaction);
+      shiftOpeningForLedgerRow(transaction, -1);
+      return false;
+    });
+    (state.transactionInboxDrafts || []).filter(matches).forEach((draft) => { paycheck.autoDetected.dismissed.push(draft); dismissDraftQuietly(draft); });
+    state.paychecks.push(paycheck);
+    state.household.activity.unshift(`Income added from your deposits: ${paycheck.name}, ${money.format(paycheck.amount)} ${paycheckRecurrenceLabels[paycheck.recurrence].toLowerCase()}`);
+    changed = true;
+  });
+  if (changed) state.budget.income = budgetIncomeFromPaychecks();
+  return changed;
+}
+
+function undoDetectedSalary(paycheckId) {
+  const index = state.paychecks.findIndex((paycheck) => paycheck.id === paycheckId && paycheck.autoDetected);
+  if (index < 0) return;
+  const [paycheck] = state.paychecks.splice(index, 1);
+  state.paycheckOccurrences = (state.paycheckOccurrences || []).filter((occurrence) => occurrence.seriesId !== paycheck.id);
+  (paycheck.autoDetected.removed || []).forEach((row) => { state.transactions.unshift(row); shiftOpeningForLedgerRow(row, 1); });
+  (paycheck.autoDetected.dismissed || []).forEach((draft) => {
+    state.transactionInboxDone = (state.transactionInboxDone || []).filter((id) => id !== draft.id);
+    state.transactionInboxDrafts = [draft, ...(state.transactionInboxDrafts || [])];
+  });
+  state.salaryDetectionIgnored ||= [];
+  state.salaryDetectionIgnored.push(`${paycheck.autoDetected.accountId}|${paycheck.autoDetected.key}`);
+  state.household.activity.unshift(`Undid the income added from your deposits: ${paycheck.name}`);
+  state.budget.income = budgetIncomeFromPaychecks();
+  autosaveState();
+  render();
+}
+
+// ---- New month, built from the last one ----
+// A new month opens with last month's plan (switchBudgetMonth carries every line's planned amount forward) and income from the paychecks.
+// The app moves itself to the current month once per page load, and Home lists where last month's real spending was well off its plan
+// with a one-tap way to plan that amount instead.
+let currentMonthOpened = false;
+
+function maybeOpenCurrentMonth() {
+  if (currentMonthOpened || !sessionUser || sessionUser.accessLevel === "view" || !state?.budget) return;
+  currentMonthOpened = true;
+  const month = currentMonthKey();
+  if (!state.budget.month || state.budget.month >= month) return;
+  setTimeout(() => {
+    switchBudgetMonth(month);
+    state.household.activity.unshift(`Opened ${formatMonth(month)} with last month's plan`);
+    autosaveState();
+    render();
+  }, 0);
+}
+
+function budgetPlanSuggestions() {
+  const month = currentMonthKey();
+  if (state.budget.month !== month) return [];
+  const [year, monthNumber] = month.split("-").map(Number);
+  const previous = `${monthNumber === 1 ? year - 1 : year}-${String(monthNumber === 1 ? 12 : monthNumber - 1).padStart(2, "0")}`;
+  const dismissed = state.budget.dismissedReminders?.[month] || [];
+  return allLines()
+    .map((line) => ({ line, planned: Number(line.planned || 0), actual: Math.round(spentByLineInMonth(state.transactions, line.id, previous) * 100) / 100 }))
+    .filter(({ line, planned, actual }) => !dismissed.includes(`plan:${line.id}`) && !(line.rolloverAmount > 0) && (
+      (planned > 0 && actual >= planned * 1.25 && actual - planned >= 25) ||
+      (planned > 0 && actual > 0 && actual <= planned * 0.5 && planned - actual >= 50)
+    ))
+    .map((row) => ({ ...row, suggested: Math.ceil(row.actual / 5) * 5, previous }))
+    .sort((a, b) => Math.abs(b.actual - b.planned) - Math.abs(a.actual - a.planned))
+    .slice(0, 5);
+}
+
+function renderPlanSuggestionsCard() {
+  const suggestions = budgetPlanSuggestions();
+  if (!suggestions.length) return "";
+  return `<section class="card home-plan-card">
+    <div class="card-label">Budget</div><h3>Last month vs this month's plan</h3>
+    ${suggestions.map(({ line, planned, actual, suggested }) => `<div class="compact-row"><div><strong>${escapeHtml(line.name)}</strong><small>Planned ${money.format(planned)}, spent ${money.format(actual)} last month</small></div>
+      <div class="button-row"><button class="pill-button" data-plan-use-actual="${escapeHtml(line.id)}:${suggested}" type="button">Plan ${money.format(suggested)}</button><button class="ghost" data-plan-keep="${escapeHtml(line.id)}" type="button">Keep</button></div></div>`).join("")}
+  </section>`;
+}
+
+let salaryDetectionDone = false;
+
+// Once per page load, looks at deposits already in the app (not only newly imported ones), after the current render has finished.
+function maybeDetectSalaries() {
+  if (salaryDetectionDone || !sessionUser || sessionUser.accessLevel === "view" || !(state.accounts || []).length) return;
+  salaryDetectionDone = true;
+  setTimeout(() => { if (autoAddDetectedSalaries()) { autosaveState(); render(); } }, 0);
+}
+
+function renderDetectedSalaryCard() {
+  const notices = state.paychecks.filter((paycheck) => paycheck.autoDetected && !paycheck.autoDetected.acknowledged);
+  if (!notices.length) return "";
+  return `<section class="card home-income-card">
+    <div class="card-label">Income</div><h3>Added from the salary in your accounts</h3>
+    ${notices.map((paycheck) => {
+      const folded = (paycheck.autoDetected.removed || []).length + (paycheck.autoDetected.dismissed || []).length;
+      return `<div class="compact-row"><div><strong>${escapeHtml(paycheck.name)}</strong><small>${money.format(paycheck.amount)} ${escapeHtml((paycheckRecurrenceLabels[paycheck.recurrence] || "").toLowerCase())} into ${escapeHtml(accountName(paycheck.autoDetected.accountId))}${folded ? ` · ${folded} matching deposit${folded === 1 ? "" : "s"} folded in so income isn't counted twice` : ""}</small></div>
+        <div class="button-row"><button class="pill-button" data-keep-detected-salary="${escapeHtml(paycheck.id)}" type="button">Keep</button><button class="ghost" data-undo-detected-salary="${escapeHtml(paycheck.id)}" type="button">Undo</button></div></div>`;
+    }).join("")}
+  </section>`;
+}
+
 // ---- AI home briefing ----
 // The facts are assembled here from the household's own state (nothing is looked up server-side) and sent as plain text; the model only
 // words them. The numbers shown as chips never depend on the AI, so the card is useful even when it is unavailable. One briefing per
@@ -2344,6 +2499,8 @@ function renderHome() {
     <section class="work-grid">
       <div class="main-stack">
         ${renderHomeBriefingCard()}
+        ${renderDetectedSalaryCard()}
+        ${renderPlanSuggestionsCard()}
         <section class="card">
           <div class="card-label">Quick add</div><h3>Jump straight to adding something</h3>
           <div class="quick-add-groups">
@@ -8389,6 +8546,19 @@ function bindViewEvents() {
   });
 
   $("#homeBriefingRefresh")?.addEventListener("click", () => { void requestHomeBriefing(); });
+  document.querySelectorAll("[data-keep-detected-salary]").forEach((button) => button.addEventListener("click", () => {
+    const paycheck = state.paychecks.find((item) => item.id === button.dataset.keepDetectedSalary);
+    if (paycheck?.autoDetected) { paycheck.autoDetected.acknowledged = true; autosaveState(); render(); }
+  }));
+  document.querySelectorAll("[data-undo-detected-salary]").forEach((button) => button.addEventListener("click", () => undoDetectedSalary(button.dataset.undoDetectedSalary)));
+  document.querySelectorAll("[data-plan-use-actual]").forEach((button) => button.addEventListener("click", () => {
+    const [lineId, amount] = button.dataset.planUseActual.split(":");
+    state.budget.categories.forEach((category) => category.lines.forEach((line) => { if (line.id === lineId) line.planned = Number(amount); }));
+    dismissBudgetReminder(`plan:${lineId}`);
+  }));
+  document.querySelectorAll("[data-plan-keep]").forEach((button) => button.addEventListener("click", () => dismissBudgetReminder(`plan:${button.dataset.planKeep}`)));
+  maybeDetectSalaries();
+  maybeOpenCurrentMonth();
   $("#homeAddChoreButton")?.addEventListener("click", () => goToViewAndRun("calendar", () => focusCalendarType("chore")));
   $("#homeAddReminderButton")?.addEventListener("click", () => goToViewAndRun("calendar", () => focusCalendarType("reminder")));
   $("#homeAddBirthdayButton")?.addEventListener("click", () => goToViewAndRun("calendar", () => focusCalendarType("birthday")));
@@ -14176,6 +14346,8 @@ async function runAiImportPassOnce(draftIds, fileName, importedCount, rerun) {
   const progress = (text) => { bankImportFeedback = `${lead} ${text}`; autosaveState(); render(); };
 
   try {
+    // Salary in the deposits becomes a paycheck first, so its deposit rows are folded in rather than posted as extra income.
+    if (autoAddDetectedSalaries()) { autosaveState(); render(); }
     // Rows saved before categories recorded where they came from: vouch for a category the household's own rule or history gives.
     draftIds.map(findDraft).forEach((draft) => {
       if (!draft?.lineId || draft.lineSource) return;
@@ -14239,7 +14411,7 @@ async function runAiImportPassOnce(draftIds, fileName, importedCount, rerun) {
   if (currentHouseholdId() !== householdId) return;
   postSafeRows(draftIds, { final: true });
 
-  const remaining = draftIds.length - added;
+  const remaining = draftIds.filter(findDraft).length;
   const reasonText = [...reviewReasons.entries()].sort((a, b) => b[1] - a[1]).slice(0, 3).map(([reason, count]) => `${count} ${reason}`).join(", ");
   bankImportFeedback = `${lead}${aiFilled ? ` AI filled in ${aiFilled} row${aiFilled === 1 ? "" : "s"}.` : ""} ${added} added to the ledger${uncategorizedAdded ? ` (${uncategorizedAdded} without a category - marked "Needs a category" there)` : ""}${remaining ? `; ${remaining} left in Bank stream to review${reasonText ? ` (${reasonText})` : ""}` : ""}.${aiNote}`;
   if (added) state.household.activity.unshift(`${rerun ? "Bank stream" : `Imported ${fileName}`}: ${added} transaction${added === 1 ? "" : "s"} auto-added with AI categories`);

@@ -226,3 +226,37 @@ test("home briefing endpoint needs a session and a context, forwards the facts, 
     assert.equal((await noKey.request("/api/home/briefing", { method: "POST", headers: { cookie: signup.cookie }, body: JSON.stringify({ context: "x" }) })).status, 503);
   } finally { await noKey.stop(); }
 });
+
+test("salary detection finds a steady payer on a regular cadence and ignores everything else", () => {
+  const { detectSalaryDeposits, salaryDepositMatchesPaycheck, salaryAlreadyRecorded, salaryPayeeKey } = require("../lib/shared-logic");
+  const dep = (payee, amount, date, extra = {}) => ({ id: `${payee}-${date}`, externalId: `sf:a:${payee}-${date}`, accountId: "chk", payee, amount: -amount, date, ...extra });
+  const today = "2026-10-26";
+  const biweekly = ["2026-08-14", "2026-08-28", "2026-09-11", "2026-09-25", "2026-10-09", "2026-10-23"].map((date) => dep(`ACME PAYROLL ${date.replace(/-/g, "")}`, 2500, date));
+  const [salary] = detectSalaryDeposits(biweekly, today);
+  assert.equal(salary.recurrence, "biweekly");
+  assert.equal(salary.amount, 2500);
+  assert.equal(salary.accountId, "chk");
+  assert.equal(salary.anchorDate, "2026-09-11", "starts at the first deposit of last month so last month and this one both show the income");
+  assert.equal(salary.count, 6);
+  assert.equal(salaryPayeeKey("ACME PAYROLL 20261023"), salaryPayeeKey("ACME PAYROLL 20260911"), "digits do not change the payer");
+
+  const monthly = ["2026-07-01", "2026-08-01", "2026-09-01", "2026-10-01"].map((date) => dep("Employer Direct Dep", 4000, date));
+  assert.equal(detectSalaryDeposits(monthly, today)[0].recurrence, "monthly");
+  const weekly = ["2026-10-02", "2026-10-09", "2026-10-16", "2026-10-23"].map((date) => dep("Shop Pay", 600, date));
+  assert.equal(detectSalaryDeposits(weekly, today)[0].recurrence, "weekly");
+
+  assert.deepEqual(detectSalaryDeposits(biweekly.slice(0, 2), today), [], "two deposits are not a pattern");
+  assert.deepEqual(detectSalaryDeposits(biweekly.map((row) => ({ ...row, payee: "Zelle payment from Sam" })), today), [], "P2P payments are never salary");
+  assert.deepEqual(detectSalaryDeposits(biweekly.map((row) => ({ ...row, externalId: "" })), today), [], "only bank-feed rows count");
+  assert.deepEqual(detectSalaryDeposits(biweekly.map((row, i) => ({ ...row, amount: -(i % 2 ? 300 : 2500) })), today), [], "wildly different amounts are not a salary");
+  assert.deepEqual(detectSalaryDeposits(biweekly.slice(0, 3), today), [], "a series that stopped long ago is not current");
+  assert.deepEqual(detectSalaryDeposits(["2026-08-01", "2026-08-16", "2026-09-01", "2026-09-16", "2026-10-01", "2026-10-16"].map((date) => dep("Twice Monthly Co", 1800, date)), today), [], "twice-a-month pay is not guessed at");
+
+  const paycheck = { amount: 2500, recurrence: "biweekly", autoDetected: { key: salary.key, accountId: "chk" } };
+  assert.equal(salaryDepositMatchesPaycheck(dep("ACME PAYROLL 20261106", 2600, "2026-11-06"), paycheck), true, "a small raise still matches");
+  assert.equal(salaryDepositMatchesPaycheck(dep("ACME PAYROLL 20261106", 4000, "2026-11-06"), paycheck), false);
+  assert.equal(salaryDepositMatchesPaycheck({ ...dep("ACME PAYROLL", 2500, "2026-11-06"), accountId: "sav" }, paycheck), false);
+  assert.equal(salaryAlreadyRecorded(salary, [{ amount: 2490, recurrence: "biweekly" }]), true, "a hand-entered paycheck is authoritative");
+  assert.equal(salaryAlreadyRecorded(salary, [{ amount: 2490, recurrence: "monthly" }]), false);
+  assert.equal(salaryAlreadyRecorded(salary, [{ amount: 2490, recurrence: "biweekly", endDate: "2026-06-30" }]), false, "an ended paycheck does not count");
+});
