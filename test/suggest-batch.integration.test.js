@@ -194,3 +194,35 @@ test("rows with different bank transaction ids are never duplicates of each othe
   assert.equal(isDuplicateTransaction({ externalId: "sf:a:1", amount: 10, date: "2026-07-12" }, [yesterday]), true, "same bank id");
   assert.equal(isDuplicateTransaction({ externalId: "sf:a:2", amount: 10, date: "2026-07-10" }, [{ amount: 10, date: "2026-07-10" }]), true, "a hand-entered row with the same amount and date");
 });
+
+test("parseHomeBriefing keeps a plain, size-limited summary and rejects anything unusable", () => {
+  const { parseHomeBriefing } = require("../lib/shared-logic");
+  const reply = "```json\n" + JSON.stringify({ headline: "A <b>busy</b> Tuesday", points: ["One", " ", "Two", "Three", "Four", "Five"], tip: "Pay the electric bill." }) + "\n```";
+  assert.deepEqual(parseHomeBriefing(reply), { headline: "A busy Tuesday", points: ["One", "Two", "Three", "Four"], tip: "Pay the electric bill." });
+  assert.equal(parseHomeBriefing("not json"), null);
+  assert.equal(parseHomeBriefing("[1,2]"), null);
+  assert.equal(parseHomeBriefing(JSON.stringify({ headline: "", points: [], tip: "x" })), null);
+});
+
+test("home briefing endpoint needs a session and a context, forwards the facts, and returns the cleaned summary", async () => {
+  const reply = JSON.stringify({ headline: "You have spent $120.00 of $400.00.", points: ["Groceries is the biggest category."], tip: "Review the 3 waiting rows." });
+  const stub = await startGeminiStub({ body: { candidates: [{ content: { parts: [{ text: reply }] } }] } });
+  const server = await startTestServer({ GEMINI_API_KEY: "test-key", GEMINI_API_BASE_URL: stub.url });
+  try {
+    assert.equal((await server.request("/api/home/briefing", { method: "POST", body: JSON.stringify({ context: "x" }) })).status, 401);
+    const signup = await server.request("/api/auth/signup", { method: "POST", body: JSON.stringify({ email: "briefing@example.com", password: "Briefing-Password-123!", name: "B", householdName: "B", country: "US" }) });
+    const post = (body) => server.request("/api/home/briefing", { method: "POST", headers: { cookie: signup.cookie }, body: JSON.stringify(body) });
+    assert.equal((await post({ context: "" })).status, 400);
+    assert.equal((await post({ context: "x".repeat(6001) })).status, 400);
+    const ok = await post({ context: "Today is Tuesday.\nBudget: $120.00 spent of $400.00 planned." });
+    assert.equal(ok.status, 200);
+    assert.equal(ok.body.briefing.headline, "You have spent $120.00 of $400.00.");
+    assert.deepEqual(ok.body.briefing.points, ["Groceries is the biggest category."]);
+    assert.ok(stub.requests[0].includes("$120.00 spent of $400.00 planned"));
+  } finally { await server.stop(); await stub.stop(); }
+  const noKey = await startTestServer();
+  try {
+    const signup = await noKey.request("/api/auth/signup", { method: "POST", body: JSON.stringify({ email: "briefing-nokey@example.com", password: "Briefing-Password-123!", name: "B", householdName: "B", country: "US" }) });
+    assert.equal((await noKey.request("/api/home/briefing", { method: "POST", headers: { cookie: signup.cookie }, body: JSON.stringify({ context: "x" }) })).status, 503);
+  } finally { await noKey.stop(); }
+});

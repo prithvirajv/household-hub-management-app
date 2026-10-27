@@ -9295,3 +9295,9 @@ html[data-theme="dark"] .note-color-coral { background: color-mix(in srgb, #fff0
   grid-column: 1 / -1;
   justify-self: start;
 }
+
+/* Home screen: the AI briefing card (number chips first, then the written summary). */
+.home-briefing-chips { display: flex; flex-wrap: wrap; gap: 0.4rem; margin: 0.3rem 0 0.6rem; }
+.home-briefing-headline { margin: 0.2rem 0 0.4rem; }
+.home-briefing-points { margin: 0 0 0.5rem; padding-left: 1.2rem; display: grid; gap: 0.25rem; }
+.home-briefing-tip { margin: 0 0 0.5rem; }

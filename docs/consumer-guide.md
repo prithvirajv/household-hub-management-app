@@ -33,7 +33,14 @@ more convenient.
    remembers your choice on this device.
 7. Home's **This week** strip merges chores, bills, birthdays, and reminders
    into one 7-day view, and **Recent activity** lists notes, decisions, and
-   settled IOUs as they happen, newest first.
+   settled IOUs as they happen, newest first. The **Today** card at the top
+   of Home shows live numbers (spent against plan, what needs attention,
+   transactions waiting in Bank Stream or without a category) and, under
+   them, a short AI-written summary of your day — spending pace, what is due,
+   what is coming up — plus one practical tip. It is written from your own
+   budget, calendar and chores, once per day per device; select **✨ Refresh
+   summary** to write it again. The numbers stay live even if the AI is not
+   available. The mobile app has the same card.
 8. Select the 🔍 icon in the top bar to search transactions, notes,
    documents, and decisions at once — type at least 2 characters, then
    select a result to jump straight to it.

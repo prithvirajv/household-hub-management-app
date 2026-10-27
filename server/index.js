@@ -16,7 +16,7 @@ const { OAuth2Client } = require("google-auth-library");
 const { countries } = require("countries-list");
 const { defaultState } = require("./default-state");
 const { registerLinkedAccountRoutes } = require("./linked-accounts");
-const { validateJournalPayload, buildDocumentObjectPath, sanitizeFilename, wouldCreateFolderCycle, collectDescendantFolderIds, SMS_CARRIERS, smsGatewayAddress, rollAnnualNotifyAtForward, choreNotifyAt, parseBankStatementPdfText, extractAccountActivityLabel, isValidEmail, parseImageReminderDraft, parseBatchSuggestions, pgDumpArgs } = require("../lib/shared-logic");
+const { validateJournalPayload, buildDocumentObjectPath, sanitizeFilename, wouldCreateFolderCycle, collectDescendantFolderIds, SMS_CARRIERS, smsGatewayAddress, rollAnnualNotifyAtForward, choreNotifyAt, parseBankStatementPdfText, extractAccountActivityLabel, isValidEmail, parseImageReminderDraft, parseBatchSuggestions, parseHomeBriefing, pgDumpArgs } = require("../lib/shared-logic");
 const pdfParse = require("pdf-parse");
 const ExcelJS = require("exceljs");
 // archiver@8 is an ESM-only rewrite: require("archiver") returns the module
@@ -1385,6 +1385,36 @@ app.post("/api/journal/reflection", requireSession, async (req, res, next) => {
     const text = body.candidates?.[0]?.content?.parts?.[0]?.text?.trim();
     if (!text) return res.status(502).json({ error: "The reflection service returned nothing usable" });
     res.json({ message: text });
+  } catch (error) {
+    next(error);
+  }
+});
+
+// The home screen's AI briefing. Like the journal reflection above, the client sends the plain-text facts it already assembled from its
+// own state (spending vs budget, what is due, what is coming up) and the server only adds the API key and forwards them; the reply is a
+// short structured summary, trimmed by parseHomeBriefing. Capped so a client bug cannot run up an unbounded bill.
+const HOME_BRIEFING_MAX_CONTEXT_CHARS = 6000;
+
+app.post("/api/home/briefing", requireSession, async (req, res, next) => {
+  try {
+    if (!GEMINI_API_KEY) return res.status(503).json({ error: "The AI briefing is not configured for this deployment" });
+    const context = String(req.body?.context || "").trim();
+    if (!context) return res.status(400).json({ error: "Nothing to summarize yet" });
+    if (context.length > HOME_BRIEFING_MAX_CONTEXT_CHARS) return res.status(400).json({ error: "That summary is too long" });
+    const response = await fetch(`${GEMINI_API_BASE_URL}/v1beta/models/${encodeURIComponent(GEMINI_MODEL)}:generateContent?key=${encodeURIComponent(GEMINI_API_KEY)}`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        contents: [{ role: "user", parts: [{ text: context }] }],
+        systemInstruction: { parts: [{ text: "You are the assistant on the home screen of a family household app (budget, calendar, chores, notes). Given today's facts, reply with ONLY a JSON object - no markdown: {\"headline\": one sentence sizing up today for this household, \"points\": an array of 2 to 4 short bullet strings with the most useful things to know (spending against the budget and its pace, things that need attention today, what is coming up this week, anything waiting for review), \"tip\": one practical suggestion that follows from the facts}. Use ONLY the facts given: never invent numbers, dates, names or events, quote amounts exactly as given, and say nothing about data that was not provided. Warm, plain and brief; no emoji." }] },
+        generationConfig: { maxOutputTokens: 1500, responseMimeType: "application/json" }
+      })
+    });
+    const body = await response.json().catch(() => ({}));
+    if (!response.ok) return res.status(502).json({ error: body?.error?.message || "The briefing service is unavailable right now" });
+    const briefing = parseHomeBriefing(body.candidates?.[0]?.content?.parts?.[0]?.text || "");
+    if (!briefing) return res.status(502).json({ error: "The briefing service returned nothing usable" });
+    res.json({ briefing });
   } catch (error) {
     next(error);
   }

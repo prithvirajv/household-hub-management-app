@@ -27,7 +27,7 @@ flowchart LR
 
     Neon[("Neon serverless Postgres\n(direct/unpooled endpoint)")]
     SMTP["Brevo SMTP\n(transactional email)"]
-    Gemini["Gemini API\n(journal reflection,\ncategorization suggestions)"]
+    Gemini["Gemini API\n(journal reflection,\nhome briefing,\ncategorization suggestions)"]
     Finnhub["Finnhub API\n(stock quotes)"]
     ExchangeRate["exchangerate-api.com\n(FX rates, 1hr server-side cache)"]
     Google["Google OAuth\n(sign-in with Google)"]

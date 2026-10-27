@@ -2215,6 +2215,124 @@ function renderOnboardingWizard() {
 // list's plain colored dot meaning the same thing two different ways.
 const HOME_ACTION_KIND_ICON = { Chore: "🧹", Birthday: "🎂", Anniversary: "💍", Reminder: "⏰" };
 
+// ---- AI home briefing ----
+// The facts are assembled here from the household's own state (nothing is looked up server-side) and sent as plain text; the model only
+// words them. The numbers shown as chips never depend on the AI, so the card is useful even when it is unavailable. One briefing per
+// viewer per day is kept in localStorage (a Refresh button asks again); it is a convenience, not data.
+let homeBriefing = { key: "", status: "idle", data: null, error: "", at: "" };
+
+function homeBriefingFacts() {
+  const now = new Date();
+  const monthKey = dateKey(now).slice(0, 7);
+  const lines = allLines();
+  const lineById = new Map(lines.map((line) => [line.id, line]));
+  const monthSpend = new Map();
+  let spent = 0;
+  state.transactions.forEach((transaction) => {
+    if (dateKeyToMonthKey(transaction.date) !== monthKey) return;
+    spent += Number(transaction.amount || 0);
+    const parts = transaction.splits?.length ? transaction.splits : [{ lineId: transaction.lineId, amount: transaction.amount }];
+    parts.forEach((part) => {
+      const category = lineById.get(part.lineId)?.category || "Uncategorized";
+      monthSpend.set(category, (monthSpend.get(category) || 0) + Number(part.amount || 0));
+    });
+  });
+  const planned = plannedTotal();
+  const daysInMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate();
+  const topCategories = [...monthSpend.entries()].filter(([, amount]) => amount > 0).sort((a, b) => b[1] - a[1]).slice(0, 3);
+  const overBudget = lines
+    .filter((line) => Number(line.planned || 0) > 0)
+    .map((line) => ({ name: line.name, over: spentByLineInMonth(state.transactions, line.id, monthKey) - Number(line.planned || 0) }))
+    .filter((line) => line.over > 0).sort((a, b) => b.over - a.over).slice(0, 3);
+  const waiting = (state.transactionInboxDrafts || []).length;
+  const uncategorized = state.transactions.filter((transaction) => !transaction.lineId && !(transaction.splits || []).length).length;
+  const actions = homeActionItems();
+  const week = homeWeekStrip().filter((day) => day.items.length);
+  const bills = billAndGoalReminders().slice(0, 5);
+  const plan = homeTodayPlanTasks();
+  const accounts = state.accounts.filter((account) => !account.closedAt).slice(0, 8);
+
+  const text = [
+    `Today is ${now.toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric", year: "numeric" })}.`,
+    `Budget this month (${formatMonth(monthKey)}): ${money.format(spent)} spent of ${money.format(planned)} planned; day ${now.getDate()} of ${daysInMonth}.`,
+    topCategories.length ? `Biggest categories this month: ${topCategories.map(([name, amount]) => `${name} ${money.format(amount)}`).join(", ")}.` : "",
+    overBudget.length ? `Over budget: ${overBudget.map((line) => `${line.name} by ${money.format(line.over)}`).join(", ")}.` : "No budget line is over its plan.",
+    accounts.length ? `Accounts: ${accounts.map((account) => `${account.name}${account.type ? ` (${account.type})` : ""} ${money.format(currentAccountBalance(account.id))}`).join("; ")}.` : "",
+    waiting ? `${waiting} imported transaction${waiting === 1 ? " is" : "s are"} waiting for review in Bank stream.` : "",
+    uncategorized ? `${uncategorized} ledger transaction${uncategorized === 1 ? " has" : "s have"} no category yet.` : "",
+    actions.length ? `Needs attention today: ${actions.slice(0, 8).map((item) => `${item.title} (${item.kind}, ${item.overdue ? "past due" : "due today"})`).join("; ")}.` : "Nothing is past due or due today.",
+    week.length ? `Coming up this week: ${week.map((day) => `${day.label}: ${day.items.map((item) => item.title).join(", ")}`).join("; ")}.` : "",
+    bills.length ? `Bills and goals open: ${bills.map((reminder) => `${reminder.title} - ${reminder.detail}`).join("; ")}.` : "",
+    plan.length ? `The viewer's plan today has ${plan.length} task${plan.length === 1 ? "" : "s"}, ${plan.filter((task) => task.done).length} done.` : ""
+  ].filter(Boolean).join("\n").slice(0, 5800);
+
+  const chips = [
+    planned > 0 ? `${money.format(spent)} of ${money.format(planned)} spent` : `${money.format(spent)} spent this month`,
+    actions.length ? `${actions.length} need${actions.length === 1 ? "s" : ""} attention` : "",
+    waiting ? `${waiting} in Bank stream` : "",
+    uncategorized ? `${uncategorized} need a category` : ""
+  ].filter(Boolean);
+  return { text, chips };
+}
+
+function homeBriefingCacheKey() {
+  return `familyloop-home-briefing:${currentHouseholdId()}:${sessionUser?.email || ""}`;
+}
+
+// Loads today's briefing once per page load per day: from this browser's copy when there is one for today, otherwise from the AI.
+function maybeLoadHomeBriefing() {
+  if (currentView !== "home" || !sessionUser) return;
+  const today = dateKey(new Date());
+  const key = `${currentHouseholdId()}:${sessionUser.email || ""}:${today}`;
+  if (homeBriefing.key === key) return;
+  homeBriefing = { key, status: "idle", data: null, error: "", at: "" };
+  // Called while the card is being drawn, so the request itself starts a moment later (it redraws the card to show progress).
+  const startRequest = () => setTimeout(() => { if (homeBriefing.key === key && homeBriefing.status === "idle") void requestHomeBriefing(key); }, 0);
+  try {
+    const cached = JSON.parse(localStorage.getItem(homeBriefingCacheKey()) || "null");
+    if (cached?.date === today && cached.briefing) { homeBriefing = { key, status: "ready", data: cached.briefing, error: "", at: cached.at || "" }; return; }
+  } catch (_error) { /* no saved copy */ }
+  startRequest();
+}
+
+async function requestHomeBriefing(key = homeBriefing.key) {
+  if (homeBriefing.status === "loading") return;
+  homeBriefing = { ...homeBriefing, key, status: "loading", error: "" };
+  render();
+  try {
+    const { briefing } = await api("/api/home/briefing", { method: "POST", body: JSON.stringify({ context: homeBriefingFacts().text }) });
+    if (homeBriefing.key !== key) return;
+    const at = new Date().toISOString();
+    homeBriefing = { key, status: "ready", data: briefing, error: "", at };
+    try { localStorage.setItem(homeBriefingCacheKey(), JSON.stringify({ date: dateKey(new Date()), briefing, at })); } catch (_error) { /* just not remembered */ }
+  } catch (error) {
+    if (homeBriefing.key !== key) return;
+    homeBriefing = { key, status: /not configured|HTTP 503/i.test(String(error.message)) ? "off" : "error", data: null, error: error.message || "", at: "" };
+  }
+  if (currentView === "home") render();
+}
+
+function renderHomeBriefingCard() {
+  maybeLoadHomeBriefing();
+  const facts = homeBriefingFacts();
+  const briefing = homeBriefing;
+  const body = briefing.status === "ready" && briefing.data
+    ? `${briefing.data.headline ? `<p class="home-briefing-headline"><strong>${escapeHtml(briefing.data.headline)}</strong></p>` : ""}
+       ${briefing.data.points.length ? `<ul class="home-briefing-points">${briefing.data.points.map((point) => `<li>${escapeHtml(point)}</li>`).join("")}</ul>` : ""}
+       ${briefing.data.tip ? `<p class="home-briefing-tip"><span class="pill pill-info">Tip</span> ${escapeHtml(briefing.data.tip)}</p>` : ""}`
+    : briefing.status === "loading" || briefing.status === "idle" ? `<p class="muted" role="status">Reading today's numbers…</p>`
+    : briefing.status === "off" ? `<p class="muted">The AI summary isn't set up on this deployment - the numbers above are still live.</p>`
+    : briefing.status === "error" ? `<p class="muted" role="status">The summary couldn't be written just now${briefing.error ? ` (${escapeHtml(briefing.error)})` : ""}. Try Refresh.</p>`
+    : "";
+  return `<section class="card home-briefing-card">
+    <div class="section-head"><div><span class="card-label">Today</span><h3>${escapeHtml(new Date().toLocaleDateString(undefined, { weekday: "long", month: "long", day: "numeric" }))}</h3></div>
+      ${briefing.status === "off" ? "" : `<button id="homeBriefingRefresh" class="ghost" type="button" ${briefing.status === "loading" ? "disabled" : ""}>${briefing.status === "loading" ? "Working…" : "✨ Refresh summary"}</button>`}</div>
+    ${facts.chips.length ? `<div class="home-briefing-chips">${facts.chips.map((chip) => `<span class="pill">${escapeHtml(chip)}</span>`).join("")}</div>` : ""}
+    ${body}
+    ${briefing.status === "ready" && briefing.at ? `<small class="muted">Written ${new Date(briefing.at).toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" })} from your budget, calendar and chores. AI can slip - check the details on each screen.</small>` : ""}
+  </section>`;
+}
+
 function renderHome() {
   const items = homeActionItems();
   const billsAndGoals = billAndGoalReminders();
@@ -2225,6 +2343,7 @@ function renderHome() {
   return `
     <section class="work-grid">
       <div class="main-stack">
+        ${renderHomeBriefingCard()}
         <section class="card">
           <div class="card-label">Quick add</div><h3>Jump straight to adding something</h3>
           <div class="quick-add-groups">
@@ -8269,6 +8388,7 @@ function bindViewEvents() {
     });
   });
 
+  $("#homeBriefingRefresh")?.addEventListener("click", () => { void requestHomeBriefing(); });
   $("#homeAddChoreButton")?.addEventListener("click", () => goToViewAndRun("calendar", () => focusCalendarType("chore")));
   $("#homeAddReminderButton")?.addEventListener("click", () => goToViewAndRun("calendar", () => focusCalendarType("reminder")));
   $("#homeAddBirthdayButton")?.addEventListener("click", () => goToViewAndRun("calendar", () => focusCalendarType("birthday")));

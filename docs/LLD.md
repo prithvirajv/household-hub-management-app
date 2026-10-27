@@ -74,6 +74,7 @@ erDiagram
 | | `GET /readyz` (DB-aware — this is what deploy health-checks poll) | public |
 | Misc | `GET /api/countries` | public |
 | AI | `POST /api/journal/reflection` (Gemini) | session |
+| AI | `POST /api/home/briefing` (Gemini; body `{context}` plain-text facts built by the client, reply `{briefing:{headline,points[],tip}}` via `parseHomeBriefing`) | session |
 | | `POST /api/transactions/suggest-subcategory` (Gemini) | session |
 | | `POST /api/transactions/suggest-account` (Gemini) | session |
 | | `GET /api/stock-quote` (Finnhub) | session |
