@@ -12012,6 +12012,7 @@ function bindViewEvents() {
   });
   document.querySelectorAll("[data-linked-history]").forEach((button) => {
     button.addEventListener("click", async () => {
+      if (linkedBusyId) { showToast("A bank sync is already running - wait for it to finish.", { type: "info" }); return; }
       const from = linkedHistoryFrom;
       if (!/^\d{4}-\d{2}-\d{2}$/.test(from)) { showToast("Pick the date to import from."); return; }
       if (!(await showConfirm(`Fetch every transaction from ${from} onward for the accounts you chose? New rows go to Bank stream (the AI categorization and safe auto-add apply). Rows you removed earlier come back.`, { title: "Import history", confirmLabel: "Import", danger: false }))) return;
@@ -14116,14 +14117,14 @@ function renderLinkedAccountsCard() {
     ${links.map((link) => `<div class="linked-account-row">
       <div><strong>${escapeHtml(link.label)}</strong><small>${linkedProviderLabel(link)} · ${escapeHtml(linkedStatusText(link))}</small>${(link.newAccounts || []).length ? `<small class="linked-new-accounts"><b>${link.newAccounts.length} new account${link.newAccounts.length === 1 ? "" : "s"} found</b> (${escapeHtml(link.newAccounts.map((account) => account.name).join(", "))}) - choose where ${link.newAccounts.length === 1 ? "it goes" : "they go"}.</small>` : ""}</div>
       <div class="button-row">
-        <button type="button" class="ghost" data-linked-sync="${link.id}" ${linkedBusyId === link.id ? "disabled" : ""}>${linkedBusyId === link.id ? "Working…" : "Sync now"}</button>
-        <button type="button" class="${(link.newAccounts || []).length ? "" : "ghost"}" data-linked-map="${link.id}">Choose accounts</button>
+        <button type="button" class="ghost" data-linked-sync="${link.id}" ${linkedBusyId ? "disabled" : ""}>${linkedBusyId === link.id ? "Working…" : "Sync now"}</button>
+        <button type="button" class="${(link.newAccounts || []).length ? "" : "ghost"}" data-linked-map="${link.id}" ${linkedBusyId ? "disabled" : ""}>Choose accounts</button>
         ${link.provider === "snaptrade" ? `<button type="button" class="ghost" data-linked-portal="${link.id}">Add brokerage</button>` : ""}
         <button type="button" class="icon-button danger-button" data-linked-remove="${link.id}" aria-label="Remove ${escapeHtml(link.label)}">×</button>
       </div>
       ${link.provider === "simplefin" && Object.keys(link.mappings || {}).length ? `<div class="linked-history-row">
-        <label>Import older transactions from<input type="date" data-linked-history-date value="${escapeHtml(linkedHistoryFrom)}"></label>
-        <button type="button" class="ghost" data-linked-history="${link.id}">Import history</button>
+        <label>Import older transactions from<input type="date" data-linked-history-date value="${escapeHtml(linkedHistoryFrom)}" ${linkedBusyId ? "disabled" : ""}></label>
+        <button type="button" class="ghost" data-linked-history="${link.id}" ${linkedBusyId ? "disabled" : ""}>${linkedBusyId === link.id ? "Working…" : "Import history"}</button>
         <small>How far back it goes depends on the bank (often 3-12 months). Rows you already have or removed with Clean up are brought in again; pending rows wait.</small>
       </div>` : ""}
     </div>`).join("")}
