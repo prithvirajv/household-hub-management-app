@@ -10034,7 +10034,7 @@ function bindViewEvents() {
     const rowRefundMatchPool = [...alreadyKnown, ...rows];
     const newDraftIds = [];
     rows.forEach((row) => {
-      const rowRefundMatch = refundMatch(row, rowRefundMatchPool);
+      const rowRefundMatch = refundMatch({ ...row, accountId: matchedAccount?.id || "" }, rowRefundMatchPool);
       // A refund match (this exact row is the return for a specific
       // purchase) is a much stronger, more literal signal than history -
       // only fall back to "you've categorized payees like this before" when
@@ -13720,7 +13720,7 @@ view.addEventListener("click", (event) => {
 // transaction, marks the draft done and logs the activity. Callers handle validation, saving and rendering.
 function postDraftToLedger(inboxItem) {
   const lineId = inboxItem.lineId || "";
-  const memo = inboxItem.recurringId ? "Recurring bill" : "Accepted bank stream item";
+  const memo = inboxItem.refundMemo || (inboxItem.recurringId ? "Recurring bill" : "Accepted bank stream item");
   const posted = makeTransaction({ date: inboxItem.date, payee: inboxItem.payee, amount: Number(inboxItem.amount), lineId, memo, accountId: inboxItem.accountId || "", orderNumber: inboxItem.orderNumber || "", tags: inboxItem.tags || [] });
   if (inboxItem.externalId) {
     posted.externalId = inboxItem.externalId;
@@ -13978,17 +13978,24 @@ async function runAiImportPassOnce(draftIds, fileName, importedCount, rerun) {
 
   // Decides each row against the live ledger and the other waiting rows, and posts the safe ones. Rows already decided are skipped, so
   // this runs after every AI chunk and the ledger fills as the pass goes instead of only at the very end.
-  const postSafeRows = (ids) => {
+  const postSafeRows = (ids, { final = false } = {}) => {
     ids.forEach((id) => {
       if (settled.has(id)) return;
       const draft = findDraft(id);
       if (!draft) return;
-      settled.add(id);
       const others = [...state.transactions, ...(state.transactionInboxDrafts || []).filter((other) => other.id !== draft.id)];
+      const returnOf = refundMatch(draft, others);
+      const returnOfPosted = !!returnOf && state.transactions.includes(returnOf);
+      // A return whose purchase is still waiting in Bank stream is looked at again at the end of the pass, once that purchase has had its chance to post.
+      if (returnOf && !returnOfPosted && !final) return;
+      // A return nets against the purchase it reverses: same category, same account, so a card credit lowers what that line spent.
+      if (returnOfPosted) adoptRefundMatch(draft, returnOf);
+      settled.add(id);
       const decision = autoAcceptDecision(draft, {
         accountsExist: hasAccounts,
         possibleDuplicate: isDuplicateTransaction(draft, others),
-        refundMatch: refundMatch(draft, others),
+        refundMatch: returnOf,
+        refundMatchPosted: returnOfPosted,
         transferMatch: findTransferCandidate(draft, others),
         accountClosedForDate: !accountAllowsDate(draft.accountId, draft.date),
         // Imported statement rows (a file or a linked bank) are the bank's own record, deposits and payments included; only a deposit that
@@ -13997,6 +14004,7 @@ async function runAiImportPassOnce(draftIds, fileName, importedCount, rerun) {
         paycheckMatch: matchesRecordedPaycheck(draft, state.paycheckOccurrences)
       });
       if (decision.accept) {
+        if (returnOfPosted) draft.refundMemo = refundMemo(returnOf);
         postDraftToLedger(draft);
         added += 1;
       } else {
@@ -14007,6 +14015,12 @@ async function runAiImportPassOnce(draftIds, fileName, importedCount, rerun) {
   const progress = (text) => { bankImportFeedback = `${lead} ${text}`; autosaveState(); render(); };
 
   try {
+    // A return of a purchase already in the ledger takes that purchase's category and account without asking the AI.
+    draftIds.map(findDraft).forEach((draft) => {
+      if (!draft || Number(draft.amount) >= 0) return;
+      const returnOf = refundMatch(draft, state.transactions);
+      if (returnOf) adoptRefundMatch(draft, returnOf);
+    });
     const needAi = draftIds.map(findDraft).filter((draft) => draft && (!draft.lineId || (!draft.accountId && openAccounts().length)));
     const needAiIds = new Set(needAi.map((draft) => draft.id));
     // Rows a rule or history already categorized go in right away, before any AI call.
@@ -14055,7 +14069,7 @@ async function runAiImportPassOnce(draftIds, fileName, importedCount, rerun) {
     aiNote = ` The import pass stopped (${error.message || "unknown error"}) - the remaining rows were left for review.`;
   }
   if (currentHouseholdId() !== householdId) return;
-  postSafeRows(draftIds);
+  postSafeRows(draftIds, { final: true });
 
   const remaining = draftIds.length - added;
   const reasonText = [...reviewReasons.entries()].sort((a, b) => b[1] - a[1]).slice(0, 3).map(([reason, count]) => `${count} ${reason}`).join(", ");

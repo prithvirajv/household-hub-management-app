@@ -168,11 +168,15 @@ more convenient.
   batched request fills in the Subcategory, the account and up to two **tags**
   (reusing tags you already use) for rows your history couldn't match, and
   rows that are confident (a rule, your history, or a high-confidence AI pick)
-  go straight to the ledger, deposits and card payments included. Duplicates,
-  refunds, possible transfers, pending rows, a deposit that matches a paycheck
-  you already recorded (it would count the income twice) and anything the AI
-  was unsure about stay in Bank Stream for review — unsure ones are marked
-  **AI guess - check**. Already have rows waiting? Select **Let AI categorize
+  go straight to the ledger, deposits and card payments included. A **return**
+  (say a $12 credit on a card) that matches an earlier $12 purchase on the
+  same account goes in under that purchase's Subcategory as a negative amount,
+  so it nets the spending back out and lowers what the card owes; its note
+  says which purchase it reverses. Duplicates, possible transfers, pending
+  rows, a return whose purchase is on a different account or still waiting in
+  Bank Stream, a deposit that matches a paycheck you already recorded (it would
+  count the income twice) and anything the AI was unsure about stay in Bank
+  Stream for review — unsure ones are marked **AI guess - check**. Already have rows waiting? Select **Let AI categorize
   and add the N waiting rows** in Bank Stream. Untick the box to review
   everything by hand. The mobile app does the same.
 - No history for a payee and AI import is off? Select **✨ Suggest with AI**

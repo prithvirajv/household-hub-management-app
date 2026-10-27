@@ -2,7 +2,7 @@ const assert = require("node:assert/strict");
 const http = require("node:http");
 const test = require("node:test");
 const { startTestServer } = require("./helpers");
-const { parseBatchSuggestions, autoAcceptDecision, matchesRecordedPaycheck, openingShiftForPostedRow, cleanSuggestedTags } = require("../lib/shared-logic");
+const { parseBatchSuggestions, autoAcceptDecision, matchesRecordedPaycheck, openingShiftForPostedRow, cleanSuggestedTags, refundMatch, adoptRefundMatch, refundMemo } = require("../lib/shared-logic");
 
 async function startGeminiStub(reply) {
   const requests = [];
@@ -144,4 +144,29 @@ test("posting a linked row hands its amount back through the opening balance so 
   assert.equal(openingShiftForPostedRow(checking, { amount: 40 }), 40);
   assert.equal(openingShiftForPostedRow(checking, { amount: -2500 }), -2500);
   assert.equal(openingShiftForPostedRow(card, { amount: 40 }), -40);
+});
+
+test("a card return nets against its purchase: same account, same category, posted straight to the ledger", () => {
+  const purchase = { id: "t1", payee: "Target", amount: 12, date: "2026-07-01", accountId: "card", lineId: "household" };
+  const credit = { payee: "TARGET 1147", amount: -12, date: "2026-07-09", accountId: "card", lineId: "", lineSource: "" };
+  const match = refundMatch(credit, [purchase]);
+  assert.equal(match, purchase);
+  assert.equal(adoptRefundMatch(credit, match), true);
+  assert.equal(credit.lineId, "household");
+  assert.equal(credit.lineSource, "refund");
+  const ctx = { accountsExist: true, possibleDuplicate: false, refundMatch: match, refundMatchPosted: true, transferMatch: null, accountClosedForDate: false, bankFeed: true };
+  assert.equal(autoAcceptDecision(credit, ctx).accept, true);
+  assert.match(refundMemo(match), /12\.00 purchase on 2026-07-01/);
+  // Held for review when the purchase is not in the ledger yet, on another account, filed elsewhere, or from a plain file import.
+  assert.equal(autoAcceptDecision(credit, { ...ctx, refundMatchPosted: false }).reason, "refund");
+  assert.equal(autoAcceptDecision(credit, { ...ctx, refundMatch: { ...purchase, lineId: "dining" } }).reason, "refund");
+  assert.equal(autoAcceptDecision({ ...credit, accountId: "checking" }, ctx).reason, "refund");
+  assert.equal(autoAcceptDecision(credit, { ...ctx, bankFeed: false }).reason, "refund");
+});
+
+test("a fuzzy refund match never pairs a credit with a purchase on a different account", () => {
+  const purchase = { payee: "Target", amount: 12, date: "2026-07-01", accountId: "checking" };
+  assert.equal(refundMatch({ payee: "Target", amount: -12, date: "2026-07-09", accountId: "card" }, [purchase]), null);
+  assert.equal(refundMatch({ payee: "Target", amount: -12, date: "2026-07-09", accountId: "checking" }, [purchase]), purchase);
+  assert.equal(refundMatch({ payee: "Target", amount: -12, date: "2026-07-09" }, [purchase]), purchase, "an unknown account still matches");
 });
