@@ -3042,6 +3042,10 @@ function renderTransactions() {
   });
   const otherMonthEntries = Object.entries(otherMonthCounts).sort(([a], [b]) => a.localeCompare(b));
   const unlinkedDraftCount = allImported.filter((transaction) => !transaction.accountId).length;
+  // Rows waiting on a yes/no that can be settled in one go: both halves of a transfer between two of the household's own accounts, and
+  // rows that are certainly a transaction already recorded. Counted over every month, like the other bulk tools below.
+  const bulkTransferPairs = planBulkTransfers(state.transactionInboxDrafts || []);
+  const bulkDuplicateSkips = planBulkDuplicateSkips(state.transactionInboxDrafts || [], state.transactions);
   // A payee-history bug (fixed) briefly let a shared generic prefix - e.g.
   // "Zelle payment to X" and "Zelle payment from Y" - cross-contaminate
   // subcategory suggestions across a whole statement import. historyMatch
@@ -3205,6 +3209,12 @@ function renderTransactions() {
           ${otherMonthEntries.length ? `<div class="bank-stream-other-months">
             <small>Also pending in:</small>
             ${otherMonthEntries.map(([month, count]) => `<button type="button" class="pill-button" data-switch-budget-month="${month}">${formatMonth(month)} (${count})</button>`).join("")}
+          </div>` : ""}
+          ${bulkTransferPairs.length || bulkDuplicateSkips.length ? `<div class="bank-stream-bulk-account">
+            ${bulkTransferPairs.length ? `<div><small>${bulkTransferPairs.length} pair${bulkTransferPairs.length === 1 ? "" : "s"} of waiting rows move money between your own accounts (every month).</small>
+              <button type="button" id="bankStreamBulkTransfers" class="ghost">Move ${bulkTransferPairs.length} pair${bulkTransferPairs.length === 1 ? "" : "s"} to Transfers…</button></div>` : ""}
+            ${bulkDuplicateSkips.length ? `<div><small>${bulkDuplicateSkips.length} waiting row${bulkDuplicateSkips.length === 1 ? " is" : "s are"} already recorded (every month).</small>
+              <button type="button" id="bankStreamBulkDuplicates" class="ghost">Skip ${bulkDuplicateSkips.length} duplicate${bulkDuplicateSkips.length === 1 ? "" : "s"}…</button></div>` : ""}
           </div>` : ""}
           ${unlinkedDraftCount && state.accounts.length ? `<div class="bank-stream-bulk-account">
             <label><small>Set account for all ${unlinkedDraftCount} unlinked row${unlinkedDraftCount === 1 ? "" : "s"} (every month)</small>
@@ -10745,6 +10755,47 @@ function bindViewEvents() {
     render();
   });
 
+  $("#bankStreamBulkTransfers")?.addEventListener("click", async () => {
+    const pairs = planBulkTransfers(state.transactionInboxDrafts || []);
+    if (!pairs.length) return;
+    const total = pairs.reduce((sum, pair) => sum + Math.abs(Number(pair.out.amount)), 0);
+    const lines = pairs.slice(0, 8).map((pair) => `${formatShortDate(pair.out.date)}  ${exactMoney.format(Math.abs(Number(pair.out.amount)))}  ${accountName(pair.out.accountId)} → ${accountName(pair.in.accountId)}`);
+    const more = pairs.length > lines.length ? `\n…and ${pairs.length - lines.length} more` : "";
+    const confirmed = await showConfirm(`Move ${pairs.length} pair${pairs.length === 1 ? "" : "s"} (${exactMoney.format(total)} in all) to Transfers? Each pair becomes one transfer from the account the money left to the account it landed in, and both waiting rows are cleared. Nothing in the Ledger is touched.\n\n${lines.join("\n")}${more}`, { title: "Move to Transfers", confirmLabel: `Move ${pairs.length}`, danger: false });
+    if (!confirmed) return;
+    // Plan again after the dialog: rows may have changed (a sync or another tab) while it was open.
+    const current = planBulkTransfers(state.transactionInboxDrafts || []);
+    const gone = new Set();
+    state.transfers ||= [];
+    state.transactionInboxDone ||= [];
+    current.forEach((pair) => {
+      state.transfers.unshift({ id: uniqueId("transfer"), date: pair.out.date, fromAccountId: pair.out.accountId, toAccountId: pair.in.accountId, amount: Math.abs(Number(pair.out.amount)), memo: (pair.out.payee || "").trim() });
+      [pair.out.id, pair.in.id].forEach((id) => { gone.add(id); if (!state.transactionInboxDone.includes(id)) state.transactionInboxDone.push(id); });
+    });
+    state.transactionInboxDrafts = (state.transactionInboxDrafts || []).filter((draft) => !gone.has(draft.id));
+    state.household.activity.unshift(`Moved ${current.length} waiting bank row pair${current.length === 1 ? "" : "s"} to Transfers`);
+    transactionValidationFeedback = `Moved ${current.length} pair${current.length === 1 ? "" : "s"} to Transfers.`;
+    autosaveState();
+    render();
+  });
+
+  $("#bankStreamBulkDuplicates")?.addEventListener("click", async () => {
+    const skips = planBulkDuplicateSkips(state.transactionInboxDrafts || [], state.transactions);
+    if (!skips.length) return;
+    const lines = skips.slice(0, 8).map((draft) => `${formatShortDate(draft.date)}  ${exactMoney.format(Math.abs(Number(draft.amount)))}  ${draft.payee}`);
+    const more = skips.length > lines.length ? `\n…and ${skips.length - lines.length} more` : "";
+    const confirmed = await showConfirm(`Skip ${skips.length} waiting row${skips.length === 1 ? "" : "s"} that ${skips.length === 1 ? "is" : "are"} already recorded? They are the same bank transaction (or the same amount, date and payee) as an entry already in your Ledger, so adding them would count the money twice. Nothing in the Ledger is touched.\n\n${lines.join("\n")}${more}`, { title: "Skip duplicates", confirmLabel: `Skip ${skips.length}`, danger: false });
+    if (!confirmed) return;
+    const current = new Set(planBulkDuplicateSkips(state.transactionInboxDrafts || [], state.transactions).map((draft) => draft.id));
+    state.transactionInboxDone ||= [];
+    current.forEach((id) => { if (!state.transactionInboxDone.includes(id)) state.transactionInboxDone.push(id); });
+    state.transactionInboxDrafts = (state.transactionInboxDrafts || []).filter((draft) => !current.has(draft.id));
+    state.household.activity.unshift(`Skipped ${current.size} waiting bank row${current.size === 1 ? "" : "s"} already in the Ledger`);
+    transactionValidationFeedback = `Skipped ${current.size} duplicate${current.size === 1 ? "" : "s"}.`;
+    autosaveState();
+    render();
+  });
+
   $("#bankStreamClearAccountButton")?.addEventListener("click", async () => {
     const select = $("#bankStreamClearAccountSelect");
     const accountId = select?.value;
@@ -14372,13 +14423,19 @@ function maybeCatchUpBankStream() {
 function runAiImportPass(draftIds, fileName, importedCount, { rerun = false } = {}) {
   aiImportQueue = aiImportQueue.then(async () => {
     aiImportRunning = true;
+    // A pass that has not finished in AI_IMPORT_PASS_TIMEOUT_MS is declared stuck: the button comes back and the queue moves on. The pass
+    // itself checks `stale` after every await and stops quietly, so it cannot keep editing Bank stream behind the next one.
+    const pass = { stale: false };
     try {
-      await runAiImportPassOnce(draftIds, fileName, importedCount, rerun);
+      await withTimeout(runAiImportPassOnce(draftIds, fileName, importedCount, rerun, pass), AI_IMPORT_PASS_TIMEOUT_MS, "it took longer than expected");
     } catch (error) {
-      bankImportFeedback = `The AI import pass stopped (${error?.message || "unknown error"}); the rows are still in Bank stream.`;
+      pass.stale = true;
+      bankImportFeedback = `The AI import pass stopped (${error?.message || "unknown error"}); the rows are still in Bank stream - press the button to try again.`;
+      autosaveState();
       render();
     } finally {
       aiImportRunning = false;
+      render();
     }
   });
   return aiImportQueue;
@@ -14386,13 +14443,15 @@ function runAiImportPass(draftIds, fileName, importedCount, { rerun = false } = 
 
 // Each AI call gets this long before the pass gives up on it; the rows it covered stay in Bank stream and the pass moves on.
 const AI_IMPORT_CALL_TIMEOUT_MS = 45000;
+// A whole pass is at most a few chunks of AI_IMPORT_CHUNK_SIZE rows, each bounded above; past this it is stuck.
+const AI_IMPORT_PASS_TIMEOUT_MS = 4 * 60 * 1000;
 
 function withTimeout(promise, ms, message) {
   let timer;
   return Promise.race([promise, new Promise((_resolve, reject) => { timer = setTimeout(() => reject(new Error(message)), ms); })]).finally(() => clearTimeout(timer));
 }
 
-async function runAiImportPassOnce(draftIds, fileName, importedCount, rerun) {
+async function runAiImportPassOnce(draftIds, fileName, importedCount, rerun, pass = { stale: false }) {
   const lead = rerun ? `Checked ${importedCount} waiting row${importedCount === 1 ? "" : "s"}.` : `Imported ${importedCount} from ${fileName}.`;
   const householdId = currentHouseholdId();
   const findDraft = (id) => (state.transactionInboxDrafts || []).find((draft) => draft.id === id);
@@ -14442,7 +14501,7 @@ async function runAiImportPassOnce(draftIds, fileName, importedCount, rerun) {
       }
     });
   };
-  const progress = (text) => { bankImportFeedback = `${lead} ${text}`; autosaveState(); render(); };
+  const progress = (text) => { if (pass.stale) return; bankImportFeedback = `${lead} ${text}`; autosaveState(); render(); };
 
   try {
     // Salary in the deposits becomes a paycheck first, so its deposit rows are folded in rather than posted as extra income.
@@ -14473,6 +14532,7 @@ async function runAiImportPassOnce(draftIds, fileName, importedCount, rerun) {
       const accounts = openAccounts().map((account) => ({ id: account.id, label: account.type ? `${account.name} (${account.type})` : account.name }));
       const knownTags = [...new Set(state.transactions.flatMap((transaction) => transaction.tags || []))].slice(0, 60);
       for (let start = 0; start < needAi.length; start += AI_IMPORT_CHUNK_SIZE) {
+        if (pass.stale) break;
         const chunk = needAi.slice(start, start + AI_IMPORT_CHUNK_SIZE);
         progress(`AI is categorizing rows ${start + 1}-${start + chunk.length} of ${needAi.length} (${added} added to the ledger so far)…`);
         let results = [];
@@ -14487,7 +14547,7 @@ async function runAiImportPassOnce(draftIds, fileName, importedCount, rerun) {
           // The rows still go into the ledger marked "Needs a category"; the overnight job categorizes them once the AI answers again.
           if (/not configured/i.test(String(error.message))) break;
         }
-        if (currentHouseholdId() !== householdId) return;
+        if (currentHouseholdId() !== householdId || pass.stale) return;
         results.forEach((result) => {
           const draft = findDraft(result.id);
           if (!draft) return;
@@ -14511,7 +14571,7 @@ async function runAiImportPassOnce(draftIds, fileName, importedCount, rerun) {
   } catch (error) {
     aiNote = ` The import pass stopped (${error.message || "unknown error"}) - the remaining rows were left for review.`;
   }
-  if (currentHouseholdId() !== householdId) return;
+  if (currentHouseholdId() !== householdId || pass.stale) return;
   postSafeRows(draftIds, { final: true });
 
   const remaining = draftIds.filter(findDraft).length;

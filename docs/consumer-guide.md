@@ -199,6 +199,17 @@ more convenient.
   and the overnight job gives them a category once the AI answers again. Already have rows waiting? Select **Let AI
   categorize and add the N waiting rows** in Bank Stream (it also runs once when
   you open Transactions). Untick the box to review everything by hand. The mobile app does the same.
+  If that button still says **Working…** after about four minutes the pass is
+  treated as stuck: the button comes back with a note and you can press it again.
+  Rows held as **possible transfer** or **possible duplicate** can be settled in
+  bulk: **Move N pairs to Transfers…** turns each pair of waiting rows that move
+  money between two of your own accounts (opposite amounts, different accounts,
+  within two days) into one transfer and clears both rows, and **Skip N
+  duplicates…** drops waiting rows that are certainly already recorded (same bank
+  id, or the same amount, date and a shared payee word as an entry you typed).
+  Both show the list and total first and do nothing until you confirm; neither
+  touches the Ledger, and a row whose other half is already in the Ledger stays
+  for a one-by-one look. (Web only for now.)
 - No history for a payee and AI import is off? Select **✨ Suggest with AI**
   for Subcategory, or **✨ Suggest account with AI** for the account (both on
   the Add transaction form, or their matching ✨ buttons next to an unlinked

@@ -1,0 +1,46 @@
+const assert = require("node:assert/strict");
+const test = require("node:test");
+const { planBulkTransfers, planBulkDuplicateSkips } = require("../lib/shared-logic");
+
+const draft = (id, payee, amount, date, accountId, extra = {}) => ({ id, payee, amount, date, accountId, ...extra });
+
+test("both halves of a transfer between two own accounts are paired once, nearest dates first, and the money direction follows the sign", () => {
+  const drafts = [
+    draft("a", "TRANSFER TO MBR ***7", 1500, "2026-09-25", "deebiga"),
+    draft("b", "TRANSFER FROM ACCT", -1500, "2026-09-25", "prithvi"),
+    draft("c", "ELECTRONIC WITHDRAWAL", 1500, "2026-09-24", "prithvi"),
+    draft("d", "ONLINE PAYMENT, THANK YOU", -1500, "2026-09-23", "card"),
+    draft("e", "ONLINE PAYMENT, THANK YOU", -1500, "2026-09-25", "card")
+  ];
+  const pairs = planBulkTransfers(drafts);
+  assert.deepEqual(pairs.map((pair) => [pair.out.id, pair.in.id]), [["c", "d"], ["a", "b"]]);
+  assert.equal(new Set(pairs.flatMap((pair) => [pair.out.id, pair.in.id])).size, 4, "a row is used once");
+});
+
+test("rows with no account, pending rows, same-account rows, far-apart dates and different amounts are left for review", () => {
+  const none = (out, other) => assert.deepEqual(planBulkTransfers([out, other]), []);
+  none(draft("a", "OUT", 100, "2026-09-25", ""), draft("b", "IN", -100, "2026-09-25", "y"));
+  none(draft("c", "OUT", 100, "2026-09-25", "x", { isPending: true }), draft("d", "IN", -100, "2026-09-25", "y"));
+  none(draft("e", "OUT", 100, "2026-09-25", "x"), draft("f", "IN", -100, "2026-09-25", "x"));
+  none(draft("g", "OUT", 100, "2026-09-25", "x"), draft("h", "IN", -100, "2026-10-05", "y"));
+  none(draft("i", "OUT", 100, "2026-09-25", "x"), draft("j", "IN", -101, "2026-09-25", "y"));
+  assert.equal(planBulkTransfers([draft("k", "OUT", 100, "2026-09-25", "x"), draft("l", "IN", -100, "2026-09-26", "y")]).length, 1);
+});
+
+test("duplicates: the same bank id as a recorded or earlier row, or the same amount, date and a shared payee word as a hand-entered entry", () => {
+  const ledger = [
+    { externalId: "sf:A:1", payee: "COSTCO", amount: 50, date: "2026-09-01" },
+    { payee: "Coffee House", amount: 12, date: "2026-09-10" }
+  ];
+  const drafts = [
+    draft("1", "COSTCO WHSE", 50, "2026-09-01", "a", { externalId: "sf:A:1" }),
+    draft("2", "SQ *COFFEE HOUSE 123", 12, "2026-09-11", "a", { externalId: "sf:A:2" }),
+    draft("3", "CHIPOTLE", 12, "2026-09-10", "a", { externalId: "sf:A:3" }),
+    draft("4", "COSTCO WHSE", 50, "2026-09-01", "a", { externalId: "sf:A:4" }),
+    draft("5", "ANOTHER", 9, "2026-09-12", "a", { externalId: "sf:A:5" }),
+    draft("6", "ANOTHER", 9, "2026-09-12", "a", { externalId: "sf:A:5" }),
+    draft("7", "TWO COFFEES", 5, "2026-09-12", "a"),
+    draft("8", "TWO COFFEES", 5, "2026-09-12", "a")
+  ];
+  assert.deepEqual(planBulkDuplicateSkips(drafts, ledger).map((d) => d.id), ["1", "2", "6"], "a different bank id is a different transaction; two untagged waiting rows are not judged against each other");
+});
