@@ -536,7 +536,7 @@ entry. It is read-only: FamilyLoop can never move money or place trades.
 - **Import history:** under a bank link, **Import older transactions from**
   a date (for example January 1) fetches everything from then on for the
   accounts you chose; it goes to Bank stream like any import. How far back
-  it reaches depends on the bank (often 3-12 months), rows already in the
+  it reaches depends on the bank (often 3-12 months; if an account comes back with less than you asked for, the status line names it and the earliest date it returned), rows already in the
   ledger or waiting in Bank stream are skipped, and rows you removed earlier
   (Clean up) come back. If you're replacing hand-entered history, clean it up
   first so the two don't double up.

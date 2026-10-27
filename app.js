@@ -14154,7 +14154,9 @@ async function syncLinkedAccount(linkId, addRows, { quiet = false, sinceDate = "
     let summary;
     if (link.provider === "simplefin") {
       const result = applySimplefinSync(link, payload, addRows, { ignoreRemembered: Boolean(sinceDate) });
+      result.coverage = historyCoverageNotes(payload.accounts, link.mappings, sinceDate, accountName);
       summary = `${link.label}: ${result.imported} new transaction${result.imported === 1 ? "" : "s"} sent to Bank stream${result.balancesUpdated ? `, ${result.balancesUpdated} balance${result.balancesUpdated === 1 ? "" : "s"} updated` : ""}${result.groupsMatched ? `, ${result.groupsMatched} investment account${result.groupsMatched === 1 ? "" : "s"} matched to the bank balance` : ""}${result.debtsMatched ? `, ${result.debtsMatched} loan${result.debtsMatched === 1 ? "" : "s"} matched to the amount owed` : ""}${result.pendingSkipped ? `; ${result.pendingSkipped} pending skipped until they post` : ""}${result.unmapped ? `; ${result.unmapped} from accounts you chose not to import` : ""}.`;
+      if (result.coverage.length) summary += ` Less history than you asked for: ${result.coverage.join("; ")} - that is all the bank holds (it varies by bank), or all it would send.`;
       if (payload.errors?.length) summary += ` The bank reported: ${payload.errors.join("; ")}`;
     } else {
       const result = applySnaptradeSync(link, payload);

@@ -12,7 +12,7 @@
 const crypto = require("node:crypto");
 const { applyLinkedPayload } = require("../lib/linked-apply");
 
-const SIMPLEFIN_WINDOW_DAYS = 55; // the Bridge caps one request at 60 days
+const SIMPLEFIN_WINDOW_DAYS = 40; // the Bridge hard-caps one request at 60 days and warns above 45 ("exceeds recommended range"); stay under both
 const SIMPLEFIN_DEFAULT_LOOKBACK_DAYS = 30;
 const SIMPLEFIN_OVERLAP_DAYS = 3; // re-ask a few days we already saw; the client drops rows it already imported
 const BROKERAGE_KINDS_AS_FUND = new Set(["mutualfund"]);
@@ -148,10 +148,15 @@ async function syncSimplefin(accessUrl, { startUnix, endUnix }, options = {}) {
     });
   }
   const list = [...accounts.values()];
+  const rowsByAccount = list.map((account) => normalizeSimplefinTransactions(account));
   return {
     errors: [...new Set(errors)],
-    accounts: list.map(normalizeSimplefinAccount),
-    transactions: list.flatMap((account) => normalizeSimplefinTransactions(account))
+    // Each account also reports how far back the bank actually returned rows, so a history import can say so when a bank holds less than was asked for.
+    accounts: list.map((account, index) => {
+      const dates = rowsByAccount[index].filter((row) => !row.pending).map((row) => row.date).sort();
+      return { ...normalizeSimplefinAccount(account), transactionCount: rowsByAccount[index].length, oldestTransactionDate: dates[0] || "" };
+    }),
+    transactions: rowsByAccount.flat()
   };
 }
 
