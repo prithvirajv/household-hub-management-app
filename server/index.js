@@ -3589,9 +3589,18 @@ app.put("/api/state", requireSession, requireEditAccess, async (req, res, next) 
     const baseHeader = req.get("X-Base-Version");
     const baseVersion = baseHeader !== undefined && /^\d+$/.test(baseHeader) ? Number(baseHeader) : null;
     const staleResponse = () => res.status(409).json({ error: "This household was updated elsewhere (for example new bank transactions applied overnight), so your screen was refreshed - repeat your last change if it is missing." });
+    // A save that would drop most of the ledger is almost always an out-of-date screen (a second tab or device that loaded the household
+    // before an import and keeps autosaving its older copy - every few minutes with live prices). It is refused, not applied; the screen
+    // reloads the current household. A deliberate removal (the Clean up tool) says so with X-Allow-Shrink.
+    const allowShrink = req.get("X-Allow-Shrink") === "1";
+    const incomingLedger = Array.isArray(req.body.transactions) ? req.body.transactions.length : 0;
+    const shrinkResponse = (existing) => res.status(409).json({ error: `This household was updated elsewhere - saving this screen would have removed most of your ledger (${incomingLedger} of ${existing} transactions), so it was refused and the screen refreshed. Nothing was lost.` });
+    const SHRINK_GUARD_MIN_ROWS = 40;
     if (MEMORY_DB) {
       const household = memoryDb.households.find((item) => item.id === req.sessionUser.household_id);
       if (baseVersion !== null && baseVersion !== (household.applied_version || 0)) return staleResponse();
+      const existingLedger = Array.isArray(household.app_state?.transactions) ? household.app_state.transactions.length : 0;
+      if (!allowShrink && existingLedger >= SHRINK_GUARD_MIN_ROWS && incomingLedger < existingLedger * 0.5) return shrinkResponse(existingLedger);
       household.app_state = req.body;
       household.state_version = (household.state_version || 0) + 1;
       const ownerId = memoryPrimaryOwnerId(req.sessionUser.household_id);
@@ -3604,6 +3613,11 @@ app.put("/api/state", requireSession, requireEditAccess, async (req, res, next) 
     }
 
     const ownerId = await databasePrimaryOwnerId(pool, req.sessionUser.household_id);
+    if (!allowShrink) {
+      const existing = await pool.query("SELECT jsonb_array_length(COALESCE(app_state->'transactions', '[]'::jsonb)) AS ledger FROM households WHERE id = $1", [req.sessionUser.household_id]);
+      const existingLedger = Number(existing.rows[0]?.ledger || 0);
+      if (existingLedger >= SHRINK_GUARD_MIN_ROWS && incomingLedger < existingLedger * 0.5) return shrinkResponse(existingLedger);
+    }
     const written = await pool.query(
       "UPDATE households SET app_state = $1, updated_at = now(), state_version = state_version + 1 WHERE id = $2 AND ($3::bigint IS NULL OR applied_version = $3::bigint) RETURNING applied_version",
       [req.body, req.sessionUser.household_id, baseVersion]

@@ -209,6 +209,12 @@ user secret) are AES-256-GCM encrypted with `LINK_ENCRYPTION_KEY` and never retu
   threw away imports whenever a second tab saved). Clients that send no version (older mobile builds) save unconditionally, so until a mobile
   build that sends it ships, a stale phone save can erase an overnight apply (the next night's overlap window re-delivers the last three days;
   use Import history for older rows).
+- **Shrink guard (why a stale tab cannot wipe the ledger):** `PUT /api/state` refuses (409, "updated elsewhere ... would have removed most of your
+  ledger") a save whose `transactions` has fewer than half the rows currently stored when the stored ledger has 40 or more, unless the request
+  carries `X-Allow-Shrink: 1` (sent only by the Clean up tool, web and mobile). The case it exists for: a second tab or device that loaded the
+  household before an import keeps autosaving its older copy (the live-price refresh saves every 5 minutes) and each save replaced the imported
+  ledger - visible in the logs as `PUT /api/state` request sizes dropping back to the pre-import size at :x3:35 every five minutes. Old mobile
+  builds do not send the Clean up header, so Clean up from an old build is refused until updated.
 - **AI categorization limits:** `geminiBatchSuggest` goes to the next model (`GEMINI_FALLBACK_MODELS`, default `gemini-2.5-flash,gemini-2.5-flash-lite`)
   on a 429/5xx/404, then once more round the list after a pause, and logs each failed attempt (`Gemini batch suggest <model> attempt N failed:
   HTTP ...`). "This model is currently experiencing high demand" 503s from the main model are common and last minutes. Rows the AI could not

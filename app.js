@@ -441,12 +441,13 @@ let stateVersion = null;
 let stateSaveChain = Promise.resolve();
 let stateSavesInFlight = 0;
 
-function putState(householdId, { keepalive = false } = {}) {
+// allowShrink is passed by the one flow that deliberately removes most of the ledger (Clean up), so the server does not take it for an out-of-date screen.
+function putState(householdId, { keepalive = false, allowShrink = false } = {}) {
   const send = () => {
     stateSavesInFlight += 1;
     return api("/api/state", {
       method: "PUT",
-      headers: { "X-Household-Id": householdId || "", ...(stateVersion !== null ? { "X-Base-Version": String(stateVersion) } : {}) },
+      headers: { "X-Household-Id": householdId || "", ...(stateVersion !== null ? { "X-Base-Version": String(stateVersion) } : {}), ...(allowShrink ? { "X-Allow-Shrink": "1" } : {}) },
       body: JSON.stringify(state),
       keepalive
     }).finally(() => { stateSavesInFlight -= 1; });
@@ -547,7 +548,7 @@ document.addEventListener("visibilitychange", () => {
 });
 window.addEventListener("pagehide", flushPendingAutosave);
 
-async function saveStateNow() {
+async function saveStateNow({ allowShrink = false } = {}) {
   if (!state) return;
   if (!looksLikeCompleteState(state)) {
     console.error("Refusing to save - state looks incomplete", state);
@@ -557,7 +558,7 @@ async function saveStateNow() {
   autosavePending = false;
   clearTimeout(autosaveTimer);
   stampChangedNotes(state.notes?.entries, noteBaseline, new Date().toISOString());
-  await putState(householdIdAtCall);
+  await putState(householdIdAtCall, { allowShrink });
 }
 
 function showToast(message, { type = "error" } = {}) {
@@ -11891,7 +11892,7 @@ function bindViewEvents() {
     state.transactions = result.transactions;
     state.transactionInboxDrafts = result.transactionInboxDrafts;
     state.household.activity.unshift(`Cleaned up ${result.removedLedger} ledger transaction${result.removedLedger === 1 ? "" : "s"} and ${result.removedStream} Bank stream row${result.removedStream === 1 ? "" : "s"}`);
-    await saveStateNow();
+    await saveStateNow({ allowShrink: true });
     bankImportFeedback = `Removed ${result.removedLedger} ledger transaction${result.removedLedger === 1 ? "" : "s"} and ${result.removedStream} Bank stream row${result.removedStream === 1 ? "" : "s"}.`;
     // Linked accounts re-match the bank's balance (sync reconciles opening balances); removed rows are not re-imported.
     await loadLinkedAccounts(false);

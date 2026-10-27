@@ -405,3 +405,34 @@ test("a history import leaves out the whole months a bank only partly returned a
   assert.equal(trimPartialHistory(payload, "").payload, payload);
   assert.equal(trimPartialHistory({ ...payload, provider: "snaptrade" }, "2026-01-01").gaps.length, 0);
 });
+
+test("an out-of-date screen cannot overwrite an imported ledger with an almost empty one; a deliberate Clean up can", async () => {
+  const server = await startTestServer();
+  try {
+    const signup = await server.request("/api/auth/signup", { method: "POST", body: JSON.stringify({ email: "shrink@example.com", password: "Shrink-Guard-Password-123!", name: "S", householdName: "Shrink home", country: "US" }) });
+    const cookie = signup.cookie;
+    const loaded = await server.request("/api/state", { headers: { cookie } });
+    const state = loaded.body;
+    const stale = JSON.parse(JSON.stringify(state));
+    state.transactions = Array.from({ length: 60 }, (_, i) => ({ date: "2026-05-01", payee: `P${i}`, amount: 5, lineId: "", memo: "", accountId: "", orderNumber: "", tags: [] }));
+    assert.equal((await server.request("/api/state", { method: "PUT", headers: { cookie }, body: JSON.stringify(state) })).status, 200);
+
+    // A second tab that loaded before the import keeps saving its older, empty-ledger copy: refused, and nothing is lost.
+    const refused = await server.request("/api/state", { method: "PUT", headers: { cookie }, body: JSON.stringify(stale) });
+    assert.equal(refused.status, 409);
+    assert.match(refused.body.error, /updated elsewhere/);
+    assert.match(refused.body.error, /0 of 60 transactions/);
+    assert.equal((await server.request("/api/state", { headers: { cookie } })).body.transactions.length, 60);
+
+    // Ordinary edits - removing a few rows, or all of a small ledger - are not mistaken for it.
+    const fewer = { ...state, transactions: state.transactions.slice(0, 40) };
+    assert.equal((await server.request("/api/state", { method: "PUT", headers: { cookie }, body: JSON.stringify(fewer) })).status, 200);
+
+    // The Clean up tool says it means it.
+    const cleaned = await server.request("/api/state", { method: "PUT", headers: { cookie, "x-allow-shrink": "1" }, body: JSON.stringify(stale) });
+    assert.equal(cleaned.status, 200);
+    assert.equal((await server.request("/api/state", { headers: { cookie } })).body.transactions.length, 0);
+    // A small ledger can be emptied freely.
+    assert.equal((await server.request("/api/state", { method: "PUT", headers: { cookie }, body: JSON.stringify({ ...stale, transactions: [] }) })).status, 200);
+  } finally { await server.stop(); }
+});
