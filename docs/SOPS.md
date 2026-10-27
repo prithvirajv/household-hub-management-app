@@ -215,6 +215,11 @@ user secret) are AES-256-GCM encrypted with `LINK_ENCRYPTION_KEY` and never retu
   threw away imports whenever a second tab saved). Clients that send no version (older mobile builds) save unconditionally, so until a mobile
   build that sends it ships, a stale phone save can erase an overnight apply (the next night's overlap window re-delivers the last three days;
   use Import history for older rows).
+- **Ledger entries are never removed automatically:** `PUT /api/state` also refuses (409) a save that would drop any stored ledger entry carrying a
+  bank id (`externalId`) unless the request has `X-Allow-Shrink: 1`, which the apps send only for a person's own removal (delete, move to Transfers,
+  split entirely with friends, Clean up; a 10-second window so the follow-up autosave carries it). Salary detection no longer removes ledger rows
+  (it only skips deposits still waiting in Bank stream, and starts the paycheck at the next payday). The nightly catch-up (`retryWaitingDrafts`)
+  re-decides every bank row still waiting in Bank stream, asking the AI at most once per row (`aiAskedAt`).
 - **Shrink guard (why a stale tab cannot wipe the ledger):** `PUT /api/state` refuses (409, "updated elsewhere ... would have removed most of your
   ledger") a save whose `transactions` has fewer than half the rows currently stored when the stored ledger has 40 or more, unless the request
   carries `X-Allow-Shrink: 1` (sent only by the Clean up tool, web and mobile). The case it exists for: a second tab or device that loaded the

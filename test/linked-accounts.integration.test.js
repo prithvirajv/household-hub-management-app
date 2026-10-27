@@ -533,3 +533,34 @@ test("a slow SimpleFIN range is split and retried instead of losing the import; 
   assert.equal(result.failedThrough, "2026-03-01");
   assert.deepEqual(gapsFromFailedWindows(payload, [], {}).gaps, []);
 });
+
+
+test("a save can never drop an entry that came from the bank unless the person asked to remove it", async () => {
+  const server = await startTestServer();
+  try {
+    const signup = await server.request("/api/auth/signup", { method: "POST", body: JSON.stringify({ email: "protect@example.com", password: "Protect-Ledger-Password-123!", name: "P", householdName: "Protect home", country: "US" }) });
+    const cookie = signup.cookie;
+    const state = (await server.request("/api/state", { headers: { cookie } })).body;
+    const row = (n, externalId) => ({ date: "2026-05-01", payee: `P${n}`, amount: 5, lineId: "", memo: "", accountId: "", orderNumber: "", tags: [], ...(externalId ? { externalId } : {}) });
+    state.transactions = [row(1, "sf:a:1"), row(2, "sf:a:2"), row(3), row(4, "sf:a:4")];
+    assert.equal((await server.request("/api/state", { method: "PUT", headers: { cookie }, body: JSON.stringify(state) })).status, 200);
+
+    // An older copy that does not have two of the bank entries yet (a second tab) is refused, even though only a few rows differ.
+    const stale = { ...state, transactions: [row(1, "sf:a:1"), row(3)] };
+    const refused = await server.request("/api/state", { method: "PUT", headers: { cookie }, body: JSON.stringify(stale) });
+    assert.equal(refused.status, 409);
+    assert.match(refused.body.error, /updated elsewhere/);
+    assert.match(refused.body.error, /2 bank-imported ledger entries/);
+    assert.equal((await server.request("/api/state", { headers: { cookie } })).body.transactions.length, 4, "nothing was lost");
+
+    // Adding entries, editing them, and removing one that was typed by hand are all fine.
+    const edited = { ...state, transactions: [{ ...row(1, "sf:a:1"), lineId: "x" }, row(2, "sf:a:2"), row(4, "sf:a:4"), row(5), row(6, "sf:a:6")] };
+    assert.equal((await server.request("/api/state", { method: "PUT", headers: { cookie }, body: JSON.stringify(edited) })).status, 200);
+
+    // Deleting a bank entry yourself says so.
+    const deleted = { ...edited, transactions: edited.transactions.filter((t) => t.externalId !== "sf:a:2") };
+    assert.equal((await server.request("/api/state", { method: "PUT", headers: { cookie }, body: JSON.stringify(deleted) })).status, 409, "without saying so it is refused");
+    assert.equal((await server.request("/api/state", { method: "PUT", headers: { cookie, "x-allow-shrink": "1" }, body: JSON.stringify(deleted) })).status, 200);
+    assert.deepEqual((await server.request("/api/state", { headers: { cookie } })).body.transactions.map((t) => t.externalId || "hand"), ["sf:a:1", "sf:a:4", "hand", "sf:a:6"]);
+  } finally { await server.stop(); }
+});

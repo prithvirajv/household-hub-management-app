@@ -3596,11 +3596,19 @@ app.put("/api/state", requireSession, requireEditAccess, async (req, res, next) 
     const incomingLedger = Array.isArray(req.body.transactions) ? req.body.transactions.length : 0;
     const shrinkResponse = (existing) => res.status(409).json({ error: `This household was updated elsewhere - saving this screen would have removed most of your ledger (${incomingLedger} of ${existing} transactions), so it was refused and the screen refreshed. Nothing was lost.` });
     const SHRINK_GUARD_MIN_ROWS = 40;
+    // Entries that came from a linked bank (they carry the bank's transaction id) are never dropped by a save unless the person asked for that
+    // (deleting the entry, moving it to Transfers, splitting it entirely with friends, or Clean up all send X-Allow-Shrink). An out-of-date
+    // screen that simply does not have them yet is refused instead.
+    const incomingBankIds = new Set((Array.isArray(req.body.transactions) ? req.body.transactions : []).map((transaction) => transaction?.externalId).filter(Boolean));
+    const droppedBankEntries = (storedIds) => (allowShrink ? 0 : storedIds.filter((id) => !incomingBankIds.has(id)).length);
+    const droppedResponse = (count) => res.status(409).json({ error: `This household was updated elsewhere - saving this screen would have removed ${count} bank-imported ledger entr${count === 1 ? "y" : "ies"}, so it was refused and the screen refreshed. Nothing was lost. (Deleting an entry yourself still works.)` });
     if (MEMORY_DB) {
       const household = memoryDb.households.find((item) => item.id === req.sessionUser.household_id);
       if (baseVersion !== null && baseVersion !== (household.applied_version || 0)) return staleResponse();
       const existingLedger = Array.isArray(household.app_state?.transactions) ? household.app_state.transactions.length : 0;
       if (!allowShrink && existingLedger >= SHRINK_GUARD_MIN_ROWS && incomingLedger < existingLedger * 0.5) return shrinkResponse(existingLedger);
+      const droppedMem = droppedBankEntries((household.app_state?.transactions || []).map((transaction) => transaction?.externalId).filter(Boolean));
+      if (droppedMem) return droppedResponse(droppedMem);
       household.app_state = req.body;
       household.state_version = (household.state_version || 0) + 1;
       const ownerId = memoryPrimaryOwnerId(req.sessionUser.household_id);
@@ -3617,6 +3625,9 @@ app.put("/api/state", requireSession, requireEditAccess, async (req, res, next) 
       const existing = await pool.query("SELECT jsonb_array_length(COALESCE(app_state->'transactions', '[]'::jsonb)) AS ledger FROM households WHERE id = $1", [req.sessionUser.household_id]);
       const existingLedger = Number(existing.rows[0]?.ledger || 0);
       if (existingLedger >= SHRINK_GUARD_MIN_ROWS && incomingLedger < existingLedger * 0.5) return shrinkResponse(existingLedger);
+      const storedBankIds = await pool.query("SELECT t->>'externalId' AS id FROM households, jsonb_array_elements(COALESCE(app_state->'transactions', '[]'::jsonb)) AS t WHERE households.id = $1 AND t->>'externalId' IS NOT NULL", [req.sessionUser.household_id]);
+      const droppedDb = droppedBankEntries(storedBankIds.rows.map((row) => row.id));
+      if (droppedDb) return droppedResponse(droppedDb);
     }
     const written = await pool.query(
       "UPDATE households SET app_state = $1, updated_at = now(), state_version = state_version + 1 WHERE id = $2 AND ($3::bigint IS NULL OR applied_version = $3::bigint) RETURNING applied_version",

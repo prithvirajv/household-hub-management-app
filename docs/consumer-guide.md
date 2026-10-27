@@ -247,10 +247,12 @@ more convenient.
   and a paycheck you already entered by hand for about the same amount is left
   as it is.
 - Home shows **Added from the salary in your accounts** with **Keep** and
-  **Undo**. The bank's own deposit rows are folded in so the money isn't
-  counted twice: waiting rows are skipped, and uncategorized ones already in
-  the ledger are taken out (the account keeps the bank's balance). Undo puts
-  every one of them back and stops that payer being detected again.
+  **Undo**. The paycheck starts at the **next payday** after the latest
+  deposit: what was already paid is in your ledger and **stays there** - nothing
+  that reached the ledger is ever taken out automatically - and only the
+  deposits still waiting in Bank Stream are folded into the paycheck, so income
+  isn't counted twice. Undo puts those waiting deposits back and stops that
+  payer being detected again.
 - If the pay changes, the paycheck follows once two deposits agree on the new
   amount. Pay that arrives twice a month is not guessed at - add it by hand.
 
@@ -569,6 +571,15 @@ entry. It is read-only: FamilyLoop can never move money or place trades.
   ledger or waiting in Bank stream are skipped, and rows you removed earlier
   (Clean up) come back. If you're replacing hand-entered history, clean it up
   first so the two don't double up.
+- **Nothing in the ledger disappears on its own.** Once a transaction is in
+  the ledger it stays until you remove it yourself (delete it, move it to
+  Transfers, split it entirely with friends, or Clean up). A save from an
+  out-of-date screen that would drop bank-imported entries is refused and that
+  screen refreshes instead. The overnight sync only **adds**: a row it already
+  knows (including one you deleted) is never added again, so each night brings
+  in just the new transactions (it re-reads a few days to catch late-posting
+  ones), and then gives everything still waiting in Bank Stream another chance
+  at the ledger.
 - **Overnight, without opening the app:** every night FamilyLoop fetches your
   linked accounts and applies them for you - new transactions are categorized
   (your rules and history first, then AI) and the ones that are safe go

@@ -10,7 +10,7 @@
 // Credentials (a SimpleFIN access URL, a SnapTrade userSecret) are encrypted at rest with AES-256-GCM using LINK_ENCRYPTION_KEY, and
 // are never returned to the client. Without the key the whole feature reports "not configured" rather than storing anything in clear.
 const crypto = require("node:crypto");
-const { applyLinkedPayload, fillUncategorizedLedgerRows } = require("../lib/linked-apply");
+const { applyLinkedPayload, fillUncategorizedLedgerRows, retryWaitingDrafts, uniqueIdFactory } = require("../lib/linked-apply");
 
 const SIMPLEFIN_WINDOW_DAYS = 55; // the Bridge hard-caps one request at 60 days and only warns above 45 (data still comes back); every request counts against its daily limit, so use few
 // A link's first sync (and the first after its accounts are changed) starts at the first day of last month, not "30 days ago": whole months
@@ -680,18 +680,20 @@ function registerLinkedAccountRoutes({ app, requireSession, requireEditAccess, r
     return { applied: 0, skipped: "conflict", perLink: {} };
   };
 
-  // Makes up for a night when the AI was busy: bank rows that went into the ledger marked "Needs a category" are offered to the AI again.
+  // The catch-up every night: whatever from a linked bank is still waiting in Bank stream gets another chance at the ledger, and bank rows that went
+  // in marked "Needs a category" (the AI was busy) are offered to the AI again.
   const fillHousehold = async (householdId) => {
-    if (!stateStore || !suggestBatch) return 0;
+    if (!stateStore) return 0;
     for (let attempt = 0; attempt < 3; attempt += 1) {
       const loaded = await stateStore.load(householdId);
       if (!loaded || loaded.state?.linkedAutoApply === false) return 0;
       const working = structuredClone(loaded.state);
+      const retried = await retryWaitingDrafts(working, { suggest: suggestBatch, createId: uniqueIdFactory() });
       const filled = await fillUncategorizedLedgerRows(working, { suggest: suggestBatch });
-      if (!filled) return 0;
+      if (!filled && !retried.added) return 0;
       if (await stateStore.saveIfVersion(householdId, working, loaded.version)) {
-        console.log(`Overnight AI fill-in: household ${householdId} categorized ${filled}`);
-        return filled;
+        console.log(`Overnight catch-up: household ${householdId} ${JSON.stringify({ waitingAdded: retried.added, aiCategorized: filled })}`);
+        return filled + retried.added;
       }
     }
     return 0;

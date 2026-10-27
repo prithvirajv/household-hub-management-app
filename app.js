@@ -441,13 +441,19 @@ let stateVersion = null;
 let stateSaveChain = Promise.resolve();
 let stateSavesInFlight = 0;
 
-// allowShrink is passed by the one flow that deliberately removes most of the ledger (Clean up), so the server does not take it for an out-of-date screen.
+// A person deliberately removing a ledger entry (deleting it, moving it to Transfers, splitting it entirely with friends, Clean up) says so, so
+// the server does not take the save for an out-of-date screen dropping bank-imported entries (see the guard in PUT /api/state). It stays open for
+// a few seconds so the autosave that follows the click carries it too.
+let allowLedgerRemovalUntil = 0;
+function allowLedgerRemoval() { allowLedgerRemovalUntil = Date.now() + 10000; }
+
+// allowShrink is passed by the one flow that removes most of the ledger at once (Clean up).
 function putState(householdId, { keepalive = false, allowShrink = false } = {}) {
   const send = () => {
     stateSavesInFlight += 1;
     return api("/api/state", {
       method: "PUT",
-      headers: { "X-Household-Id": householdId || "", ...(stateVersion !== null ? { "X-Base-Version": String(stateVersion) } : {}), ...(allowShrink ? { "X-Allow-Shrink": "1" } : {}) },
+      headers: { "X-Household-Id": householdId || "", ...(stateVersion !== null ? { "X-Base-Version": String(stateVersion) } : {}), ...(allowShrink || Date.now() < allowLedgerRemovalUntil ? { "X-Allow-Shrink": "1" } : {}) },
       body: JSON.stringify(state),
       keepalive
     }).finally(() => { stateSavesInFlight -= 1; });
@@ -13999,6 +14005,7 @@ view.addEventListener("click", (event) => {
 
   const deleteTransactionButton = event.target.closest("[data-delete-transaction]");
   if (deleteTransactionButton) {
+    allowLedgerRemoval();
     state.transactions.splice(Number(deleteTransactionButton.dataset.deleteTransaction), 1);
     autosaveState();
     render();
@@ -14441,8 +14448,12 @@ async function runAiImportPassOnce(draftIds, fileName, importedCount, rerun) {
     if (autoAddDetectedSalaries()) { autosaveState(); render(); }
     // Rows saved before categories recorded where they came from: vouch for a category the household's own rule or history gives.
     draftIds.map(findDraft).forEach((draft) => {
-      if (!draft?.lineId || draft.lineSource) return;
-      if (categorizationRuleForPayee(draft.payee) === draft.lineId) draft.lineSource = "rule";
+      if (!draft || draft.lineSource) return;
+      const rule = categorizationRuleForPayee(draft.payee);
+      const history = rule ? "" : suggestSubcategoryFromHistory(draft.payee, state.transactions) || "";
+      if (!draft.lineId) {
+        if (rule) { draft.lineId = rule; draft.lineSource = "rule"; } else if (history) { draft.lineId = history; draft.lineSource = "history"; draft.historyMatch = true; }
+      } else if (rule === draft.lineId) draft.lineSource = "rule";
       else if (suggestSubcategoryFromHistory(draft.payee, state.transactions) === draft.lineId) draft.lineSource = "history";
     });
     // A return of a purchase already in the ledger takes that purchase's category and account without asking the AI.
@@ -15783,6 +15794,7 @@ $("#assignIouForm").addEventListener("submit", async (event) => {
     }
   } else if (fullySplit) {
     const index = Number(source.id);
+    allowLedgerRemoval();
     if (index >= 0) state.transactions.splice(index, 1);
     state.household.activity.unshift(`Split ${record.payee} entirely with friends - removed from the Ledger`);
   } else {
@@ -15906,6 +15918,7 @@ $("#moveToTransferForm").addEventListener("submit", (event) => {
     state.transactionInboxDrafts = (state.transactionInboxDrafts || []).filter((item) => item.id !== record.id);
   } else {
     const index = state.transactions.indexOf(record);
+    allowLedgerRemoval();
     if (index >= 0) state.transactions.splice(index, 1);
   }
 
@@ -15917,6 +15930,7 @@ $("#moveToTransferForm").addEventListener("submit", (event) => {
       state.transactionInboxDrafts.splice(draftIndex, 1);
     } else {
       const ledgerIndex = state.transactions.indexOf(counterpartMatch);
+      allowLedgerRemoval();
       if (ledgerIndex >= 0) state.transactions.splice(ledgerIndex, 1);
     }
   }

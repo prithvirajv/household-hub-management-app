@@ -237,12 +237,12 @@ test("salary detection finds a steady payer on a regular cadence and ignores eve
   assert.equal(salary.recurrence, "biweekly");
   assert.equal(salary.amount, 2500);
   assert.equal(salary.accountId, "chk");
-  assert.equal(salary.anchorDate, "2026-09-11", "starts at the first deposit of last month so last month and this one both show the income");
+  assert.equal(salary.anchorDate, "2026-11-06", "the paycheck starts at the next payday after the latest deposit - what was already paid stays in the ledger and is not counted again");
   assert.equal(salary.count, 6);
   assert.equal(salaryPayeeKey("ACME PAYROLL 20261023"), salaryPayeeKey("ACME PAYROLL 20260911"), "digits do not change the payer");
 
   const monthly = ["2026-07-01", "2026-08-01", "2026-09-01", "2026-10-01"].map((date) => dep("Employer Direct Dep", 4000, date));
-  assert.equal(detectSalaryDeposits(monthly, today)[0].recurrence, "monthly");
+  assert.deepEqual([detectSalaryDeposits(monthly, today)[0].recurrence, detectSalaryDeposits(monthly, today)[0].anchorDate], ["monthly", "2026-11-01"]);
   const weekly = ["2026-10-02", "2026-10-09", "2026-10-16", "2026-10-23"].map((date) => dep("Shop Pay", 600, date));
   assert.equal(detectSalaryDeposits(weekly, today)[0].recurrence, "weekly");
 
@@ -303,4 +303,23 @@ test("an account's synced-through date is the bank's own balance date, never in 
   markAccountsSynced(accounts, mappings, [{ remoteId: "RA", balanceDate: "2026-10-24" }, { remoteId: "RB", balanceDate: "2026-12-01" }, { remoteId: "RC", balanceDate: "" }, { remoteId: "RD", balanceDate: "2026-10-26" }], "2026-10-27", "2026-10-27T07:30:00Z");
   assert.deepEqual(accounts.map((a) => a.syncedThrough), ["2026-10-24", "2026-10-27", "2026-10-27", undefined]);
   assert.equal(accounts[0].lastSyncedAt, "2026-10-27T07:30:00Z");
+});
+
+test("detecting a salary never takes an entry out of the ledger; only deposits still waiting in Bank stream are folded in", () => {
+  const { applyDetectedSalariesToState } = require("../lib/shared-logic");
+  const dates = ["2026-08-14", "2026-08-28", "2026-09-11", "2026-09-25", "2026-10-09", "2026-10-23"];
+  const bankRow = (date) => ({ date, payee: `ACME PAYROLL ${date.replace(/-/g, "")}`, amount: -2500, lineId: "", accountId: "chk", externalId: `sf:chk:${date}`, memo: "Accepted bank stream item", tags: [] });
+  const state = {
+    household: { activity: [] }, accounts: [{ id: "chk", type: "checking", openingBalance: 100 }], paychecks: [], paycheckOccurrences: [],
+    transactions: dates.slice(0, 5).map(bankRow),
+    transactionInboxDrafts: [{ id: "d6", ...bankRow("2026-10-23"), isDeposit: true }], transactionInboxDone: []
+  };
+  const changed = applyDetectedSalariesToState(state, "2026-10-26", (seed) => `${seed}-1`);
+  assert.equal(changed, true);
+  assert.equal(state.transactions.length, 5, "every entry already in the ledger is still there");
+  assert.equal(state.accounts[0].openingBalance, 100, "and nothing was shifted to make up for a removal");
+  assert.deepEqual(state.transactionInboxDrafts, [], "the waiting deposit is folded into the paycheck");
+  assert.equal(state.paychecks[0].date, "2026-11-06");
+  assert.deepEqual(state.paychecks[0].autoDetected.removed, []);
+  assert.equal(state.paychecks[0].autoDetected.dismissed.length, 1);
 });

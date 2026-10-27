@@ -103,3 +103,28 @@ test("an apply that would outgrow the 1 MB save limit is refused before it chang
   await assert.rejects(() => applyLinkedPayload(state, link, payload, { createId: ids(), todayKey: TODAY }), /size/);
   assert.equal(state.transactionInboxDrafts.length, 0);
 });
+
+test("every night whatever is still waiting from the bank gets another chance, and the AI is not asked about the same row twice", async () => {
+  const { retryWaitingDrafts } = require("../lib/linked-apply");
+  const state = baseState({
+    transactions: [{ date: "2026-09-02", payee: "KNOWN GROCER", amount: 20, lineId: "groceries", accountId: "chk", memo: "", tags: [] }],
+    transactionInboxDrafts: [
+      { id: "w1", payee: "KNOWN GROCER", amount: 30, date: "2026-10-20", lineId: "", accountId: "chk", externalId: "sf:A1:w1", lineSource: "" },
+      { id: "w2", payee: "NEW CAFE", amount: 12, date: "2026-10-21", lineId: "", accountId: "chk", externalId: "sf:A1:w2", lineSource: "" },
+      { id: "w3", payee: "HAND ENTERED", amount: 7, date: "2026-10-22", lineId: "", accountId: "chk", lineSource: "" }
+    ]
+  });
+  let asked = 0;
+  const suggest = async (rows) => { asked += rows.length; return rows.map((r) => ({ id: r.id, lineId: "dining", accountId: null, confidence: "high", tags: [] })); };
+  const first = await retryWaitingDrafts(state, { suggest, createId: ids(), todayKey: TODAY });
+  assert.equal(first.added, 2, "the two bank rows are added; a row typed or imported from a file is left alone");
+  assert.equal(asked, 1, "only the row history could not place went to the AI");
+  assert.deepEqual(state.transactionInboxDrafts.map((d) => d.id), ["w3"]);
+  assert.equal(state.transactions.find((t) => t.payee === "NEW CAFE").lineId, "dining");
+  const held = baseState({ transactionInboxDrafts: [{ id: "h1", payee: "ODD", amount: 3, date: "2026-10-20", lineId: "", accountId: "", externalId: "sf:A1:h1", lineSource: "" }] });
+  let calls = 0;
+  const quiet = async (rows) => { calls += 1; return rows.map((r) => ({ id: r.id, lineId: null, accountId: null, confidence: "low", tags: [] })); };
+  await retryWaitingDrafts(held, { suggest: quiet, createId: ids(), todayKey: TODAY });
+  await retryWaitingDrafts(held, { suggest: quiet, createId: ids(), todayKey: TODAY });
+  assert.equal(calls, 1, "a row the AI already answered for is not sent again the next night");
+});
