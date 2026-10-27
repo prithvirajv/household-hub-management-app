@@ -6330,6 +6330,7 @@ function accountItemRow(account, index) {
       <div class="split-stat"><span>${isLiability ? "Owed" : "Balance"}</span><b class="${isLiability && balance > 0 ? "danger" : ""}">${money.format(balance)}</b></div>
       ${sparkline}
       ${account.closedAt ? `<span class="pill pill-warning" title="No new transactions can be added after ${formatShortDate(account.closedAt)}">Closed ${formatShortDate(account.closedAt)}</span>` : ""}
+      ${account.syncedFrom ? `<span class="pill pill-info account-synced-tag" title="Fed by your bank: its records are complete from this date. For anything earlier, import a statement (Transactions, then Import a statement).">Synced from ${escapeHtml(new Date(`${account.syncedFrom}T00:00:00`).toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" }))}</span>` : ""}
     </div>
     <button class="icon-button danger-button card-close-button" data-delete-account="${index}" type="button" aria-label="Remove ${escapeHtml(account.name)}">×</button>
   </article>`;
@@ -14113,6 +14114,7 @@ function applySimplefinSync(link, payload, addRows, { ignoreRemembered = false }
   posted.forEach((transaction) => { byAccount.set(transaction.accountId, [...(byAccount.get(transaction.accountId) || []), transaction]); });
   byAccount.forEach((rows, accountId) => addRows(rows, { name: `${link.label}` }, "linked-import", "", { accountId }));
   state.linkedImportedIds = rememberLinkedImportedIds(state.linkedImportedIds, posted.map((transaction) => transaction.externalId));
+  updateAccountsSyncedFrom(state.accounts, link.mappings, payload.coverage, [...state.transactions, ...(state.transactionInboxDrafts || [])], dateKey(new Date()));
   // Bring balances in line with the bank. The ledger alone is matched to the bank's figure (so the balance shown is the bank's), and a
   // row posted from Bank stream later hands its amount back through the opening balance (postDraftToLedger), keeping it there.
   let balancesUpdated = 0;

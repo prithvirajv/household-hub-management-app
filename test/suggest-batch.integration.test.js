@@ -283,3 +283,14 @@ test("a busy main AI model is not waited on: the next model answers", async () =
     assert.deepEqual(calls.map((url) => url.split("/").pop()), ["main-model:generateContent", "backup-model:generateContent"], "the busy model is tried once, then the backup answers");
   } finally { await server.stop(); await new Promise((resolve) => stub.close(resolve)); }
 });
+
+test("an account's synced-from date takes the coverage a sync reports, never moves later, and is backfilled from its earliest bank row", () => {
+  const { updateAccountsSyncedFrom } = require("../lib/shared-logic");
+  const accounts = [{ id: "a" }, { id: "b", syncedFrom: "2026-02-01" }, { id: "c" }, { id: "d" }];
+  const mappings = { RA: { accountId: "a" }, RB: { accountId: "b" }, RC: { accountId: "c" }, RD: { accountId: "d" }, RX: { groupId: "g" } };
+  const rows = [{ externalId: "sf:1", accountId: "c", date: "2026-08-14" }, { externalId: "sf:2", accountId: "c", date: "2026-07-02" }, { accountId: "c", date: "2026-01-01" }];
+  const changed = updateAccountsSyncedFrom(accounts, mappings, { RA: { from: "2026-04-01" }, RB: { from: "2026-05-01" } }, rows, "2026-10-27");
+  assert.deepEqual(accounts.map((a) => a.syncedFrom), ["2026-04-01", "2026-02-01", "2026-07-02", "2026-10-27"], "coverage wins, an earlier date is kept, a bare account takes its earliest bank row (a hand-entered one does not count), else today");
+  assert.equal(changed, 3);
+  assert.equal(updateAccountsSyncedFrom(accounts, mappings, {}, rows, "2026-10-27"), 0, "nothing moves on a plain sync");
+});

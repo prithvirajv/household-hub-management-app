@@ -534,6 +534,15 @@ entry. It is read-only: FamilyLoop can never move money or place trades.
   under **Choose accounts**). Until you choose where each goes it is ignored.
   A "Don't import" choice is remembered, so skipped accounts aren't reported
   again.
+- **Whole months only, and a "Synced from" tag:** a new link (and the first
+  sync after you change which accounts it imports) reads from the first day of
+  last month, and follows the same rule as a history import: if a bank returns
+  only part of a month for an account, that whole month is left out and you are
+  asked to import it from a statement. Each bank-fed account in Wealth shows a
+  small **Synced from <date>** tag - the date its bank records are complete
+  from; anything earlier has to come from a statement. A link's first sync
+  always happens in the app (never overnight), so you see that explanation
+  first.
 - **Import history:** under a bank link, **Import older transactions from**
   a date (for example January 1) fetches everything from then on for the
   accounts you chose; it goes to Bank stream like any import. How far back

@@ -295,6 +295,9 @@ test("the nightly job notifies the household about new transactions and about a 
     const id = created.body.link.id;
     assert.equal((await job()).body.links, 0, "a link with no accounts chosen yet is not synced");
     await call(`/api/linked-accounts/${id}/mappings`, { method: "PUT", body: JSON.stringify({ mappings: { A1: { accountId: "chk" } } }) });
+    assert.equal((await job()).body.links, 0, "a link that has never synced waits for its first sync in the app, where a short history is explained");
+    await call(`/api/linked-accounts/${id}/sync`, { method: "POST", body: "{}" });
+    await call(`/api/linked-accounts/${id}/ack`, { method: "POST", body: JSON.stringify({ stagedAt: new Date(Date.now() + 3600000).toISOString() }) });
 
     const first = await job();
     assert.deepEqual([first.body.synced, first.body.newTransactions], [1, 2]);
@@ -341,6 +344,11 @@ test("the nightly job applies new bank transactions to the household without the
     const id = created.body.link.id;
     await server.request(`/api/linked-accounts/${id}/mappings`, { method: "PUT", headers: { cookie }, body: JSON.stringify({ mappings: { "ACT-1": { accountId: "local-checking" }, "ACT-2": { skipped: true } } }) });
 
+    // A link that has never synced waits for its first sync in the app (where a short history is explained); once it has, the job takes over.
+    const skipped = await server.request("/api/internal/linked-accounts/sync-all", { method: "POST", headers: { authorization: "Bearer job-secret" }, body: "{}" });
+    assert.deepEqual([skipped.body.links, skipped.body.synced], [0, 0]);
+    await server.request(`/api/linked-accounts/${id}/sync`, { method: "POST", headers: { cookie }, body: "{}" });
+    await server.request(`/api/linked-accounts/${id}/ack`, { method: "POST", headers: { cookie }, body: JSON.stringify({ stagedAt: new Date(Date.now() + 3600000).toISOString() }) });
     const nightly = await server.request("/api/internal/linked-accounts/sync-all", { method: "POST", headers: { authorization: "Bearer job-secret" }, body: "{}" });
     assert.deepEqual([nightly.status, nightly.body.synced, nightly.body.failed, nightly.body.autoApplied], [200, 1, 0, 2]);
 
@@ -362,6 +370,9 @@ test("the nightly job applies new bank transactions to the household without the
     after.body.linkedAutoApply = false;
     await server.request("/api/state", { method: "PUT", headers: { cookie, "x-base-version": after.headers.get("x-state-version") }, body: JSON.stringify(after.body) });
     await server.request(`/api/linked-accounts/${id}/mappings`, { method: "PUT", headers: { cookie }, body: JSON.stringify({ mappings: { "ACT-1": { accountId: "local-checking" } } }) });
+    // Changing the accounts restarts the link's first sync, which happens in the app; then the job takes over again.
+    await server.request(`/api/linked-accounts/${id}/sync`, { method: "POST", headers: { cookie }, body: "{}" });
+    await server.request(`/api/linked-accounts/${id}/ack`, { method: "POST", headers: { cookie }, body: JSON.stringify({ stagedAt: new Date(Date.now() + 3600000).toISOString() }) });
     await server.request("/api/internal/linked-accounts/sync-all", { method: "POST", headers: { authorization: "Bearer job-secret" }, body: "{}" });
     const off = (await server.request("/api/linked-accounts", { headers: { cookie } })).body.links[0];
     assert.deepEqual([off.hasStaged, (await get()).body.transactions.length], [true, after.body.transactions.length], "with auto-apply off the rows stay staged and the state is untouched");
@@ -435,4 +446,19 @@ test("an out-of-date screen cannot overwrite an imported ledger with an almost e
     // A small ledger can be emptied freely.
     assert.equal((await server.request("/api/state", { method: "PUT", headers: { cookie }, body: JSON.stringify({ ...stale, transactions: [] }) })).status, 200);
   } finally { await server.stop(); }
+});
+
+
+test("trimPartialHistory reports where each account's bank rows are complete from, and a first sync starts on the first of last month", () => {
+  const { firstOfPreviousMonth } = require("../server/linked-accounts");
+  assert.equal(firstOfPreviousMonth(Date.parse("2026-10-27T12:00:00Z")), "2026-09-01");
+  assert.equal(firstOfPreviousMonth(Date.parse("2026-01-05T12:00:00Z")), "2025-12-01");
+  const row = (remoteAccountId, date, n) => ({ externalId: `sf:${remoteAccountId}:${date}:${n}`, remoteAccountId, date, payee: "P", amount: 5, pending: false });
+  const payload = { provider: "simplefin", accounts: [{ remoteId: "A", name: "Late" }, { remoteId: "B", name: "On time" }, { remoteId: "C", name: "Empty" }], errors: [], transactions: [
+    ...["2026-03-09", "2026-03-20", "2026-04-02", "2026-05-11", "2026-06-03"].map((d, i) => row("A", d, i)),
+    ...["2026-01-02", "2026-02-10", "2026-03-10", "2026-04-10", "2026-05-10"].map((d, i) => row("B", d, i))
+  ] };
+  const { coverage } = trimPartialHistory(payload, "2026-01-01");
+  assert.deepEqual(coverage, { A: { from: "2026-04-01" }, B: { from: "2026-01-01" }, C: { from: "2026-01-01" } });
+  assert.deepEqual(trimPartialHistory(payload, "").coverage, {});
 });

@@ -13,7 +13,12 @@ const crypto = require("node:crypto");
 const { applyLinkedPayload, fillUncategorizedLedgerRows } = require("../lib/linked-apply");
 
 const SIMPLEFIN_WINDOW_DAYS = 55; // the Bridge hard-caps one request at 60 days and only warns above 45 (data still comes back); every request counts against its daily limit, so use few
-const SIMPLEFIN_DEFAULT_LOOKBACK_DAYS = 30;
+// A link's first sync (and the first after its accounts are changed) starts at the first day of last month, not "30 days ago": whole months
+// only, so no account begins with a half-filled month (see trimPartialHistory for when the bank returns less).
+function firstOfPreviousMonth(nowMs = Date.now()) {
+  const now = new Date(nowMs);
+  return new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - 1, 1)).toISOString().slice(0, 10);
+}
 const SIMPLEFIN_OVERLAP_DAYS = 3; // re-ask a few days we already saw; the client drops rows it already imported
 const BROKERAGE_KINDS_AS_FUND = new Set(["mutualfund"]);
 
@@ -265,7 +270,7 @@ const HISTORY_GAP_SLACK_DAYS = 21;
 const HISTORY_GAP_MIN_ROWS = 5;
 
 function trimPartialHistory(payload, sinceDate) {
-  if (payload?.provider !== "simplefin" || !/^\d{4}-\d{2}-\d{2}$/.test(String(sinceDate || ""))) return { payload, gaps: [] };
+  if (payload?.provider !== "simplefin" || !/^\d{4}-\d{2}-\d{2}$/.test(String(sinceDate || ""))) return { payload, gaps: [], coverage: {} };
   const oldestByAccount = new Map();
   const rowCounts = new Map();
   (payload.transactions || []).filter((transaction) => !transaction.pending).forEach((transaction) => {
@@ -287,7 +292,10 @@ function trimPartialHistory(payload, sinceDate) {
     const account = (payload.accounts || []).find((item) => item.remoteId === remoteId);
     gaps.push({ remoteId, name: account?.name || "Account", fromMonth: sinceDate.slice(0, 7), toMonth: lastMissing, oldestReturned: oldest, skippedRows: 0 });
   }
-  if (!gaps.length) return { payload, gaps };
+  // Where each account's bank rows are complete from: the date asked for, or the first fully covered month when the bank returned less.
+  const coverage = {};
+  (payload.accounts || []).forEach((account) => { coverage[account.remoteId] = { from: firstCovered.get(account.remoteId) || sinceDate }; });
+  if (!gaps.length) return { payload, gaps, coverage };
   const transactions = (payload.transactions || []).filter((transaction) => {
     const boundary = firstCovered.get(transaction.remoteAccountId);
     if (!boundary || transaction.date >= boundary) return true;
@@ -295,7 +303,7 @@ function trimPartialHistory(payload, sinceDate) {
     return false;
   });
   // A gap that only just misses the start (covered from the first month asked for) has nothing to report.
-  return { payload: { ...payload, transactions }, gaps: gaps.filter((gap) => gap.toMonth >= gap.fromMonth) };
+  return { payload: { ...payload, transactions }, gaps: gaps.filter((gap) => gap.toMonth >= gap.fromMonth), coverage };
 }
 
 // Folds a fresh fetch into what is already staged (not yet applied by any client): SimpleFIN transactions accumulate by id (so nights
@@ -495,7 +503,7 @@ function registerLinkedAccountRoutes({ app, requireSession, requireEditAccess, r
       const requested = String(sinceDate || "").trim();
       const requestedUnix = /^\d{4}-\d{2}-\d{2}$/.test(requested) ? Math.floor(Date.parse(`${requested}T00:00:00Z`) / 1000) : null;
       const lastUnix = link.lastSyncAt ? Math.floor(new Date(link.lastSyncAt).getTime() / 1000) - SIMPLEFIN_OVERLAP_DAYS * 86400 : null;
-      const startUnix = Math.max(requestedUnix ?? lastUnix ?? (nowUnix - SIMPLEFIN_DEFAULT_LOOKBACK_DAYS * 86400), nowUnix - 365 * 86400);
+      const startUnix = Math.max(requestedUnix ?? lastUnix ?? Math.floor(Date.parse(`${firstOfPreviousMonth()}T00:00:00Z`) / 1000), nowUnix - 365 * 86400);
       const result = await syncSimplefin(credentials.accessUrl, { startUnix, endUnix: nowUnix }, { fetchImpl, allowInsecureHosts });
       // Only accounts sent to a Wealth account import transactions (investment and loan accounts follow their balance only), so only those are staged.
       const wanted = new Set(Object.entries(link.mappings || {}).filter(([, mapping]) => mapping && mapping.accountId).map(([remoteId]) => remoteId));
@@ -518,11 +526,13 @@ function registerLinkedAccountRoutes({ app, requireSession, requireEditAccess, r
     const link = await loadLink(req);
     try {
       const fetched = await fetchLinkPayload(link, { sinceDate: req.body?.sinceDate });
-      const { payload, gaps } = trimPartialHistory(fetched, req.body?.sinceDate);
+      // A first sync reads from the first of last month, and is held to the same whole-months rule as a history import.
+      const since = req.body?.sinceDate || (link.provider === "simplefin" && !link.lastSyncAt ? firstOfPreviousMonth() : "");
+      const { payload, gaps, coverage } = trimPartialHistory(fetched, since);
       const { merged } = mergeStagedPayload(link.staged, payload, new Date().toISOString(), { sinceDate: req.body?.sinceDate });
       await store.update(sessionHouseholdId(req), link.id, { staged: merged, stagedAt: merged.stagedAt });
       await recordOutcome(req, link, null, payload.accounts);
-      res.json(gaps.length ? { ...merged, historyGaps: gaps } : merged);
+      res.json({ ...merged, ...(gaps.length ? { historyGaps: gaps } : {}), ...(Object.keys(coverage).length ? { coverage } : {}) });
     } catch (error) {
       await recordOutcome(req, link, error);
       throw error;
@@ -602,7 +612,9 @@ function registerLinkedAccountRoutes({ app, requireSession, requireEditAccess, r
     app.post("/api/internal/linked-accounts/sync-all", requireJobSecret, async (_req, res, next) => {
       try {
         if (!encryptionKey) return res.json({ skipped: "Linked accounts are not configured" });
-        const links = (await store.listAll()).filter((link) => link.status === "active" && Object.keys(link.mappings || {}).length && !(link.provider === "snaptrade" && !snaptrade));
+        // A link that has never synced (or whose accounts were just changed) waits for its first sync in the app, where a bank that returns less
+        // history than asked for is explained and has to be acknowledged before anything is imported.
+        const links = (await store.listAll()).filter((link) => link.status === "active" && Object.keys(link.mappings || {}).length && !(link.provider === "snaptrade" && !snaptrade) && (link.provider !== "simplefin" || link.lastSyncAt));
         const summary = { links: links.length, synced: 0, failed: 0, newTransactions: 0, reconnect: 0 };
         const byHousehold = new Map();
         for (const link of links) {
@@ -666,6 +678,6 @@ function registerLinkedAccountRoutes({ app, requireSession, requireEditAccess, r
 }
 
 module.exports = {
-  registerLinkedAccountRoutes, trimPartialHistory, mergeStagedPayload, knownExternalIds, findNewAccounts, encryptJson, decryptJson, claimSimplefinToken, syncSimplefin, normalizeSimplefinAccount,
+  registerLinkedAccountRoutes, trimPartialHistory, firstOfPreviousMonth, mergeStagedPayload, knownExternalIds, findNewAccounts, encryptJson, decryptJson, claimSimplefinToken, syncSimplefin, normalizeSimplefinAccount,
   normalizeSimplefinTransactions, normalizeSnaptradePositions, snaptradeConfig, assertSimplefinUrl
 };
