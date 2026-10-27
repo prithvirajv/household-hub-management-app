@@ -543,6 +543,13 @@ entry. It is read-only: FamilyLoop can never move money or place trades.
   from; anything earlier has to come from a statement. A link's first sync
   always happens in the app (never overnight), so you see that explanation
   first.
+- **If SimpleFIN is slow ("HTTP 524"):** SimpleFIN's servers sometimes
+  take too long to answer a large date range. FamilyLoop gives up on a request
+  after a minute, splits that stretch into smaller ranges and tries again; if a
+  stretch still can't be fetched, the months it touches are left out whole for
+  every account and the window says exactly which, so nothing is imported with a
+  hole in the middle. If SimpleFIN doesn't answer at all, nothing is imported and
+  you are told to try again in a few minutes.
 - **Is last night's sync complete?** Each bank-fed account in Wealth shows
   an end tag next to "Synced from": **Synced through <date>** - how far the
   bank's data for it runs (it turns amber and says "behind" if the bank hasn't

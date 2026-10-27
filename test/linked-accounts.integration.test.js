@@ -474,3 +474,54 @@ test("trimPartialHistory reports where each account's bank rows are complete fro
   assert.deepEqual(coverage, { A: { from: "2026-04-01" }, B: { from: "2026-01-01" }, C: { from: "2026-01-01" } });
   assert.deepEqual(trimPartialHistory(payload, "").coverage, {});
 });
+
+test("a slow SimpleFIN range is split and retried instead of losing the import; what still fails becomes whole-month gaps, and a sync that may not be partial fails clearly", async () => {
+  const { syncSimplefin, gapsFromFailedWindows } = require("../server/linked-accounts");
+  const day = 86400;
+  const start = Math.floor(Date.parse("2026-01-01T00:00:00Z") / 1000);
+  const end = start + 130 * day; // three windows of up to 55 days
+  const respond = (accounts) => ({ ok: true, status: 200, json: async () => ({ errors: [], accounts }) });
+  const accountFor = (from, to) => ({ id: "A1", name: "Checking", org: { name: "B" }, currency: "USD", balance: "10", "balance-date": to, transactions: [{ id: `t-${from}`, posted: from + day, amount: "-1", description: "X" }] });
+  const rangeOf = (url) => { const u = new URL(url); return [Number(u.searchParams.get("start-date")), Number(u.searchParams.get("end-date"))]; };
+
+  // The Bridge times out on any range that includes the second window's start; smaller pieces of it also fail around that point.
+  const calls = [];
+  const flaky = async (url) => {
+    const [from, to] = rangeOf(url);
+    calls.push([from, to]);
+    if (from <= start + 56 * day && to > start + 56 * day && to - from > 20 * day) return { ok: false, status: 524, json: async () => ({}) };
+    return respond([accountFor(from, to)]);
+  };
+  const recovered = await syncSimplefin("https://u:p@bridge.simplefin.org/simplefin", { startUnix: start, endUnix: end, allowPartial: true }, { fetchImpl: flaky });
+  assert.deepEqual(recovered.failedWindows, [], "the failing range was split into smaller ones that answered");
+  assert.ok(calls.length > 3, "more requests were made than the three windows");
+  assert.equal(recovered.accounts.length, 1);
+
+  // A range that fails at every size is reported, not silently dropped.
+  const alwaysDown = async (url) => {
+    const [from, to] = rangeOf(url);
+    if (from < start + 55 * day) return { ok: false, status: 524, json: async () => ({}) };
+    return respond([accountFor(from, to)]);
+  };
+  const partial = await syncSimplefin("https://u:p@bridge.simplefin.org/simplefin", { startUnix: start, endUnix: end, allowPartial: true }, { fetchImpl: alwaysDown });
+  assert.ok(partial.failedWindows.length >= 1 && partial.failedWindows.every((w) => w.from < "2026-02-26"));
+  // ...and a sync that may not be partial (the nightly job) fails with the Bridge's reason instead.
+  await assert.rejects(() => syncSimplefin("https://u:p@bridge.simplefin.org/simplefin", { startUnix: start, endUnix: end, allowPartial: false }, { fetchImpl: alwaysDown }), /SimpleFIN is unavailable right now \(HTTP 524\)/);
+  // Nothing answering at all is one clear error.
+  await assert.rejects(() => syncSimplefin("https://u:p@bridge.simplefin.org/simplefin", { startUnix: start, endUnix: end, allowPartial: true }, { fetchImpl: async () => ({ ok: false, status: 524, json: async () => ({}) }) }), /did not answer .* Nothing was imported; try again in a few minutes/);
+  // A request that never answers is given up on (the real timeout is a minute; the test stub just throws like an abort).
+  await assert.rejects(() => syncSimplefin("https://u:p@bridge.simplefin.org/simplefin", { startUnix: start, endUnix: start + 10 * day, allowPartial: false }, { fetchImpl: async () => { throw new Error("aborted"); } }), /took too long to answer/);
+
+  // Failed stretches become whole-month gaps for every mapped account, and rows in those months are left out.
+  const payload = { provider: "simplefin", accounts: [{ remoteId: "A1", name: "Checking" }, { remoteId: "A2", name: "Card" }], errors: [], transactions: [
+    { externalId: "sf:A1:1", remoteAccountId: "A1", date: "2026-01-20", amount: 1, pending: false },
+    { externalId: "sf:A1:2", remoteAccountId: "A1", date: "2026-02-10", amount: 1, pending: false },
+    { externalId: "sf:A1:3", remoteAccountId: "A1", date: "2026-03-10", amount: 1, pending: false },
+    { externalId: "sf:A2:1", remoteAccountId: "A2", date: "2026-02-12", amount: 1, pending: false }
+  ] };
+  const result = gapsFromFailedWindows(payload, [{ from: "2026-01-15", to: "2026-02-20", error: "x" }], { A1: { accountId: "a" }, A2: { accountId: "b" }, A3: { groupId: "g" } });
+  assert.deepEqual(result.payload.transactions.map((t) => t.externalId), ["sf:A1:3"], "January and February are left out whole, for every account");
+  assert.deepEqual(result.gaps.map((g) => [g.remoteId, g.fromMonth, g.toMonth, g.oldestReturned, g.reason, g.skippedRows]), [["A1", "2026-01", "2026-02", "", "timeout", 2], ["A2", "2026-01", "2026-02", "", "timeout", 1]]);
+  assert.equal(result.failedThrough, "2026-03-01");
+  assert.deepEqual(gapsFromFailedWindows(payload, [], {}).gaps, []);
+});

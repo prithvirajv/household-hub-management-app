@@ -14232,7 +14232,7 @@ function historyGapMonths(gap) {
 }
 
 function historyGapDialogText(gaps, nameOf) {
-  const lines = gaps.map((gap) => `• ${nameOf(gap.remoteId) || gap.name}: ${historyGapMonths(gap)} will NOT be imported (the bank's rows only start on ${gap.oldestReturned})`);
+  const lines = gaps.map((gap) => `• ${nameOf(gap.remoteId) || gap.name}: ${historyGapMonths(gap)} will NOT be imported (${gap.oldestReturned ? `the bank's rows only start on ${gap.oldestReturned}` : "SimpleFIN did not answer for this period"})`);
   return `The bank did not return all the history you asked for.\n\n${lines.join("\n")}\n\nThose whole months are left out on purpose - half a month would make the ledger wrong and double up when you import it yourself. After this, import those months for ${gaps.length === 1 ? "that account" : "those accounts"} from a bank statement: Transactions, then Import a statement, and pick the account.\n\nImport everything else now?`;
 }
 
@@ -14251,7 +14251,7 @@ function renderHistoryGapCard() {
   return `<section class="card history-gap-card" role="alert">
     <div class="card-label">Action needed</div><h3>Some bank history is missing - import it from a statement</h3>
     <p class="muted">The bank did not return these months, so they were left out rather than half-filled. For each, go to Transactions, choose Import a statement, and pick the account. Mark it done once you have.</p>
-    ${notices.map((notice) => `<div class="compact-row"><div><strong>${escapeHtml(accountName(notice.accountId) || notice.accountName)}</strong><small>${escapeHtml(historyGapMonths(notice))} · the bank's rows start on ${escapeHtml(notice.oldestReturned)}</small></div>
+    ${notices.map((notice) => `<div class="compact-row"><div><strong>${escapeHtml(accountName(notice.accountId) || notice.accountName)}</strong><small>${escapeHtml(historyGapMonths(notice))} · ${notice.oldestReturned ? `the bank's rows start on ${escapeHtml(notice.oldestReturned)}` : "SimpleFIN did not answer for this period"}</small></div>
       <div class="button-row"><button class="pill-button" data-goto-view="transactions" type="button">Import a statement</button><button class="ghost" data-ack-history-gap="${escapeHtml(notice.id)}" type="button">I've imported it</button></div></div>`).join("")}
   </section>`;
 }

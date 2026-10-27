@@ -19,7 +19,8 @@ function firstOfPreviousMonth(nowMs = Date.now()) {
   const now = new Date(nowMs);
   return new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - 1, 1)).toISOString().slice(0, 10);
 }
-const SIMPLEFIN_OVERLAP_DAYS = 3; // re-ask a few days we already saw; the client drops rows it already imported
+const SIMPLEFIN_OVERLAP_DAYS = 3;
+const SIMPLEFIN_REQUEST_TIMEOUT_MS = 60000; // re-ask a few days we already saw; the client drops rows it already imported
 const BROKERAGE_KINDS_AS_FUND = new Set(["mutualfund"]);
 
 // ---- encryption ---------------------------------------------------------------------------------------------------
@@ -89,7 +90,14 @@ function simplefinRequest(accessUrl, path, params) {
 async function fetchSimplefinAccounts(accessUrl, params, { fetchImpl = fetch, allowInsecureHosts = false } = {}) {
   assertSimplefinUrl(accessUrl, allowInsecureHosts);
   const request = simplefinRequest(accessUrl, "/accounts", params);
-  const response = await fetchImpl(request.url, { headers: request.headers });
+  // A request the Bridge does not answer is given up on after a minute (it can otherwise hang for two - Cloudflare answers "524"), so the
+  // caller can try a smaller date range instead of losing the whole sync.
+  let response;
+  try {
+    response = await fetchImpl(request.url, { headers: request.headers, signal: AbortSignal.timeout(SIMPLEFIN_REQUEST_TIMEOUT_MS) });
+  } catch (error) {
+    throw clientError("SimpleFIN took too long to answer.", 504);
+  }
   if (response.status === 401 || response.status === 403) throw clientError("SimpleFIN no longer accepts this connection - remove it and link again.", 409);
   if (!response.ok) throw clientError(`SimpleFIN is unavailable right now (HTTP ${response.status}).`, 502);
   const body = await response.json().catch(() => ({}));
@@ -135,13 +143,38 @@ function normalizeSimplefinTransactions(account, { today = new Date() } = {}) {
 }
 
 // Walks [startDate, endDate] in windows the Bridge accepts and merges the results by account (transactions de-duplicated by id).
-async function syncSimplefin(accessUrl, { startUnix, endUnix }, options = {}) {
+async function syncSimplefin(accessUrl, { startUnix, endUnix, allowPartial = false }, options = {}) {
   const windowSeconds = SIMPLEFIN_WINDOW_DAYS * 86400;
   const accounts = new Map();
   const errors = [];
-  for (let start = startUnix; start < endUnix; start += windowSeconds) {
-    const end = Math.min(start + windowSeconds, endUnix);
-    const result = await fetchSimplefinAccounts(accessUrl, { "start-date": start, "end-date": end, pending: 1 }, options);
+  // A range the Bridge fails on (timeout or a server error) is split in half and each half tried again, twice over, so one slow stretch of
+  // history does not cost the whole import. What still fails is reported (failedWindows); a sync that is not allowed to be partial (the
+  // nightly job, whose next run starts from where this one ended) fails instead, so nothing is silently skipped.
+  const queue = [];
+  for (let start = startUnix; start < endUnix; start += windowSeconds) queue.push({ start, end: Math.min(start + windowSeconds, endUnix), depth: 0 });
+  const failedWindows = [];
+  let succeeded = 0;
+  let lastFailure = null;
+  while (queue.length) {
+    const { start, end, depth } = queue.shift();
+    let result;
+    try {
+      result = await fetchSimplefinAccounts(accessUrl, { "start-date": start, "end-date": end, pending: 1 }, options);
+    } catch (error) {
+      if (error.statusCode === 409) throw error;
+      lastFailure = error;
+      console.warn(`SimpleFIN window ${new Date(start * 1000).toISOString().slice(0, 10)}..${new Date(end * 1000).toISOString().slice(0, 10)} failed: ${error.message}`);
+      if (allowPartial && depth < 2 && end - start > 7 * 86400) {
+        const middle = Math.floor((start + end) / 2);
+        queue.unshift({ start, end: middle, depth: depth + 1 }, { start: middle, end, depth: depth + 1 });
+      } else if (allowPartial) {
+        failedWindows.push({ from: new Date(start * 1000).toISOString().slice(0, 10), to: new Date(end * 1000).toISOString().slice(0, 10), error: String(error.message || "") });
+      } else {
+        throw error;
+      }
+      continue;
+    }
+    succeeded += 1;
     errors.push(...result.errors);
     // What each request returned (counts and the Bridge's own messages, no credentials): the record for when an import comes back short.
     console.log(`SimpleFIN window ${new Date(start * 1000).toISOString().slice(0, 10)}..${new Date(end * 1000).toISOString().slice(0, 10)}: ${result.accounts.length} accounts, ${result.accounts.reduce((sum, account) => sum + (account.transactions || []).length, 0)} transactions${result.errors.length ? `, messages: ${result.errors.map((message) => String(message).slice(0, 160)).join(" | ")}` : ""}`);
@@ -154,6 +187,7 @@ async function syncSimplefin(accessUrl, { startUnix, endUnix }, options = {}) {
       existing["balance-date"] = account["balance-date"];
     });
   }
+  if (!succeeded) throw clientError(`SimpleFIN did not answer (${lastFailure?.message || "no reply"}) - its servers may be slow right now. Nothing was imported; try again in a few minutes.`, 502);
   const list = [...accounts.values()];
   const rowsByAccount = list.map((account) => normalizeSimplefinTransactions(account));
   return {
@@ -163,7 +197,8 @@ async function syncSimplefin(accessUrl, { startUnix, endUnix }, options = {}) {
       const dates = rowsByAccount[index].filter((row) => !row.pending).map((row) => row.date).sort();
       return { ...normalizeSimplefinAccount(account), transactionCount: rowsByAccount[index].length, oldestTransactionDate: dates[0] || "" };
     }),
-    transactions: rowsByAccount.flat()
+    transactions: rowsByAccount.flat(),
+    failedWindows
   };
 }
 
@@ -304,6 +339,44 @@ function trimPartialHistory(payload, sinceDate) {
   });
   // A gap that only just misses the start (covered from the first month asked for) has nothing to report.
   return { payload: { ...payload, transactions }, gaps: gaps.filter((gap) => gap.toMonth >= gap.fromMonth), coverage };
+}
+
+// When the Bridge could not answer for some stretch of a history import even after retrying smaller ranges (failedWindows), the months those
+// stretches touch are left out for every account - a month with a hole in the middle is as wrong as a half month - and each mapped account
+// gets a gap to report, like the ones trimPartialHistory makes (oldestReturned is empty and reason is "timeout"). coverage moves up to the first
+// month after the last failed one so "Synced from" never claims more than was loaded.
+function gapsFromFailedWindows(payload, failedWindows, mappings) {
+  if (!failedWindows?.length) return { payload, gaps: [], failedThrough: "" };
+  const months = new Set();
+  failedWindows.forEach((window) => {
+    const [fromYear, fromMonth] = window.from.split("-").map(Number);
+    const end = new Date(Date.parse(`${window.to}T00:00:00Z`) - 86400000);
+    let year = fromYear;
+    let month = fromMonth;
+    while (year < end.getUTCFullYear() || (year === end.getUTCFullYear() && month <= end.getUTCMonth() + 1)) {
+      months.add(`${year}-${String(month).padStart(2, "0")}`);
+      month += 1;
+      if (month > 12) { month = 1; year += 1; }
+    }
+  });
+  const sorted = [...months].sort();
+  const ranges = [];
+  sorted.forEach((month) => {
+    const last = ranges[ranges.length - 1];
+    const [y, m] = last ? last.to.split("-").map(Number) : [0, 0];
+    const next = m === 12 ? `${y + 1}-01` : `${y}-${String(m + 1).padStart(2, "0")}`;
+    if (last && next === month) last.to = month; else ranges.push({ from: month, to: month });
+  });
+  const transactions = (payload.transactions || []).filter((transaction) => !months.has(String(transaction.date).slice(0, 7)));
+  const gaps = [];
+  Object.entries(mappings || {}).filter(([, mapping]) => mapping?.accountId).forEach(([remoteId]) => {
+    const account = (payload.accounts || []).find((item) => item.remoteId === remoteId);
+    ranges.forEach((range) => gaps.push({ remoteId, name: account?.name || "Account", fromMonth: range.from, toMonth: range.to, oldestReturned: "", reason: "timeout", skippedRows: (payload.transactions || []).filter((transaction) => transaction.remoteAccountId === remoteId && String(transaction.date).slice(0, 7) >= range.from && String(transaction.date).slice(0, 7) <= range.to).length }));
+  });
+  const lastFailed = sorted[sorted.length - 1];
+  const [lastYear, lastMonth] = lastFailed.split("-").map(Number);
+  const failedThrough = lastMonth === 12 ? `${lastYear + 1}-01-01` : `${lastYear}-${String(lastMonth + 1).padStart(2, "0")}-01`;
+  return { payload: { ...payload, transactions }, gaps, failedThrough };
 }
 
 // Folds a fresh fetch into what is already staged (not yet applied by any client): SimpleFIN transactions accumulate by id (so nights
@@ -496,7 +569,7 @@ function registerLinkedAccountRoutes({ app, requireSession, requireEditAccess, r
 
   // Fetches fresh data for a link: SimpleFIN since the last successful fetch (minus a few days of overlap) or an explicit date, SnapTrade as a
   // snapshot of positions for the mapped accounts.
-  const fetchLinkPayload = async (link, { sinceDate } = {}) => {
+  const fetchLinkPayload = async (link, { sinceDate, allowPartial = false } = {}) => {
     const credentials = credentialsOf(link);
     if (link.provider === "simplefin") {
       const nowUnix = Math.floor(Date.now() / 1000);
@@ -504,10 +577,10 @@ function registerLinkedAccountRoutes({ app, requireSession, requireEditAccess, r
       const requestedUnix = /^\d{4}-\d{2}-\d{2}$/.test(requested) ? Math.floor(Date.parse(`${requested}T00:00:00Z`) / 1000) : null;
       const lastUnix = link.lastSyncAt ? Math.floor(new Date(link.lastSyncAt).getTime() / 1000) - SIMPLEFIN_OVERLAP_DAYS * 86400 : null;
       const startUnix = Math.max(requestedUnix ?? lastUnix ?? Math.floor(Date.parse(`${firstOfPreviousMonth()}T00:00:00Z`) / 1000), nowUnix - 365 * 86400);
-      const result = await syncSimplefin(credentials.accessUrl, { startUnix, endUnix: nowUnix }, { fetchImpl, allowInsecureHosts });
+      const result = await syncSimplefin(credentials.accessUrl, { startUnix, endUnix: nowUnix, allowPartial: Boolean(allowPartial) }, { fetchImpl, allowInsecureHosts });
       // Only accounts sent to a Wealth account import transactions (investment and loan accounts follow their balance only), so only those are staged.
       const wanted = new Set(Object.entries(link.mappings || {}).filter(([, mapping]) => mapping && mapping.accountId).map(([remoteId]) => remoteId));
-      return { provider: "simplefin", accounts: result.accounts, transactions: result.transactions.filter((transaction) => wanted.has(transaction.remoteAccountId)), errors: result.errors };
+      return { provider: "simplefin", accounts: result.accounts, transactions: result.transactions.filter((transaction) => wanted.has(transaction.remoteAccountId)), errors: result.errors, failedWindows: result.failedWindows || [] };
     }
     const accounts = await getAdapter().listAccounts(credentials);
     const mapped = accounts.filter((account) => link.mappings[account.remoteId] && !link.mappings[account.remoteId].skipped);
@@ -525,10 +598,15 @@ function registerLinkedAccountRoutes({ app, requireSession, requireEditAccess, r
   app.post("/api/linked-accounts/:id/sync", requireSession, requireEditAccess, requireConfigured, wrap(async (req, res) => {
     const link = await loadLink(req);
     try {
-      const fetched = await fetchLinkPayload(link, { sinceDate: req.body?.sinceDate });
       // A first sync reads from the first of last month, and is held to the same whole-months rule as a history import.
       const since = req.body?.sinceDate || (link.provider === "simplefin" && !link.lastSyncAt ? firstOfPreviousMonth() : "");
-      const { payload, gaps, coverage } = trimPartialHistory(fetched, since);
+      const fetched = await fetchLinkPayload(link, { sinceDate: req.body?.sinceDate, allowPartial: Boolean(since) });
+      const failed = gapsFromFailedWindows(fetched, fetched.failedWindows, link.mappings);
+      const trimmed = trimPartialHistory(failed.payload, since);
+      const payload = trimmed.payload;
+      const gaps = [...failed.gaps, ...trimmed.gaps];
+      const coverage = trimmed.coverage;
+      if (failed.failedThrough) Object.values(coverage).forEach((entry) => { if (entry.from < failed.failedThrough) entry.from = failed.failedThrough; });
       const { merged } = mergeStagedPayload(link.staged, payload, new Date().toISOString(), { sinceDate: req.body?.sinceDate });
       await store.update(sessionHouseholdId(req), link.id, { staged: merged, stagedAt: merged.stagedAt });
       await recordOutcome(req, link, null, payload.accounts);
@@ -710,6 +788,6 @@ function registerLinkedAccountRoutes({ app, requireSession, requireEditAccess, r
 }
 
 module.exports = {
-  registerLinkedAccountRoutes, trimPartialHistory, firstOfPreviousMonth, mergeStagedPayload, knownExternalIds, findNewAccounts, encryptJson, decryptJson, claimSimplefinToken, syncSimplefin, normalizeSimplefinAccount,
+  registerLinkedAccountRoutes, trimPartialHistory, gapsFromFailedWindows, syncSimplefin, firstOfPreviousMonth, mergeStagedPayload, knownExternalIds, findNewAccounts, encryptJson, decryptJson, claimSimplefinToken, syncSimplefin, normalizeSimplefinAccount,
   normalizeSimplefinTransactions, normalizeSnaptradePositions, snaptradeConfig, assertSimplefinUrl
 };
