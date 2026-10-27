@@ -168,17 +168,22 @@ more convenient.
   batched request fills in the Subcategory, the account and up to two **tags**
   (reusing tags you already use) for rows your history couldn't match, and
   rows that are confident (a rule, your history, or a high-confidence AI pick)
-  go straight to the ledger, deposits and card payments included. A **return**
-  (say a $12 credit on a card) that matches an earlier $12 purchase on the
-  same account goes in under that purchase's Subcategory as a negative amount,
-  so it nets the spending back out and lowers what the card owes; its note
-  says which purchase it reverses. Duplicates, possible transfers, pending
-  rows, a return whose purchase is on a different account or still waiting in
-  Bank Stream, a deposit that matches a paycheck you already recorded (it would
-  count the income twice) and anything the AI was unsure about stay in Bank
-  Stream for review — unsure ones are marked **AI guess - check**. Already have rows waiting? Select **Let AI categorize
-  and add the N waiting rows** in Bank Stream. Untick the box to review
-  everything by hand. The mobile app does the same.
+  go straight to the ledger, deposits and card payments included. A row the AI
+  could not categorize, or was unsure about, **still goes to the ledger** with
+  no Subcategory, marked **Needs a category** there (it counts toward the
+  account balance straight away; pick the Subcategory on the ledger row when
+  you like, and Insights lists how many are waiting). A **return** (say a $12
+  credit on a card) that matches an earlier $12 purchase on the same account
+  goes in under that purchase's Subcategory as a negative amount, so it nets the
+  spending back out and lowers what the card owes; its note says which purchase
+  it reverses. Duplicates, possible transfers, pending rows, rows with no
+  account, a return whose purchase is on a different account or still waiting
+  in Bank Stream, and a deposit that matches a paycheck you already recorded (it
+  would count the income twice) stay in Bank Stream, each marked **Held:** with
+  the reason. If the AI could not be reached, the rows wait for the next try
+  instead of going in uncategorized. Already have rows waiting? Select **Let AI
+  categorize and add the N waiting rows** in Bank Stream (it also runs once when
+  you open Transactions). Untick the box to review everything by hand. The mobile app does the same.
 - No history for a payee and AI import is off? Select **✨ Suggest with AI**
   for Subcategory, or **✨ Suggest account with AI** for the account (both on
   the Add transaction form, or their matching ✨ buttons next to an unlinked

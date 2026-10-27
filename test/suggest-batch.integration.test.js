@@ -123,7 +123,7 @@ test("a linked bank feed also posts deposits and payments, but still holds back 
   assert.equal(autoAcceptDecision(draft, { ...ctx, bankFeed: true }).accept, true);
   assert.equal(autoAcceptDecision({ ...draft, isDeposit: false, isPayment: true }, { ...ctx, bankFeed: true }).accept, true);
   assert.equal(autoAcceptDecision(draft, { ...ctx, bankFeed: true, paycheckMatch: true }).reason, "matches a recorded paycheck");
-  assert.equal(autoAcceptDecision({ ...draft, lineSource: "ai-low" }, { ...ctx, bankFeed: true }).reason, "low confidence");
+  assert.equal(autoAcceptDecision({ ...draft, lineSource: "ai-low" }, { ...ctx, bankFeed: true }).uncategorized, true, "an unsure AI guess goes in without its category");
 });
 
 test("matchesRecordedPaycheck needs the same account, about the same amount and a nearby payday", () => {
@@ -169,4 +169,20 @@ test("a fuzzy refund match never pairs a credit with a purchase on a different a
   assert.equal(refundMatch({ payee: "Target", amount: -12, date: "2026-07-09", accountId: "card" }, [purchase]), null);
   assert.equal(refundMatch({ payee: "Target", amount: -12, date: "2026-07-09", accountId: "checking" }, [purchase]), purchase);
   assert.equal(refundMatch({ payee: "Target", amount: -12, date: "2026-07-09" }, [purchase]), purchase, "an unknown account still matches");
+});
+
+test("from a bank feed a row with no category (or an unsure AI guess) still goes in, uncategorized; every other hold still applies", () => {
+  const ctx = { accountsExist: true, possibleDuplicate: false, refundMatch: null, transferMatch: null, accountClosedForDate: false, bankFeed: true };
+  const row = { lineId: "", accountId: "checking", lineSource: "" };
+  assert.deepEqual(autoAcceptDecision(row, ctx), { accept: true, reason: "", uncategorized: true });
+  assert.deepEqual(autoAcceptDecision({ ...row, lineId: "dining", lineSource: "ai-low" }, ctx), { accept: true, reason: "", uncategorized: true });
+  assert.deepEqual(autoAcceptDecision({ ...row, lineId: "dining", lineSource: "ai-high" }, ctx), { accept: true, reason: "" });
+  assert.deepEqual(autoAcceptDecision({ ...row, lineId: "dining", lineSource: "" }, ctx), { accept: true, reason: "" });
+  assert.equal(autoAcceptDecision({ ...row, accountId: "" }, ctx).reason, "no account");
+  assert.equal(autoAcceptDecision(row, { ...ctx, possibleDuplicate: true }).reason, "possible duplicate");
+  assert.equal(autoAcceptDecision(row, { ...ctx, transferMatch: {} }).reason, "possible transfer");
+  assert.equal(autoAcceptDecision({ ...row, isPending: true }, ctx).reason, "still pending");
+  // Without the bank-feed flag the old conservative rules hold.
+  assert.equal(autoAcceptDecision(row, { ...ctx, bankFeed: false }).reason, "no category");
+  assert.equal(autoAcceptDecision({ ...row, lineId: "dining", lineSource: "ai-low" }, { ...ctx, bankFeed: false }).reason, "low confidence");
 });
