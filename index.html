@@ -66,7 +66,7 @@
         </header>
 
         <section id="authPanel" class="auth-panel">
-          <form id="signinForm" class="auth-form">
+          <form id="signinForm" method="post" action="/" class="auth-form">
             <h2>Sign in</h2>
             <label>Email<input name="email" type="email" autocomplete="username" required></label>
             <label>Password<input name="password" type="password" autocomplete="current-password" required></label>
@@ -82,7 +82,7 @@
             </div>
             <p id="authMessage"></p>
           </form>
-          <form id="passwordResetRequestForm" class="auth-form secondary-form" hidden>
+          <form id="passwordResetRequestForm" method="post" action="/" class="auth-form secondary-form" hidden>
             <h2>Reset password</h2>
             <p>We will email a one-time link that expires in 30 minutes.</p>
             <label>Email<input name="email" type="email" autocomplete="username" required></label>
@@ -90,7 +90,7 @@
             <button class="text-button" data-show-signin type="button">Back to sign in</button>
             <p class="form-message" data-reset-message></p>
           </form>
-          <form id="passwordResetConfirmForm" class="auth-form secondary-form" hidden>
+          <form id="passwordResetConfirmForm" method="post" action="/" class="auth-form secondary-form" hidden>
             <h2>Choose a new password</h2>
             <input name="email" type="hidden">
             <input name="token" type="hidden">
@@ -99,7 +99,7 @@
             <button type="submit">Reset password</button>
             <p class="form-message" data-reset-message></p>
           </form>
-          <form id="invitationAcceptForm" class="auth-form secondary-form" hidden>
+          <form id="invitationAcceptForm" method="post" action="/" class="auth-form secondary-form" hidden>
             <h2>Accept invitation</h2>
             <p>Use the invited email address and code from your FamilyLoop email.</p>
             <label>Name<input name="name" autocomplete="name" placeholder="Your name"></label>
@@ -113,7 +113,7 @@
             <button class="text-button" data-show-signin type="button">Back to sign in</button>
             <p class="form-message" data-invitation-message></p>
           </form>
-          <form id="signupForm" class="auth-form secondary-form">
+          <form id="signupForm" method="post" action="/" class="auth-form secondary-form">
             <h2>Create household</h2>
             <label>Name<input name="name" value="Household Owner" required></label>
             <label>Household<input name="householdName" value="My Household" required></label>
@@ -456,7 +456,22 @@
 
     <script src="https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/build/pdf.min.js"></script>
     <script>if (window.pdfjsLib) pdfjsLib.GlobalWorkerOptions.workerSrc = "https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/build/pdf.worker.min.js";</script>
+    <script>
+      // A sign-in, sign-up or reset form submitted before the app script has attached its handler (or if it failed to load) would fall back to a
+      // plain browser submit. Never let that happen: the forms are POST (nothing in the address bar) and are held here until the app is ready.
+      (function () {
+        try { if (/[?&](password|newPassword|confirmPassword|token)=/i.test(location.search)) history.replaceState(null, "", location.pathname + location.hash); } catch (_error) { /* address bar left as is */ }
+        document.querySelectorAll("form.auth-form").forEach(function (form) {
+          form.addEventListener("submit", function (event) {
+            event.preventDefault();
+            if (window.__authReady) return;
+            var message = document.getElementById("authMessage");
+            if (message) message.textContent = "The page is still loading - try again in a moment.";
+          });
+        });
+      })();
+    </script>
     <script src="/lib/shared-logic.js?v=20261027-2"></script>
-    <script src="/app.js?v=20261028-1"></script>
+    <script src="/app.js?v=20261028-2"></script>
   </body>
 </html>

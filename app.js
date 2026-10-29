@@ -14637,6 +14637,9 @@ function dismissImportTransaction(button) {
   render();
 }
 
+// The page-load guard in index.html holds the auth forms until this point, so a submit can never fall back to a plain (URL) form submit.
+window.__authReady = true;
+
 $("#signinForm").addEventListener("submit", async (event) => {
   event.preventDefault();
   try {
