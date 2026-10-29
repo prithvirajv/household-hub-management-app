@@ -2984,17 +2984,60 @@ function recurringExpenseRow(recurring, index) {
 // same normalization rule as history matching itself, so it can't cross-
 // contaminate a different payee that merely shares a generic prefix.
 function categorizationRuleForPayee(payee) {
-  const key = normalizeForPayeeMatch(payee);
-  if (!key) return "";
-  return state.transactionCategorizationRules?.[key] || "";
+  return lookupCategorizationRule(state.transactionCategorizationRules, payee);
 }
 
 function setCategorizationRuleForPayee(payee, lineId) {
-  const key = normalizeForPayeeMatch(payee);
-  if (!key) return;
-  state.transactionCategorizationRules ||= {};
-  if (lineId) state.transactionCategorizationRules[key] = lineId;
-  else delete state.transactionCategorizationRules[key];
+  setCategorizationRule(state, payee, lineId);
+}
+
+// The household's "always categorize this way" rules, one entry per payee (a rule is stored under an exact and a looser key; both belong to one
+// entry), for the Category rules list.
+function categorizationRuleEntries() {
+  const rules = state.transactionCategorizationRules || {};
+  const labels = state.transactionCategorizationRuleLabels || {};
+  const groups = new Map();
+  Object.entries(rules).forEach(([key, lineId]) => {
+    const label = labels[key] || key;
+    const id = `${label.toLowerCase()}|${lineId}`;
+    const group = groups.get(id) || { label, lineId, keys: [] };
+    group.keys.push(key);
+    groups.set(id, group);
+  });
+  return [...groups.values()].sort((a, b) => a.label.localeCompare(b.label));
+}
+
+// A category the household picks by hand is remembered: the payee's rule becomes that Subcategory (so the next one - from the bank, an
+// import or the overnight sync - lands there), waiting Bank stream rows of the payee follow it, and earlier ledger transactions of the same
+// payee filed elsewhere are offered to move too (listed first; nothing changes until confirmed).
+async function learnFromCategoryChange(ledgerIndex) {
+  const transaction = state.transactions[ledgerIndex];
+  if (!transaction || !transaction.lineId || !String(transaction.payee || "").trim()) return;
+  const line = allLines().find((item) => item.id === transaction.lineId);
+  const label = line ? `${line.category} - ${line.name}` : "this Subcategory";
+  const had = categorizationRuleForPayee(transaction.payee);
+  setCategorizationRuleForPayee(transaction.payee, transaction.lineId);
+  let waiting = 0;
+  (state.transactionInboxDrafts || []).forEach((draft) => {
+    if (draft.lineId === transaction.lineId || categorizationRuleForPayee(draft.payee) !== transaction.lineId) return;
+    draft.lineId = transaction.lineId;
+    draft.lineSource = "rule";
+    draft.historyMatch = false;
+    waiting += 1;
+  });
+  autosaveState();
+  showToast(`Learned: "${transaction.payee}" goes to ${label} from now on${waiting ? ` (${waiting} waiting row${waiting === 1 ? "" : "s"} updated)` : ""}. You can change this under Category rules.`, { type: "info" });
+  const others = planCategoryRelearn(state.transactions, ledgerIndex, transaction.lineId);
+  if (!others.length) { if (waiting || had !== transaction.lineId) render(); return; }
+  const list = others.slice(0, 6).map((i) => `${state.transactions[i].date}  ${exactMoney.format(Math.abs(Number(state.transactions[i].amount)))}  ${state.transactions[i].payee}`).join("\n");
+  const more = others.length > 6 ? `\n…and ${others.length - 6} more` : "";
+  const confirmed = await showConfirm(`Also move the ${others.length} earlier "${transaction.payee}" transaction${others.length === 1 ? "" : "s"} to ${label}?\n\n${list}${more}`, { title: "Apply to earlier transactions?", confirmLabel: `Move ${others.length}`, cancelLabel: "Just this one", danger: false });
+  if (confirmed) {
+    others.forEach((i) => { const other = state.transactions[i]; if (other && other.lineId !== transaction.lineId) Object.assign(other, { lineId: transaction.lineId }, lineSnapshot(transaction.lineId)); });
+    state.household.activity.unshift(`Moved ${others.length} earlier ${transaction.payee} transaction${others.length === 1 ? "" : "s"} to ${label}`);
+    autosaveState();
+  }
+  render();
 }
 
 function renderTransactions() {
@@ -3276,6 +3319,11 @@ function renderTransactions() {
             </div>
           `).join("") || `<div class="empty-inline">No bank stream items waiting</div>`}
         </section>
+        ${categorizationRuleEntries().length ? `<section class="card category-rules-card">
+          <div class="card-label">Learned</div><h3>Category rules</h3>
+          <p class="muted">Whenever you move a transaction to a different Subcategory, FamilyLoop remembers it for that payee and files the next one there too. Remove a rule to go back to guessing from history.</p>
+          ${categorizationRuleEntries().map((entry) => { const line = allLines().find((item) => item.id === entry.lineId); return `<div class="compact-row"><div><strong>${escapeHtml(entry.label)}</strong><small>${line ? escapeHtml(`${line.category} - ${line.name}`) : "A Subcategory that no longer exists"}</small></div><button type="button" class="icon-button danger-button" data-remove-category-rule="${escapeHtml(entry.keys.join(","))}" aria-label="Remove the rule for ${escapeHtml(entry.label)}">×</button></div>`; }).join("")}
+        </section>` : ""}
         <section class="card cleanup-card">
           <div class="card-label">Housekeeping</div><h3>Clean up old transactions</h3>
           <p class="muted">Permanently remove ledger transactions and/or waiting Bank stream rows from before a date. A CSV backup of exactly what is removed can download first. Linked accounts re-match their bank balance afterwards.</p>
@@ -10610,8 +10658,36 @@ function bindViewEvents() {
         // from - once someone hand-picks a different one, keeping the pill
         // up would misattribute their own choice to the suggestion.
         draft.historyMatch = false;
+        // A Subcategory picked by hand is remembered for the payee, like a change in the ledger (see learnFromCategoryChange).
+        if (select.value && String(draft.payee || "").trim()) {
+          setCategorizationRuleForPayee(draft.payee, select.value);
+          let followed = 0;
+          (state.transactionInboxDrafts || []).forEach((other) => {
+            if (other === draft || other.lineId === select.value || categorizationRuleForPayee(other.payee) !== select.value) return;
+            other.lineId = select.value;
+            other.lineSource = "rule";
+            other.historyMatch = false;
+            followed += 1;
+          });
+          const line = allLines().find((item) => item.id === select.value);
+          showToast(`Learned: "${draft.payee}" goes to ${line ? `${line.category} - ${line.name}` : "this Subcategory"} from now on${followed ? ` (${followed} other waiting row${followed === 1 ? "" : "s"} updated)` : ""}.`, { type: "info" });
+          autosaveState();
+          if (followed) render();
+          return;
+        }
       }
       autosaveState();
+    });
+  });
+
+  document.querySelectorAll("[data-remove-category-rule]").forEach((button) => {
+    button.addEventListener("click", () => {
+      button.dataset.removeCategoryRule.split(",").forEach((key) => {
+        delete (state.transactionCategorizationRules || {})[key];
+        delete (state.transactionCategorizationRuleLabels || {})[key];
+      });
+      autosaveState();
+      render();
     });
   });
 
@@ -10849,11 +10925,14 @@ function bindViewEvents() {
   });
 
   document.querySelectorAll("[data-ledger-entry-line]").forEach((select) => {
-    select.addEventListener("change", () => {
-      const transaction = state.transactions[Number(select.dataset.ledgerEntryLine)];
-      if (transaction) Object.assign(transaction, { lineId: select.value }, lineSnapshot(select.value));
+    select.addEventListener("change", async () => {
+      const index = Number(select.dataset.ledgerEntryLine);
+      const transaction = state.transactions[index];
+      if (!transaction) return;
+      Object.assign(transaction, { lineId: select.value }, lineSnapshot(select.value));
       autosaveState();
       render();
+      await learnFromCategoryChange(index);
     });
   });
 

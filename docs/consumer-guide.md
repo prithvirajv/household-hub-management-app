@@ -210,6 +210,18 @@ more convenient.
   Both show the list and total first and do nothing until you confirm; neither
   touches the Ledger, and a row whose other half is already in the Ledger stays
   for a one-by-one look. (Web only for now.)
+- **FamilyLoop learns from your category changes.** When you move a
+  transaction to a different Subcategory (in the Ledger, or by picking one on
+  a Bank stream row), that becomes the rule for the payee: the next one - from
+  the bank, an import, or the overnight sync - goes to the same Subcategory,
+  and waiting Bank stream rows of that payee follow right away. A merchant
+  written with varying store numbers or reference codes (for example
+  `NAME*A1B2` and `NAME*C3D4`) counts as one payee; person-to-person payments
+  and transfers only match exactly. If earlier Ledger transactions of the same
+  payee are filed elsewhere, you are asked whether to move them too (the list
+  is shown first; **Just this one** leaves them). The **Category rules** card
+  lists what it learned, each with a remove button. The mobile app does the
+  same.
 - No history for a payee and AI import is off? Select **✨ Suggest with AI**
   for Subcategory, or **✨ Suggest account with AI** for the account (both on
   the Add transaction form, or their matching ✨ buttons next to an unlinked
