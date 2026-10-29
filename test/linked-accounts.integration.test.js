@@ -327,6 +327,63 @@ test("the nightly job notifies the household about new transactions and about a 
 });
 
 
+test("a night that never ran is made up: the next run starts from the last successful sync, and the catch-up run only touches links whose last clean run is old", async () => {
+  const requested = [];
+  const fetchImpl = async (url, options = {}) => {
+    if (options.method === "POST") return { ok: true, status: 200, text: async () => "http://u:p@127.0.0.1:9/simplefin" };
+    requested.push(new URL(url).searchParams.get("start-date"));
+    const posted = Math.floor(Date.now() / 1000) - 3600;
+    return { ok: true, status: 200, json: async () => ({ errors: [], accounts: [{ org: { name: "B" }, id: "A1", name: "Checking", currency: "USD", balance: "5", "balance-date": posted, transactions: [] }] }) };
+  };
+  const app = express();
+  app.use(express.json());
+  const memoryDb = {};
+  const requireSession = (req, _res, next) => { req.sessionUser = { id: "u1", email: "o@example.com", household_id: "h1", access_level: "edit" }; next(); };
+  const requireJobSecret = (req, res, next) => (req.headers.authorization === "Bearer s" ? next() : res.status(401).json({ error: "no" }));
+  registerLinkedAccountRoutes({ app, requireSession, requireEditAccess: (_q, _r, n) => n(), requireJobSecret, notifyHousehold: async () => undefined, MEMORY_DB: true, memoryDb, pool: null, env: { LINK_ENCRYPTION_KEY: KEY, NODE_ENV: "test", SIMPLEFIN_ALLOW_TEST_HOSTS: "true" }, fetchImpl });
+  const server = await new Promise((resolve) => { const s = app.listen(0, "127.0.0.1", () => resolve(s)); });
+  const base = `http://127.0.0.1:${server.address().port}`;
+  const call = async (path, options = {}) => { const res = await fetch(`${base}${path}`, { ...options, headers: { "content-type": "application/json", ...(options.headers || {}) } }); return { status: res.status, body: await res.json().catch(() => ({})) }; };
+  const run = (body) => call("/api/internal/linked-accounts/sync-all", { method: "POST", headers: { authorization: "Bearer s" }, body: JSON.stringify(body) });
+  const day = 86400 * 1000;
+  try {
+    const token = Buffer.from("http://127.0.0.1:9/simplefin/claim/T").toString("base64");
+    const created = await call("/api/linked-accounts/simplefin", { method: "POST", body: JSON.stringify({ setupToken: token, label: "Bank one" }) });
+    const id = created.body.link.id;
+    await call(`/api/linked-accounts/${id}/mappings`, { method: "PUT", body: JSON.stringify({ mappings: { A1: { accountId: "chk" } } }) });
+    const row = memoryDb.linkedAccounts[0];
+    // The last successful sync was six days ago and the nights since never ran.
+    row.last_sync_at = new Date(Date.now() - 6 * day).toISOString();
+    row.last_run = { at: new Date(Date.now() - 6 * day).toISOString(), ok: true, stage: "applied" };
+    const dateOf = (offsetDays) => new Date(Date.now() - offsetDays * day).toISOString().slice(0, 10);
+    const first = await run({});
+    assert.equal(first.body.synced, 1);
+    assert.equal(requested[0] && new Date(Number(requested[0]) * 1000).toISOString().slice(0, 10), dateOf(9), "the fetch started three days of overlap before the last successful sync, not just from last night");
+    const ran = (await call("/api/linked-accounts")).body.links[0].lastRun;
+    assert.equal(ran.sinceDate, dateOf(9), "the run says where it started, so the status line can say what it covered");
+    assert.equal(new Date(row.last_sync_at).toISOString().slice(0, 10), dateOf(6), "a fetch alone does not move the link's last-sync date: nothing has been loaded into the household yet");
+    // A manual sync stages data but the date only moves when the client has applied it and acknowledges it.
+    const manual = await call(`/api/linked-accounts/${id}/sync`, { method: "POST", body: "{}" });
+    assert.equal(manual.status, 200);
+    assert.equal(new Date(row.last_sync_at).toISOString().slice(0, 10), dateOf(6), "a manual fetch does not move it either");
+    const staged = row.staged_at;
+    await call(`/api/linked-accounts/${id}/ack`, { method: "POST", body: JSON.stringify({ stagedAt: new Date(Date.now() + 3600000).toISOString() }) });
+    assert.equal(new Date(row.last_sync_at).toISOString(), new Date(staged).toISOString(), "acknowledging the applied data moves it to when that data was fetched");
+
+    // A clean run today: neither the retry nor the catch-up touches the link.
+    assert.equal((await run({ retry: true })).body.links, 0);
+    assert.equal((await run({ retry: true, maxAgeHours: 20 })).body.links, 0);
+    // The nightly run never happened for a day and a half: the catch-up picks it up (the plain retry, with its 8-hour rule, would too).
+    row.last_run = { ...row.last_run, at: new Date(Date.now() - 36 * 3600 * 1000).toISOString() };
+    assert.equal((await run({ retry: true, maxAgeHours: 20 })).body.links, 1);
+    row.last_run = { ...row.last_run, at: new Date(Date.now() - 12 * 3600 * 1000).toISOString() };
+    assert.equal((await run({ retry: true, maxAgeHours: 20 })).body.links, 0, "twelve hours old is fine for the catch-up");
+    assert.equal((await run({ retry: true })).body.links, 1, "but not for the 8-hour retry rule");
+  } finally {
+    await new Promise((resolve) => server.close(resolve));
+  }
+});
+
 test("the nightly job applies new bank transactions to the household without the app: ledger, balances and versions", async () => {
   const stub = await startSimplefinStub();
   const server = await startTestServer({ LINK_ENCRYPTION_KEY: KEY, SIMPLEFIN_ALLOW_TEST_HOSTS: "true", NOTIFICATION_SECRET: "job-secret" });

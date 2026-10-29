@@ -597,7 +597,8 @@ function registerLinkedAccountRoutes({ app, requireSession, requireEditAccess, r
       const result = await syncSimplefin(credentials.accessUrl, { startUnix, endUnix: nowUnix, allowPartial: Boolean(allowPartial) }, { fetchImpl, allowInsecureHosts });
       // Only accounts sent to a Wealth account import transactions (investment and loan accounts follow their balance only), so only those are staged.
       const wanted = new Set(Object.entries(link.mappings || {}).filter(([, mapping]) => mapping && mapping.accountId).map(([remoteId]) => remoteId));
-      return { provider: "simplefin", accounts: result.accounts, transactions: result.transactions.filter((transaction) => wanted.has(transaction.remoteAccountId)), errors: result.errors, failedWindows: result.failedWindows || [] };
+      // sinceDate is where this fetch started: the last successful sync (minus a few days of overlap), so a missed night is picked up by the next run.
+      return { provider: "simplefin", sinceDate: new Date(startUnix * 1000).toISOString().slice(0, 10), accounts: result.accounts, transactions: result.transactions.filter((transaction) => wanted.has(transaction.remoteAccountId)), errors: result.errors, failedWindows: result.failedWindows || [] };
     }
     const accounts = await getAdapter().listAccounts(credentials);
     const mapped = accounts.filter((account) => link.mappings[account.remoteId] && !link.mappings[account.remoteId].skipped);
@@ -629,7 +630,7 @@ function registerLinkedAccountRoutes({ app, requireSession, requireEditAccess, r
       const { notices: _previous, ...previousRun } = link.lastRun || {};
       const notices = bridgeNotices(payload.errors);
       await store.update(sessionHouseholdId(req), link.id, { staged: merged, stagedAt: merged.stagedAt, ...(link.lastRun?.at || notices.length ? { lastRun: { ...previousRun, ...(notices.length ? { notices } : {}) } } : {}) });
-      await recordOutcome(req, link, null, payload.accounts);
+      await recordOutcome(req, link, null, payload.accounts, { touchLastSync: false });
       res.json({ ...merged, ...(gaps.length ? { historyGaps: gaps } : {}), ...(Object.keys(coverage).length ? { coverage } : {}) });
     } catch (error) {
       await recordOutcome(req, link, error);
@@ -642,7 +643,8 @@ function registerLinkedAccountRoutes({ app, requireSession, requireEditAccess, r
     const through = String(req.body?.stagedAt || "");
     // Only clears what the client actually applied: anything staged after that (a nightly run in between) stays for next time.
     if (through && link.stagedAt && new Date(link.stagedAt).getTime() <= new Date(through).getTime()) {
-      await store.update(sessionHouseholdId(req), link.id, { staged: {}, stagedAt: null });
+      // What the client acknowledges is applied and saved, so this is the moment the link counts as synced up to when that data was fetched.
+      await store.update(sessionHouseholdId(req), link.id, { staged: {}, stagedAt: null, ...(link.stagedAt && (!link.lastSyncAt || new Date(link.stagedAt) > new Date(link.lastSyncAt)) ? { lastSyncAt: link.stagedAt } : {}) });
     }
     res.json({ ok: true });
   }));
@@ -718,7 +720,10 @@ function registerLinkedAccountRoutes({ app, requireSession, requireEditAccess, r
         // The retry run (a second schedule a few hours after the main one) only picks up links whose last run did not finish cleanly or is old,
         // so a bank that was down overnight is tried again before the morning rather than waiting a whole day.
         const retry = Boolean(req.body?.retry);
-        const freshEnough = (link) => link.lastRun?.ok === true && link.lastRun.at && Date.now() - new Date(link.lastRun.at).getTime() < 8 * 3600 * 1000;
+        // How recent a clean run has to be for the retry to leave a link alone: 8 hours by default (the run a few hours after the main one), or
+        // what the catch-up run asks for (about a day, so a night that never ran at all is made up the same afternoon).
+        const maxAgeHours = Math.min(72, Math.max(1, Number(req.body?.maxAgeHours) || 8));
+        const freshEnough = (link) => link.lastRun?.ok === true && link.lastRun.at && Date.now() - new Date(link.lastRun.at).getTime() < maxAgeHours * 3600 * 1000;
         // A link that has never synced (or whose accounts were just changed) waits for its first sync in the app, where a bank that returns less
         // history than asked for is explained and has to be acknowledged before anything is imported.
         const links = (await store.listAll()).filter((link) => link.status === "active" && Object.keys(link.mappings || {}).length && !(link.provider === "snaptrade" && !snaptrade) && (link.provider !== "simplefin" || link.lastSyncAt) && !(retry && freshEnough(link)));
@@ -741,8 +746,8 @@ function registerLinkedAccountRoutes({ app, requireSession, requireEditAccess, r
               const previouslyStaged = new Set((link.staged?.transactions || []).map((transaction) => transaction.externalId));
               newTransactionCount = (payload.transactions || []).filter((transaction) => !previouslyStaged.has(transaction.externalId) && !known.has(transaction.externalId)).length;
             }
-            runs.set(link.id, { at, ok: true, stage: "fetched", accounts: (payload.accounts || []).length, newRows: newTransactionCount, ...(bridgeNotices(payload.errors).length ? { notices: bridgeNotices(payload.errors) } : {}), ...(retry ? { retry: true } : {}) });
-            await store.update(link.householdId, link.id, { staged: merged, stagedAt: merged.stagedAt, lastError: "", status: "active", lastSyncAt: at, newAccounts: findNewAccounts(payload.accounts, link.mappings), lastRun: runs.get(link.id) });
+            runs.set(link.id, { at, ok: true, stage: "fetched", accounts: (payload.accounts || []).length, newRows: newTransactionCount, ...(payload.sinceDate ? { sinceDate: payload.sinceDate } : {}), ...(bridgeNotices(payload.errors).length ? { notices: bridgeNotices(payload.errors) } : {}), ...(retry ? { retry: true } : {}) });
+            await store.update(link.householdId, link.id, { staged: merged, stagedAt: merged.stagedAt, lastError: "", status: "active", newAccounts: findNewAccounts(payload.accounts, link.mappings), lastRun: runs.get(link.id) });
             entry.newTransactions += newTransactionCount;
             summary.synced += 1;
             summary.newTransactions += newTransactionCount;
@@ -772,7 +777,9 @@ function registerLinkedAccountRoutes({ app, requireSession, requireEditAccess, r
                 : outcome?.skipped === "conflict" ? { ...run, ok: false, stage: "apply", error: "Your household was being edited while it loaded, so loading it was postponed." }
                 : outcome ? { ...run, stage: "applied", imported: 0, added: 0, left: 0 } : run;
               runs.set(link.id, finished);
-              await store.update(householdId, link.id, { lastRun: finished });
+              // The link's last-sync date (where the next fetch starts from) moves only when the new rows are really loaded: a night whose fetch worked
+              // but whose loading did not finish is fetched again, from the same place, the next time.
+              await store.update(householdId, link.id, { lastRun: finished, ...(finished.ok && finished.stage === "applied" ? { lastSyncAt: finished.at } : {}) });
               if (!finished.ok) entry.failed.push(`${link.label}: ${finished.error}`);
             }
           } catch (error) {

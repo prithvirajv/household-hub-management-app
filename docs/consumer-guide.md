@@ -604,7 +604,15 @@ entry. It is read-only: FamilyLoop can never move money or place trades.
   to sign in again (its own message is shown, for example "Auth required", with
   a reminder to re-authorise that bank in your SimpleFIN Bridge account) - a red **The overnight sync needs a look**
   card appears on Home (with **Sync now**) and your phone is told. A second
-  run a few hours after the main one retries anything that didn't finish. The
+  run a few hours after the main one retries anything that didn't finish, and
+  an afternoon run makes up a night that never ran at all. Every run starts
+  from the last sync that was fully loaded (a few days earlier, to catch
+  late-posting items), so a missed night is picked up by the next one and the
+  status line says where it caught up from. A bank's "last synced" date, and
+  each account's synced-through tag, move forward only once the new rows are
+  really in your ledger or Bank stream - a fetch that didn't finish loading is
+  fetched again from the same place. If no overnight run has happened for over
+  a day, Home says so. The
   Home AI summary also reports the sync: whether it finished, what is missing
   (months not imported, accounts behind, rows waiting) and useful FYIs.
 - **Import history:** under a bank link, **Import older transactions from**

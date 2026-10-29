@@ -128,3 +128,18 @@ test("every night whatever is still waiting from the bank gets another chance, a
   await retryWaitingDrafts(held, { suggest: quiet, createId: ids(), todayKey: TODAY });
   assert.equal(calls, 1, "a row the AI already answered for is not sent again the next night");
 });
+
+test("an account's sync marks move only when loading is complete, and not at all when part of the range could not be fetched", async () => {
+  const payload = (extra = {}) => ({ provider: "simplefin", accounts: [{ remoteId: "A1", balance: 100, balanceDate: "2026-10-25" }], transactions: [row("1", "NEW CAFE", 12, "2026-10-21")], coverage: { A1: { from: "2026-09-01", through: "2026-10-26" } }, ...extra });
+  const stamped = baseState();
+  await applyLinkedPayload(stamped, link, payload(), { suggest: async () => [], createId: ids(), todayKey: TODAY });
+  const account = stamped.accounts.find((a) => a.id === "chk");
+  assert.deepEqual([account.syncedThrough, typeof account.lastSyncedAt, account.syncedFrom], ["2026-10-25", "string", "2026-09-01"], "stamped once the rows are loaded");
+  const partial = baseState();
+  await applyLinkedPayload(partial, link, payload({ failedWindows: [{ from: "2026-08-01", to: "2026-09-01", error: "timeout" }] }), { suggest: async () => [], createId: ids(), todayKey: TODAY });
+  const notCaughtUp = partial.accounts.find((a) => a.id === "chk");
+  assert.deepEqual([notCaughtUp.syncedThrough, notCaughtUp.lastSyncedAt], [undefined, undefined], "an account that is not caught up is not stamped");
+  const failing = baseState();
+  await assert.rejects(() => applyLinkedPayload(failing, link, payload({ transactions: [row("1", "A", 1, "2026-10-21")] }), { suggest: async () => { throw new Error("x"); }, createId: () => { throw new Error("boom"); }, todayKey: TODAY }));
+  assert.equal(failing.accounts.find((a) => a.id === "chk").lastSyncedAt, undefined, "a load that throws leaves the marks alone");
+});

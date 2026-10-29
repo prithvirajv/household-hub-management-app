@@ -293,6 +293,9 @@ upsert_linked_sync_job() {
 # The main run, and a retry a few hours later that only picks up links whose overnight run did not finish cleanly (a bank that was down).
 upsert_linked_sync_job "${LINKED_SYNC_JOB:-familyloop-linked-sync}" "${LINKED_SYNC_SCHEDULE:-30 3 * * *}" "{}"
 upsert_linked_sync_job "${LINKED_SYNC_RETRY_JOB:-familyloop-linked-sync-retry}" "${LINKED_SYNC_RETRY_SCHEDULE:-30 6 * * *}" '{"retry":true}'
+# A catch-up in the afternoon for a night that never ran at all (a scheduler or service outage): it leaves a link alone when its last clean run is
+# under 20 hours old, otherwise it syncs from that link's last successful sync, so nothing between the two is missed.
+upsert_linked_sync_job "${LINKED_SYNC_CATCHUP_JOB:-familyloop-linked-sync-catchup}" "${LINKED_SYNC_CATCHUP_SCHEDULE:-30 14 * * *}" '{"retry":true,"maxAgeHours":20}'
 
 echo "Cloud Run URL: ${SERVICE_URL}"
 if [[ "${USE_CLOUD_SQL}" == "true" ]]; then

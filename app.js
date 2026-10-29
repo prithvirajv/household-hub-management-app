@@ -2449,6 +2449,7 @@ function bankSyncFacts() {
     const when = run.at ? new Date(run.at).toLocaleString("en-US", { weekday: "short", hour: "numeric", minute: "2-digit" }) : "";
     if (link.status === "needs_reconnect") facts.push(`- Connection "${link.label}" needs signing in again; nothing new can sync until then.`);
     else if (!run.at) facts.push(`- Connection "${link.label}" has not had an overnight run yet.`);
+    else if (linkRunIsStale(link)) facts.push(`- Connection "${link.label}": NO overnight run since ${when} (a night was missed); the next run catches up from the last successful sync.`);
     else if (run.ok === false) facts.push(`- Connection "${link.label}": the overnight run (${when}) did NOT finish - ${run.error || "unknown problem"}.`);
     else if (run.stage === "waiting") facts.push(`- Connection "${link.label}": fetched overnight (${when}) but the new transactions are waiting for the household to open the app.`);
     else if (run.stage === "applied") facts.push(`- Connection "${link.label}": the overnight run (${when}) completed - ${run.imported || 0} new from the bank, ${run.added || 0} added to the ledger${run.left ? `, ${run.left} held for review` : ""}.`);
@@ -14280,13 +14281,28 @@ function linkedProviderLabel(link) {
 }
 
 // What the last overnight run did for a link, in words: loaded (with the counts), waiting for you, or failed (with the reason).
+// When a run had to reach back further than the usual few days of overlap (a night was missed), the status line says where it caught up from.
+function linkedCaughtUpNote(run) {
+  if (!run.sinceDate || !run.at) return "";
+  const days = (new Date(run.at).getTime() - new Date(`${run.sinceDate}T00:00:00`).getTime()) / 86400000;
+  return days > 5 ? ` (caught up from ${new Date(`${run.sinceDate}T00:00:00`).toLocaleDateString(undefined, { month: "short", day: "numeric" })})` : "";
+}
+
+// A bank link whose overnight run has not happened for over a day: the scheduler missed a night. The next run starts from the last successful
+// sync, so nothing is lost, but it is worth saying.
+function linkRunIsStale(link) {
+  if (link.status !== "active" || !Object.keys(link.mappings || {}).length) return false;
+  const last = link.lastRun?.at || link.lastSyncAt;
+  return Boolean(last) && Date.now() - new Date(last).getTime() > 30 * 3600 * 1000;
+}
+
 function linkedRunSummary(link) {
   const run = link.lastRun || {};
   if (!run.at) return "";
   const time = new Date(run.at).toLocaleString();
   if (run.ok === false) return `Overnight sync ${time} did not finish: ${run.error || "unknown problem"}`;
   if (run.stage === "waiting") return `Overnight sync ${time}: ${run.reason || "new transactions are waiting for you to open the app."}`;
-  if (run.stage === "applied") return `Overnight sync ${time}: complete - ${run.imported || 0} new from the bank, ${run.added || 0} added to the ledger${run.left ? `, ${run.left} need a look` : ""}.`;
+  if (run.stage === "applied") return `Overnight sync ${time}: complete${linkedCaughtUpNote(run)} - ${run.imported || 0} new from the bank, ${run.added || 0} added to the ledger${run.left ? `, ${run.left} need a look` : ""}.`;
   return `Overnight sync ${time}: fetched${run.newRows ? ` ${run.newRows} new` : ""} - not loaded yet.`;
 }
 
@@ -14313,6 +14329,7 @@ function bankSyncProblems() {
     else if (run.ok === false) problems.push({ title: link.label, detail: `did not finish overnight: ${run.error || "unknown problem"}`, sync: link.id });
     else if (run.stage === "waiting") problems.push({ title: link.label, detail: run.reason || "new transactions are waiting for you to open the app", sync: link.id });
     else if (link.hasStaged && link.status === "active") problems.push({ title: link.label, detail: "has fetched transactions that are not loaded yet", sync: link.id });
+    else if (linkRunIsStale(link)) problems.push({ title: link.label, detail: `no overnight sync has run since ${new Date(link.lastRun?.at || link.lastSyncAt).toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric" })}. The next run catches up from the last successful sync on its own - or press Sync now.`, sync: link.id });
   });
   // What the bank connection itself reported (the Bridge's own words), e.g. a bank that needs signing in again.
   (linkedAccounts?.links || []).forEach((link) => (link.lastRun?.notices || []).forEach((notice) => problems.push({ title: link.label, detail: bridgeNoticeText(notice) })));
