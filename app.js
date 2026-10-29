@@ -2520,6 +2520,68 @@ function renderHomeBriefingCard() {
   </section>`;
 }
 
+// "Ask FamilyLoop": a request typed in plain words becomes a short plan (the AI only plans, from a fixed set of actions); the plan is shown in
+// words written from the household's own data, and nothing changes until it is confirmed. A finished change can be undone for as long as the
+// page stays open (the pieces it touched are put back exactly as they were).
+let assistantUi = { request: "", status: "idle", say: "", clarify: "", error: "", actions: [], skipped: [], done: "", undo: null };
+
+function renderAssistantCard() {
+  if (!sessionUser || sessionUser.accessLevel === "view") return "";
+  const ui = assistantUi;
+  const today = dateKey(new Date());
+  const rows = ui.actions.map((action) => ({ action, problem: assistantActionProblem(action, state, today) }));
+  const ready = rows.filter((row) => !row.problem);
+  return `<section class="card assistant-card">
+    <div class="section-head"><div><span class="card-label">Ask FamilyLoop</span><h3>Tell me what changed</h3></div></div>
+    <p class="muted">For example: "my M1 account is closed and moved to Fidelity". I will show exactly what I would change and wait for your OK.</p>
+    <form id="assistantForm" class="inline-form">
+      <input id="assistantRequest" name="request" maxlength="500" value="${escapeHtml(ui.request)}" placeholder="What changed?" autocomplete="off" ${ui.status === "planning" ? "disabled" : ""}>
+      <button type="submit" ${ui.status === "planning" ? "disabled" : ""}>${ui.status === "planning" ? "Thinking…" : "Ask"}</button>
+    </form>
+    ${ui.status === "error" ? `<p class="muted" role="alert">${escapeHtml(ui.error)}</p>` : ""}
+    ${ui.status === "ready" ? `<div class="assistant-plan" role="status">
+      ${ui.say ? `<p><strong>${escapeHtml(ui.say)}</strong></p>` : ""}
+      ${ui.clarify ? `<p>${escapeHtml(ui.clarify)}</p>` : ""}
+      ${rows.length ? `<ol>${rows.map((row) => `<li>${row.problem ? `<span class="muted">Skipped - ${escapeHtml(row.problem)}</span>` : escapeHtml(describeAssistantAction(row.action, state, (value) => money.format(value), today))}</li>`).join("")}</ol>` : (ui.clarify ? "" : `<p class="muted">I couldn't turn that into a change I'm able to make. I can close or rename an account, move one investment account's holdings into another, rename an investment account, or always file a payee under a Subcategory.</p>`)}
+      ${ready.length ? `<div class="button-row"><button type="button" id="assistantConfirm">Confirm ${ready.length === 1 ? "this change" : `these ${ready.length} changes`}</button><button type="button" class="ghost" id="assistantCancel">Cancel</button></div>` : `<div class="button-row"><button type="button" class="ghost" id="assistantCancel">Close</button></div>`}
+    </div>` : ""}
+    ${ui.status === "done" ? `<div class="assistant-plan" role="status"><p>${escapeHtml(ui.done)}</p>${ui.undo ? `<div class="button-row"><button type="button" class="ghost" id="assistantUndo">Undo</button></div>` : ""}</div>` : ""}
+  </section>`;
+}
+
+async function askAssistant(request) {
+  assistantUi = { ...assistantUi, request, status: "planning", error: "", say: "", clarify: "", actions: [], skipped: [], done: "", undo: null };
+  render();
+  try {
+    const plan = await api("/api/assistant/plan", { method: "POST", body: JSON.stringify({ request, context: assistantContext(state) }) });
+    assistantUi = { ...assistantUi, status: "ready", say: plan.say || "", clarify: plan.clarify || "", actions: plan.actions || [] };
+  } catch (error) {
+    assistantUi = { ...assistantUi, status: "error", error: error?.message || "The assistant couldn't be reached." };
+  }
+  render();
+}
+
+function confirmAssistantPlan() {
+  const today = dateKey(new Date());
+  const result = applyAssistantActions(state, assistantUi.actions, today);
+  if (!result.applied.length) { assistantUi = { ...assistantUi, status: "error", error: "Nothing could be changed - the data has moved on since I made the plan." }; render(); return; }
+  Object.assign(state, result.patch);
+  state.household.activity.unshift(`Ask FamilyLoop: ${result.applied.map((action) => describeAssistantAction(action, { ...state, ...result.undo }, (value) => money.format(value), today)).join(" ")}`.slice(0, 400));
+  autosaveState();
+  const skipped = result.skipped.length ? ` ${result.skipped.length} could not be done and was skipped.` : "";
+  assistantUi = { ...assistantUi, status: "done", done: `Done - ${result.applied.length} change${result.applied.length === 1 ? "" : "s"} made.${skipped}`, undo: result.undo, actions: [] };
+  render();
+}
+
+function undoAssistantChange() {
+  if (!assistantUi.undo) return;
+  Object.assign(state, assistantUi.undo);
+  state.household.activity.unshift("Ask FamilyLoop: undid the last change");
+  autosaveState();
+  assistantUi = { ...assistantUi, status: "done", done: "Undone - everything is back as it was.", undo: null };
+  render();
+}
+
 function renderHome() {
   const items = homeActionItems();
   const billsAndGoals = billAndGoalReminders();
@@ -2531,6 +2593,7 @@ function renderHome() {
     <section class="work-grid">
       <div class="main-stack">
         ${renderHomeBriefingCard()}
+        ${renderAssistantCard()}
         ${renderBankSyncHealthCard()}
         ${renderHistoryGapCard()}
         ${renderDetectedSalaryCard()}
@@ -8602,6 +8665,14 @@ function bindViewEvents() {
   });
 
   $("#homeBriefingRefresh")?.addEventListener("click", () => { void requestHomeBriefing(); });
+  $("#assistantForm")?.addEventListener("submit", (event) => {
+    event.preventDefault();
+    const request = String(new FormData(event.currentTarget).get("request") || "").trim();
+    if (request && assistantUi.status !== "planning") void askAssistant(request);
+  });
+  $("#assistantConfirm")?.addEventListener("click", confirmAssistantPlan);
+  $("#assistantCancel")?.addEventListener("click", () => { assistantUi = { ...assistantUi, status: "idle", actions: [], say: "", clarify: "" }; render(); });
+  $("#assistantUndo")?.addEventListener("click", undoAssistantChange);
   document.querySelectorAll("[data-keep-detected-salary]").forEach((button) => button.addEventListener("click", () => {
     const paycheck = state.paychecks.find((item) => item.id === button.dataset.keepDetectedSalary);
     if (paycheck?.autoDetected) { paycheck.autoDetected.acknowledged = true; autosaveState(); render(); }

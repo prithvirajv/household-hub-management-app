@@ -9300,3 +9300,10 @@ html[data-theme="dark"] .note-color-coral { background: color-mix(in srgb, #fff0
 #confirmDialogMessage { white-space: pre-line; }
 /* A reminder that must be acted on (missing bank history): stands out from ordinary Home cards. */
 .history-gap-card { border: 2px solid var(--coral, #c5533f); }
+
+/* Ask FamilyLoop (Home) */
+.assistant-card .inline-form { display: flex; gap: 8px; align-items: stretch; margin: 8px 0; }
+.assistant-card .inline-form input { flex: 1; min-width: 0; }
+.assistant-card .assistant-plan { margin-top: 8px; }
+.assistant-card .assistant-plan ol { margin: 8px 0 12px; padding-left: 20px; display: grid; gap: 6px; }
+@media (max-width: 560px) { .assistant-card .inline-form { flex-direction: column; } }
