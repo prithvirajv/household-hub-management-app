@@ -54,7 +54,7 @@ more convenient.
 
 ### Ask FamilyLoop (tell it what changed)
 
-On Home, **Ask FamilyLoop** takes a request in plain words - for example "my
+The **✨ Ask FamilyLoop** button (bottom right of every page) opens a panel that takes a request in plain words - for example "my
 M1 account is closed and moved to Fidelity". The AI only makes a plan; you see
 it written out from your own data first, for example "Move all 2 holdings
 (about $2,300) from M1 into Fidelity. M1 disappears as a separate group; your
@@ -67,8 +67,8 @@ investment account, and always file a payee under a Subcategory. It never
 deletes anything and never touches individual transactions. If a name could
 mean two things it asks which. If something can no longer be done by the time
 you confirm (the data changed), that step is skipped and says why. Each change
-is also noted in the household's activity. The mobile app has the same card on
-Home.
+is also noted in the household's activity. The mobile app has the same Ask
+button on every screen. People with view-only access don't see it.
 
 ## Households
 

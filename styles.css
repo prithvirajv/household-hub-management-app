@@ -9307,3 +9307,8 @@ html[data-theme="dark"] .note-color-coral { background: color-mix(in srgb, #fff0
 .assistant-card .assistant-plan { margin-top: 8px; }
 .assistant-card .assistant-plan ol { margin: 8px 0 12px; padding-left: 20px; display: grid; gap: 6px; }
 @media (max-width: 560px) { .assistant-card .inline-form { flex-direction: column; } }
+
+.assistant-fab { position: fixed; right: 20px; bottom: 20px; z-index: 40; border-radius: 999px; padding: 12px 18px; box-shadow: 0 6px 20px rgba(0, 0, 0, 0.25); }
+.assistant-fab[hidden] { display: none; }
+.assistant-dialog { width: min(560px, calc(100vw - 32px)); }
+@media (max-width: 560px) { .assistant-fab { right: 12px; bottom: 12px; padding: 10px 14px; } }

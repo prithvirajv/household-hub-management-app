@@ -2082,6 +2082,7 @@ function render() {
   renderShell();
   view.innerHTML = (renderers[currentView] || renderers.budget)();
   bindViewEvents();
+  syncAssistantButton();
   if (currentView === "admin" && !adminData) loadAdminData();
   if (["documents", "wealth", "notes"].includes(currentView) && !documentsData) loadDocumentsData();
   if (["wealth", "transactions", "home"].includes(currentView) && !linkedAccounts) loadLinkedAccounts();
@@ -2525,15 +2526,13 @@ function renderHomeBriefingCard() {
 // page stays open (the pieces it touched are put back exactly as they were).
 let assistantUi = { request: "", status: "idle", say: "", clarify: "", error: "", actions: [], skipped: [], done: "", undo: null };
 
-function renderAssistantCard() {
-  if (!sessionUser || sessionUser.accessLevel === "view") return "";
+// The panel's inner HTML (it lives in a dialog opened from the floating button, so it is available on every page).
+function assistantPanelHtml() {
   const ui = assistantUi;
   const today = dateKey(new Date());
   const rows = ui.actions.map((action) => ({ action, problem: assistantActionProblem(action, state, today) }));
   const ready = rows.filter((row) => !row.problem);
-  return `<section class="card assistant-card">
-    <div class="section-head"><div><span class="card-label">Ask FamilyLoop</span><h3>Tell me what changed</h3></div></div>
-    <p class="muted">For example: "my M1 account is closed and moved to Fidelity". I will show exactly what I would change and wait for your OK.</p>
+  return `<p class="muted">For example: "my M1 account is closed and moved to Fidelity". I will show exactly what I would change and wait for your OK.</p>
     <form id="assistantForm" class="inline-form">
       <input id="assistantRequest" name="request" maxlength="500" value="${escapeHtml(ui.request)}" placeholder="What changed?" autocomplete="off" ${ui.status === "planning" ? "disabled" : ""}>
       <button type="submit" ${ui.status === "planning" ? "disabled" : ""}>${ui.status === "planning" ? "Thinking…" : "Ask"}</button>
@@ -2545,32 +2544,60 @@ function renderAssistantCard() {
       ${rows.length ? `<ol>${rows.map((row) => `<li>${row.problem ? `<span class="muted">Skipped - ${escapeHtml(row.problem)}</span>` : escapeHtml(describeAssistantAction(row.action, state, (value) => money.format(value), today))}</li>`).join("")}</ol>` : (ui.clarify ? "" : `<p class="muted">I couldn't turn that into a change I'm able to make. I can close or rename an account, move one investment account's holdings into another, rename an investment account, or always file a payee under a Subcategory.</p>`)}
       ${ready.length ? `<div class="button-row"><button type="button" id="assistantConfirm">Confirm ${ready.length === 1 ? "this change" : `these ${ready.length} changes`}</button><button type="button" class="ghost" id="assistantCancel">Cancel</button></div>` : `<div class="button-row"><button type="button" class="ghost" id="assistantCancel">Close</button></div>`}
     </div>` : ""}
-    ${ui.status === "done" ? `<div class="assistant-plan" role="status"><p>${escapeHtml(ui.done)}</p>${ui.undo ? `<div class="button-row"><button type="button" class="ghost" id="assistantUndo">Undo</button></div>` : ""}</div>` : ""}
-  </section>`;
+    ${ui.status === "done" ? `<div class="assistant-plan" role="status"><p>${escapeHtml(ui.done)}</p>${ui.undo ? `<div class="button-row"><button type="button" class="ghost" id="assistantUndo">Undo</button></div>` : ""}</div>` : ""}`;
+}
+
+function renderAssistantDialog() {
+  const body = $("#assistantDialogBody");
+  if (!body || !state) return;
+  body.innerHTML = assistantPanelHtml();
+  $("#assistantForm")?.addEventListener("submit", (event) => {
+    event.preventDefault();
+    const request = String(new FormData(event.currentTarget).get("request") || "").trim();
+    if (request && assistantUi.status !== "planning") void askAssistant(request);
+  });
+  $("#assistantConfirm")?.addEventListener("click", confirmAssistantPlan);
+  $("#assistantCancel")?.addEventListener("click", () => { assistantUi = { ...assistantUi, status: "idle", actions: [], say: "", clarify: "" }; renderAssistantDialog(); });
+  $("#assistantUndo")?.addEventListener("click", undoAssistantChange);
+}
+
+function openAssistant() {
+  const dialog = $("#assistantDialog");
+  if (!dialog || !state) return;
+  renderAssistantDialog();
+  if (!dialog.open) dialog.showModal();
+  $("#assistantRequest")?.focus();
+}
+
+// The floating button is on every page for anyone who can make changes (a view-only member cannot).
+function syncAssistantButton() {
+  const button = $("#assistantFab");
+  if (button) button.hidden = !(state && sessionUser && sessionUser.accessLevel !== "view");
 }
 
 async function askAssistant(request) {
   assistantUi = { ...assistantUi, request, status: "planning", error: "", say: "", clarify: "", actions: [], skipped: [], done: "", undo: null };
-  render();
+  renderAssistantDialog();
   try {
     const plan = await api("/api/assistant/plan", { method: "POST", body: JSON.stringify({ request, context: assistantContext(state) }) });
     assistantUi = { ...assistantUi, status: "ready", say: plan.say || "", clarify: plan.clarify || "", actions: plan.actions || [] };
   } catch (error) {
     assistantUi = { ...assistantUi, status: "error", error: error?.message || "The assistant couldn't be reached." };
   }
-  render();
+  renderAssistantDialog();
 }
 
 function confirmAssistantPlan() {
   const today = dateKey(new Date());
   const result = applyAssistantActions(state, assistantUi.actions, today);
-  if (!result.applied.length) { assistantUi = { ...assistantUi, status: "error", error: "Nothing could be changed - the data has moved on since I made the plan." }; render(); return; }
+  if (!result.applied.length) { assistantUi = { ...assistantUi, status: "error", error: "Nothing could be changed - the data has moved on since I made the plan." }; renderAssistantDialog(); return; }
   Object.assign(state, result.patch);
   state.household.activity.unshift(`Ask FamilyLoop: ${result.applied.map((action) => describeAssistantAction(action, { ...state, ...result.undo }, (value) => money.format(value), today)).join(" ")}`.slice(0, 400));
   autosaveState();
   const skipped = result.skipped.length ? ` ${result.skipped.length} could not be done and was skipped.` : "";
   assistantUi = { ...assistantUi, status: "done", done: `Done - ${result.applied.length} change${result.applied.length === 1 ? "" : "s"} made.${skipped}`, undo: result.undo, actions: [] };
   render();
+  renderAssistantDialog();
 }
 
 function undoAssistantChange() {
@@ -2580,6 +2607,7 @@ function undoAssistantChange() {
   autosaveState();
   assistantUi = { ...assistantUi, status: "done", done: "Undone - everything is back as it was.", undo: null };
   render();
+  renderAssistantDialog();
 }
 
 function renderHome() {
@@ -2593,7 +2621,6 @@ function renderHome() {
     <section class="work-grid">
       <div class="main-stack">
         ${renderHomeBriefingCard()}
-        ${renderAssistantCard()}
         ${renderBankSyncHealthCard()}
         ${renderHistoryGapCard()}
         ${renderDetectedSalaryCard()}
@@ -8665,14 +8692,6 @@ function bindViewEvents() {
   });
 
   $("#homeBriefingRefresh")?.addEventListener("click", () => { void requestHomeBriefing(); });
-  $("#assistantForm")?.addEventListener("submit", (event) => {
-    event.preventDefault();
-    const request = String(new FormData(event.currentTarget).get("request") || "").trim();
-    if (request && assistantUi.status !== "planning") void askAssistant(request);
-  });
-  $("#assistantConfirm")?.addEventListener("click", confirmAssistantPlan);
-  $("#assistantCancel")?.addEventListener("click", () => { assistantUi = { ...assistantUi, status: "idle", actions: [], say: "", clarify: "" }; render(); });
-  $("#assistantUndo")?.addEventListener("click", undoAssistantChange);
   document.querySelectorAll("[data-keep-detected-salary]").forEach((button) => button.addEventListener("click", () => {
     const paycheck = state.paychecks.find((item) => item.id === button.dataset.keepDetectedSalary);
     if (paycheck?.autoDetected) { paycheck.autoDetected.acknowledged = true; autosaveState(); render(); }
@@ -15146,6 +15165,9 @@ $("#closeHouseholdDialogButton").addEventListener("click", () => $("#householdDi
 $("#cancelHouseholdButton").addEventListener("click", () => $("#householdDialog").close());
 $("#closeRemoveHouseholdDialogButton").addEventListener("click", () => $("#removeHouseholdDialog").close());
 $("#cancelRemoveHouseholdButton").addEventListener("click", () => $("#removeHouseholdDialog").close());
+
+$("#assistantFab")?.addEventListener("click", openAssistant);
+$("#assistantDialogClose")?.addEventListener("click", () => $("#assistantDialog").close());
 
 $("#confirmDialogOkButton").addEventListener("click", () => {
   const dialog = $("#confirmDialog");
