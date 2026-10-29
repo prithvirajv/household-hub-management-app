@@ -184,6 +184,7 @@ test("SimpleFIN link flow end to end: not configured without a key, SSRF-pinned 
     assert.equal(decided.body.link.mappings["ACT-2"].skipped, true);
     await configured.request(`/api/linked-accounts/${id}/sync`, { method: "POST", headers: { cookie }, body: "{}" });
     assert.deepEqual((await configured.request("/api/linked-accounts", { headers: { cookie } })).body.links[0].newAccounts, [], "a skipped account is not reported as new again");
+    assert.deepEqual((await configured.request("/api/linked-accounts", { headers: { cookie } })).body.links[0].lastRun.notices, ["Connection to Sample Bank may need attention"], "a manual sync records the Bridge's messages too");
     // An account added at the bank later has no entry, so it shows up as new on the next sync.
     await configured.request(`/api/linked-accounts/${id}/mappings`, { method: "PUT", headers: { cookie }, body: JSON.stringify({ mappings: { "ACT-1": { accountId: "local-checking" } } }) });
     await configured.request(`/api/linked-accounts/${id}/sync`, { method: "POST", headers: { cookie }, body: "{}" });
@@ -198,6 +199,7 @@ test("SimpleFIN link flow end to end: not configured without a key, SSRF-pinned 
     assert.equal(nightly.body.newTransactions, 3);
     const afterNightly = (await configured.request("/api/linked-accounts", { headers: { cookie } })).body.links[0];
     assert.deepEqual([afterNightly.hasStaged, afterNightly.stagedCount], [false, 0], "what the job applied is no longer staged");
+    assert.deepEqual(afterNightly.lastRun.notices, ["Connection to Sample Bank may need attention"], "what the Bridge said about a bank is kept on the run record so Home can show it");
     const stateAfterNightly = await configured.request("/api/state", { headers: { cookie } });
     assert.deepEqual((stateAfterNightly.body.transactions || []).filter((t) => t.externalId).map((t) => [t.externalId, t.memo]).sort(), [["sf:ACT-1:T1", "Needs a category"], ["sf:ACT-1:T2", "Needs a category"]], "with no AI here, rows nothing in the household can categorize still go into the ledger, marked");
     assert.deepEqual(stateAfterNightly.body.transactionInboxDrafts || [], []);

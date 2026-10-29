@@ -570,7 +570,9 @@ entry. It is read-only: FamilyLoop can never move money or place trades.
   overnight run did: complete (with how many came in and how many were added),
   waiting for you, or did not finish and why. If anything is off - a
   connection that needs signing in, a run that failed, rows fetched but not
-  loaded, an account that is behind - a red **The overnight sync needs a look**
+  loaded, an account that is behind, or a bank that SimpleFIN reports needs you
+  to sign in again (its own message is shown, for example "Auth required", with
+  a reminder to re-authorise that bank in your SimpleFIN Bridge account) - a red **The overnight sync needs a look**
   card appears on Home (with **Sync now**) and your phone is told. A second
   run a few hours after the main one retries anything that didn't finish. The
   Home AI summary also reports the sync: whether it finished, what is missing

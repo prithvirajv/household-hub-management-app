@@ -147,6 +147,12 @@ function normalizeSimplefinTransactions(account, { today = new Date() } = {}) {
   }).filter(Boolean);
 }
 
+// The Bridge's own messages about a connection (e.g. "Connection to X may need attention. Auth required"): kept on the link's run record
+// so Home can say which bank needs signing in again. Trimmed and de-duplicated; they never carry credentials.
+function bridgeNotices(errors) {
+  return [...new Set((errors || []).map((message) => String(message || "").replace(/\s+/g, " ").trim().slice(0, 220)).filter(Boolean))].slice(0, 5);
+}
+
 // Walks [startDate, endDate] in windows the Bridge accepts and merges the results by account (transactions de-duplicated by id).
 async function syncSimplefin(accessUrl, { startUnix, endUnix, allowPartial = false }, options = {}) {
   const windowSeconds = SIMPLEFIN_WINDOW_DAYS * 86400;
@@ -619,7 +625,10 @@ function registerLinkedAccountRoutes({ app, requireSession, requireEditAccess, r
       const coverage = trimmed.coverage;
       if (failed.failedThrough) Object.values(coverage).forEach((entry) => { if (entry.from < failed.failedThrough) entry.from = failed.failedThrough; });
       const { merged } = mergeStagedPayload(link.staged, payload, new Date().toISOString(), { sinceDate: req.body?.sinceDate });
-      await store.update(sessionHouseholdId(req), link.id, { staged: merged, stagedAt: merged.stagedAt });
+      // A manual sync also refreshes what the Bridge said about each bank, so Home shows (or stops showing) a sign-in warning right away.
+      const { notices: _previous, ...previousRun } = link.lastRun || {};
+      const notices = bridgeNotices(payload.errors);
+      await store.update(sessionHouseholdId(req), link.id, { staged: merged, stagedAt: merged.stagedAt, ...(link.lastRun?.at || notices.length ? { lastRun: { ...previousRun, ...(notices.length ? { notices } : {}) } } : {}) });
       await recordOutcome(req, link, null, payload.accounts);
       res.json({ ...merged, ...(gaps.length ? { historyGaps: gaps } : {}), ...(Object.keys(coverage).length ? { coverage } : {}) });
     } catch (error) {
@@ -732,7 +741,7 @@ function registerLinkedAccountRoutes({ app, requireSession, requireEditAccess, r
               const previouslyStaged = new Set((link.staged?.transactions || []).map((transaction) => transaction.externalId));
               newTransactionCount = (payload.transactions || []).filter((transaction) => !previouslyStaged.has(transaction.externalId) && !known.has(transaction.externalId)).length;
             }
-            runs.set(link.id, { at, ok: true, stage: "fetched", accounts: (payload.accounts || []).length, newRows: newTransactionCount, ...(retry ? { retry: true } : {}) });
+            runs.set(link.id, { at, ok: true, stage: "fetched", accounts: (payload.accounts || []).length, newRows: newTransactionCount, ...(bridgeNotices(payload.errors).length ? { notices: bridgeNotices(payload.errors) } : {}), ...(retry ? { retry: true } : {}) });
             await store.update(link.householdId, link.id, { staged: merged, stagedAt: merged.stagedAt, lastError: "", status: "active", lastSyncAt: at, newAccounts: findNewAccounts(payload.accounts, link.mappings), lastRun: runs.get(link.id) });
             entry.newTransactions += newTransactionCount;
             summary.synced += 1;

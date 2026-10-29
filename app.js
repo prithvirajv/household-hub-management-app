@@ -2452,6 +2452,7 @@ function bankSyncFacts() {
     else if (run.stage === "waiting") facts.push(`- Connection "${link.label}": fetched overnight (${when}) but the new transactions are waiting for the household to open the app.`);
     else if (run.stage === "applied") facts.push(`- Connection "${link.label}": the overnight run (${when}) completed - ${run.imported || 0} new from the bank, ${run.added || 0} added to the ledger${run.left ? `, ${run.left} held for review` : ""}.`);
     else facts.push(`- Connection "${link.label}": fetched overnight (${when}); not loaded yet.`);
+    (run.notices || []).forEach((notice) => facts.push(`- The bank connection reported (needs the household's attention): ${notice}`));
   });
   const behind = dateKey(new Date(Date.now() - 2 * 86400000));
   fed.slice(0, 10).forEach((account) => {
@@ -14130,6 +14131,11 @@ function linkedStatusText(link) {
 
 // Home: what needs attention about the bank sync - a connection that needs signing in, an overnight run that did not finish or is waiting for
 // the app, or a bank-fed account whose data is more than two days old. Empty when everything loaded.
+function bridgeNoticeText(notice) {
+  const text = String(notice || "");
+  return /auth|attention|log\s?in|sign\s?in|credential|password/i.test(text) ? `${text} - sign in to your SimpleFIN Bridge account and re-authorise that bank; until then it may stop sending new transactions.` : text;
+}
+
 function bankSyncProblems() {
   const problems = [];
   (linkedAccounts?.links || []).forEach((link) => {
@@ -14139,6 +14145,8 @@ function bankSyncProblems() {
     else if (run.stage === "waiting") problems.push({ title: link.label, detail: run.reason || "new transactions are waiting for you to open the app", sync: link.id });
     else if (link.hasStaged && link.status === "active") problems.push({ title: link.label, detail: "has fetched transactions that are not loaded yet", sync: link.id });
   });
+  // What the bank connection itself reported (the Bridge's own words), e.g. a bank that needs signing in again.
+  (linkedAccounts?.links || []).forEach((link) => (link.lastRun?.notices || []).forEach((notice) => problems.push({ title: link.label, detail: bridgeNoticeText(notice) })));
   const stale = dateKey(new Date(Date.now() - 2 * 86400000));
   (state.accounts || []).filter((account) => account.syncedThrough && account.syncedThrough < stale && !account.closedAt).forEach((account) => {
     problems.push({ title: account.name, detail: `the bank has data only through ${new Date(`${account.syncedThrough}T00:00:00`).toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" })}` });
