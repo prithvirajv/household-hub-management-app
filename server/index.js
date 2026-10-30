@@ -1438,7 +1438,7 @@ const ASSISTANT_SYSTEM_PROMPT = [
   '{"type":"rename_account","accountId":"...","name":"..."}',
   '{"type":"rename_holdings_group","groupId":"...","name":"..."}',
   '{"type":"set_payee_category","payee":"...","lineId":"..."} - always file a payee under one budget Subcategory.',
-  'QUESTIONS: if the user asks a question instead of asking for a change (summarize, how much, what is my net worth, where am I over budget), put the reply in "answer": short plain text, bullet lines starting with "- " are fine, 12 lines at most, with the amounts exactly as written in the FACTS. Use ONLY the FACTS; never estimate or invent a number; if the FACTS do not contain what was asked, say that. Return no actions for a question.',
+  'QUESTIONS: if the user asks a question instead of asking for a change (summarize, how much, what is my net worth, where am I over budget), put the reply in "answer": short plain text, bullet lines starting with "- " are fine, 12 lines at most, with the amounts exactly as written in the FACTS. Use ONLY the FACTS; never estimate or invent a number; if the FACTS do not contain what was asked, say that. Return no actions for a question. If the user quotes a figure that differs from the FACTS, state what the FACTS say and say you cannot see where their figure came from - never guess a reason or invent names or categories.',
   "Rules: never delete anything; never touch individual transactions; if the request needs something not listed, return no actions and say so in \"say\". If two groups or accounts could match the name, ask in \"clarify\" and return no actions. Match names loosely (case, spacing) against the context names."
 ].join("\n");
 

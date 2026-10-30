@@ -2,7 +2,7 @@ const assert = require("node:assert/strict");
 const http = require("node:http");
 const test = require("node:test");
 const { startTestServer } = require("./helpers");
-const { assistantContext, assistantFacts, parseAssistantPlan, assistantActionProblem, describeAssistantAction, applyAssistantActions, lookupCategorizationRule } = require("../lib/shared-logic");
+const { assistantContext, assistantFacts, monthSpendingSummary, parseAssistantPlan, assistantActionProblem, describeAssistantAction, applyAssistantActions, lookupCategorizationRule } = require("../lib/shared-logic");
 
 const TODAY = "2026-10-29";
 const money = (value) => `$${Number(value).toFixed(2)}`;
@@ -128,7 +128,7 @@ test("the facts the assistant answers from are a compact read of the household's
   assert.match(text, /Sample Fidelity: 1 holding, \$200\.00/);
   assert.match(text, /Cash \(cash\): \$500\.00/);
   assert.match(text, /Sample Loan: \$1000\.00/);
-  assert.match(text, /BUDGET 2026-10: income \$0\.00, planned \$500\.00, spent \$40\.00/);
+  assert.match(text, /BUDGET 2026-10: income \$0\.00, planned \$500\.00, SPENT \$50\.00 \(\$40\.00 on budget lines \+ \$10\.00 of expenses with no category yet; \$0\.00 of money-in rows/);
   assert.match(text, /Food: planned \$500\.00, spent \$40\.00/);
   assert.match(text, /WAITING: 1 bank row in Bank stream; 1 ledger transaction without a category\./);
   assert.ok(text.length < 9000);
@@ -152,4 +152,20 @@ test("a question is answered from the facts the client sent, and the answer come
     assert.ok(stub.requests[0].includes("Use ONLY the FACTS"), "the AI is told to answer only from them");
     assert.equal((await post({ request: "x", context, facts: "y".repeat(12001) })).status, 400);
   } finally { await server.stop(); await stub.stop(); }
+});
+
+test("spent this month counts spending on budget lines plus uncategorized expenses, and money coming in never reduces it", () => {
+  const categories = [{ name: "Food", lines: [{ id: "groceries" }, { id: "dining" }] }];
+  const rows = [
+    { date: "2026-10-03", amount: 130, lineId: "groceries" },
+    { date: "2026-10-04", amount: 20, lineId: "dining" },
+    { date: "2026-10-05", amount: 15, lineId: "" },
+    { date: "2026-10-06", amount: -4000, lineId: "" },
+    { date: "2026-10-07", amount: -300, lineId: "" },
+    { date: "2026-10-08", amount: -10, lineId: "groceries" },
+    { date: "2026-10-09", amount: 100, splits: [{ lineId: "groceries", amount: 60 }, { lineId: "dining", amount: 40 }] },
+    { date: "2026-09-30", amount: 999, lineId: "groceries" }
+  ];
+  const result = monthSpendingSummary(rows, categories, "2026-10");
+  assert.deepEqual([result.onLines, result.uncategorizedOut, result.total, result.moneyInNotCounted], [240, 15, 255, 4300], "a refund on a line nets against it; a card payment or deposit with no line is reported but not counted; splits count by line; other months are ignored");
 });

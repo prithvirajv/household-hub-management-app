@@ -2394,12 +2394,14 @@ function homeBriefingFacts() {
   const lines = allLines();
   const lineById = new Map(lines.map((line) => [line.id, line]));
   const monthSpend = new Map();
-  let spent = 0;
+  // "Spent" means spending against the budget (see monthSpendingSummary): money-in rows such as card payments and deposits do not reduce it.
+  const spending = monthSpendingSummary(state.transactions, state.budget.categories, monthKey);
+  const spent = spending.total;
   state.transactions.forEach((transaction) => {
     if (dateKeyToMonthKey(transaction.date) !== monthKey) return;
-    spent += Number(transaction.amount || 0);
     const parts = transaction.splits?.length ? transaction.splits : [{ lineId: transaction.lineId, amount: transaction.amount }];
     parts.forEach((part) => {
+      if (!lineById.has(part.lineId) && Number(part.amount || 0) <= 0) return;
       const category = lineById.get(part.lineId)?.category || "Uncategorized";
       monthSpend.set(category, (monthSpend.get(category) || 0) + Number(part.amount || 0));
     });
@@ -2421,7 +2423,7 @@ function homeBriefingFacts() {
 
   const text = [
     `Today is ${now.toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric", year: "numeric" })}.`,
-    `Budget this month (${formatMonth(monthKey)}): ${money.format(spent)} spent of ${money.format(planned)} planned; day ${now.getDate()} of ${daysInMonth}.`,
+    `Budget this month (${formatMonth(monthKey)}): ${money.format(spent)} spent of ${money.format(planned)} planned (${money.format(spending.onLines)} on budget lines + ${money.format(spending.uncategorizedOut)} of expenses with no category yet); day ${now.getDate()} of ${daysInMonth}.`,
     topCategories.length ? `Biggest categories this month: ${topCategories.map(([name, amount]) => `${name} ${money.format(amount)}`).join(", ")}.` : "",
     overBudget.length ? `Over budget: ${overBudget.map((line) => `${line.name} by ${money.format(line.over)}`).join(", ")}.` : "No budget line is over its plan.",
     accounts.length ? `Accounts: ${accounts.map((account) => `${account.name}${account.type ? ` (${account.type})` : ""} ${money.format(currentAccountBalance(account.id))}`).join("; ")}.` : "",
@@ -2471,6 +2473,14 @@ function bankSyncFacts() {
   return facts;
 }
 
+// A short fingerprint of the facts the summary is written from, to tell whether a saved summary is still describing the same situation.
+function homeBriefingFactsSignature() {
+  const text = homeBriefingFacts().text;
+  let hash = 0;
+  for (let i = 0; i < text.length; i += 1) hash = (hash * 31 + text.charCodeAt(i)) | 0;
+  return String(hash);
+}
+
 function homeBriefingCacheKey() {
   return `familyloop-home-briefing:${currentHouseholdId()}:${sessionUser?.email || ""}`;
 }
@@ -2486,7 +2496,10 @@ function maybeLoadHomeBriefing() {
   const startRequest = () => setTimeout(() => { if (homeBriefing.key === key && homeBriefing.status === "idle") void requestHomeBriefing(key); }, 0);
   try {
     const cached = JSON.parse(localStorage.getItem(homeBriefingCacheKey()) || "null");
-    if (cached?.date === today && cached.briefing) { homeBriefing = { key, status: "ready", data: cached.briefing, error: "", at: cached.at || "" }; return; }
+    // A saved summary is reused for the day only while the facts behind it are unchanged (or it is under half an hour old): after a sync, a new
+    // import or a fix, the next visit writes a fresh one instead of repeating numbers and warnings that are no longer true.
+    const fresh = cached && Date.now() - new Date(cached.at || 0).getTime() < 30 * 60 * 1000;
+    if (cached?.date === today && cached.briefing && (fresh || !linkedAccounts || cached.facts === homeBriefingFactsSignature())) { homeBriefing = { key, status: "ready", data: cached.briefing, error: "", at: cached.at || "" }; return; }
   } catch (_error) { /* no saved copy */ }
   startRequest();
 }
@@ -2500,7 +2513,7 @@ async function requestHomeBriefing(key = homeBriefing.key) {
     if (homeBriefing.key !== key) return;
     const at = new Date().toISOString();
     homeBriefing = { key, status: "ready", data: briefing, error: "", at };
-    try { localStorage.setItem(homeBriefingCacheKey(), JSON.stringify({ date: dateKey(new Date()), briefing, at })); } catch (_error) { /* just not remembered */ }
+    try { localStorage.setItem(homeBriefingCacheKey(), JSON.stringify({ date: dateKey(new Date()), briefing, at, facts: homeBriefingFactsSignature() })); } catch (_error) { /* just not remembered */ }
   } catch (error) {
     if (homeBriefing.key !== key) return;
     homeBriefing = { key, status: /not configured|HTTP 503/i.test(String(error.message)) ? "off" : "error", data: null, error: error.message || "", at: "" };
@@ -6455,7 +6468,7 @@ function renderWealth() {
           </article>`).join("") : `<div class="onboarding-empty compact-onboarding"><div class="empty-symbol" aria-hidden="true">↓</div><h3>Add a debt when you are ready</h3><p>Track its balance, rate, payment, and the asset it secures.</p></div>`}
         </section>
       </div>
-      <section class="card wealth-holdings"><div class="section-head"><div><span class="card-label">Net worth</span><h3>Assets, investments and liabilities</h3></div><div class="wealth-currency-row"><select id="wealthCurrencySelect" aria-label="Display currency">${[...new Set([state.household.currency || "USD", "USD", "EUR", "GBP", "INR"])].map((code) => `<option value="${code}" ${wealthDisplayCurrency() === code ? "selected" : ""}>${code}</option>`).join("")}</select><button id="addNetWorthItemButton" type="button">+ Add holding</button></div></div><div class="net-worth-strip"><strong data-net-worth-total>${wealthMoney(netWorth().total)}</strong><span>Assets <b data-net-worth-assets>${wealthMoney(netWorth().assets)}</b> Liabilities <b data-net-worth-liabilities>${wealthMoney(netWorth().liabilities)}</b></span></div>${wealthDisplayCurrency() !== (state.household.currency || "USD") ? `<p class="muted wealth-currency-note">Converted from ${state.household.currency || "USD"} using real exchange rates${wealthFxRates ? "" : " — loading…"}. Individual accounts and holdings below still show ${state.household.currency || "USD"}.</p>` : ""}<div class="net-worth-items">${groupStockHoldings(state.goals.netWorth.assets).map((group) => netWorthStockGroupCard(group)).join("")}${state.goals.netWorth.assets.map((asset, index) => ({ asset, index })).filter(({ asset }) => !isHoldingAssetClass(asset.assetClass)).map(({ asset, index }) => netWorthItemRow(asset, "asset", index)).join("")}${state.goals.netWorth.liabilities.map((item, index) => netWorthItemRow(item, "liability", index)).join("")}</div>${state.goals.netWorth.assets.length || state.goals.netWorth.liabilities.length ? "" : `<div class="empty-inline">No assets, investments or liabilities yet</div>`}</section>
+      <section class="card wealth-holdings"><div class="section-head"><div><span class="card-label">Net worth</span><h3>Assets, investments and liabilities</h3></div><div class="wealth-currency-row"><select id="wealthCurrencySelect" aria-label="Display currency">${[...new Set([state.household.currency || "USD", "USD", "EUR", "GBP", "INR"])].map((code) => `<option value="${code}" ${wealthDisplayCurrency() === code ? "selected" : ""}>${code}</option>`).join("")}</select><button id="addNetWorthItemButton" type="button">+ Add holding</button></div></div><div class="net-worth-strip"><strong data-net-worth-total>${wealthMoney(netWorth().total)}</strong><span>Assets <b data-net-worth-assets>${wealthMoney(netWorth().assets)}</b> Liabilities <b data-net-worth-liabilities>${wealthMoney(netWorth().liabilities)}</b></span></div>${wealthDisplayCurrency() !== (state.household.currency || "USD") ? `<p class="muted wealth-currency-note">Converted from ${state.household.currency || "USD"} using real exchange rates${wealthFxRates ? "" : " — loading…"}. Individual accounts and holdings below still show ${state.household.currency || "USD"}.</p>` : ""}<div class="net-worth-items">${groupStockHoldings(state.goals.netWorth.assets).map((group) => netWorthStockGroupCard(group)).join("")}${netWorthLinkedSummaryHtml()}${state.goals.netWorth.assets.map((asset, index) => ({ asset, index })).filter(({ asset }) => !isHoldingAssetClass(asset.assetClass) && !isAccountLinked("asset", asset.id)).map(({ asset, index }) => netWorthItemRow(asset, "asset", index)).join("")}${state.goals.netWorth.liabilities.map((item, index) => ({ item, index })).filter(({ item }) => !isAccountLinked("liability", item.id)).map(({ item, index }) => netWorthItemRow(item, "liability", index)).join("")}</div>${state.goals.netWorth.assets.length || state.goals.netWorth.liabilities.length ? "" : `<div class="empty-inline">No assets, investments or liabilities yet</div>`}</section>
     </section>`;
 }
 
@@ -6537,6 +6550,21 @@ function transferRow(transfer, index) {
     "",
     `data-delete-transfer="${index}" aria-label="Delete transfer"`
   );
+}
+
+// Accounts (checking, savings, credit cards, ...) are listed once, in the Accounts section; the Net worth list used to repeat each of them as a
+// read-only "from account" line. They still count toward net worth, and this one line says how much comes from them.
+function netWorthLinkedSummaryHtml() {
+  const linkedAssets = state.goals.netWorth.assets.filter((asset) => isAccountLinked("asset", asset.id));
+  const linkedLiabilities = state.goals.netWorth.liabilities.filter((item) => isAccountLinked("liability", item.id));
+  if (!linkedAssets.length && !linkedLiabilities.length) return "";
+  const sum = (items) => items.reduce((total, item) => total + Number(item.value || 0), 0);
+  return `<div class="net-worth-linked-summary" role="note">
+    <strong>Counted from your accounts</strong>
+    <span>${linkedAssets.length} account${linkedAssets.length === 1 ? "" : "s"} <b>${wealthMoney(sum(linkedAssets))}</b></span>
+    <span>${linkedLiabilities.length} card${linkedLiabilities.length === 1 ? "" : "s"} and loan${linkedLiabilities.length === 1 ? "" : "s"} <b>${wealthMoney(sum(linkedLiabilities))}</b> owed</span>
+    <small>These are the accounts listed below under Accounts; they count toward net worth from there, so they are not listed twice.</small>
+  </div>`;
 }
 
 function netWorthItemRow(item, type, index) {
@@ -14321,7 +14349,18 @@ async function loadLinkedAccounts(shouldRender = true) {
   } catch (error) {
     linkedAccounts = { configured: false, providers: {}, links: [], error: error.message };
   }
+  recheckSavedHomeBriefing();
   if (shouldRender && ["wealth", "transactions", "home"].includes(currentView)) render();
+}
+
+// Once the bank connections are known, a saved summary written from different facts (and not just now) is replaced by a fresh one.
+function recheckSavedHomeBriefing() {
+  if (currentView !== "home" || !sessionUser || homeBriefing.status !== "ready" || !homeBriefing.at) return;
+  if (Date.now() - new Date(homeBriefing.at).getTime() < 30 * 60 * 1000) return;
+  try {
+    const cached = JSON.parse(localStorage.getItem(homeBriefingCacheKey()) || "null");
+    if (cached && cached.facts !== homeBriefingFactsSignature()) void requestHomeBriefing(homeBriefing.key);
+  } catch (_error) { /* keep what is shown */ }
 }
 
 function linkedProviderLabel(link) {
