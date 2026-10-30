@@ -1190,12 +1190,16 @@ function ensureAccountsData() {
   state.accounts.forEach((account) => {
     const balance = currentAccountBalance(account.id);
     if (account.netWorthAssetId) {
-      const asset = state.goals.netWorth.assets.find((item) => item.id === account.netWorthAssetId);
-      if (asset) asset.value = balance;
+      let asset = state.goals.netWorth.assets.find((item) => item.id === account.netWorthAssetId);
+      // An account whose net worth line went missing (removed by hand or lost in an earlier edit) would silently drop out of net worth: the line is
+      // made again under the same id, so the account counts once more.
+      if (!asset) { asset = { id: account.netWorthAssetId, name: account.name, value: balance, assetClass: "cash" }; state.goals.netWorth.assets.push(asset); }
+      asset.value = balance;
     }
     if (account.netWorthLiabilityId) {
-      const liability = state.goals.netWorth.liabilities.find((item) => item.id === account.netWorthLiabilityId);
-      if (liability) liability.value = balance;
+      let liability = state.goals.netWorth.liabilities.find((item) => item.id === account.netWorthLiabilityId);
+      if (!liability) { liability = { id: account.netWorthLiabilityId, name: account.name, value: balance }; state.goals.netWorth.liabilities.push(liability); }
+      liability.value = balance;
     }
   });
 }
