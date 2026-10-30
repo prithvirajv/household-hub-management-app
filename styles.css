@@ -9323,3 +9323,5 @@ html[data-theme="dark"] .note-color-coral { background: color-mix(in srgb, #fff0
 .linked-account-picker .linked-picker-account { padding-left: 22px; }
 .net-worth-linked-summary { display: flex; flex-wrap: wrap; gap: 6px 18px; align-items: baseline; padding: 10px 12px; margin-bottom: 8px; border-radius: 8px; background: var(--surface-muted, rgba(0, 0, 0, 0.04)); }
 .net-worth-linked-summary small { flex-basis: 100%; }
+.net-worth-subhead { font-size: 0.78rem; letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted, #6b6258); margin: 14px 0 6px; }
+.net-worth-accounts, .net-worth-transfers { margin-bottom: 8px; }

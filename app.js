@@ -6374,6 +6374,54 @@ function assetAllocationRingHtml(segments) {
   return `<div class="wealth-allocation-ring" style="background:conic-gradient(${stops || "var(--soft) 0 100%"})"></div>`;
 }
 
+// The accounts (checking, savings, credit cards, ...) live inside the Net worth card, grouped by type: each keeps its type, opening balance, close date,
+// balance, chart, synced-from/through tags, drag-to-reorder and remove.
+function wealthAccountsHtml() {
+  return `
+          ${state.accounts.length
+            ? groupAccountsByType(state.accounts).map((group) => {
+                const isLiabilityGroup = group.type === "credit_card";
+                const groupTotal = group.accounts.reduce((sum, account) => sum + currentAccountBalance(account.id), 0);
+                return `<details class="account-type-group" data-account-group="${group.type}" ${wealthCollapsedGroups.has(group.type) ? "" : "open"}>
+                  <summary>
+                    <span>${group.label}</span>
+                    <small class="muted">${group.accounts.length} account${group.accounts.length === 1 ? "" : "s"}</small>
+                    <b class="${isLiabilityGroup && groupTotal > 0 ? "danger" : ""}">${money.format(groupTotal)}</b>
+                  </summary>
+                  ${group.accounts.map((account) => accountItemRow(account, state.accounts.indexOf(account))).join("")}
+                </details>`;
+              }).join("")
+            : `<div class="onboarding-empty compact-onboarding"><div class="empty-symbol" aria-hidden="true">▥</div><h3>Add your first account</h3><p>Track a checking account your paycheck deposits into, and a credit card whose purchases it pays off.</p></div>`}
+        `;
+}
+
+// Moving money between two accounts (for example paying a card from checking), and its history; shown inside the Net worth card under the accounts.
+function wealthTransfersHtml() {
+  return `
+          ${state.accounts.length >= 2 ? `<form id="transferForm" class="mini-form">
+            <label>From<select name="fromAccountId">${accountOptions("")}</select></label>
+            <label>To<select name="toAccountId">${accountOptions("")}</select></label>
+            <label>Amount<input name="amount" type="number" min="0.01" step="0.01" placeholder="620.00" required></label>
+            <label>Date<input name="date" type="date" value="${dateKey(new Date())}"></label>
+            <label>Memo<input name="memo" placeholder="Credit card payment"></label>
+            <button type="submit">Transfer</button>
+          </form>` : `<div class="empty-inline">Add at least two accounts to record a transfer, like paying a credit card from checking.</div>`}
+          ${state.transfers.length ? `<details class="transfers-overflow-details" data-transfers-toggle ${wealthTransfersCollapsed ? "" : "open"}>
+            <summary>Transfer history (${state.transfers.length})</summary>
+            ${state.transfers
+              .map((transfer, index) => ({ transfer, index }))
+              // Newest date first (ties broken by whichever was added most
+              // recently) - transfers are stored in plain insertion order via
+              // unshift, which drifts from date order the moment someone
+              // logs a back-dated transfer, so this always re-sorts for
+              // display rather than trusting the array's own order.
+              .sort((a, b) => (b.transfer.date || "").localeCompare(a.transfer.date || "") || b.index - a.index)
+              .map(({ transfer, index }) => transferRow(transfer, index))
+              .join("")}
+          </details>` : ""}
+        `;
+}
+
 function renderWealth() {
   if (ensureDebtNetWorthSync()) autosaveState();
   ensureAccountsData();
@@ -6398,47 +6446,6 @@ function renderWealth() {
             </div>
           </div>
         </section>` : ""}
-        <section class="card">
-          <div class="section-head"><div><span class="card-label">Cash flow</span><h3>Accounts</h3></div><button id="addAccountButton" type="button">+ Add account</button></div>
-          ${state.accounts.length
-            ? groupAccountsByType(state.accounts).map((group) => {
-                const isLiabilityGroup = group.type === "credit_card";
-                const groupTotal = group.accounts.reduce((sum, account) => sum + currentAccountBalance(account.id), 0);
-                return `<details class="account-type-group" data-account-group="${group.type}" ${wealthCollapsedGroups.has(group.type) ? "" : "open"}>
-                  <summary>
-                    <span>${group.label}</span>
-                    <small class="muted">${group.accounts.length} account${group.accounts.length === 1 ? "" : "s"}</small>
-                    <b class="${isLiabilityGroup && groupTotal > 0 ? "danger" : ""}">${money.format(groupTotal)}</b>
-                  </summary>
-                  ${group.accounts.map((account) => accountItemRow(account, state.accounts.indexOf(account))).join("")}
-                </details>`;
-              }).join("")
-            : `<div class="onboarding-empty compact-onboarding"><div class="empty-symbol" aria-hidden="true">▥</div><h3>Add your first account</h3><p>Track a checking account your paycheck deposits into, and a credit card whose purchases it pays off.</p></div>`}
-        </section>
-        <section class="card">
-          <div class="section-head"><div><span class="card-label">Cash flow</span><h3>Transfers</h3></div></div>
-          ${state.accounts.length >= 2 ? `<form id="transferForm" class="mini-form">
-            <label>From<select name="fromAccountId">${accountOptions("")}</select></label>
-            <label>To<select name="toAccountId">${accountOptions("")}</select></label>
-            <label>Amount<input name="amount" type="number" min="0.01" step="0.01" placeholder="620.00" required></label>
-            <label>Date<input name="date" type="date" value="${dateKey(new Date())}"></label>
-            <label>Memo<input name="memo" placeholder="Credit card payment"></label>
-            <button type="submit">Transfer</button>
-          </form>` : `<div class="empty-inline">Add at least two accounts to record a transfer, like paying a credit card from checking.</div>`}
-          ${state.transfers.length ? `<details class="transfers-overflow-details" data-transfers-toggle ${wealthTransfersCollapsed ? "" : "open"}>
-            <summary>Transfer history (${state.transfers.length})</summary>
-            ${state.transfers
-              .map((transfer, index) => ({ transfer, index }))
-              // Newest date first (ties broken by whichever was added most
-              // recently) - transfers are stored in plain insertion order via
-              // unshift, which drifts from date order the moment someone
-              // logs a back-dated transfer, so this always re-sorts for
-              // display rather than trusting the array's own order.
-              .sort((a, b) => (b.transfer.date || "").localeCompare(a.transfer.date || "") || b.index - a.index)
-              .map(({ transfer, index }) => transferRow(transfer, index))
-              .join("")}
-          </details>` : ""}
-        </section>
         <section class="card">
           <div class="section-head"><div><span class="card-label">Debt snowball</span><h3>Debt payoff tracker</h3></div><button id="addDebtButton" type="button">+ Add debt</button></div>
           ${state.goals.debts.length ? state.goals.debts.map((debt, index) => `<article class="debt-card">
@@ -6468,7 +6475,7 @@ function renderWealth() {
           </article>`).join("") : `<div class="onboarding-empty compact-onboarding"><div class="empty-symbol" aria-hidden="true">↓</div><h3>Add a debt when you are ready</h3><p>Track its balance, rate, payment, and the asset it secures.</p></div>`}
         </section>
       </div>
-      <section class="card wealth-holdings"><div class="section-head"><div><span class="card-label">Net worth</span><h3>Assets, investments and liabilities</h3></div><div class="wealth-currency-row"><select id="wealthCurrencySelect" aria-label="Display currency">${[...new Set([state.household.currency || "USD", "USD", "EUR", "GBP", "INR"])].map((code) => `<option value="${code}" ${wealthDisplayCurrency() === code ? "selected" : ""}>${code}</option>`).join("")}</select><button id="addNetWorthItemButton" type="button">+ Add holding</button></div></div><div class="net-worth-strip"><strong data-net-worth-total>${wealthMoney(netWorth().total)}</strong><span>Assets <b data-net-worth-assets>${wealthMoney(netWorth().assets)}</b> Liabilities <b data-net-worth-liabilities>${wealthMoney(netWorth().liabilities)}</b></span></div>${wealthDisplayCurrency() !== (state.household.currency || "USD") ? `<p class="muted wealth-currency-note">Converted from ${state.household.currency || "USD"} using real exchange rates${wealthFxRates ? "" : " — loading…"}. Individual accounts and holdings below still show ${state.household.currency || "USD"}.</p>` : ""}<div class="net-worth-items">${groupStockHoldings(state.goals.netWorth.assets).map((group) => netWorthStockGroupCard(group)).join("")}${netWorthLinkedSummaryHtml()}${state.goals.netWorth.assets.map((asset, index) => ({ asset, index })).filter(({ asset }) => !isHoldingAssetClass(asset.assetClass) && !isAccountLinked("asset", asset.id)).map(({ asset, index }) => netWorthItemRow(asset, "asset", index)).join("")}${state.goals.netWorth.liabilities.map((item, index) => ({ item, index })).filter(({ item }) => !isAccountLinked("liability", item.id)).map(({ item, index }) => netWorthItemRow(item, "liability", index)).join("")}</div>${state.goals.netWorth.assets.length || state.goals.netWorth.liabilities.length ? "" : `<div class="empty-inline">No assets, investments or liabilities yet</div>`}</section>
+      <section class="card wealth-holdings"><div class="section-head"><div><span class="card-label">Net worth</span><h3>Assets, investments and liabilities</h3></div><div class="wealth-currency-row"><select id="wealthCurrencySelect" aria-label="Display currency">${[...new Set([state.household.currency || "USD", "USD", "EUR", "GBP", "INR"])].map((code) => `<option value="${code}" ${wealthDisplayCurrency() === code ? "selected" : ""}>${code}</option>`).join("")}</select><button id="addAccountButton" type="button">+ Add account</button><button id="addNetWorthItemButton" type="button">+ Add holding</button></div></div><div class="net-worth-strip"><strong data-net-worth-total>${wealthMoney(netWorth().total)}</strong><span>Assets <b data-net-worth-assets>${wealthMoney(netWorth().assets)}</b> Liabilities <b data-net-worth-liabilities>${wealthMoney(netWorth().liabilities)}</b></span></div>${wealthDisplayCurrency() !== (state.household.currency || "USD") ? `<p class="muted wealth-currency-note">Converted from ${state.household.currency || "USD"} using real exchange rates${wealthFxRates ? "" : " — loading…"}. Individual accounts and holdings below still show ${state.household.currency || "USD"}.</p>` : ""}<div class="net-worth-accounts"><div class="net-worth-subhead">Accounts</div>${wealthAccountsHtml()}</div><div class="net-worth-items">${groupStockHoldings(state.goals.netWorth.assets).map((group) => netWorthStockGroupCard(group)).join("")}${state.goals.netWorth.assets.map((asset, index) => ({ asset, index })).filter(({ asset }) => !isHoldingAssetClass(asset.assetClass) && !isAccountLinked("asset", asset.id)).map(({ asset, index }) => netWorthItemRow(asset, "asset", index)).join("")}${state.goals.netWorth.liabilities.map((item, index) => ({ item, index })).filter(({ item }) => !isAccountLinked("liability", item.id)).map(({ item, index }) => netWorthItemRow(item, "liability", index)).join("")}</div>${state.goals.netWorth.assets.length || state.goals.netWorth.liabilities.length || state.accounts.length ? "" : `<div class="empty-inline">No assets, investments or liabilities yet</div>`}<div class="net-worth-transfers"><div class="net-worth-subhead">Transfers</div>${wealthTransfersHtml()}</div></section>
     </section>`;
 }
 
@@ -6550,21 +6557,6 @@ function transferRow(transfer, index) {
     "",
     `data-delete-transfer="${index}" aria-label="Delete transfer"`
   );
-}
-
-// Accounts (checking, savings, credit cards, ...) are listed once, in the Accounts section; the Net worth list used to repeat each of them as a
-// read-only "from account" line. They still count toward net worth, and this one line says how much comes from them.
-function netWorthLinkedSummaryHtml() {
-  const linkedAssets = state.goals.netWorth.assets.filter((asset) => isAccountLinked("asset", asset.id));
-  const linkedLiabilities = state.goals.netWorth.liabilities.filter((item) => isAccountLinked("liability", item.id));
-  if (!linkedAssets.length && !linkedLiabilities.length) return "";
-  const sum = (items) => items.reduce((total, item) => total + Number(item.value || 0), 0);
-  return `<div class="net-worth-linked-summary" role="note">
-    <strong>Counted from your accounts</strong>
-    <span>${linkedAssets.length} account${linkedAssets.length === 1 ? "" : "s"} <b>${wealthMoney(sum(linkedAssets))}</b></span>
-    <span>${linkedLiabilities.length} card${linkedLiabilities.length === 1 ? "" : "s"} and loan${linkedLiabilities.length === 1 ? "" : "s"} <b>${wealthMoney(sum(linkedLiabilities))}</b> owed</span>
-    <small>These are the accounts listed below under Accounts; they count toward net worth from there, so they are not listed twice.</small>
-  </div>`;
 }
 
 function netWorthItemRow(item, type, index) {

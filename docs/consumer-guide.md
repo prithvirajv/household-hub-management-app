@@ -502,6 +502,13 @@ button on every screen. People with view-only access don't see it.
 
 ![A net worth summary strip and two account cards with colored type dots and a debt payoff tracker](../assets/mockup-wealth.svg)
 
+All of this lives in one **Net worth** card: your **Accounts** (grouped as
+Checking, Savings, Credit cards, ...) with their type, opening balance, close
+date, balance chart and "synced from/through" tags, then your holdings,
+property and loans, then **Transfers** between accounts. **+ Add account** and
+**+ Add holding** are at the top of the card. An account is listed once - in
+the Accounts part - and counts toward the net worth total from there.
+
 1. Add a real bank or credit-card **Account** with its opening balance.
 2. Let the balance update itself from there on — it's computed live from
    linked transactions, paychecks, and transfers, never entered by hand.
