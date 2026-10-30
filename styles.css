@@ -9318,3 +9318,6 @@ html[data-theme="dark"] .note-color-coral { background: color-mix(in srgb, #fff0
 .linked-account-picker > summary { cursor: pointer; padding: 8px 12px; border: 1px solid var(--line, #d8d2c8); border-radius: 8px; background: var(--surface, #fff); list-style: none; }
 .linked-account-picker .linked-picker-list { position: absolute; z-index: 5; min-width: 240px; margin-top: 4px; padding: 10px; display: grid; gap: 6px; border: 1px solid var(--line, #d8d2c8); border-radius: 8px; background: var(--surface, #fff); box-shadow: 0 6px 20px rgba(0, 0, 0, 0.15); }
 .linked-account-picker .linked-picker-list label { display: flex; gap: 8px; align-items: center; }
+.linked-account-picker .linked-picker-list { max-height: 60vh; overflow-y: auto; }
+.linked-account-picker .linked-picker-kind { margin-top: 6px; }
+.linked-account-picker .linked-picker-account { padding-left: 22px; }

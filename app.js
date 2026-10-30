@@ -12243,17 +12243,31 @@ function bindViewEvents() {
   document.querySelectorAll("[data-linked-pick-all]").forEach((box) => {
     box.addEventListener("change", () => { linkedAccountPick[box.dataset.linkedPickAll] = []; linkedPickerOpenId = box.dataset.linkedPickAll; render(); });
   });
+  document.querySelectorAll("[data-linked-pick-kind]").forEach((box) => {
+    box.indeterminate = box.dataset.indeterminate === "true";
+    box.addEventListener("change", () => {
+      const linkId = box.dataset.linkedPickKind;
+      const link = (linkedAccounts?.links || []).find((item) => item.id === linkId);
+      const kind = link ? linkedPickableKinds(link).find((item) => item.key === box.value) : null;
+      if (!kind) return;
+      const current = new Set(linkedPickedIds(link));
+      kind.remoteIds.forEach((id) => { if (box.checked) current.add(id); else current.delete(id); });
+      linkedAccountPick[linkId] = [...current];
+      linkedPickerOpenId = linkId;
+      render();
+    });
+  });
   document.querySelectorAll("[data-linked-pick]").forEach((box) => {
     box.addEventListener("change", () => {
       const linkId = box.dataset.linkedPick;
-      const current = new Set(linkedAccountPick[linkId] || []);
+      const link = (linkedAccounts?.links || []).find((item) => item.id === linkId);
+      const current = new Set(link ? linkedPickedIds(link) : []);
       if (box.checked) current.add(box.value); else current.delete(box.value);
       linkedAccountPick[linkId] = [...current];
       linkedPickerOpenId = linkId;
       render();
     });
   });
-
   document.querySelectorAll("[data-linked-history-date]").forEach((input) => {
     input.addEventListener("change", () => { linkedHistoryFrom = input.value; });
   });
@@ -14383,48 +14397,57 @@ function renderBankSyncHealthCard() {
   </section>`;
 }
 
-// What Sync now and Import history can be limited to on one connection: kinds of account (all checking accounts, all credit cards, ...), not
-// single accounts. Only kinds this connection actually has are offered; none ticked (or every kind ticked) = every account.
+// What Sync now and Import history can be limited to on one connection: a kind of account (all checking accounts, all credit cards, ...) or any
+// individual accounts under it. linkedAccountPick[linkId] holds the ticked remote account ids; none ticked (or every one ticked) = every account.
+// SimpleFIN counts requests, not accounts, so ticking a whole group costs the same as ticking one account.
 const LINKED_ACCOUNT_KINDS = [["checking", "Checking accounts"], ["savings", "Savings accounts"], ["credit_card", "Credit cards"], ["cash", "Cash accounts"], ["other", "Other accounts"]];
 
 function linkedPickableKinds(link) {
   const byKind = new Map();
   Object.entries(link.mappings || {}).forEach(([remoteId, mapping]) => {
     if (!mapping || !mapping.accountId) return;
-    const type = (state.accounts || []).find((account) => account.id === mapping.accountId)?.type || "other";
+    const account = (state.accounts || []).find((item) => item.id === mapping.accountId);
+    const type = account?.type || "other";
     const kind = LINKED_ACCOUNT_KINDS.some(([key]) => key === type) ? type : "other";
-    byKind.set(kind, [...(byKind.get(kind) || []), remoteId]);
+    byKind.set(kind, [...(byKind.get(kind) || []), { remoteId, name: account?.name || "Account" }]);
   });
-  return LINKED_ACCOUNT_KINDS.filter(([key]) => byKind.has(key)).map(([key, label]) => ({ key, label, remoteIds: byKind.get(key) }));
+  return LINKED_ACCOUNT_KINDS.filter(([key]) => byKind.has(key)).map(([key, label]) => ({ key, label, accounts: byKind.get(key).sort((a, b) => a.name.localeCompare(b.name)), remoteIds: byKind.get(key).map((entry) => entry.remoteId) }));
 }
 
-// The remote account ids the ticked kinds stand for ([] = every account, which is also what ticking every kind means).
+// The ticked remote account ids ([] = every account, which is also what ticking every account means).
 function linkedPickedIds(link) {
-  const kinds = linkedPickableKinds(link);
-  const picked = kinds.filter((kind) => (linkedAccountPick[link.id] || []).includes(kind.key));
-  return !picked.length || picked.length === kinds.length ? [] : picked.flatMap((kind) => kind.remoteIds);
+  const all = linkedPickableKinds(link).flatMap((kind) => kind.remoteIds);
+  const picked = (linkedAccountPick[link.id] || []).filter((id) => all.includes(id));
+  return !picked.length || picked.length === all.length ? [] : picked;
 }
 
-// How the current selection reads in a sentence ("every account on this connection", "your checking accounts and credit cards").
-function linkedPickedLabel(linkId) {
+// How the current selection reads: whole groups by name, otherwise a count.
+function linkedPickedLabel(linkId, { short = false } = {}) {
   const link = (linkedAccounts?.links || []).find((item) => item.id === linkId);
   if (!link) return "every account on this connection";
-  const kinds = linkedPickableKinds(link);
-  const picked = kinds.filter((kind) => (linkedAccountPick[link.id] || []).includes(kind.key));
-  return !picked.length || picked.length === kinds.length ? "every account on this connection" : `only ${picked.map((kind) => kind.label.toLowerCase()).join(" and ")}`;
+  const picked = linkedPickedIds(link);
+  if (!picked.length) return short ? "All accounts" : "every account on this connection";
+  const wholeKinds = linkedPickableKinds(link).filter((kind) => kind.remoteIds.every((id) => picked.includes(id)));
+  const covered = wholeKinds.flatMap((kind) => kind.remoteIds);
+  if (wholeKinds.length && covered.length === picked.length) return short ? wholeKinds.map((kind) => kind.label).join(", ") : `only ${wholeKinds.map((kind) => kind.label.toLowerCase()).join(" and ")}`;
+  return short ? `${picked.length} account${picked.length === 1 ? "" : "s"}` : `only ${picked.length} account${picked.length === 1 ? "" : "s"} you picked`;
 }
 
 function renderLinkedAccountPicker(link) {
   const kinds = linkedPickableKinds(link);
-  if (kinds.length < 2) return "";
-  const picked = kinds.filter((kind) => (linkedAccountPick[link.id] || []).includes(kind.key));
-  const all = !picked.length || picked.length === kinds.length;
-  const summary = all ? "All accounts" : picked.map((kind) => kind.label).join(", ");
+  if (kinds.flatMap((kind) => kind.remoteIds).length < 2) return "";
+  const picked = linkedPickedIds(link);
+  const disabled = linkedBusyId ? "disabled" : "";
   return `<details class="linked-account-picker" data-linked-picker="${link.id}" ${linkedPickerOpenId === link.id ? "open" : ""}>
-    <summary>Sync: ${escapeHtml(summary)}</summary>
+    <summary>Sync: ${escapeHtml(linkedPickedLabel(link.id, { short: true }))}</summary>
     <div class="linked-picker-list">
-      <label><input type="checkbox" data-linked-pick-all="${link.id}" ${all ? "checked" : ""} ${linkedBusyId ? "disabled" : ""}> All accounts</label>
-      ${kinds.map((kind) => `<label><input type="checkbox" data-linked-pick="${link.id}" value="${kind.key}" ${!all && picked.includes(kind) ? "checked" : ""} ${linkedBusyId ? "disabled" : ""}> ${kind.label} (${kind.remoteIds.length})</label>`).join("")}
+      <label><input type="checkbox" data-linked-pick-all="${link.id}" ${!picked.length ? "checked" : ""} ${disabled}> All accounts</label>
+      ${kinds.map((kind) => {
+        const on = kind.remoteIds.filter((id) => picked.includes(id)).length;
+        const state = !picked.length ? "none" : on === kind.remoteIds.length ? "all" : on ? "some" : "none";
+        return `<label class="linked-picker-kind"><input type="checkbox" data-linked-pick-kind="${link.id}" value="${kind.key}" data-indeterminate="${state === "some"}" ${state === "all" ? "checked" : ""} ${disabled}> <strong>${kind.label} (${kind.remoteIds.length})</strong></label>
+          ${kind.accounts.map((entry) => `<label class="linked-picker-account"><input type="checkbox" data-linked-pick="${link.id}" value="${escapeHtml(entry.remoteId)}" ${picked.includes(entry.remoteId) ? "checked" : ""} ${disabled}> ${escapeHtml(entry.name)}</label>`).join("")}`;
+      }).join("")}
       <small>Sync now and Import history use this selection.</small>
     </div>
   </details>`;
