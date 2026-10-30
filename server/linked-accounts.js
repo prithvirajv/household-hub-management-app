@@ -83,7 +83,7 @@ function simplefinRequest(accessUrl, path, params) {
   url.username = "";
   url.password = "";
   url.pathname = `${url.pathname.replace(/\/$/, "")}${path}`;
-  Object.entries(params || {}).forEach(([key, value]) => url.searchParams.set(key, String(value)));
+  Object.entries(params || {}).forEach(([key, value]) => { if (Array.isArray(value)) value.forEach((item) => url.searchParams.append(key, String(item))); else url.searchParams.set(key, String(value)); });
   return { url: url.toString(), headers: { Authorization: auth, Accept: "application/json" } };
 }
 
@@ -154,7 +154,7 @@ function bridgeNotices(errors) {
 }
 
 // Walks [startDate, endDate] in windows the Bridge accepts and merges the results by account (transactions de-duplicated by id).
-async function syncSimplefin(accessUrl, { startUnix, endUnix, allowPartial = false }, options = {}) {
+async function syncSimplefin(accessUrl, { startUnix, endUnix, allowPartial = false, accountIds = [] }, options = {}) {
   const windowSeconds = SIMPLEFIN_WINDOW_DAYS * 86400;
   const accounts = new Map();
   const errors = [];
@@ -171,7 +171,7 @@ async function syncSimplefin(accessUrl, { startUnix, endUnix, allowPartial = fal
     const { start, end, depth } = queue.shift();
     let result;
     try {
-      result = await fetchSimplefinAccounts(accessUrl, { "start-date": start, "end-date": end, pending: 1 }, options);
+      result = await fetchSimplefinAccounts(accessUrl, { "start-date": start, "end-date": end, pending: 1, ...(accountIds.length ? { account: accountIds } : {}) }, options);
     } catch (error) {
       if (error.statusCode === 409) throw error;
       lastFailure = error;
@@ -414,7 +414,12 @@ function mergeStagedPayload(staged, payload, nowIso, { sinceDate } = {}) {
   });
   let transactions = [...byId.values()].filter((transaction) => transaction.date >= cutoff);
   if (transactions.length > STAGED_TRANSACTION_LIMIT) transactions = transactions.sort((a, b) => b.date.localeCompare(a.date)).slice(0, STAGED_TRANSACTION_LIMIT);
-  return { merged: { provider: "simplefin", accounts: payload.accounts, transactions, errors: payload.errors || [], stagedAt: nowIso }, newTransactionCount };
+  // A fetch of only some accounts adds to what is staged (the other accounts' latest snapshot stays) and does not count as a full fetch: fullAt is
+  // when every mapped account was last fetched, which is what the link's last-sync date may move to once the data is applied.
+  const accountsById = new Map();
+  if (payload.subset) (staged?.accounts || []).forEach((account) => accountsById.set(String(account.remoteId), account));
+  (payload.accounts || []).forEach((account) => accountsById.set(String(account.remoteId), account));
+  return { merged: { provider: "simplefin", accounts: payload.subset ? [...accountsById.values()] : payload.accounts, transactions, errors: payload.errors || [], stagedAt: nowIso, fullAt: payload.subset ? (staged?.fullAt || null) : nowIso }, newTransactionCount };
 }
 
 // Every linked-feed row id the household already imported: remembered ids, ledger rows and drafts still waiting.
@@ -580,13 +585,17 @@ function registerLinkedAccountRoutes({ app, requireSession, requireEditAccess, r
     // reports an account that was not in that list.
     // Changing which accounts are imported restarts the look-back (default 30 days) so a newly chosen account gets its recent history; rows
     // already imported are skipped by id on the client.
-    await store.update(sessionHouseholdId(req), link.id, { mappings, newAccounts: [], lastSyncAt: null });
-    res.json({ link: publicLink({ ...link, mappings, newAccounts: [] }) });
+    // Choosing accounts for the first time starts the look-back. Adding an account to a link that already syncs does not touch the others' sync
+    // date; the new account's earlier days are pulled on request (pick it next to Import history) instead of re-fetching everything.
+    const hadAccounts = Object.values(link.mappings || {}).some((mapping) => mapping && !mapping.skipped);
+    await store.update(sessionHouseholdId(req), link.id, { mappings, newAccounts: [], ...(hadAccounts ? {} : { lastSyncAt: null }) });
+    const added = Object.entries(mappings).filter(([remoteId, mapping]) => mapping && !mapping.skipped && !(link.mappings?.[remoteId] && !link.mappings[remoteId].skipped)).map(([remoteId]) => remoteId);
+    res.json({ link: publicLink({ ...link, mappings, newAccounts: [], ...(hadAccounts ? {} : { lastSyncAt: null }) }), addedRemoteIds: hadAccounts ? added : [] });
   }));
 
   // Fetches fresh data for a link: SimpleFIN since the last successful fetch (minus a few days of overlap) or an explicit date, SnapTrade as a
   // snapshot of positions for the mapped accounts.
-  const fetchLinkPayload = async (link, { sinceDate, allowPartial = false } = {}) => {
+  const fetchLinkPayload = async (link, { sinceDate, allowPartial = false, accountIds = [] } = {}) => {
     const credentials = credentialsOf(link);
     if (link.provider === "simplefin") {
       const nowUnix = Math.floor(Date.now() / 1000);
@@ -594,11 +603,11 @@ function registerLinkedAccountRoutes({ app, requireSession, requireEditAccess, r
       const requestedUnix = /^\d{4}-\d{2}-\d{2}$/.test(requested) ? Math.floor(Date.parse(`${requested}T00:00:00Z`) / 1000) : null;
       const lastUnix = link.lastSyncAt ? Math.floor(new Date(link.lastSyncAt).getTime() / 1000) - SIMPLEFIN_OVERLAP_DAYS * 86400 : null;
       const startUnix = Math.max(requestedUnix ?? lastUnix ?? Math.floor(Date.parse(`${firstOfPreviousMonth()}T00:00:00Z`) / 1000), nowUnix - 365 * 86400);
-      const result = await syncSimplefin(credentials.accessUrl, { startUnix, endUnix: nowUnix, allowPartial: Boolean(allowPartial) }, { fetchImpl, allowInsecureHosts });
+      const result = await syncSimplefin(credentials.accessUrl, { startUnix, endUnix: nowUnix, allowPartial: Boolean(allowPartial), accountIds }, { fetchImpl, allowInsecureHosts });
       // Only accounts sent to a Wealth account import transactions (investment and loan accounts follow their balance only), so only those are staged.
-      const wanted = new Set(Object.entries(link.mappings || {}).filter(([, mapping]) => mapping && mapping.accountId).map(([remoteId]) => remoteId));
+      const wanted = new Set(Object.entries(link.mappings || {}).filter(([remoteId, mapping]) => mapping && mapping.accountId && (!accountIds.length || accountIds.includes(remoteId))).map(([remoteId]) => remoteId));
       // sinceDate is where this fetch started: the last successful sync (minus a few days of overlap), so a missed night is picked up by the next run.
-      return { provider: "simplefin", sinceDate: new Date(startUnix * 1000).toISOString().slice(0, 10), accounts: result.accounts, transactions: result.transactions.filter((transaction) => wanted.has(transaction.remoteAccountId)), errors: result.errors, failedWindows: result.failedWindows || [] };
+      return { provider: "simplefin", sinceDate: new Date(startUnix * 1000).toISOString().slice(0, 10), ...(accountIds.length ? { subset: true } : {}), accounts: accountIds.length ? result.accounts.filter((account) => accountIds.includes(String(account.remoteId))) : result.accounts, transactions: result.transactions.filter((transaction) => wanted.has(transaction.remoteAccountId)), errors: result.errors, failedWindows: result.failedWindows || [] };
     }
     const accounts = await getAdapter().listAccounts(credentials);
     const mapped = accounts.filter((account) => link.mappings[account.remoteId] && !link.mappings[account.remoteId].skipped);
@@ -618,7 +627,11 @@ function registerLinkedAccountRoutes({ app, requireSession, requireEditAccess, r
     try {
       // A first sync reads from the first of last month, and is held to the same whole-months rule as a history import.
       const since = req.body?.sinceDate || (link.provider === "simplefin" && !link.lastSyncAt ? firstOfPreviousMonth() : "");
-      const fetched = await fetchLinkPayload(link, { sinceDate: req.body?.sinceDate, allowPartial: Boolean(since) });
+      // Some accounts only (the picker next to Import history): each must be one of this link's mapped accounts; all of them is a normal full sync.
+      const mappedIds = Object.entries(link.mappings || {}).filter(([, mapping]) => mapping && mapping.accountId).map(([remoteId]) => remoteId);
+      const asked = Array.isArray(req.body?.accountIds) ? [...new Set(req.body.accountIds.map(String))].filter((id) => mappedIds.includes(id)) : [];
+      const accountIds = link.provider === "simplefin" && asked.length && asked.length < mappedIds.length ? asked : [];
+      const fetched = await fetchLinkPayload(link, { sinceDate: req.body?.sinceDate, allowPartial: Boolean(since), accountIds });
       const failed = gapsFromFailedWindows(fetched, fetched.failedWindows, link.mappings);
       const trimmed = trimPartialHistory(failed.payload, since);
       const payload = trimmed.payload;
@@ -641,10 +654,13 @@ function registerLinkedAccountRoutes({ app, requireSession, requireEditAccess, r
   app.post("/api/linked-accounts/:id/ack", requireSession, requireEditAccess, requireConfigured, wrap(async (req, res) => {
     const link = await loadLink(req);
     const through = String(req.body?.stagedAt || "");
+    // The link counts as synced up to when every mapped account was last fetched (a fetch of only some accounts does not move it), and not at all when
+    // the client discards the fetch without applying it.
+    const syncedThrough = req.body?.discard === true ? null : (link.staged?.provider === "simplefin" ? link.staged?.fullAt : link.stagedAt) || null;
     // Only clears what the client actually applied: anything staged after that (a nightly run in between) stays for next time.
     if (through && link.stagedAt && new Date(link.stagedAt).getTime() <= new Date(through).getTime()) {
       // What the client acknowledges is applied and saved, so this is the moment the link counts as synced up to when that data was fetched.
-      await store.update(sessionHouseholdId(req), link.id, { staged: {}, stagedAt: null, ...(link.stagedAt && (!link.lastSyncAt || new Date(link.stagedAt) > new Date(link.lastSyncAt)) ? { lastSyncAt: link.stagedAt } : {}) });
+      await store.update(sessionHouseholdId(req), link.id, { staged: {}, stagedAt: null, ...(syncedThrough && (!link.lastSyncAt || new Date(syncedThrough) > new Date(link.lastSyncAt)) ? { lastSyncAt: syncedThrough } : {}) });
     }
     res.json({ ok: true });
   }));

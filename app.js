@@ -171,6 +171,9 @@ let linkedMapping = null;
 let linkedPortalLinkId = "";
 let linkedAutoSyncDone = false;
 let linkedHistoryFrom = `${new Date().getFullYear()}-01-01`;
+// Which of a connection's accounts Sync now and Import history work on: linkId -> remote ids ([] or missing = every account), plus which picker is open.
+const linkedAccountPick = {};
+let linkedPickerOpenId = "";
 // Clean up old transactions card (Transactions page): the options last chosen.
 let cleanupOptions = { before: "", all: false, ledger: true, stream: true, backup: true };
 let ledgerAcceptFeedback = "";
@@ -12227,7 +12230,24 @@ function bindViewEvents() {
   });
 
   document.querySelectorAll("[data-linked-sync]").forEach((button) => {
-    button.addEventListener("click", () => syncLinkedAccount(button.dataset.linkedSync, addBankStreamRows));
+    button.addEventListener("click", () => syncLinkedAccount(button.dataset.linkedSync, addBankStreamRows, { accountIds: linkedPickedIds({ id: button.dataset.linkedSync, mappings: (linkedAccounts?.links || []).find((item) => item.id === button.dataset.linkedSync)?.mappings }) }));
+  });
+
+  document.querySelectorAll("[data-linked-picker]").forEach((details) => {
+    details.addEventListener("toggle", () => { linkedPickerOpenId = details.open ? details.dataset.linkedPicker : (linkedPickerOpenId === details.dataset.linkedPicker ? "" : linkedPickerOpenId); });
+  });
+  document.querySelectorAll("[data-linked-pick-all]").forEach((box) => {
+    box.addEventListener("change", () => { linkedAccountPick[box.dataset.linkedPickAll] = []; linkedPickerOpenId = box.dataset.linkedPickAll; render(); });
+  });
+  document.querySelectorAll("[data-linked-pick]").forEach((box) => {
+    box.addEventListener("change", () => {
+      const linkId = box.dataset.linkedPick;
+      const current = new Set(linkedAccountPick[linkId] || []);
+      if (box.checked) current.add(box.value); else current.delete(box.value);
+      linkedAccountPick[linkId] = [...current];
+      linkedPickerOpenId = linkId;
+      render();
+    });
   });
 
   document.querySelectorAll("[data-linked-history-date]").forEach((input) => {
@@ -12238,8 +12258,9 @@ function bindViewEvents() {
       if (linkedBusyId) { showToast("A bank sync is already running - wait for it to finish.", { type: "info" }); return; }
       const from = linkedHistoryFrom;
       if (!/^\d{4}-\d{2}-\d{2}$/.test(from)) { showToast("Pick the date to import from."); return; }
-      if (!(await showConfirm(`Fetch every transaction from ${from} onward for the accounts you chose? New rows go to Bank stream (the AI categorization and safe auto-add apply). Rows you removed earlier come back.`, { title: "Import history", confirmLabel: "Import", danger: false }))) return;
-      await syncLinkedAccount(button.dataset.linkedHistory, addBankStreamRows, { sinceDate: from });
+      if (!(await showConfirm(`Fetch every transaction from ${from} onward for ${linkedPickedLabel(button.dataset.linkedHistory)}? New rows go to Bank stream (the AI categorization and safe auto-add apply). Rows you removed earlier come back.`, { title: "Import history", confirmLabel: "Import", danger: false }))) return;
+      const link = (linkedAccounts?.links || []).find((item) => item.id === button.dataset.linkedHistory);
+      await syncLinkedAccount(button.dataset.linkedHistory, addBankStreamRows, { sinceDate: from, accountIds: link ? linkedPickedIds(link) : [] });
     });
   });
 
@@ -12293,11 +12314,19 @@ function bindViewEvents() {
       }
     });
     try {
-      await api(`/api/linked-accounts/${linkId}/mappings`, { method: "PUT", body: JSON.stringify({ mappings }) });
+      const saved = await api(`/api/linked-accounts/${linkId}/mappings`, { method: "PUT", body: JSON.stringify({ mappings }) });
       linkedMapping = null;
       autosaveState();
       await loadLinkedAccounts(false);
-      await syncLinkedAccount(linkId, addBankStreamRows);
+      // Accounts added to a connection that already syncs are brought in from the first of last month on their own, so the accounts already there
+      // are neither re-fetched nor disturbed; a first-time setup is a normal full sync.
+      const addedIds = saved?.addedRemoteIds || [];
+      if (addedIds.length) {
+        const first = new Date(); first.setMonth(first.getMonth() - 1); first.setDate(1);
+        await syncLinkedAccount(linkId, addBankStreamRows, { sinceDate: dateKey(first), accountIds: addedIds });
+      } else {
+        await syncLinkedAccount(linkId, addBankStreamRows);
+      }
     } catch (error) {
       linkedFeedback = error.message;
       render();
@@ -14350,6 +14379,53 @@ function renderBankSyncHealthCard() {
   </section>`;
 }
 
+// What Sync now and Import history can be limited to on one connection: kinds of account (all checking accounts, all credit cards, ...), not
+// single accounts. Only kinds this connection actually has are offered; none ticked (or every kind ticked) = every account.
+const LINKED_ACCOUNT_KINDS = [["checking", "Checking accounts"], ["savings", "Savings accounts"], ["credit_card", "Credit cards"], ["cash", "Cash accounts"], ["other", "Other accounts"]];
+
+function linkedPickableKinds(link) {
+  const byKind = new Map();
+  Object.entries(link.mappings || {}).forEach(([remoteId, mapping]) => {
+    if (!mapping || !mapping.accountId) return;
+    const type = (state.accounts || []).find((account) => account.id === mapping.accountId)?.type || "other";
+    const kind = LINKED_ACCOUNT_KINDS.some(([key]) => key === type) ? type : "other";
+    byKind.set(kind, [...(byKind.get(kind) || []), remoteId]);
+  });
+  return LINKED_ACCOUNT_KINDS.filter(([key]) => byKind.has(key)).map(([key, label]) => ({ key, label, remoteIds: byKind.get(key) }));
+}
+
+// The remote account ids the ticked kinds stand for ([] = every account, which is also what ticking every kind means).
+function linkedPickedIds(link) {
+  const kinds = linkedPickableKinds(link);
+  const picked = kinds.filter((kind) => (linkedAccountPick[link.id] || []).includes(kind.key));
+  return !picked.length || picked.length === kinds.length ? [] : picked.flatMap((kind) => kind.remoteIds);
+}
+
+// How the current selection reads in a sentence ("every account on this connection", "your checking accounts and credit cards").
+function linkedPickedLabel(linkId) {
+  const link = (linkedAccounts?.links || []).find((item) => item.id === linkId);
+  if (!link) return "every account on this connection";
+  const kinds = linkedPickableKinds(link);
+  const picked = kinds.filter((kind) => (linkedAccountPick[link.id] || []).includes(kind.key));
+  return !picked.length || picked.length === kinds.length ? "every account on this connection" : `only ${picked.map((kind) => kind.label.toLowerCase()).join(" and ")}`;
+}
+
+function renderLinkedAccountPicker(link) {
+  const kinds = linkedPickableKinds(link);
+  if (kinds.length < 2) return "";
+  const picked = kinds.filter((kind) => (linkedAccountPick[link.id] || []).includes(kind.key));
+  const all = !picked.length || picked.length === kinds.length;
+  const summary = all ? "All accounts" : picked.map((kind) => kind.label).join(", ");
+  return `<details class="linked-account-picker" data-linked-picker="${link.id}" ${linkedPickerOpenId === link.id ? "open" : ""}>
+    <summary>Sync: ${escapeHtml(summary)}</summary>
+    <div class="linked-picker-list">
+      <label><input type="checkbox" data-linked-pick-all="${link.id}" ${all ? "checked" : ""} ${linkedBusyId ? "disabled" : ""}> All accounts</label>
+      ${kinds.map((kind) => `<label><input type="checkbox" data-linked-pick="${link.id}" value="${kind.key}" ${!all && picked.includes(kind) ? "checked" : ""} ${linkedBusyId ? "disabled" : ""}> ${kind.label} (${kind.remoteIds.length})</label>`).join("")}
+      <small>Sync now and Import history use this selection.</small>
+    </div>
+  </details>`;
+}
+
 function renderLinkedAccountsCard() {
   if (!linkedAccounts) return `<section class="card linked-accounts-card"><div class="card-label">Linked accounts</div><p class="muted">Loading…</p></section>`;
   if (!linkedAccounts.configured) return "";
@@ -14369,6 +14445,7 @@ function renderLinkedAccountsCard() {
         <button type="button" class="icon-button danger-button" data-linked-remove="${link.id}" aria-label="Remove ${escapeHtml(link.label)}">×</button>
       </div>
       ${link.provider === "simplefin" && Object.keys(link.mappings || {}).length ? `<div class="linked-history-row">
+        ${renderLinkedAccountPicker(link)}
         <label>Import older transactions from<input type="date" data-linked-history-date value="${escapeHtml(linkedHistoryFrom)}" ${linkedBusyId ? "disabled" : ""}></label>
         <button type="button" class="ghost" data-linked-history="${link.id}" ${linkedBusyId ? "disabled" : ""}>${linkedBusyId === link.id ? "Working…" : "Import history"}</button>
         <small>How far back it goes depends on the bank (often 3-12 months). Rows you already have or removed with Clean up are brought in again; pending rows wait.</small>
@@ -14510,13 +14587,13 @@ function renderHistoryGapCard() {
   </section>`;
 }
 
-async function syncLinkedAccount(linkId, addRows, { quiet = false, sinceDate = "" } = {}) {
+async function syncLinkedAccount(linkId, addRows, { quiet = false, sinceDate = "", accountIds = [] } = {}) {
   const link = (linkedAccounts?.links || []).find((item) => item.id === linkId);
   if (!link || linkedBusyId) return;
   linkedBusyId = linkId;
   if (!quiet) { linkedFeedback = `Syncing ${link.label}…`; render(); }
   try {
-    const payload = await api(`/api/linked-accounts/${linkId}/sync`, { method: "POST", body: JSON.stringify(sinceDate ? { sinceDate } : {}) });
+    const payload = await api(`/api/linked-accounts/${linkId}/sync`, { method: "POST", body: JSON.stringify({ ...(sinceDate ? { sinceDate } : {}), ...(accountIds.length ? { accountIds } : {}) }) });
     let summary;
     if (link.provider === "simplefin" && payload.historyGaps?.length) {
       linkedBusyId = "";
@@ -14525,7 +14602,7 @@ async function syncLinkedAccount(linkId, addRows, { quiet = false, sinceDate = "
       linkedBusyId = linkId;
       if (!proceed) {
         // Nothing is applied; clearing what the server staged keeps the overnight job from importing it behind the person's back.
-        if (payload.stagedAt) await api(`/api/linked-accounts/${linkId}/ack`, { method: "POST", body: JSON.stringify({ stagedAt: payload.stagedAt }) });
+        if (payload.stagedAt) await api(`/api/linked-accounts/${linkId}/ack`, { method: "POST", body: JSON.stringify({ stagedAt: payload.stagedAt, discard: true }) });
         linkedFeedback = `${link.label}: nothing was imported. The bank's history for the accounts above is incomplete - import those months from a statement, or ask for a later start date.`;
         await loadLinkedAccounts(false);
         return;

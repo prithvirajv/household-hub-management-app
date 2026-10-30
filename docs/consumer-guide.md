@@ -630,6 +630,18 @@ entry. It is read-only: FamilyLoop can never move money or place trades.
   ledger or waiting in Bank stream are skipped, and rows you removed earlier
   (Clean up) come back. If you're replacing hand-entered history, clean it up
   first so the two don't double up.
+- **Sync or import just some kinds of account:** when a bank link has more
+  than one kind of account, a **Sync** dropdown next to Import history lets you
+  tick **All accounts**, **Checking accounts**, **Credit cards** (and Savings or
+  Cash if the link has them) - kinds, not individual accounts. **Sync now** and
+  **Import history** then work on only those: the bank is asked for just them,
+  so the other accounts are not re-fetched and their records are not touched.
+  Ticking every kind is the same as All accounts. A fetch of some accounts does
+  not move the connection's "last synced" date (the others were not fetched),
+  and adding a new account to a connection that already syncs no longer restarts
+  the others: the new account alone is brought in from the first of last month,
+  and you can pull more with the dropdown and Import history. The mobile app has
+  the same chooser.
 - **Nothing in the ledger disappears on its own.** Once a transaction is in
   the ledger it stays until you remove it yourself (delete it, move it to
   Transfers, split it entirely with friends, or Clean up). A save from an

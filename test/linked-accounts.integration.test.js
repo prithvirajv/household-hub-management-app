@@ -384,6 +384,65 @@ test("a night that never ran is made up: the next run starts from the last succe
   }
 });
 
+test("syncing only some accounts asks the bank for just those, leaves the link's last-sync date alone, and adding an account does not reset the others", async () => {
+  const urls = [];
+  const fetchImpl = async (url, options = {}) => {
+    if (options.method === "POST") return { ok: true, status: 200, text: async () => "http://u:p@127.0.0.1:9/simplefin" };
+    urls.push(new URL(url));
+    const wanted = new URL(url).searchParams.getAll("account");
+    const posted = Math.floor(Date.now() / 1000) - 3600;
+    const all = [["A1", "t1"], ["A2", "t2"], ["A3", "t3"]].map(([id, tid]) => ({ org: { name: "B" }, id, name: `Account ${id}`, currency: "USD", balance: "5", "balance-date": posted, transactions: [{ id: tid, posted, amount: "-1", description: `Row ${id}` }] }));
+    return { ok: true, status: 200, json: async () => ({ errors: [], accounts: wanted.length ? all.filter((account) => wanted.includes(account.id)) : all }) };
+  };
+  const app = express();
+  app.use(express.json());
+  const memoryDb = {};
+  const requireSession = (req, _res, next) => { req.sessionUser = { id: "u1", email: "o@example.com", household_id: "h1", access_level: "edit" }; next(); };
+  registerLinkedAccountRoutes({ app, requireSession, requireEditAccess: (_q, _r, n) => n(), requireJobSecret: (_q, _r, n) => n(), notifyHousehold: async () => undefined, MEMORY_DB: true, memoryDb, pool: null, env: { LINK_ENCRYPTION_KEY: KEY, NODE_ENV: "test", SIMPLEFIN_ALLOW_TEST_HOSTS: "true" }, fetchImpl });
+  const server = await new Promise((resolve) => { const s = app.listen(0, "127.0.0.1", () => resolve(s)); });
+  const base = `http://127.0.0.1:${server.address().port}`;
+  const call = async (path, options = {}) => { const res = await fetch(`${base}${path}`, { ...options, headers: { "content-type": "application/json", ...(options.headers || {}) } }); return { status: res.status, body: await res.json().catch(() => ({})) }; };
+  const day = 86400 * 1000;
+  try {
+    const token = Buffer.from("http://127.0.0.1:9/simplefin/claim/T").toString("base64");
+    const created = await call("/api/linked-accounts/simplefin", { method: "POST", body: JSON.stringify({ setupToken: token, label: "Bank one" }) });
+    const id = created.body.link.id;
+    const map = (mappings) => call(`/api/linked-accounts/${id}/mappings`, { method: "PUT", body: JSON.stringify({ mappings }) });
+    const first = await map({ A1: { accountId: "a1" }, A2: { accountId: "a2" } });
+    assert.deepEqual(first.body.addedRemoteIds, [], "choosing accounts for the first time is not an addition");
+    const row = memoryDb.linkedAccounts[0];
+    const syncedAt = new Date(Date.now() - 2 * day).toISOString();
+    row.last_sync_at = syncedAt;
+    // A third account is added to a link that already syncs: the other accounts' sync date is not reset, and the response says what was added.
+    const added = await map({ A1: { accountId: "a1" }, A2: { accountId: "a2" }, A3: { accountId: "a3" } });
+    assert.deepEqual(added.body.addedRemoteIds, ["A3"]);
+    assert.equal(row.last_sync_at, syncedAt);
+
+    // Only A3, from an earlier date: the bank is asked for just that account.
+    const subset = await call(`/api/linked-accounts/${id}/sync`, { method: "POST", body: JSON.stringify({ sinceDate: "2026-09-01", accountIds: ["A3", "NOPE"] }) });
+    assert.equal(subset.status, 200);
+    assert.deepEqual(urls.at(-1).searchParams.getAll("account"), ["A3"], "an id that is not one of the link's accounts is ignored");
+    assert.deepEqual(subset.body.accounts.map((a) => a.remoteId), ["A3"]);
+    assert.deepEqual(subset.body.transactions.map((t) => t.remoteAccountId), ["A3"]);
+    await call(`/api/linked-accounts/${id}/ack`, { method: "POST", body: JSON.stringify({ stagedAt: subset.body.stagedAt }) });
+    assert.equal(row.last_sync_at, syncedAt, "a fetch of some accounts does not move the link's last-sync date: the others were not fetched");
+
+    // A full sync, discarded without applying, does not move it either; applied, it does.
+    const full = await call(`/api/linked-accounts/${id}/sync`, { method: "POST", body: "{}" });
+    assert.equal(urls.at(-1).searchParams.getAll("account").length, 0, "no account filter on a full sync");
+    await call(`/api/linked-accounts/${id}/ack`, { method: "POST", body: JSON.stringify({ stagedAt: full.body.stagedAt, discard: true }) });
+    assert.equal(row.last_sync_at, syncedAt);
+    const again = await call(`/api/linked-accounts/${id}/sync`, { method: "POST", body: "{}" });
+    await call(`/api/linked-accounts/${id}/ack`, { method: "POST", body: JSON.stringify({ stagedAt: again.body.stagedAt }) });
+    assert.ok(new Date(row.last_sync_at) > new Date(syncedAt), "applied and acknowledged, a full sync moves it");
+    // Choosing every account is a full sync, not a subset.
+    await call(`/api/linked-accounts/${id}/sync`, { method: "POST", body: JSON.stringify({ accountIds: ["A1", "A2", "A3"] }) });
+    assert.equal(urls.at(-1).searchParams.getAll("account").length, 0);
+  } finally {
+    await new Promise((resolve) => server.close(resolve));
+  }
+});
+
 test("the nightly job applies new bank transactions to the household without the app: ledger, balances and versions", async () => {
   const stub = await startSimplefinStub();
   const server = await startTestServer({ LINK_ENCRYPTION_KEY: KEY, SIMPLEFIN_ALLOW_TEST_HOSTS: "true", NOTIFICATION_SECRET: "job-secret" });
