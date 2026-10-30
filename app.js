@@ -2525,7 +2525,7 @@ function renderHomeBriefingCard() {
 // "Ask FamilyLoop": a request typed in plain words becomes a short plan (the AI only plans, from a fixed set of actions); the plan is shown in
 // words written from the household's own data, and nothing changes until it is confirmed. A finished change can be undone for as long as the
 // page stays open (the pieces it touched are put back exactly as they were).
-let assistantUi = { request: "", status: "idle", say: "", clarify: "", error: "", actions: [], skipped: [], done: "", undo: null };
+let assistantUi = { request: "", status: "idle", say: "", answer: "", clarify: "", error: "", actions: [], skipped: [], done: "", undo: null };
 
 // The panel's inner HTML (it lives in a dialog opened from the floating button, so it is available on every page).
 function assistantPanelHtml() {
@@ -2533,17 +2533,18 @@ function assistantPanelHtml() {
   const today = dateKey(new Date());
   const rows = ui.actions.map((action) => ({ action, problem: assistantActionProblem(action, state, today) }));
   const ready = rows.filter((row) => !row.problem);
-  return `<p class="muted">For example: "my M1 account is closed and moved to Fidelity". I will show exactly what I would change and wait for your OK.</p>
+  return `<p class="muted">Ask a question - "summarize my wealth", "where am I over budget this month?" - or tell me what changed: "my M1 account is closed and moved to Fidelity". Answers come only from your own numbers; changes are shown first and wait for your OK.</p>
     <form id="assistantForm" class="inline-form">
-      <input id="assistantRequest" name="request" maxlength="500" value="${escapeHtml(ui.request)}" placeholder="What changed?" autocomplete="off" ${ui.status === "planning" ? "disabled" : ""}>
+      <input id="assistantRequest" name="request" maxlength="500" value="${escapeHtml(ui.request)}" placeholder="Ask a question or say what changed" autocomplete="off" ${ui.status === "planning" ? "disabled" : ""}>
       <button type="submit" ${ui.status === "planning" ? "disabled" : ""}>${ui.status === "planning" ? "Thinking…" : "Ask"}</button>
     </form>
     ${ui.status === "error" ? `<p class="muted" role="alert">${escapeHtml(ui.error)}</p>` : ""}
     ${ui.status === "ready" ? `<div class="assistant-plan" role="status">
       ${ui.say ? `<p><strong>${escapeHtml(ui.say)}</strong></p>` : ""}
+      ${ui.answer ? `<div class="assistant-answer">${escapeHtml(ui.answer)}</div>` : ""}
       ${ui.clarify ? `<p>${escapeHtml(ui.clarify)}</p>` : ""}
-      ${rows.length ? `<ol>${rows.map((row) => `<li>${row.problem ? `<span class="muted">Skipped - ${escapeHtml(row.problem)}</span>` : escapeHtml(describeAssistantAction(row.action, state, (value) => money.format(value), today))}</li>`).join("")}</ol>` : (ui.clarify ? "" : `<p class="muted">I couldn't turn that into a change I'm able to make. I can close or rename an account, move one investment account's holdings into another, rename an investment account, or always file a payee under a Subcategory.</p>`)}
-      ${ready.length ? `<div class="button-row"><button type="button" id="assistantConfirm">Confirm ${ready.length === 1 ? "this change" : `these ${ready.length} changes`}</button><button type="button" class="ghost" id="assistantCancel">Cancel</button></div>` : `<div class="button-row"><button type="button" class="ghost" id="assistantCancel">Close</button></div>`}
+      ${rows.length ? `<ol>${rows.map((row) => `<li>${row.problem ? `<span class="muted">Skipped - ${escapeHtml(row.problem)}</span>` : escapeHtml(describeAssistantAction(row.action, state, (value) => money.format(value), today))}</li>`).join("")}</ol>` : (ui.clarify || ui.answer ? "" : `<p class="muted">I couldn't turn that into a change I'm able to make. I can close or rename an account, move one investment account's holdings into another, rename an investment account, or always file a payee under a Subcategory.</p>`)}
+      ${ready.length ? `<div class="button-row"><button type="button" id="assistantConfirm">Confirm ${ready.length === 1 ? "this change" : `these ${ready.length} changes`}</button><button type="button" class="ghost" id="assistantCancel">Cancel</button></div>` : `<div class="button-row"><button type="button" class="ghost" id="assistantCancel">Clear</button></div>`}
     </div>` : ""}
     ${ui.status === "done" ? `<div class="assistant-plan" role="status"><p>${escapeHtml(ui.done)}</p>${ui.undo ? `<div class="button-row"><button type="button" class="ghost" id="assistantUndo">Undo</button></div>` : ""}</div>` : ""}`;
 }
@@ -2558,7 +2559,7 @@ function renderAssistantDialog() {
     if (request && assistantUi.status !== "planning") void askAssistant(request);
   });
   $("#assistantConfirm")?.addEventListener("click", confirmAssistantPlan);
-  $("#assistantCancel")?.addEventListener("click", () => { assistantUi = { ...assistantUi, status: "idle", actions: [], say: "", clarify: "" }; renderAssistantDialog(); });
+  $("#assistantCancel")?.addEventListener("click", () => { assistantUi = { ...assistantUi, status: "idle", actions: [], say: "", answer: "", clarify: "" }; renderAssistantDialog(); });
   $("#assistantUndo")?.addEventListener("click", undoAssistantChange);
 }
 
@@ -2577,11 +2578,11 @@ function syncAssistantButton() {
 }
 
 async function askAssistant(request) {
-  assistantUi = { ...assistantUi, request, status: "planning", error: "", say: "", clarify: "", actions: [], skipped: [], done: "", undo: null };
+  assistantUi = { ...assistantUi, request, status: "planning", error: "", say: "", answer: "", clarify: "", actions: [], skipped: [], done: "", undo: null };
   renderAssistantDialog();
   try {
-    const plan = await api("/api/assistant/plan", { method: "POST", body: JSON.stringify({ request, context: assistantContext(state) }) });
-    assistantUi = { ...assistantUi, status: "ready", say: plan.say || "", clarify: plan.clarify || "", actions: plan.actions || [] };
+    const plan = await api("/api/assistant/plan", { method: "POST", body: JSON.stringify({ request, context: assistantContext(state), facts: assistantFacts(state, dateKey(new Date()), (value) => money.format(value)) }) });
+    assistantUi = { ...assistantUi, status: "ready", say: plan.say || "", answer: plan.answer || "", clarify: plan.clarify || "", actions: plan.actions || [] };
   } catch (error) {
     assistantUi = { ...assistantUi, status: "error", error: error?.message || "The assistant couldn't be reached." };
   }

@@ -1428,6 +1428,7 @@ app.post("/api/home/briefing", requireSession, async (req, res, next) => {
 // client bug cannot run up an unbounded bill.
 const ASSISTANT_MAX_REQUEST_CHARS = 500;
 const ASSISTANT_MAX_CONTEXT_CHARS = 20000;
+const ASSISTANT_MAX_FACTS_CHARS = 12000;
 const ASSISTANT_SYSTEM_PROMPT = [
   "You plan changes for a family household finance app. The user asks for a change in plain words. Reply with ONLY a JSON object, no markdown:",
   '{"say":"one short sentence in plain words about what you understood","clarify":"a question if the request is ambiguous or you cannot tell which account/group is meant, else empty","actions":[...]}',
@@ -1437,6 +1438,7 @@ const ASSISTANT_SYSTEM_PROMPT = [
   '{"type":"rename_account","accountId":"...","name":"..."}',
   '{"type":"rename_holdings_group","groupId":"...","name":"..."}',
   '{"type":"set_payee_category","payee":"...","lineId":"..."} - always file a payee under one budget Subcategory.',
+  'QUESTIONS: if the user asks a question instead of asking for a change (summarize, how much, what is my net worth, where am I over budget), put the reply in "answer": short plain text, bullet lines starting with "- " are fine, 12 lines at most, with the amounts exactly as written in the FACTS. Use ONLY the FACTS; never estimate or invent a number; if the FACTS do not contain what was asked, say that. Return no actions for a question.',
   "Rules: never delete anything; never touch individual transactions; if the request needs something not listed, return no actions and say so in \"say\". If two groups or accounts could match the name, ask in \"clarify\" and return no actions. Match names loosely (case, spacing) against the context names."
 ].join("\n");
 
@@ -1448,13 +1450,15 @@ app.post("/api/assistant/plan", requireSession, async (req, res, next) => {
     if (request.length > ASSISTANT_MAX_REQUEST_CHARS) return res.status(400).json({ error: "That request is too long - keep it to a sentence or two" });
     const context = req.body?.context;
     if (!context || typeof context !== "object" || JSON.stringify(context).length > ASSISTANT_MAX_CONTEXT_CHARS) return res.status(400).json({ error: "The household summary was missing or too large" });
+    const facts = String(req.body?.facts || "").trim();
+    if (facts.length > ASSISTANT_MAX_FACTS_CHARS) return res.status(400).json({ error: "The household summary was too large" });
     const response = await fetch(`${GEMINI_API_BASE_URL}/v1beta/models/${encodeURIComponent(GEMINI_MODEL)}:generateContent?key=${encodeURIComponent(GEMINI_API_KEY)}`, {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({
-        contents: [{ role: "user", parts: [{ text: `Context (ids you may use):\n${JSON.stringify(context)}\n\nRequest: ${request}` }] }],
+        contents: [{ role: "user", parts: [{ text: `Context (ids you may use):\n${JSON.stringify(context)}${facts ? `\n\nFACTS (the household's own numbers - answer questions only from these):\n${facts}` : ""}\n\nRequest: ${request}` }] }],
         systemInstruction: { parts: [{ text: ASSISTANT_SYSTEM_PROMPT }] },
-        generationConfig: { maxOutputTokens: 800, responseMimeType: "application/json" }
+        generationConfig: { maxOutputTokens: 1500, responseMimeType: "application/json" }
       })
     });
     const body = await response.json().catch(() => ({}));

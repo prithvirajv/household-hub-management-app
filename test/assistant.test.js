@@ -2,7 +2,7 @@ const assert = require("node:assert/strict");
 const http = require("node:http");
 const test = require("node:test");
 const { startTestServer } = require("./helpers");
-const { assistantContext, parseAssistantPlan, assistantActionProblem, describeAssistantAction, applyAssistantActions, lookupCategorizationRule } = require("../lib/shared-logic");
+const { assistantContext, assistantFacts, parseAssistantPlan, assistantActionProblem, describeAssistantAction, applyAssistantActions, lookupCategorizationRule } = require("../lib/shared-logic");
 
 const TODAY = "2026-10-29";
 const money = (value) => `$${Number(value).toFixed(2)}`;
@@ -114,4 +114,42 @@ test("the plan endpoint needs a session, a request and a context, sends only the
     const signup = await noKey.request("/api/auth/signup", { method: "POST", body: JSON.stringify({ email: "assistant-nokey@example.com", password: "Assistant-Password-123!", name: "A", householdName: "A", country: "US" }) });
     assert.equal((await noKey.request("/api/assistant/plan", { method: "POST", headers: { cookie: signup.cookie }, body: JSON.stringify({ request: "x", context }) })).status, 503);
   } finally { await noKey.stop(); }
+});
+
+test("the facts the assistant answers from are a compact read of the household's own tables: net worth, holdings groups, liabilities, accounts and the budget", () => {
+  const state = household();
+  state.goals.netWorth.liabilities = [{ id: "loan", name: "Sample Loan", value: 1000 }];
+  state.goals.debts = [{ name: "Sample Loan", balance: 1000, rate: 5, minimum: 50 }];
+  state.transactions = [{ accountId: "chk", date: "2026-10-05", payee: "X", amount: 40, lineId: "groceries" }, { accountId: "chk", date: "2026-10-06", payee: "Y", amount: 10, lineId: "" }];
+  state.transactionInboxDrafts = [{ id: "d" }];
+  const text = assistantFacts(state, TODAY, money);
+  assert.match(text, /NET WORTH: \$2000\.00 \(assets \$3000\.00 minus liabilities \$1000\.00\)/);
+  assert.match(text, /Sample M1: 2 holdings, \$2300\.00/);
+  assert.match(text, /Sample Fidelity: 1 holding, \$200\.00/);
+  assert.match(text, /Cash \(cash\): \$500\.00/);
+  assert.match(text, /Sample Loan: \$1000\.00/);
+  assert.match(text, /BUDGET 2026-10: income \$0\.00, planned \$500\.00, spent \$40\.00/);
+  assert.match(text, /Food: planned \$500\.00, spent \$40\.00/);
+  assert.match(text, /WAITING: 1 bank row in Bank stream; 1 ledger transaction without a category\./);
+  assert.ok(text.length < 9000);
+  assert.equal(assistantFacts({ ...state, goals: undefined, accounts: [] }, TODAY, money).includes("NET WORTH: $0.00"), true, "a household with nothing yet still reads cleanly");
+});
+
+test("a question is answered from the facts the client sent, and the answer comes back with no actions", async () => {
+  const reply = JSON.stringify({ say: "Here is your wealth.", answer: "- Net worth: $2000.00\n- Investments: $2500.00", actions: [] });
+  const stub = await startGeminiStub({ candidates: [{ content: { parts: [{ text: reply }] } }] });
+  const server = await startTestServer({ GEMINI_API_KEY: "test-key", GEMINI_API_BASE_URL: stub.url });
+  try {
+    const signup = await server.request("/api/auth/signup", { method: "POST", body: JSON.stringify({ email: "assistant-q@example.com", password: "Assistant-Password-123!", name: "A", householdName: "A", country: "US" }) });
+    const post = (body) => server.request("/api/assistant/plan", { method: "POST", headers: { cookie: signup.cookie }, body: JSON.stringify(body) });
+    const context = assistantContext(household());
+    const facts = assistantFacts(household(), TODAY, money);
+    const ok = await post({ request: "summarize my wealth", context, facts });
+    assert.equal(ok.status, 200);
+    assert.equal(ok.body.answer, "- Net worth: $2000.00\n- Investments: $2500.00");
+    assert.deepEqual(ok.body.actions, []);
+    assert.ok(stub.requests[0].includes("FACTS") && stub.requests[0].includes("Sample M1: 2 holdings"), "the household's numbers are sent with the question");
+    assert.ok(stub.requests[0].includes("Use ONLY the FACTS"), "the AI is told to answer only from them");
+    assert.equal((await post({ request: "x", context, facts: "y".repeat(12001) })).status, 400);
+  } finally { await server.stop(); await stub.stop(); }
 });

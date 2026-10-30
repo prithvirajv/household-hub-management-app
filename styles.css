@@ -9312,3 +9312,4 @@ html[data-theme="dark"] .note-color-coral { background: color-mix(in srgb, #fff0
 .assistant-fab[hidden] { display: none; }
 .assistant-dialog { width: min(560px, calc(100vw - 32px)); }
 @media (max-width: 560px) { .assistant-fab { right: 12px; bottom: 12px; padding: 10px 14px; } }
+.assistant-answer { white-space: pre-wrap; margin: 8px 0; line-height: 1.5; }

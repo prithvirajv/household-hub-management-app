@@ -61,7 +61,15 @@ it written out from your own data first, for example "Move all 2 holdings
 net worth stays the same." Nothing changes until you press **Confirm**, and
 **Undo** puts everything back as it was while the page stays open.
 
-It can: mark an account closed, rename an account, move all the holdings of one
+It also **answers questions** about your own numbers - "summarize my wealth
+and holdings", "what is my net worth?", "where am I over budget this month?".
+The app sends it a compact read of your tables (net worth, assets by type,
+each investment account and its holdings, liabilities, debt plans, account
+balances, this month's budget); it may only answer from that, quotes amounts
+exactly as the app has them, and says so when something is not there. A
+question never changes anything.
+
+For changes it can: mark an account closed, rename an account, move all the holdings of one
 investment account into another (and so retire the first), rename an
 investment account, and always file a payee under a Subcategory. It never
 deletes anything and never touches individual transactions. If a name could
