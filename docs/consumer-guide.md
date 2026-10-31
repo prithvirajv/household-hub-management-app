@@ -108,6 +108,8 @@ button on every screen. People with view-only access don't see it.
    and its own sinking-fund set-aside math.
 5. As you assign transactions to a line (see Transactions below), **Spent**
    and **Remaining** update automatically — nothing to recalculate by hand.
+   The month's overall **Spent** (Home, Reports, Ask FamilyLoop) counts what went out on your budget lines plus expenses not yet filed under a line;
+   money coming in, such as a card payment or deposit, never reduces it.
 6. Starting a new month? Use **Use previous budget** at the top of
    Categories and subcategories to copy last month's categories and amounts
    instead of rebuilding from scratch.

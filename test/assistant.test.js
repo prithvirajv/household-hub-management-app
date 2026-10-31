@@ -169,3 +169,13 @@ test("spent this month counts spending on budget lines plus uncategorized expens
   const result = monthSpendingSummary(rows, categories, "2026-10");
   assert.deepEqual([result.onLines, result.uncategorizedOut, result.total, result.moneyInNotCounted], [240, 15, 255, 4300], "a refund on a line nets against it; a card payment or deposit with no line is reported but not counted; splits count by line; other months are ignored");
 });
+
+test("Budget and Reports use the same spent definition as Home, and the Bank stream icon buttons explain themselves on hover", () => {
+  const source = require("node:fs").readFileSync(require("node:path").join(__dirname, "..", "app.js"), "utf8");
+  assert.match(source, /function spentTotal\(\) \{\s*return monthSpendingSummary\(state\.transactions, state\.budget\.categories, state\.budget\.month\)\.total;/);
+  ["data-accept-import", "data-assign-iou", "data-move-to-transfer", "data-dismiss-import"].forEach((attribute) => {
+    const button = source.split("\n").find((line) => line.includes(`${attribute}="\${transaction.id}"`) && line.includes("<button"));
+    assert.ok(button && /title="/.test(button), `${attribute} button has a hover title`);
+  });
+  assert.ok(source.includes('"button[aria-label]:not([title])"'), "labelled buttons without a title get one on hover");
+});

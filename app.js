@@ -921,10 +921,9 @@ function spentByLine(lineId) {
   return spentByLineInMonth(state.transactions, lineId, state.budget.month);
 }
 
+// Same definition as Home and Ask FamilyLoop (see monthSpendingSummary): money in with no budget line never reduces what was spent.
 function spentTotal() {
-  return state.transactions
-    .filter((transaction) => transaction.date?.slice(0, 7) === state.budget.month)
-    .reduce((sum, transaction) => sum + Number(transaction.amount || 0), 0);
+  return monthSpendingSummary(state.transactions, state.budget.categories, state.budget.month).total;
 }
 
 function lowerActivityMargin() {
@@ -3033,7 +3032,7 @@ function ledgerEntryRow(transaction, index, transferMatch) {
         : `<select class="income-recurrence-select" aria-label="Subcategory" data-ledger-entry-line="${index}">${lineOptions}</select>`}
       ${state.accounts.length ? `<select class="income-recurrence-select" aria-label="Account" data-ledger-entry-account="${index}"><option value="">Not linked</option>${accountOptions(transaction.accountId || "")}</select>` : ""}
       <button class="icon-button ${isSplit ? "has-transfer-match" : ""}" data-split-transaction-edit="${index}" type="button" aria-label="Split ${escapeHtml(transaction.payee)} across categories" title="Split across categories">✂</button>
-      <button class="icon-button" data-assign-iou-ledger="${index}" type="button" aria-label="Split with a friend ${escapeHtml(transaction.payee)}">👥</button>
+      <button class="icon-button" data-assign-iou-ledger="${index}" type="button" aria-label="Split with a friend ${escapeHtml(transaction.payee)}" title="Split with a friend (they owe you)">👥</button>
       <button class="icon-button ${transferMatch ? "has-transfer-match" : ""}" data-move-to-transfer-ledger="${index}" type="button" aria-label="Move ${escapeHtml(transaction.payee)} to Transfers" title="${transferMatch ? `Matches ${escapeHtml(accountName(transferMatch.accountId))}'s ${exactMoney.format(Math.abs(transferMatch.amount))} on ${formatShortDate(transferMatch.date)}` : "Move to Transfers (account-to-account movement)"}">⇄</button>
       <button class="icon-button danger-button" data-delete-transaction="${index}" type="button" aria-label="Delete ${escapeHtml(transaction.payee)}">×</button>
       ${!transaction.lineId && !isSplit ? `<span class="pill pill-warning ledger-needs-category" title="No subcategory yet - this counts toward your balance but not toward any budget line. Choose one on this row.">Needs a category</span>` : ""}
@@ -3421,10 +3420,10 @@ function renderTransactions() {
                 ${state.accounts.length ? `<label class="row-field row-select"><small>Account</small><select data-bank-stream-account="${transaction.id}"><option value="">Not linked</option>${accountOptions(transaction.accountId || "")}</select></label>` : ""}
                 ${state.accounts.length && !transaction.accountId ? `<button class="icon-button" data-ai-suggest-account="${transaction.id}" type="button" aria-label="Suggest an account with AI for ${escapeHtml(transaction.payee)}" title="No history match for this payee - ask AI to suggest an account">✨</button>` : ""}
                 <div class="row-actions">
-                  <button class="icon-button" data-accept-import="${transaction.id}" type="button" aria-label="Accept ${escapeHtml(transaction.payee)}">✓</button>
-                  <button class="icon-button" data-assign-iou="${transaction.id}" type="button" aria-label="Split with a friend ${escapeHtml(transaction.payee)}">👥</button>
-                  <button class="icon-button ${transaction.transferMatch ? "has-transfer-match" : ""}" data-move-to-transfer="${transaction.id}" type="button" aria-label="Move ${escapeHtml(transaction.payee)} to Transfers">⇄</button>
-                  <button class="icon-button danger-button" data-dismiss-import="${transaction.id}" type="button" aria-label="Dismiss ${escapeHtml(transaction.payee)}">×</button>
+                  <button class="icon-button" data-accept-import="${transaction.id}" type="button" aria-label="Accept ${escapeHtml(transaction.payee)}" title="Add to the ledger">✓</button>
+                  <button class="icon-button" data-assign-iou="${transaction.id}" type="button" aria-label="Split with a friend ${escapeHtml(transaction.payee)}" title="Split with a friend (they owe you)">👥</button>
+                  <button class="icon-button ${transaction.transferMatch ? "has-transfer-match" : ""}" data-move-to-transfer="${transaction.id}" type="button" aria-label="Move ${escapeHtml(transaction.payee)} to Transfers" title="Move to Transfers (money moved between your own accounts)">⇄</button>
+                  <button class="icon-button danger-button" data-dismiss-import="${transaction.id}" type="button" aria-label="Dismiss ${escapeHtml(transaction.payee)}" title="Skip - do not add to the ledger">×</button>
                 </div>
               </div>
               ${tagChipsHtml(transaction.tags, "data-remove-bank-stream-tag", "data-add-bank-stream-tag", transaction.id)}
@@ -14958,6 +14957,12 @@ function dismissImportTransaction(button) {
   autosaveState();
   render();
 }
+
+// Icon-only buttons carry their meaning in aria-label; mirror it into a hover tooltip wherever a button was built without a title.
+document.addEventListener("mouseover", (event) => {
+  const button = event.target.closest?.("button[aria-label]:not([title])");
+  if (button) button.title = button.getAttribute("aria-label");
+});
 
 // The page-load guard in index.html holds the auth forms until this point, so a submit can never fall back to a plain (URL) form submit.
 window.__authReady = true;
