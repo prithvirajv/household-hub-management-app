@@ -235,9 +235,12 @@ button on every screen. People with view-only access don't see it.
   within two days) into one transfer and clears both rows, and **Skip N
   duplicates…** drops waiting rows that are certainly already recorded (same bank
   id, or the same amount, date and a shared payee word as an entry you typed).
-  Both show the list and total first and do nothing until you confirm; neither
-  touches the Ledger, and a row whose other half is already in the Ledger stays
-  for a one-by-one look. (Web only for now.)
+  Both show the list and total first and do nothing until you confirm, and
+  neither touches the Ledger. When the other half of a transfer is already in the
+  Ledger (a payment you entered by hand, say), **Move N to Transfers…** handles
+  it: it only appears when the match is the one and only candidate, and after
+  you confirm it records the transfer, clears the waiting row and removes that
+  Ledger entry, since the transfer replaces both. Web and mobile.
 - **FamilyLoop learns from your category changes.** When you move a
   transaction to a different Subcategory (in the Ledger, or by picking one on
   a Bank stream row), that becomes the rule for the payee: the next one - from

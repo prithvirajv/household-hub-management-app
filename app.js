@@ -3151,6 +3151,12 @@ async function learnFromCategoryChange(ledgerIndex) {
   render();
 }
 
+// The waiting rows left once the two-waiting-rows pairs have been taken out, so one row is never offered in two bulk moves.
+function remainingDraftsAfterPairs(pairs) {
+  const used = new Set(pairs.flatMap((pair) => [pair.out.id, pair.in.id]));
+  return (state.transactionInboxDrafts || []).filter((draft) => !used.has(draft.id));
+}
+
 function renderTransactions() {
   ensureAccountsData();
   ensureRecurringExpensesPosted();
@@ -3201,6 +3207,7 @@ function renderTransactions() {
   // rows that are certainly a transaction already recorded. Counted over every month, like the other bulk tools below.
   const bulkTransferPairs = planBulkTransfers(state.transactionInboxDrafts || [], state.accounts);
   const bulkDuplicateSkips = planBulkDuplicateSkips(state.transactionInboxDrafts || [], state.transactions);
+  const bulkLedgerPairs = planBulkLedgerTransfers(remainingDraftsAfterPairs(bulkTransferPairs), state.transactions, state.accounts);
   // A payee-history bug (fixed) briefly let a shared generic prefix - e.g.
   // "Zelle payment to X" and "Zelle payment from Y" - cross-contaminate
   // subcategory suggestions across a whole statement import. historyMatch
@@ -3365,9 +3372,11 @@ function renderTransactions() {
             <small>Also pending in:</small>
             ${otherMonthEntries.map(([month, count]) => `<button type="button" class="pill-button" data-switch-budget-month="${month}">${formatMonth(month)} (${count})</button>`).join("")}
           </div>` : ""}
-          ${bulkTransferPairs.length || bulkDuplicateSkips.length ? `<div class="bank-stream-bulk-account">
+          ${bulkTransferPairs.length || bulkLedgerPairs.length || bulkDuplicateSkips.length ? `<div class="bank-stream-bulk-account">
             ${bulkTransferPairs.length ? `<div><small>${bulkTransferPairs.length} pair${bulkTransferPairs.length === 1 ? "" : "s"} of waiting rows move money between your own accounts (every month).</small>
               <button type="button" id="bankStreamBulkTransfers" class="ghost">Move ${bulkTransferPairs.length} pair${bulkTransferPairs.length === 1 ? "" : "s"} to Transfers…</button></div>` : ""}
+            ${bulkLedgerPairs.length ? `<div><small>${bulkLedgerPairs.length} waiting row${bulkLedgerPairs.length === 1 ? " is" : "s are"} the other half of a transfer already in your Ledger (every month).</small>
+              <button type="button" id="bankStreamBulkLedgerTransfers" class="ghost">Move ${bulkLedgerPairs.length} to Transfers…</button></div>` : ""}
             ${bulkDuplicateSkips.length ? `<div><small>${bulkDuplicateSkips.length} waiting row${bulkDuplicateSkips.length === 1 ? " is" : "s are"} already recorded (every month).</small>
               <button type="button" id="bankStreamBulkDuplicates" class="ghost">Skip ${bulkDuplicateSkips.length} duplicate${bulkDuplicateSkips.length === 1 ? "" : "s"}…</button></div>` : ""}
           </div>` : ""}
@@ -10970,6 +10979,35 @@ function bindViewEvents() {
     state.transactionInboxDrafts = (state.transactionInboxDrafts || []).filter((draft) => !gone.has(draft.id));
     state.household.activity.unshift(`Moved ${current.length} waiting bank row pair${current.length === 1 ? "" : "s"} to Transfers`);
     transactionValidationFeedback = `Moved ${current.length} pair${current.length === 1 ? "" : "s"} to Transfers.`;
+    autosaveState();
+    render();
+  });
+
+  $("#bankStreamBulkLedgerTransfers")?.addEventListener("click", async () => {
+    const plan = () => planBulkLedgerTransfers(remainingDraftsAfterPairs(planBulkTransfers(state.transactionInboxDrafts || [], state.accounts)), state.transactions, state.accounts);
+    const pairs = plan();
+    if (!pairs.length) return;
+    const total = pairs.reduce((sum, pair) => sum + Math.abs(Number(pair.out.amount)), 0);
+    const lines = pairs.slice(0, 8).map((pair) => `${formatShortDate(pair.out.date)}  ${exactMoney.format(Math.abs(Number(pair.out.amount)))}  ${accountName(pair.out.accountId)} → ${accountName(pair.in.accountId)}  (${pair.ledgerRow.payee})`);
+    const more = pairs.length > lines.length ? `\n…and ${pairs.length - lines.length} more` : "";
+    const confirmed = await showConfirm(`Move ${pairs.length} (${exactMoney.format(total)} in all) to Transfers? Each is one transfer from the account the money left to the account it landed in. The waiting row is cleared and the matching Ledger entry is removed, because the transfer replaces both.\n\n${lines.join("\n")}${more}`);
+    if (!confirmed) return;
+    // Plan again after the dialog: rows may have changed (a sync or another tab) while it was open.
+    const current = plan();
+    if (!current.length) return;
+    state.transfers ||= [];
+    state.transactionInboxDone ||= [];
+    allowLedgerRemoval();
+    const goneLedger = new Set(current.map((pair) => pair.ledgerRow));
+    const goneDrafts = new Set(current.map((pair) => pair.draft.id));
+    current.forEach((pair) => {
+      state.transfers.unshift({ id: uniqueId("transfer"), date: pair.out.date, fromAccountId: pair.out.accountId, toAccountId: pair.in.accountId, amount: Math.abs(Number(pair.out.amount)), memo: (pair.out.payee || "").trim() });
+      if (!state.transactionInboxDone.includes(pair.draft.id)) state.transactionInboxDone.push(pair.draft.id);
+    });
+    for (let index = state.transactions.length - 1; index >= 0; index -= 1) if (goneLedger.has(state.transactions[index])) state.transactions.splice(index, 1);
+    state.transactionInboxDrafts = (state.transactionInboxDrafts || []).filter((draft) => !goneDrafts.has(draft.id));
+    state.household.activity.unshift(`Moved ${current.length} transfer${current.length === 1 ? "" : "s"} half-waiting in Bank stream to Transfers`);
+    transactionValidationFeedback = `Moved ${current.length} to Transfers.`;
     autosaveState();
     render();
   });

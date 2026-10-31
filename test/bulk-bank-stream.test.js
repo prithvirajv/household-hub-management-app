@@ -1,6 +1,6 @@
 const assert = require("node:assert/strict");
 const test = require("node:test");
-const { planBulkTransfers, planBulkDuplicateSkips } = require("../lib/shared-logic");
+const { planBulkTransfers, planBulkLedgerTransfers, planBulkDuplicateSkips } = require("../lib/shared-logic");
 
 const draft = (id, payee, amount, date, accountId, extra = {}) => ({ id, payee, amount, date, accountId, ...extra });
 
@@ -52,4 +52,30 @@ test("person-to-person payments, direct deposits and card-to-card matches are ne
   assert.deepEqual(planBulkTransfers([draft("e", "SAMPLE PAYROLL DIRECT DEP", -4800, "2026-08-03", "chk"), draft("f", "SAMPLE DIRECT DEPOSIT", 4800, "2026-08-03", "card1")], accounts), []);
   assert.deepEqual(planBulkTransfers([draft("g", "SAMPLE SHOP A", 7.25, "2026-09-03", "card1"), draft("h", "SAMPLE SHOP B", -7.25, "2026-09-03", "card2")], accounts), []);
   assert.equal(planBulkTransfers([draft("i", "CARD AUTOPAY", 100, "2026-09-03", "chk"), draft("j", "AUTOPAY THANK YOU", -100, "2026-09-03", "card1")], accounts).length, 1);
+});
+
+test("a waiting row whose other half is already in the Ledger is offered when the match is unambiguous, with the money direction following the sign", () => {
+  const accounts = [{ id: "card", type: "credit_card" }, { id: "checking", type: "checking" }];
+  const ledger = [{ payee: "ELECTRONIC WITHDRAWAL", amount: 100, date: "2026-09-26", accountId: "checking" }];
+  const pairs = planBulkLedgerTransfers([draft("a", "AUTO PAYMENT - THANKS", -100, "2026-09-24", "card")], ledger, accounts);
+  assert.equal(pairs.length, 1);
+  assert.deepEqual([pairs[0].out.accountId, pairs[0].in.accountId, pairs[0].ledgerRow, pairs[0].draft.id], ["checking", "card", ledger[0], "a"]);
+  const outgoing = planBulkLedgerTransfers([draft("b", "TRANSFER OUT", 50, "2026-09-24", "checking")], [{ payee: "TRANSFER IN", amount: -50, date: "2026-09-24", accountId: "savings" }], accounts);
+  assert.deepEqual([outgoing[0].out.accountId, outgoing[0].in.accountId], ["checking", "savings"]);
+});
+
+test("ledger transfers are left alone when ambiguous, split, excluded, same account, card-to-card, pending or too far apart", () => {
+  const accounts = [{ id: "cardA", type: "credit_card" }, { id: "cardB", type: "credit_card" }, { id: "checking", type: "checking" }];
+  const row = (extra = {}) => ({ payee: "ELECTRONIC WITHDRAWAL", amount: 100, date: "2026-09-26", accountId: "checking", ...extra });
+  const plan = (d, ledger) => planBulkLedgerTransfers([d], ledger, accounts).length;
+  const waiting = draft("a", "AUTO PAYMENT", -100, "2026-09-25", "cardA");
+  assert.equal(plan(waiting, [row()]), 1);
+  assert.equal(plan(waiting, [row(), row({ date: "2026-09-25" })]), 0, "two possible ledger partners");
+  assert.equal(planBulkLedgerTransfers([waiting, draft("b", "AUTO PAYMENT", -100, "2026-09-26", "cardB")], [row()], accounts).length, 0, "two waiting rows for one ledger entry");
+  assert.equal(plan(waiting, [row({ splits: [{ lineId: "x", amount: 100 }] })]), 0, "split ledger entry");
+  assert.equal(plan(waiting, [row({ payee: "ZELLE TO SAM" })]), 0, "person-to-person payee");
+  assert.equal(plan(waiting, [row({ accountId: "cardA" })]), 0, "same account");
+  assert.equal(plan(waiting, [row({ accountId: "cardB" })]), 0, "card to card");
+  assert.equal(plan({ ...waiting, isPending: true }, [row()]), 0, "pending row");
+  assert.equal(plan(waiting, [row({ date: "2026-10-05" })]), 0, "too far apart");
 });
