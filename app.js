@@ -6403,6 +6403,33 @@ function wealthAccountsHtml() {
         `;
 }
 
+// Everything in Net worth that is not a bank account sits under the same collapsible banner (name, count, total) the accounts use: investment and
+// retirement holdings groups, other assets, and loans/liabilities. A holding or liability that is mirrored by a linked account stays hidden here
+// (the account row shows it). Each row inside keeps its own drag-to-reorder, edit and remove.
+function wealthItemGroupsHtml() {
+  const assets = state.goals.netWorth.assets;
+  const holdingGroups = groupStockHoldings(assets);
+  const groupTotal = (group) => group.items.reduce((sum, item) => sum + assetValue(item), 0);
+  const sections = [
+    { key: "nw-investments", label: "Investments", noun: "account", rows: holdingGroups.filter((group) => group.items[0]?.assetClass !== "retirement"), total: (rows) => rows.reduce((sum, group) => sum + groupTotal(group), 0), html: (group) => netWorthStockGroupCard(group) },
+    { key: "nw-retirement", label: "Retirement", noun: "account", rows: holdingGroups.filter((group) => group.items[0]?.assetClass === "retirement"), total: (rows) => rows.reduce((sum, group) => sum + groupTotal(group), 0), html: (group) => netWorthStockGroupCard(group) },
+    { key: "nw-other-assets", label: "Other assets", noun: "item", rows: assets.map((asset, index) => ({ asset, index })).filter(({ asset }) => !isHoldingAssetClass(asset.assetClass) && !isAccountLinked("asset", asset.id)), total: (rows) => rows.reduce((sum, { asset }) => sum + assetValue(asset), 0), html: ({ asset, index }) => netWorthItemRow(asset, "asset", index) },
+    { key: "nw-liabilities", label: "Loans and other liabilities", noun: "item", liability: true, rows: state.goals.netWorth.liabilities.map((item, index) => ({ item, index })).filter(({ item }) => !isAccountLinked("liability", item.id)), total: (rows) => rows.reduce((sum, { item }) => sum + Number(item.value || 0), 0), html: ({ item, index }) => netWorthItemRow(item, "liability", index) }
+  ].filter((section) => section.rows.length);
+  if (!sections.length) return "";
+  return `<div class="net-worth-items"><div class="net-worth-subhead">Investments, property and loans</div>${sections.map((section) => {
+    const total = section.total(section.rows);
+    return `<details class="account-type-group" data-account-group="${section.key}" ${wealthCollapsedGroups.has(section.key) ? "" : "open"}>
+      <summary>
+        <span>${section.label}</span>
+        <small class="muted">${section.rows.length} ${section.noun}${section.rows.length === 1 ? "" : "s"}</small>
+        <b class="${section.liability && total > 0 ? "danger" : ""}">${wealthMoney(total)}</b>
+      </summary>
+      ${section.rows.map((row) => section.html(row)).join("")}
+    </details>`;
+  }).join("")}</div>`;
+}
+
 // Moving money between two accounts (for example paying a card from checking), and its history; shown inside the Net worth card under the accounts.
 function wealthTransfersHtml() {
   return `
@@ -6483,7 +6510,7 @@ function renderWealth() {
           </article>`).join("") : `<div class="onboarding-empty compact-onboarding"><div class="empty-symbol" aria-hidden="true">↓</div><h3>Add a debt when you are ready</h3><p>Track its balance, rate, payment, and the asset it secures.</p></div>`}
         </section>
       </div>
-      <section class="card wealth-holdings"><div class="section-head"><div><span class="card-label">Net worth</span><h3>Assets, investments and liabilities</h3></div><div class="wealth-currency-row"><select id="wealthCurrencySelect" aria-label="Display currency">${[...new Set([state.household.currency || "USD", "USD", "EUR", "GBP", "INR"])].map((code) => `<option value="${code}" ${wealthDisplayCurrency() === code ? "selected" : ""}>${code}</option>`).join("")}</select><button id="addAccountButton" type="button">+ Add account</button><button id="addNetWorthItemButton" type="button">+ Add holding</button></div></div><div class="net-worth-strip"><strong data-net-worth-total>${wealthMoney(netWorth().total)}</strong><span>Assets <b data-net-worth-assets>${wealthMoney(netWorth().assets)}</b> Liabilities <b data-net-worth-liabilities>${wealthMoney(netWorth().liabilities)}</b></span></div>${wealthDisplayCurrency() !== (state.household.currency || "USD") ? `<p class="muted wealth-currency-note">Converted from ${state.household.currency || "USD"} using real exchange rates${wealthFxRates ? "" : " — loading…"}. Individual accounts and holdings below still show ${state.household.currency || "USD"}.</p>` : ""}<div class="net-worth-accounts"><div class="net-worth-subhead">Accounts</div>${wealthAccountsHtml()}</div><div class="net-worth-items">${groupStockHoldings(state.goals.netWorth.assets).map((group) => netWorthStockGroupCard(group)).join("")}${state.goals.netWorth.assets.map((asset, index) => ({ asset, index })).filter(({ asset }) => !isHoldingAssetClass(asset.assetClass) && !isAccountLinked("asset", asset.id)).map(({ asset, index }) => netWorthItemRow(asset, "asset", index)).join("")}${state.goals.netWorth.liabilities.map((item, index) => ({ item, index })).filter(({ item }) => !isAccountLinked("liability", item.id)).map(({ item, index }) => netWorthItemRow(item, "liability", index)).join("")}</div>${state.goals.netWorth.assets.length || state.goals.netWorth.liabilities.length || state.accounts.length ? "" : `<div class="empty-inline">No assets, investments or liabilities yet</div>`}<div class="net-worth-transfers"><div class="net-worth-subhead">Transfers</div>${wealthTransfersHtml()}</div></section>
+      <section class="card wealth-holdings"><div class="section-head"><div><span class="card-label">Net worth</span><h3>Assets, investments and liabilities</h3></div><div class="wealth-currency-row"><select id="wealthCurrencySelect" aria-label="Display currency">${[...new Set([state.household.currency || "USD", "USD", "EUR", "GBP", "INR"])].map((code) => `<option value="${code}" ${wealthDisplayCurrency() === code ? "selected" : ""}>${code}</option>`).join("")}</select><button id="addAccountButton" type="button">+ Add account</button><button id="addNetWorthItemButton" type="button">+ Add holding</button></div></div><div class="net-worth-strip"><strong data-net-worth-total>${wealthMoney(netWorth().total)}</strong><span>Assets <b data-net-worth-assets>${wealthMoney(netWorth().assets)}</b> Liabilities <b data-net-worth-liabilities>${wealthMoney(netWorth().liabilities)}</b></span></div>${wealthDisplayCurrency() !== (state.household.currency || "USD") ? `<p class="muted wealth-currency-note">Converted from ${state.household.currency || "USD"} using real exchange rates${wealthFxRates ? "" : " — loading…"}. Individual accounts and holdings below still show ${state.household.currency || "USD"}.</p>` : ""}<div class="net-worth-accounts"><div class="net-worth-subhead">Accounts</div>${wealthAccountsHtml()}</div>${wealthItemGroupsHtml()}${state.goals.netWorth.assets.length || state.goals.netWorth.liabilities.length || state.accounts.length ? "" : `<div class="empty-inline">No assets, investments or liabilities yet</div>`}<div class="net-worth-transfers"><div class="net-worth-subhead">Transfers</div>${wealthTransfersHtml()}</div></section>
     </section>`;
 }
 

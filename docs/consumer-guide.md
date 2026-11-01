@@ -539,6 +539,7 @@ the Accounts part - and counts toward the net worth total from there.
   reorder its list — useful for putting the ones you check most often at
   the top. A grouped holdings card drags as one unit, moving every holding
   inside it together.
+- Under **Net worth**, everything sits under the same collapsible banners (name, how many, total): your accounts by type (Checking, Savings, Credit cards...), then **Investments**, **Retirement**, **Other assets** and **Loans and other liabilities**. A banner only appears when it has something in it, and collapsing one is remembered while you use the page.
 - Under **Net worth**, a brokerage or retirement account (401(k), IRA) with
   several stocks or mutual funds shows as one card, not one row per symbol:
   select **+ Add holding**, then switch its Asset class to **Stock** or

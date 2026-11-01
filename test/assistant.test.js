@@ -179,3 +179,10 @@ test("Budget and Reports use the same spent definition as Home, and the Bank str
   });
   assert.ok(source.includes('"button[aria-label]:not([title])"'), "labelled buttons without a title get one on hover");
 });
+
+test("Net worth puts investments, retirement, other assets and liabilities under the same collapsible banners as the accounts", () => {
+  const source = require("node:fs").readFileSync(require("node:path").join(__dirname, "..", "app.js"), "utf8");
+  assert.ok(source.includes("${wealthItemGroupsHtml()}"), "the Net worth card renders the grouped sections");
+  ["nw-investments", "nw-retirement", "nw-other-assets", "nw-liabilities"].forEach((key) => assert.ok(source.includes(`key: "${key}"`), `${key} section exists`));
+  assert.ok(source.includes('class="account-type-group" data-account-group="${section.key}"'), "same banner markup as the account groups, so the collapse state is remembered");
+});
