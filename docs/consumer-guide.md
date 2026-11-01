@@ -241,6 +241,14 @@ button on every screen. People with view-only access don't see it.
   it: it only appears when the match is the one and only candidate, and after
   you confirm it records the transfer, clears the waiting row and removes that
   Ledger entry, since the transfer replaces both. Web and mobile.
+- **The same payment is never recorded twice.** A transfer with the same date,
+  accounts and amount as one already in Transfers asks first ("Already in
+  Transfers") instead of being added again; bulk moves leave such pairs waiting
+  and say so; a statement file leaves out rows that are already recorded (same
+  bank id, or half of a transfer already in Transfers) and tells you how many;
+  and on the web a Ledger entry identical to one already there asks first. If
+  duplicates already got in, Transfers shows **Remove N extras…**, which lists
+  them and keeps one of each after you confirm. Web and mobile.
 - **FamilyLoop learns from your category changes.** When you move a
   transaction to a different Subcategory (in the Ledger, or by picking one on
   a Bank stream row), that becomes the rule for the payee: the next one - from

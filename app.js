@@ -3157,6 +3157,15 @@ function remainingDraftsAfterPairs(pairs) {
   return (state.transactionInboxDrafts || []).filter((draft) => !used.has(draft.id));
 }
 
+// The bulk "move to Transfers" plans. Pairs whose transfer is already recorded are held back (counted in `held`) rather than recorded again.
+function bulkTransferPlans() {
+  const drafts = state.transactionInboxDrafts || [];
+  const transfers = state.transfers || [];
+  const pairs = planBulkTransfers(drafts, state.accounts, transfers);
+  const ledgerPairs = planBulkLedgerTransfers(remainingDraftsAfterPairs(pairs), state.transactions, state.accounts, transfers);
+  return { pairs, ledgerPairs, held: planBulkTransfers(drafts, state.accounts).length - pairs.length };
+}
+
 function renderTransactions() {
   ensureAccountsData();
   ensureRecurringExpensesPosted();
@@ -3205,9 +3214,8 @@ function renderTransactions() {
   const unlinkedDraftCount = allImported.filter((transaction) => !transaction.accountId).length;
   // Rows waiting on a yes/no that can be settled in one go: both halves of a transfer between two of the household's own accounts, and
   // rows that are certainly a transaction already recorded. Counted over every month, like the other bulk tools below.
-  const bulkTransferPairs = planBulkTransfers(state.transactionInboxDrafts || [], state.accounts);
+  const { pairs: bulkTransferPairs, ledgerPairs: bulkLedgerPairs, held: heldTransferPairs } = bulkTransferPlans();
   const bulkDuplicateSkips = planBulkDuplicateSkips(state.transactionInboxDrafts || [], state.transactions);
-  const bulkLedgerPairs = planBulkLedgerTransfers(remainingDraftsAfterPairs(bulkTransferPairs), state.transactions, state.accounts);
   // A payee-history bug (fixed) briefly let a shared generic prefix - e.g.
   // "Zelle payment to X" and "Zelle payment from Y" - cross-contaminate
   // subcategory suggestions across a whole statement import. historyMatch
@@ -3372,11 +3380,12 @@ function renderTransactions() {
             <small>Also pending in:</small>
             ${otherMonthEntries.map(([month, count]) => `<button type="button" class="pill-button" data-switch-budget-month="${month}">${formatMonth(month)} (${count})</button>`).join("")}
           </div>` : ""}
-          ${bulkTransferPairs.length || bulkLedgerPairs.length || bulkDuplicateSkips.length ? `<div class="bank-stream-bulk-account">
+          ${bulkTransferPairs.length || bulkLedgerPairs.length || bulkDuplicateSkips.length || heldTransferPairs ? `<div class="bank-stream-bulk-account">
             ${bulkTransferPairs.length ? `<div><small>${bulkTransferPairs.length} pair${bulkTransferPairs.length === 1 ? "" : "s"} of waiting rows move money between your own accounts (every month).</small>
               <button type="button" id="bankStreamBulkTransfers" class="ghost">Move ${bulkTransferPairs.length} pair${bulkTransferPairs.length === 1 ? "" : "s"} to Transfers…</button></div>` : ""}
             ${bulkLedgerPairs.length ? `<div><small>${bulkLedgerPairs.length} waiting row${bulkLedgerPairs.length === 1 ? " is" : "s are"} the other half of a transfer already in your Ledger (every month).</small>
               <button type="button" id="bankStreamBulkLedgerTransfers" class="ghost">Move ${bulkLedgerPairs.length} to Transfers…</button></div>` : ""}
+            ${heldTransferPairs ? `<div><small>${heldTransferPairs} more pair${heldTransferPairs === 1 ? " matches a transfer" : "s match transfers"} already in Transfers (same date, accounts and amount), so ${heldTransferPairs === 1 ? "it was" : "they were"} left waiting rather than recorded twice. If ${heldTransferPairs === 1 ? "it is" : "they are"} the same payment, skip the rows with ×.</small></div>` : ""}
             ${bulkDuplicateSkips.length ? `<div><small>${bulkDuplicateSkips.length} waiting row${bulkDuplicateSkips.length === 1 ? " is" : "s are"} already recorded (every month).</small>
               <button type="button" id="bankStreamBulkDuplicates" class="ghost">Skip ${bulkDuplicateSkips.length} duplicate${bulkDuplicateSkips.length === 1 ? "" : "s"}…</button></div>` : ""}
           </div>` : ""}
@@ -6441,6 +6450,10 @@ function wealthTransfersHtml() {
             <label>Memo<input name="memo" placeholder="Credit card payment"></label>
             <button type="submit">Transfer</button>
           </form>` : `<div class="empty-inline">Add at least two accounts to record a transfer, like paying a credit card from checking.</div>`}
+          ${(() => {
+            const extras = planDuplicateTransferRemoval(state.transfers);
+            return extras.length ? `<div class="empty-inline"><span>${extras.length} transfer${extras.length === 1 ? " looks" : "s look"} recorded twice (same date, accounts and amount).</span> <button type="button" id="removeDuplicateTransfers" class="ghost">Remove ${extras.length} extra${extras.length === 1 ? "" : "s"}…</button></div>` : "";
+          })()}
           ${state.transfers.length ? `<details class="transfers-overflow-details" data-transfers-toggle ${wealthTransfersCollapsed ? "" : "open"}>
             <summary>Transfer history (${state.transfers.length})</summary>
             ${state.transfers
@@ -10206,7 +10219,7 @@ function bindViewEvents() {
     render();
   });
 
-  $("#transactionForm")?.addEventListener("submit", (event) => {
+  $("#transactionForm")?.addEventListener("submit", async (event) => {
     event.preventDefault();
     const data = Object.fromEntries(new FormData(event.currentTarget));
     const date = data.date || dateKey(new Date());
@@ -10217,6 +10230,12 @@ function bindViewEvents() {
       return;
     }
     transactionValidationFeedback = "";
+    // The same payee, amount, date and account already in the Ledger is almost always a double entry (a second click, or a payment that
+    // already arrived from the bank), so it needs a yes.
+    if (recurrence === "none" && state.transactions.some((row) => row.date === date && Number(row.amount) === Number(data.amount) && (row.accountId || "") === (data.accountId || "") && String(row.payee || "").trim().toLowerCase() === String(data.payee || "").trim().toLowerCase())) {
+      const again = await showConfirm(`${data.payee} for ${exactMoney.format(Number(data.amount))} on ${formatShortDate(date)} is already in your Ledger. Add it again only if you paid twice.`, { title: "Already recorded", confirmLabel: "Add again", danger: false });
+      if (!again) return;
+    }
     if (recurrence === "none") {
       state.transactions.unshift(makeTransaction({ date, payee: data.payee, lineId: data.lineId, amount: Number(data.amount), memo: "Manual entry", accountId: data.accountId || "", tags: parseTagsInput(data.tags) }));
     } else {
@@ -10541,6 +10560,12 @@ function bindViewEvents() {
     const matchedAccount = options.accountId ? state.accounts.find((account) => account.id === options.accountId) || null : matchAccountByHints([extraAccountHint, file.name], state.accounts);
     state.transactionInboxDrafts ||= [];
     const alreadyKnown = [...state.transactions, ...state.transactionInboxDrafts];
+    // Rows that are certainly already recorded are not brought in a second time: the same bank id as a row already here (or one imported
+    // before), or one half of a transfer already in Transfers (its row was cleared when the transfer was made, so nothing else would
+    // recognise it and it would be paired into a second transfer).
+    const knownBankIds = new Set([...(state.linkedImportedIds || []), ...alreadyKnown.map((item) => item.externalId)].filter(Boolean));
+    const alreadyRecordedCount = rows.filter((row) => (row.externalId && knownBankIds.has(row.externalId)) || repeatsRecordedTransfer(row, matchedAccount?.id, state.transfers)).length;
+    if (alreadyRecordedCount) rows = rows.filter((row) => !((row.externalId && knownBankIds.has(row.externalId)) || repeatsRecordedTransfer(row, matchedAccount?.id, state.transfers)));
     const duplicateCount = rows.filter((row) => isDuplicateTransaction(row, alreadyKnown)).length;
     const rowRefundMatchPool = [...alreadyKnown, ...rows];
     const newDraftIds = [];
@@ -10580,8 +10605,9 @@ function bindViewEvents() {
         accountHistoryMatch: !!(!matchedAccount && historyAccountId)
       });
     });
+    const alreadyRecordedNote = alreadyRecordedCount ? ` Left out ${alreadyRecordedCount} row${alreadyRecordedCount === 1 ? "" : "s"} already recorded (the same bank id, or part of a transfer in Transfers).` : "";
     const duplicateNote = duplicateCount ? ` ${duplicateCount} look${duplicateCount === 1 ? "s" : ""} like a duplicate of a transaction you already have — check before accepting.` : "";
-    bankImportFeedback = `Imported ${rows.length} transaction${rows.length === 1 ? "" : "s"} from ${file.name}${matchedAccount ? ` — linked to ${matchedAccount.name}` : " — no matching account found, pick one per row below"}.${duplicateNote}`;
+    bankImportFeedback = `Imported ${rows.length} transaction${rows.length === 1 ? "" : "s"} from ${file.name}${matchedAccount ? ` — linked to ${matchedAccount.name}` : " — no matching account found, pick one per row below"}.${alreadyRecordedNote}${duplicateNote}`;
     autosaveState();
     render();
     if (aiImportEnabled()) void runAiImportPass(newDraftIds, file.name, rows.length);
@@ -10987,7 +11013,7 @@ function bindViewEvents() {
   });
 
   $("#bankStreamBulkTransfers")?.addEventListener("click", async () => {
-    const pairs = planBulkTransfers(state.transactionInboxDrafts || [], state.accounts);
+    const pairs = bulkTransferPlans().pairs;
     if (!pairs.length) return;
     const total = pairs.reduce((sum, pair) => sum + Math.abs(Number(pair.out.amount)), 0);
     const lines = pairs.slice(0, 8).map((pair) => `${formatShortDate(pair.out.date)}  ${exactMoney.format(Math.abs(Number(pair.out.amount)))}  ${accountName(pair.out.accountId)} → ${accountName(pair.in.accountId)}`);
@@ -10995,7 +11021,7 @@ function bindViewEvents() {
     const confirmed = await showConfirm(`Move ${pairs.length} pair${pairs.length === 1 ? "" : "s"} (${exactMoney.format(total)} in all) to Transfers? Each pair becomes one transfer from the account the money left to the account it landed in, and both waiting rows are cleared. Nothing in the Ledger is touched.\n\n${lines.join("\n")}${more}`, { title: "Move to Transfers", confirmLabel: `Move ${pairs.length}`, danger: false });
     if (!confirmed) return;
     // Plan again after the dialog: rows may have changed (a sync or another tab) while it was open.
-    const current = planBulkTransfers(state.transactionInboxDrafts || [], state.accounts);
+    const current = bulkTransferPlans().pairs;
     const gone = new Set();
     state.transfers ||= [];
     state.transactionInboxDone ||= [];
@@ -11011,7 +11037,7 @@ function bindViewEvents() {
   });
 
   $("#bankStreamBulkLedgerTransfers")?.addEventListener("click", async () => {
-    const plan = () => planBulkLedgerTransfers(remainingDraftsAfterPairs(planBulkTransfers(state.transactionInboxDrafts || [], state.accounts)), state.transactions, state.accounts);
+    const plan = () => bulkTransferPlans().ledgerPairs;
     const pairs = plan();
     if (!pairs.length) return;
     const total = pairs.reduce((sum, pair) => sum + Math.abs(Number(pair.out.amount)), 0);
@@ -12685,19 +12711,39 @@ function bindViewEvents() {
   wireNetWorthDragReorder("data-drag-networth-asset", () => state.goals.netWorth.assets, (list) => { state.goals.netWorth.assets = list; }, moveNetWorthAssetBlock);
   wireNetWorthDragReorder("data-drag-networth-liability", () => state.goals.netWorth.liabilities, (list) => { state.goals.netWorth.liabilities = list; }, moveArrayItemById);
 
-  $("#transferForm")?.addEventListener("submit", (event) => {
+  $("#transferForm")?.addEventListener("submit", async (event) => {
     event.preventDefault();
     const data = Object.fromEntries(new FormData(event.currentTarget));
     const amount = Number(data.amount || 0);
     if (!data.fromAccountId || !data.toAccountId || data.fromAccountId === data.toAccountId || amount <= 0) return;
+    const date = data.date || dateKey(new Date());
+    if (findDuplicateTransfer(state.transfers, { date, fromAccountId: data.fromAccountId, toAccountId: data.toAccountId, amount })) {
+      const again = await showConfirm(`A transfer of ${exactMoney.format(amount)} from ${accountName(data.fromAccountId)} to ${accountName(data.toAccountId)} on ${formatShortDate(date)} is already in Transfers. Record a second one only if it was a separate payment.`, { title: "Already recorded", confirmLabel: "Record another", danger: false });
+      if (!again) return;
+    }
     state.transfers.unshift({
       id: uniqueId("transfer"),
-      date: data.date || dateKey(new Date()),
+      date,
       fromAccountId: data.fromAccountId,
       toAccountId: data.toAccountId,
       amount,
       memo: (data.memo || "").trim()
     });
+    autosaveState();
+    render();
+  });
+
+  $("#removeDuplicateTransfers")?.addEventListener("click", async () => {
+    const extras = planDuplicateTransferRemoval(state.transfers);
+    if (!extras.length) return;
+    const lines = extras.slice(0, 8).map((transfer) => `${formatShortDate(transfer.date)}  ${exactMoney.format(Number(transfer.amount))}  ${accountName(transfer.fromAccountId)} → ${accountName(transfer.toAccountId)}`);
+    const more = extras.length > lines.length ? `\n…and ${extras.length - lines.length} more` : "";
+    const confirmed = await showConfirm(`Remove ${extras.length} extra cop${extras.length === 1 ? "y" : "ies"}? One transfer of each stays. Keep both only if you really made the same payment twice.\n\n${lines.join("\n")}${more}`, { title: "Remove duplicate transfers", confirmLabel: `Remove ${extras.length}`, danger: false });
+    if (!confirmed) return;
+    const gone = new Set(planDuplicateTransferRemoval(state.transfers));
+    if (!gone.size) return;
+    state.transfers = state.transfers.filter((transfer) => !gone.has(transfer));
+    state.household.activity.unshift(`Removed ${gone.size} duplicate transfer${gone.size === 1 ? "" : "s"}`);
     autosaveState();
     render();
   });
@@ -16339,7 +16385,7 @@ function openMoveToTransferDialog(source) {
 $("#closeMoveToTransferDialogButton").addEventListener("click", () => $("#moveToTransferDialog").close());
 $("#cancelMoveToTransferButton").addEventListener("click", () => $("#moveToTransferDialog").close());
 
-$("#moveToTransferForm").addEventListener("submit", (event) => {
+$("#moveToTransferForm").addEventListener("submit", async (event) => {
   event.preventDefault();
   const source = pendingTransferMoveSource;
   const record = resolveTransferMoveSource(source);
@@ -16359,6 +16405,15 @@ $("#moveToTransferForm").addEventListener("submit", (event) => {
   const fromAccountId = movingOut ? record.accountId : counterpartAccountId;
   const toAccountId = movingOut ? counterpartAccountId : record.accountId;
   state.transfers ||= [];
+  // The same payment recorded twice would count the money twice in both accounts, so a transfer identical to one already there needs a yes.
+  if (findDuplicateTransfer(state.transfers, { date: record.date, fromAccountId, toAccountId, amount })) {
+    const again = await showConfirm(`A transfer of ${exactMoney.format(amount)} from ${accountName(fromAccountId)} to ${accountName(toAccountId)} on ${formatShortDate(record.date)} is already in Transfers. If this row is that same payment, cancel and skip it with × instead. Record a second transfer only if it was a separate payment.`, { title: "Already recorded", confirmLabel: "Record another", danger: false });
+    if (!again) return;
+    if (resolveTransferMoveSource(source) !== record) {
+      $("#moveToTransferMessage").textContent = "This row changed while you were deciding. Open it again.";
+      return;
+    }
+  }
   state.transfers.unshift({
     id: uniqueId("transfer"),
     date: record.date,
