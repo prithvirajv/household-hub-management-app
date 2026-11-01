@@ -241,14 +241,19 @@ button on every screen. People with view-only access don't see it.
   it: it only appears when the match is the one and only candidate, and after
   you confirm it records the transfer, clears the waiting row and removes that
   Ledger entry, since the transfer replaces both. Web and mobile.
-- **The same payment is never recorded twice.** A transfer with the same date,
-  accounts and amount as one already in Transfers asks first ("Already in
-  Transfers") instead of being added again; bulk moves leave such pairs waiting
-  and say so; a statement file leaves out rows that are already recorded (same
-  bank id, or half of a transfer already in Transfers) and tells you how many;
-  and on the web a Ledger entry identical to one already there asks first. If
-  duplicates already got in, Transfers shows **Remove N extras…**, which lists
-  them and keeps one of each after you confirm. Web and mobile.
+- **The same payment is never recorded twice - but two real payments are two.**
+  FamilyLoop counts bank rows: one row leaving DCU and one row arriving at
+  Target make one transfer; two of each (two real $500 payments on a day) make
+  two. A transfer made from rows remembers them, so it is never mistaken for a
+  copy. Where a copy could slip in, it asks or leaves it out: a transfer you type
+  that matches one already in Transfers asks first, and so does moving a row
+  that has no matching row on the other account; a statement file leaves out
+  rows already covered by a recorded transfer (one row per transfer and side,
+  so a second real payment still comes in) or with a bank id already seen, and
+  tells you how many; and on the web a Ledger entry identical to one already
+  there asks first. If copies already got in, Transfers shows **Remove N
+  extras…**, which lists them and keeps one of each after you confirm. Web and
+  mobile.
 - **FamilyLoop learns from your category changes.** When you move a
   transaction to a different Subcategory (in the Ledger, or by picking one on
   a Bank stream row), that becomes the rule for the payee: the next one - from
