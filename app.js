@@ -654,7 +654,9 @@ async function suggestSubcategoryWithAI(payee) {
     method: "POST",
     body: JSON.stringify({
       payee,
-      lines: allLines().map((line) => ({ id: line.id, label: `${line.category} - ${line.name}` }))
+      lines: allLines().map((line) => ({ id: line.id, label: `${line.category} - ${line.name}` })),
+      // What the household has already decided, so the answer follows it (every manual change, rule and bulk change is in there).
+      examples: learnedExamples(state, allLines().map((line) => line.id), [])
     })
   });
 }
@@ -668,7 +670,8 @@ async function suggestAccountWithAI(payee) {
     method: "POST",
     body: JSON.stringify({
       payee,
-      accounts: state.accounts.filter((account) => !account.closedAt).map((account) => ({ id: account.id, label: account.type ? `${account.name} (${account.type})` : account.name }))
+      accounts: state.accounts.filter((account) => !account.closedAt).map((account) => ({ id: account.id, label: account.type ? `${account.name} (${account.type})` : account.name })),
+      examples: learnedAccountExamples(state, state.accounts.filter((account) => !account.closedAt).map((account) => account.id))
     })
   });
 }
@@ -3118,6 +3121,20 @@ function categorizationRuleEntries() {
   return [...groups.values()].sort((a, b) => a.label.localeCompare(b.label));
 }
 
+// Makes `lineId` the payee's rule and moves the waiting Bank stream rows of that payee to it. Returns how many waiting rows changed.
+function learnPayeeLine(payee, lineId) {
+  setCategorizationRuleForPayee(payee, lineId);
+  let waiting = 0;
+  (state.transactionInboxDrafts || []).forEach((draft) => {
+    if (draft.lineId === lineId || categorizationRuleForPayee(draft.payee) !== lineId) return;
+    draft.lineId = lineId;
+    draft.lineSource = "rule";
+    draft.historyMatch = false;
+    waiting += 1;
+  });
+  return waiting;
+}
+
 // A category the household picks by hand is remembered: the payee's rule becomes that Subcategory (so the next one - from the bank, an
 // import or the overnight sync - lands there), waiting Bank stream rows of the payee follow it, and earlier ledger transactions of the same
 // payee filed elsewhere are offered to move too (listed first; nothing changes until confirmed).
@@ -3127,15 +3144,7 @@ async function learnFromCategoryChange(ledgerIndex) {
   const line = allLines().find((item) => item.id === transaction.lineId);
   const label = line ? `${line.category} - ${line.name}` : "this Subcategory";
   const had = categorizationRuleForPayee(transaction.payee);
-  setCategorizationRuleForPayee(transaction.payee, transaction.lineId);
-  let waiting = 0;
-  (state.transactionInboxDrafts || []).forEach((draft) => {
-    if (draft.lineId === transaction.lineId || categorizationRuleForPayee(draft.payee) !== transaction.lineId) return;
-    draft.lineId = transaction.lineId;
-    draft.lineSource = "rule";
-    draft.historyMatch = false;
-    waiting += 1;
-  });
+  const waiting = learnPayeeLine(transaction.payee, transaction.lineId);
   autosaveState();
   showToast(`Learned: "${transaction.payee}" goes to ${label} from now on${waiting ? ` (${waiting} waiting row${waiting === 1 ? "" : "s"} updated)` : ""}. You can change this under Category rules.`, { type: "info" });
   const others = planCategoryRelearn(state.transactions, ledgerIndex, transaction.lineId);
@@ -10558,7 +10567,10 @@ function bindViewEvents() {
     const coveredRows = new Set(rowsCoveredByTransfers(rows, matchedAccount?.id, state.transfers));
     const isRecorded = (row) => (row.externalId && knownBankIds.has(row.externalId)) || coveredRows.has(row);
     const alreadyRecordedCount = rows.filter(isRecorded).length;
-    if (alreadyRecordedCount) rows = rows.filter((row) => !isRecorded(row));
+    // A row deleted from the Ledger or skipped before is not brought back by importing the same statement again.
+    const removedBefore = new Set(rowsAlreadyRemoved(rows, state.removedRowSignatures));
+    const removedBeforeCount = rows.filter((row) => !isRecorded(row) && removedBefore.has(row)).length;
+    if (alreadyRecordedCount || removedBeforeCount) rows = rows.filter((row) => !isRecorded(row) && !removedBefore.has(row));
     const duplicateCount = rows.filter((row) => isDuplicateTransaction(row, alreadyKnown)).length;
     const rowRefundMatchPool = [...alreadyKnown, ...rows];
     const newDraftIds = [];
@@ -10598,9 +10610,10 @@ function bindViewEvents() {
         accountHistoryMatch: !!(!matchedAccount && historyAccountId)
       });
     });
+    const removedBeforeNote = removedBeforeCount ? ` Left out ${removedBeforeCount} row${removedBeforeCount === 1 ? "" : "s"} you deleted or skipped before.` : "";
     const alreadyRecordedNote = alreadyRecordedCount ? ` Left out ${alreadyRecordedCount} row${alreadyRecordedCount === 1 ? "" : "s"} already recorded (the same bank id, or the row for a transfer already in Transfers).` : "";
     const duplicateNote = duplicateCount ? ` ${duplicateCount} look${duplicateCount === 1 ? "s" : ""} like a duplicate of a transaction you already have — check before accepting.` : "";
-    bankImportFeedback = `Imported ${rows.length} transaction${rows.length === 1 ? "" : "s"} from ${file.name}${matchedAccount ? ` — linked to ${matchedAccount.name}` : " — no matching account found, pick one per row below"}.${alreadyRecordedNote}${duplicateNote}`;
+    bankImportFeedback = `Imported ${rows.length} transaction${rows.length === 1 ? "" : "s"} from ${file.name}${matchedAccount ? ` — linked to ${matchedAccount.name}` : " — no matching account found, pick one per row below"}.${alreadyRecordedNote}${removedBeforeNote}${duplicateNote}`;
     autosaveState();
     render();
     if (aiImportEnabled()) void runAiImportPass(newDraftIds, file.name, rows.length);
@@ -11166,13 +11179,19 @@ function bindViewEvents() {
     if (!lineId) return;
     const snapshot = lineSnapshot(lineId);
     let skippedSplits = 0;
+    // Every payee in the selection is learned (one rule per payee), like a single category change - without the per-payee "move earlier ones?" questions.
+    const learned = new Set();
+    let waitingUpdated = 0;
     ledgerSelectedIndices.forEach((index) => {
       const transaction = state.transactions[index];
       if (!transaction) return;
       // A row split across categories has no single category to overwrite; leave it alone rather than corrupt its splits.
       if (transaction.splits?.length) { skippedSplits += 1; return; }
       Object.assign(transaction, { lineId }, snapshot);
+      const payee = String(transaction.payee || "").trim();
+      if (payee && !learned.has(payee.toLowerCase())) { learned.add(payee.toLowerCase()); waitingUpdated += learnPayeeLine(payee, lineId); }
     });
+    if (learned.size) showToast(`Learned: ${learned.size} payee${learned.size === 1 ? "" : "s"} will go to this Subcategory from now on${waitingUpdated ? ` (${waitingUpdated} waiting row${waitingUpdated === 1 ? "" : "s"} updated)` : ""}. You can change this under Category rules.`, { type: "info" });
     if (skippedSplits) showToast(`${skippedSplits} split transaction${skippedSplits === 1 ? " was" : "s were"} skipped - remove the split first to recategorize.`, { type: "info" });
     ledgerSelectedIndices.clear();
     autosaveState();
@@ -14401,6 +14420,7 @@ view.addEventListener("click", (event) => {
   if (deleteTransactionButton) {
     allowLedgerRemoval();
     const [removed] = state.transactions.splice(Number(deleteTransactionButton.dataset.deleteTransaction), 1);
+    rememberRemovedRow(state, removed);
     autosaveState();
     render();
     void offerPaycheckLearning(removed);
@@ -14973,7 +14993,7 @@ async function runAiImportPassOnce(draftIds, fileName, importedCount, rerun, pas
         try {
           ({ results } = await withTimeout(api("/api/transactions/suggest-batch", {
             method: "POST",
-            body: JSON.stringify({ rows: chunk.map((draft) => ({ id: draft.id, payee: draft.payee, amount: draft.amount, date: draft.date })), lines, accounts, tags: knownTags })
+            body: JSON.stringify({ rows: chunk.map((draft) => ({ id: draft.id, payee: draft.payee, amount: draft.amount, date: draft.date })), lines, accounts, tags: knownTags, examples: learnedExamples(state, lines.map((line) => line.id), accounts.map((account) => account.id)) })
           }), AI_IMPORT_CALL_TIMEOUT_MS, "the AI took too long to answer"));
         } catch (error) {
           // One failed chunk must not stop the others: its rows stay in Bank stream and the pass carries on.
@@ -15059,6 +15079,7 @@ function dismissImportTransaction(button) {
   if (!state.transactionInboxDone.includes(button.dataset.dismissImport)) state.transactionInboxDone.push(button.dataset.dismissImport);
   state.transactionInboxDrafts = (state.transactionInboxDrafts || []).filter((item) => item.id !== button.dataset.dismissImport);
   state.household.activity.unshift(`Dismissed bank stream item: ${inboxItem?.payee || button.dataset.dismissImport}`);
+  rememberRemovedRow(state, inboxItem);
   autosaveState();
   render();
   void offerPaycheckLearning(inboxItem);
@@ -15469,6 +15490,14 @@ $("#confirmDeleteBudgetLineButton").addEventListener("click", () => {
   const { lineIds, perform } = pendingBudgetLineDeletion;
   const targetLineId = $("#deleteBudgetLineReassignSelect")?.value || "";
   const impact = budgetDeletionImpact(lineIds);
+  // Learned "always categorize this way" rules pointing at a Subcategory that is going away follow its transactions to the new one, or are
+  // dropped when nothing replaces it, so a later row is never filed under a Subcategory that no longer exists.
+  const goingLineIds = new Set(lineIds);
+  Object.keys(state.transactionCategorizationRules || {}).forEach((key) => {
+    if (!goingLineIds.has(state.transactionCategorizationRules[key])) return;
+    if (targetLineId) state.transactionCategorizationRules[key] = targetLineId;
+    else { delete state.transactionCategorizationRules[key]; delete (state.transactionCategorizationRuleLabels || {})[key]; }
+  });
   if (targetLineId) {
     const targetLine = allLines().find((line) => line.id === targetLineId);
     impact.transactions.forEach((transaction) => {

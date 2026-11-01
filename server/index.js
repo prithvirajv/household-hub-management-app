@@ -1496,12 +1496,13 @@ app.post("/api/transactions/suggest-subcategory", requireSession, async (req, re
     if (lines.length > SUBCATEGORY_SUGGEST_MAX_LINES) return res.status(400).json({ error: "Too many subcategories to suggest from" });
     const validIds = new Set(lines.map((line) => String(line?.id || "")).filter(Boolean));
     const optionsText = lines.map((line) => `${line.id}: ${line.label}`).join("\n");
+    const learnedText = learnedExamplesText(cleanLearnedExamples(req.body?.examples, [...validIds], [])).join("\n");
 
     const response = await fetch(`${GEMINI_API_BASE_URL}/v1beta/models/${encodeURIComponent(GEMINI_MODEL)}:generateContent?key=${encodeURIComponent(GEMINI_API_KEY)}`, {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({
-        contents: [{ role: "user", parts: [{ text: `Payee: ${payee}\n\nOptions:\n${optionsText}` }] }],
+        contents: [{ role: "user", parts: [{ text: `Payee: ${payee}\n\nOptions:\n${optionsText}${learnedText ? `\n\n${learnedText}` : ""}` }] }],
         systemInstruction: { parts: [{ text: "You are categorizing a household bank transaction for a budgeting app. Given a payee name and a list of budget subcategory options (each line is \"id: Category - Name\"), reply with ONLY the exact id of the single best-matching option - nothing else, no explanation, no punctuation, no quotes. If nothing listed is a reasonable, confident match, reply with exactly: none" }] },
         generationConfig: { maxOutputTokens: 20 }
       })
@@ -1527,7 +1528,25 @@ const BATCH_SUGGEST_MAX_PAYEE_CHARS = 200;
 // One batched Gemini call that categorizes cleaned rows (see the endpoint below for the validation that produces them). Shared by the
 // endpoint and the overnight bank sync; every id in the answer is checked against what was offered. Throws with statusCode 502 when the
 // AI service fails and 503 when it is not configured.
-async function geminiBatchSuggest({ cleanRows, lines, accounts, knownTags }) {
+// What the household has already decided (payee -> Subcategory id [account id]), sent by the client from its own rules and ledger and
+// validated here against the ids the request offers. The model is told to follow it, so every correction the household makes is learned.
+function cleanLearnedExamples(examples, lineIds, accountIds) {
+  const lines = new Set(lineIds);
+  const accounts = new Set(accountIds);
+  return (Array.isArray(examples) ? examples : []).slice(0, 80).map((example) => ({
+    payee: String(example?.payee || "").trim().replace(/[\r\n|]+/g, " ").replace(/\s+/g, " ").slice(0, 60),
+    lineId: String(example?.lineId || ""),
+    accountId: String(example?.accountId || "")
+  })).filter((example) => example.payee && lines.has(example.lineId)).map((example) => ({ ...example, accountId: accounts.has(example.accountId) ? example.accountId : "" })).slice(0, 60);
+}
+
+function learnedExamplesText(examples) {
+  return examples.length
+    ? ["Decisions this household has already made (payee | subcategory id | account id). Follow them for the same payee or a very similar one - they override your own guess:", ...examples.map((example) => `${example.payee} | ${example.lineId} | ${example.accountId || "-"}`), ""]
+    : [];
+}
+
+async function geminiBatchSuggest({ cleanRows, lines, accounts, knownTags, examples = [] }) {
   if (!GEMINI_API_KEY) { const failure = new Error("AI suggestions are not configured for this deployment"); failure.statusCode = 503; throw failure; }
   const lineIds = lines.map((line) => String(line?.id || "")).filter(Boolean);
   const accountIds = accounts.map((account) => String(account?.id || "")).filter(Boolean);
@@ -1540,6 +1559,7 @@ async function geminiBatchSuggest({ cleanRows, lines, accounts, knownTags }) {
     "",
     knownTags.length ? `Tags already in use (reuse one when it fits): ${knownTags.join(", ")}` : "No tags are in use yet.",
     "",
+    ...learnedExamplesText(cleanLearnedExamples(examples, lineIds, accountIds)),
     "Transactions (id | payee | amount | date). Positive amounts are purchases, negative are refunds or deposits:",
     ...cleanRows.map((row) => `${row.id} | ${row.payee} | ${row.amount} | ${row.date}`)
   ].join("\n");
@@ -1589,7 +1609,7 @@ app.post("/api/transactions/suggest-batch", requireSession, async (req, res, nex
     if (!cleanRows.length) return res.status(400).json({ error: "No transactions to categorize" });
     let results;
     try {
-      results = await geminiBatchSuggest({ cleanRows, lines, accounts, knownTags });
+      results = await geminiBatchSuggest({ cleanRows, lines, accounts, knownTags, examples: req.body?.examples });
     } catch (error) {
       if (error.statusCode) return res.status(error.statusCode).json({ error: error.message });
       throw error;
@@ -1619,12 +1639,15 @@ app.post("/api/transactions/suggest-account", requireSession, async (req, res, n
     if (accounts.length > ACCOUNT_SUGGEST_MAX_ACCOUNTS) return res.status(400).json({ error: "Too many accounts to suggest from" });
     const validIds = new Set(accounts.map((account) => String(account?.id || "")).filter(Boolean));
     const optionsText = accounts.map((account) => `${account.id}: ${account.label}`).join("\n");
+    // Payees this household has already linked to an account (payee | account id), so the answer follows what it decided before.
+    const linked = (Array.isArray(req.body?.examples) ? req.body.examples : []).slice(0, 80).map((example) => ({ payee: String(example?.payee || "").trim().replace(/[\r\n|]+/g, " ").replace(/\s+/g, " ").slice(0, 60), accountId: String(example?.accountId || "") })).filter((example) => example.payee && validIds.has(example.accountId)).slice(0, 60);
+    const learnedText = linked.length ? `Accounts this household already linked payees to (payee | account id) - follow them for the same or a very similar payee:\n${linked.map((example) => `${example.payee} | ${example.accountId}`).join("\n")}` : "";
 
     const response = await fetch(`${GEMINI_API_BASE_URL}/v1beta/models/${encodeURIComponent(GEMINI_MODEL)}:generateContent?key=${encodeURIComponent(GEMINI_API_KEY)}`, {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({
-        contents: [{ role: "user", parts: [{ text: `Payee: ${payee}\n\nOptions:\n${optionsText}` }] }],
+        contents: [{ role: "user", parts: [{ text: `Payee: ${payee}\n\nOptions:\n${optionsText}${learnedText ? `\n\n${learnedText}` : ""}` }] }],
         systemInstruction: { parts: [{ text: "You are linking a household bank transaction to the account it belongs to, for a budgeting app. Given a payee name and a list of account options (each line is \"id: Account name (type)\"), reply with ONLY the exact id of the single best-matching option - nothing else, no explanation, no punctuation, no quotes. If nothing listed is a reasonable, confident match, reply with exactly: none" }] },
         generationConfig: { maxOutputTokens: 20 }
       })
@@ -5044,7 +5067,7 @@ registerLinkedAccountRoutes({
   app, requireSession, requireEditAccess, requireJobSecret: requireNotificationSecret, notifyHousehold: notifyHouseholdMembers, loadHouseholdState: loadHouseholdAppState,
   stateStore: { load: loadHouseholdStateVersioned, saveIfVersion: saveHouseholdStateIfVersion },
   // The AI answers the overnight apply asks for: the same batched categorization the app uses, validated against what was offered.
-  suggestBatch: GEMINI_API_KEY ? async (rows, lines, accounts, knownTags) => geminiBatchSuggest({ cleanRows: rows.map((row) => ({ id: String(row.id), payee: String(row.payee || "").trim().slice(0, BATCH_SUGGEST_MAX_PAYEE_CHARS), amount: Number(row.amount) || 0, date: String(row.date || "").slice(0, 10) })).filter((row) => row.id && row.payee), lines, accounts, knownTags }) : null,
+  suggestBatch: GEMINI_API_KEY ? async (rows, lines, accounts, knownTags, examples) => geminiBatchSuggest({ cleanRows: rows.map((row) => ({ id: String(row.id), payee: String(row.payee || "").trim().slice(0, BATCH_SUGGEST_MAX_PAYEE_CHARS), amount: Number(row.amount) || 0, date: String(row.date || "").slice(0, 10) })).filter((row) => row.id && row.payee), lines, accounts, knownTags, examples }) : null,
   MEMORY_DB, memoryDb, pool
 });
 

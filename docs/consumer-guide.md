@@ -254,6 +254,17 @@ button on every screen. People with view-only access don't see it.
   there asks first. If copies already got in, Transfers shows **Remove N
   extras…**, which lists them and keeps one of each after you confirm. Web and
   mobile.
+- **The AI always learns from what you decide.** Every time you change a
+  transaction's Subcategory - one at a time or for a whole selection - that payee
+  becomes a rule ("Category rules"), waiting Bank stream rows of the payee follow
+  it, and moving or deleting a Subcategory carries its rules along. Every AI
+  request (importing, the overnight sync, the ✨ buttons) is also told what you
+  already decided - your rules first, then your recent categorized
+  transactions and the accounts you linked - and has to follow it for the same
+  or a similar payee, so it stops repeating mistakes you corrected. Deleting a
+  Ledger row or skipping a Bank stream row is remembered too: importing the same
+  statement again leaves those rows out (and says how many), while a second
+  identical purchase on the same day still comes in. Web and mobile.
 - **Paychecks learn from the deposits you remove.** When a bank deposit is
   really a paycheck you already recorded as income (it would count twice), you
   delete it from the Ledger or skip it in Bank stream. FamilyLoop recognises it as
