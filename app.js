@@ -14400,9 +14400,10 @@ view.addEventListener("click", (event) => {
   const deleteTransactionButton = event.target.closest("[data-delete-transaction]");
   if (deleteTransactionButton) {
     allowLedgerRemoval();
-    state.transactions.splice(Number(deleteTransactionButton.dataset.deleteTransaction), 1);
+    const [removed] = state.transactions.splice(Number(deleteTransactionButton.dataset.deleteTransaction), 1);
     autosaveState();
     render();
+    void offerPaycheckLearning(removed);
     return;
   }
 
@@ -14836,7 +14837,7 @@ function bankStreamHeldReason(transaction) {
     transferMatch: transaction.transferMatch,
     accountClosedForDate: !accountAllowsDate(transaction.accountId, transaction.date),
     bankFeed: true,
-    paycheckMatch: matchesRecordedPaycheck(transaction, state.paycheckOccurrences)
+    paycheckMatch: matchesRecordedPaycheck(transaction, state.paycheckOccurrences, state.paychecks)
   });
   if (decision.accept) return "not checked yet";
   return { "no category": "no subcategory yet", "no account": "no account yet", "unverified category": "category not confirmed" }[decision.reason] || decision.reason;
@@ -14922,7 +14923,7 @@ async function runAiImportPassOnce(draftIds, fileName, importedCount, rerun, pas
         // Imported statement rows (a file or a linked bank) are the bank's own record, deposits and payments included; only a deposit that
         // duplicates a recorded paycheck is held back, along with the duplicate/refund/transfer/low-confidence cases above.
         bankFeed: true,
-        paycheckMatch: matchesRecordedPaycheck(draft, state.paycheckOccurrences)
+        paycheckMatch: matchesRecordedPaycheck(draft, state.paycheckOccurrences, state.paychecks)
       });
       if (decision.accept) {
         if (returnOfPosted) draft.postMemo = refundMemo(returnOf);
@@ -15058,6 +15059,21 @@ function dismissImportTransaction(button) {
   if (!state.transactionInboxDone.includes(button.dataset.dismissImport)) state.transactionInboxDone.push(button.dataset.dismissImport);
   state.transactionInboxDrafts = (state.transactionInboxDrafts || []).filter((item) => item.id !== button.dataset.dismissImport);
   state.household.activity.unshift(`Dismissed bank stream item: ${inboxItem?.payee || button.dataset.dismissImport}`);
+  autosaveState();
+  render();
+  void offerPaycheckLearning(inboxItem);
+}
+
+// Removing a deposit that is really a recorded paycheck is the household saying "this is my paycheck": remember the payer so later deposits
+// from it are held, and offer to bring the paycheck's amount in line when the deposit differs.
+async function offerPaycheckLearning(row) {
+  const plan = planPaycheckLearning(row, state.paychecks);
+  if (!plan) return;
+  let updateAmount = false;
+  if (plan.differs) {
+    updateAmount = await showConfirm(`This looks like your ${plan.paycheck.name} paycheck. You have ${exactMoney.format(plan.previous)} recorded as income, and this deposit was ${exactMoney.format(plan.received)}. Update the paycheck to ${exactMoney.format(plan.received)}, so your income follows what you actually receive? Later deposits from this payer will be recognised as this paycheck instead of being added again.`, { title: "Update your income?", confirmLabel: `Update to ${exactMoney.format(plan.received)}`, cancelLabel: `Keep ${exactMoney.format(plan.previous)}`, danger: false });
+  }
+  if (applyPaycheckLearning(state, plan, row, { updateAmount })) state.budget.income = budgetIncomeFromPaychecks();
   autosaveState();
   render();
 }

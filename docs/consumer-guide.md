@@ -254,6 +254,16 @@ button on every screen. People with view-only access don't see it.
   there asks first. If copies already got in, Transfers shows **Remove N
   extras…**, which lists them and keeps one of each after you confirm. Web and
   mobile.
+- **Paychecks learn from the deposits you remove.** When a bank deposit is
+  really a paycheck you already recorded as income (it would count twice), you
+  delete it from the Ledger or skip it in Bank stream. FamilyLoop recognises it as
+  that paycheck (same account, the payer's name in the deposit, worded like pay),
+  remembers the payer so later deposits from it are held instead of added, and -
+  if the deposit differs from the amount you recorded - asks whether to update
+  the paycheck to what you actually received ("Update to $3,391.44" or "Keep
+  $1,500.00"). Updating changes that payday and the later ones; past paydays
+  stay as they were. Refunds, transfers and deposits to another account never
+  count as a paycheck. Web and mobile.
 - **FamilyLoop learns from your category changes.** When you move a
   transaction to a different Subcategory (in the Ledger, or by picking one on
   a Bank stream row), that becomes the rule for the payee: the next one - from
