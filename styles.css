@@ -18,8 +18,12 @@
   --muted: oklch(52% 0.02 60);
   --green: #13936d;
   --green-soft: #e6f6ef;
+  /* Green text that stays readable on --green-soft: darkened toward --text, so it flips light in dark mode. */
+  --green-ink: color-mix(in srgb, var(--green) 75%, var(--text));
   --blue: #3569d4;
   --gold: #d99a24;
+  /* Gold text that stays readable on light surfaces: darkened toward --text, lightened in dark mode. */
+  --gold-ink: color-mix(in srgb, var(--gold) 62%, var(--text));
   --coral: #e05252;
   --shadow: 0 14px 34px rgba(80, 60, 30, 0.1);
   --card-radius: 14px;
@@ -407,7 +411,7 @@ nav {
 }
 
 .nav-calendar-icon-day {
-  color: var(--navy);
+  color: var(--text);
   font-size: 11px;
   line-height: 1;
   font-weight: 900;
@@ -1030,7 +1034,7 @@ main {
   border: 0;
   border-radius: 999px;
   background: var(--soft-blue);
-  color: var(--navy);
+  color: var(--text);
   font-size: 0.78rem;
   font-weight: 700;
   white-space: nowrap;
@@ -1887,7 +1891,7 @@ main {
 }
 
 .money-input[readonly] {
-  color: var(--navy);
+  color: var(--text);
   background: var(--soft-blue);
 }
 
@@ -2121,7 +2125,7 @@ main {
 
 button.ghost-accent {
   background: var(--green-soft);
-  color: color-mix(in srgb, var(--green) 75%, black);
+  color: var(--green-ink);
   border-color: transparent;
 }
 
@@ -2217,6 +2221,10 @@ button.ghost-accent {
   background: #fde9e8;
 }
 
+html[data-theme="dark"] .compact-row.overdue {
+  background: color-mix(in srgb, var(--coral) 16%, var(--panel));
+}
+
 .compact-row.overdue small {
   color: var(--coral);
   font-weight: 700;
@@ -2244,7 +2252,7 @@ button.ghost-accent {
 
 .pill-warning {
   background: rgba(217, 154, 36, 0.14);
-  color: var(--gold);
+  color: var(--gold-ink);
 }
 
 .pill-info {
@@ -2259,7 +2267,7 @@ button.ghost-accent {
 
 .bank-stream-confidence-warning {
   background: rgba(217, 154, 36, 0.14);
-  color: var(--gold);
+  color: var(--gold-ink);
 }
 
 .bank-stream-confidence-danger {
@@ -2575,7 +2583,7 @@ button.ghost-accent {
 }
 
 .bank-stream-bulk-warning small {
-  color: var(--gold);
+  color: var(--gold-ink);
   font-weight: 500;
 }
 
@@ -3473,7 +3481,7 @@ button.ghost-accent {
   gap: 0.3rem;
   border-radius: 999px;
   background: var(--green-soft);
-  color: #07654b;
+  color: var(--green-ink);
   padding: 0.25rem 0.45rem;
   font-weight: 800;
   font-size: 0.72rem;
@@ -3556,7 +3564,7 @@ button.ghost-accent {
 }
 
 .outside-month {
-  color: #9aa5b5;
+  color: color-mix(in srgb, var(--muted) 80%, var(--soft));
 }
 
 .today-cell {
@@ -3958,7 +3966,7 @@ button.ghost-accent {
 .scope-toggle:has(input:checked) {
   background: var(--green-soft);
   border-color: #a7e4ca;
-  color: #075f46;
+  color: var(--green-ink);
 }
 
 .report-row {
@@ -4207,7 +4215,7 @@ button.ghost-accent {
 }
 
 .bills-due-danger { color: var(--coral); font-weight: 800; }
-.bills-due-warning { color: var(--gold); font-weight: 800; }
+.bills-due-warning { color: var(--gold-ink); font-weight: 800; }
 .bills-due-good { color: var(--green); font-weight: 800; }
 .bills-due-neutral { color: var(--muted); }
 
@@ -6228,7 +6236,7 @@ html[data-theme="dark"] .note-color-coral { background: color-mix(in srgb, #fff0
 }
 
 .note-icon-button.active {
-  color: var(--gold);
+  color: var(--gold-ink);
   background: color-mix(in srgb, var(--gold) 22%, var(--panel));
 }
 
@@ -6498,6 +6506,10 @@ html[data-theme="dark"] .note-color-coral { background: color-mix(in srgb, #fff0
   border: 0;
   background: rgba(239, 80, 80, 0.1);
   color: var(--coral);
+}
+
+html[data-theme="dark"] .note-check-delete {
+  color: color-mix(in srgb, var(--coral) 65%, white);
 }
 
 .note-check-plan {
@@ -7179,7 +7191,7 @@ html[data-theme="dark"] .note-color-coral { background: color-mix(in srgb, #fff0
   }
 
   .mobile-tab-bar-button.active {
-    color: color-mix(in srgb, var(--green) 78%, black);
+    color: var(--green-ink);
   }
 
   main {
@@ -7355,7 +7367,7 @@ html[data-theme="dark"] .note-color-coral { background: color-mix(in srgb, #fff0
 
 .mood-chip.active {
   border-color: var(--mood-color, var(--line));
-  background: color-mix(in srgb, var(--mood-color, var(--line)) 14%, white);
+  background: color-mix(in srgb, var(--mood-color, var(--line)) 14%, var(--panel));
   color: var(--text);
 }
 
@@ -7805,6 +7817,7 @@ html[data-theme="dark"] .note-color-coral { background: color-mix(in srgb, #fff0
   border: 1px solid var(--line);
   border-radius: 8px;
   background: var(--panel);
+  color: var(--text);
   cursor: pointer;
 }
 
@@ -8566,7 +8579,7 @@ html[data-theme="dark"] .note-color-coral { background: color-mix(in srgb, #fff0
 }
 
 .documents-expiry-danger { background: color-mix(in srgb, var(--coral) 16%, white); color: var(--coral); }
-.documents-expiry-warning { background: color-mix(in srgb, var(--gold) 18%, white); color: var(--gold); }
+.documents-expiry-warning { background: color-mix(in srgb, var(--gold) 18%, white); color: color-mix(in srgb, var(--gold) 55%, black); }
 .documents-expiry-neutral { background: var(--soft-blue); color: var(--muted); }
 
 .documents-expiry-input {
@@ -9218,7 +9231,7 @@ html[data-theme="dark"] .note-color-coral { background: color-mix(in srgb, #fff0
   margin: 0.35rem 0 0;
   font-size: 0.8rem;
   font-weight: 700;
-  color: var(--gold);
+  color: var(--gold-ink);
 }
 
 .metric-danger strong {
@@ -9226,11 +9239,11 @@ html[data-theme="dark"] .note-color-coral { background: color-mix(in srgb, #fff0
 }
 
 .metric-warning strong {
-  color: var(--gold);
+  color: var(--gold-ink);
 }
 
 .metric-good strong {
-  color: color-mix(in srgb, var(--green) 75%, black);
+  color: var(--green-ink);
 }
 
 .ai-import-toggle {
@@ -9323,8 +9336,8 @@ html[data-theme="dark"] .note-color-coral { background: color-mix(in srgb, #fff0
 .assistant-answer { white-space: pre-wrap; margin: 8px 0; line-height: 1.5; }
 
 .linked-account-picker { position: relative; display: inline-block; }
-.linked-account-picker > summary { cursor: pointer; padding: 8px 12px; border: 1px solid var(--line, #d8d2c8); border-radius: 8px; background: var(--surface, #fff); list-style: none; }
-.linked-account-picker .linked-picker-list { position: absolute; z-index: 5; min-width: 240px; margin-top: 4px; padding: 10px; display: grid; gap: 6px; border: 1px solid var(--line, #d8d2c8); border-radius: 8px; background: var(--surface, #fff); box-shadow: 0 6px 20px rgba(0, 0, 0, 0.15); }
+.linked-account-picker > summary { cursor: pointer; padding: 8px 12px; border: 1px solid var(--line, #d8d2c8); border-radius: 8px; background: var(--panel); list-style: none; }
+.linked-account-picker .linked-picker-list { position: absolute; z-index: 5; min-width: 240px; margin-top: 4px; padding: 10px; display: grid; gap: 6px; border: 1px solid var(--line, #d8d2c8); border-radius: 8px; background: var(--panel); box-shadow: 0 6px 20px rgba(0, 0, 0, 0.15); }
 .linked-account-picker .linked-picker-list label { display: flex; gap: 8px; align-items: center; }
 .linked-account-picker .linked-picker-list { max-height: 60vh; overflow-y: auto; }
 .linked-account-picker .linked-picker-kind { margin-top: 6px; }
