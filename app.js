@@ -1280,6 +1280,7 @@ const ACCOUNT_TYPE_GROUPS = [
   { type: "checking", label: "Checking" },
   { type: "savings", label: "Savings" },
   { type: "cash", label: "Cash" },
+  { type: "investment", label: "Investment" },
   { type: "other", label: "Other" },
   { type: "credit_card", label: "Credit cards" }
 ];
@@ -6566,12 +6567,12 @@ function netWorthStockGroupCard(group) {
   </article>`;
 }
 
-const accountTypeColors = { checking: "var(--blue)", savings: "var(--green)", cash: "var(--gold)", credit_card: "var(--coral)", other: "var(--muted)" };
+const accountTypeColors = { checking: "var(--blue)", savings: "var(--green)", cash: "var(--gold)", investment: "#8a63d2", credit_card: "var(--coral)", other: "var(--muted)" };
 
 function accountItemRow(account, index) {
   const balance = currentAccountBalance(account.id);
   const isLiability = account.type === "credit_card";
-  const typeLabels = { checking: "Checking", savings: "Savings", cash: "Cash", credit_card: "Credit card", other: "Other" };
+  const typeLabels = { checking: "Checking", savings: "Savings", cash: "Cash", investment: "Investment", credit_card: "Credit card", other: "Other" };
   // Closed accounts stop accruing new history worth trending, and a
   // just-added account has no past months behind it yet - both skip the
   // sparkline computation rather than rendering a flat/misleading line.
@@ -14555,7 +14556,7 @@ function renderBankSyncHealthCard() {
 // What Sync now and Import history can be limited to on one connection: a kind of account (all checking accounts, all credit cards, ...) or any
 // individual accounts under it. linkedAccountPick[linkId] holds the ticked remote account ids; none ticked (or every one ticked) = every account.
 // SimpleFIN counts requests, not accounts, so ticking a whole group costs the same as ticking one account.
-const LINKED_ACCOUNT_KINDS = [["checking", "Checking accounts"], ["savings", "Savings accounts"], ["credit_card", "Credit cards"], ["cash", "Cash accounts"], ["other", "Other accounts"]];
+const LINKED_ACCOUNT_KINDS = [["checking", "Checking accounts"], ["savings", "Savings accounts"], ["credit_card", "Credit cards"], ["cash", "Cash accounts"], ["investment", "Investment accounts"], ["other", "Other accounts"]];
 
 function linkedPickableKinds(link) {
   const byKind = new Map();

@@ -542,8 +542,9 @@ button on every screen. People with view-only access don't see it.
 ![A net worth summary strip and two account cards with colored type dots and a debt payoff tracker](../assets/mockup-wealth.svg)
 
 All of this lives in one **Net worth** card: your **Accounts** (grouped as
-Checking, Savings, Credit cards, ...) with their type, opening balance, close
-date, balance chart and "synced from/through" tags, then your holdings,
+Checking, Savings, Investment, Credit cards, ...) with their type, opening
+balance, close date, balance chart and "synced from/through" tags, then your
+holdings,
 property and loans, then **Transfers** between accounts. **+ Add account** and
 **+ Add holding** are at the top of the card. An account is listed once - in
 the Accounts part - and counts toward the net worth total from there.
@@ -574,6 +575,11 @@ the Accounts part - and counts toward the net worth total from there.
   the top. A grouped holdings card drags as one unit, moving every holding
   inside it together.
 - Under **Net worth**, everything sits under the same collapsible banners (name, how many, total): your accounts by type (Checking, Savings, Credit cards...), then **Investments**, **Retirement**, **Other assets** and **Loans and other liabilities**. A banner only appears when it has something in it, and collapsing one is remembered while you use the page.
+- An account's **Type** can be set to **Investment** (alongside Checking, Savings,
+  Cash, Credit card and Other) for a brokerage or retirement account you track
+  as a plain balance. It groups under its own **Investment** heading and counts
+  as an asset. For per-holding detail (shares, prices, gain/loss) use a
+  holdings group below instead.
 - Under **Net worth**, a brokerage or retirement account (401(k), IRA) with
   several stocks or mutual funds shows as one card, not one row per symbol:
   select **+ Add holding**, then switch its Asset class to **Stock** or
