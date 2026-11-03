@@ -9364,3 +9364,9 @@ html[data-theme="dark"] .note-check-delete {
   padding: 0.15rem 0.6rem;
   font-size: 0.75rem;
 }
+
+.account-trend-empty {
+  color: var(--muted);
+  font-size: 0.78rem;
+  font-style: italic;
+}

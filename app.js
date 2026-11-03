@@ -6577,7 +6577,9 @@ function accountItemRow(account, index) {
   // just-added account has no past months behind it yet - both skip the
   // sparkline computation rather than rendering a flat/misleading line.
   const trendMonths = trailingMonthKeys(12);
-  const sparkline = account.closedAt ? "" : accountSparklineSvg(accountBalanceTrend(account.id, trendMonths), trendMonths);
+  // A flat history draws no chart, so say why rather than leave a gap that looks like a bug (a linked account's opening balance absorbs
+  // whatever came before its first sync, so it stays flat until a transaction moves it).
+  const sparkline = account.closedAt ? "" : (accountSparklineSvg(accountBalanceTrend(account.id, trendMonths), trendMonths) || `<span class="account-trend-empty" title="The chart appears once this account's balance changes from month to month.">No balance changes yet</span>`);
   return `<article class="account-item ${isLiability ? "liability" : ""}" draggable="true" data-drag-account="${account.id}">
     <div class="debt-edit-grid">
       <label class="debt-name-field">Account name<input data-account-name="${index}" value="${escapeHtml(account.name)}" aria-label="Account name"></label>
