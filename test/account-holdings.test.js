@@ -108,3 +108,12 @@ test("Investment accounts are listed under Investments with the holdings card; t
   const card = app.slice(app.indexOf("function netWorthStockGroupCard"), app.indexOf("const accountTypeColors"));
   for (const part of ["data-drag-account", "data-delete-account", "data-toggle-account-edit", "accountEditGridHtml", "data-untrack-holdings", "data-track-holdings"]) assert.ok(card.includes(part), `${part} is on the shared card`);
 });
+
+test("the ledger tags both halves of a refund pair, and a refund is not offered as a transfer", () => {
+  const app = fs.readFileSync(path.join(__dirname, "..", "app.js"), "utf8");
+  assert.match(app, /function ledgerRefundPairs\(\)/);
+  assert.match(app, /pairs\.set\(transaction, \{ role: "refund", other: purchase \}\);\s*pairs\.set\(purchase, \{ role: "refunded", other: transaction \}\);/, "the refund and the purchase both get an entry");
+  assert.match(app, /Refund of \$\{amount\} · \$\{when\}/);
+  assert.match(app, /Refunded \$\{amount\} · \$\{when\}/);
+  assert.match(app, /refundPairs\.has\(transaction\) \? null : findTransferCandidate/, "a paired row does not light up the transfer button");
+});

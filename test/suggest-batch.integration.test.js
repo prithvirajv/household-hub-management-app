@@ -60,6 +60,15 @@ test("autoAcceptDecision only lets confident, ordinary rows straight into the le
   assert.equal(autoAcceptDecision(ok, { ...ctx, accountClosedForDate: true }).reason, "account closed");
 });
 
+test("a refund that nets against a posted purchase is not held as a possible transfer, but a plain look-alike still is", () => {
+  const refund = { lineId: "shopping", accountId: "card", amount: -25, lineSource: "refund" };
+  const ctx = { accountsExist: true, possibleDuplicate: false, accountClosedForDate: false, bankFeed: true };
+  const purchase = { lineId: "shopping", accountId: "card", amount: 25 };
+  assert.equal(autoAcceptDecision(refund, { ...ctx, refundMatch: purchase, refundMatchPosted: true, transferMatch: { accountId: "checking" } }).accept, true);
+  assert.equal(autoAcceptDecision(refund, { ...ctx, refundMatch: { ...purchase, lineId: "other" }, refundMatchPosted: true, transferMatch: { accountId: "checking" } }).reason, "refund", "a refund that cannot post is still held, for the refund reason");
+  assert.equal(autoAcceptDecision({ ...refund, lineSource: "history" }, { ...ctx, transferMatch: { accountId: "checking" } }).reason, "possible transfer");
+});
+
 test("suggest-batch endpoint validates input, requires a session, and returns only validated picks", async () => {
   const reply = JSON.stringify([{ id: "r1", lineId: "groceries", accountId: "checking", confidence: "high" }, { id: "r2", lineId: "hallucinated", accountId: null, confidence: "high" }]);
   const stub = await startGeminiStub({ body: { candidates: [{ content: { parts: [{ text: reply }] } }] } });

@@ -9317,7 +9317,8 @@ html[data-theme="dark"] .note-check-delete {
   color: var(--muted);
 }
 /* A ledger row posted without a category: a full-width note under the row's fields (the row is a fixed grid with no room inline). */
-.ledger-entry-row .ledger-needs-category {
+.ledger-entry-row .ledger-needs-category,
+.ledger-entry-row .ledger-refund-pill {
   grid-column: 1 / -1;
   justify-self: start;
 }

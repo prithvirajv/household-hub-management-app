@@ -3017,7 +3017,30 @@ function renderBudget() {
 let splitEditorLedgerIndex = null;
 let splitEditorRows = [];
 
-function ledgerEntryRow(transaction, index, transferMatch) {
+// Pairs each refund in the ledger with the purchase it reverses (the same match the Bank stream uses), so both rows can say so:
+// the refund reads "Refund of ..." and the purchase reads "Refunded ...". Keyed by the transaction object.
+function ledgerRefundPairs() {
+  const pairs = new Map();
+  state.transactions.forEach((transaction) => {
+    if (!(Number(transaction.amount) < 0) || pairs.has(transaction)) return;
+    const purchase = refundMatch(transaction, state.transactions.filter((other) => other !== transaction && Number(other.amount) > 0 && !pairs.has(other)));
+    if (!purchase) return;
+    pairs.set(transaction, { role: "refund", other: purchase });
+    pairs.set(purchase, { role: "refunded", other: transaction });
+  });
+  return pairs;
+}
+
+function ledgerRefundPill(pair) {
+  if (!pair) return "";
+  const amount = exactMoney.format(Math.abs(Number(pair.other.amount)));
+  const when = formatShortDate(pair.other.date);
+  return pair.role === "refund"
+    ? `<span class="pill pill-info ledger-refund-pill" title="Reverses the ${amount} purchase on ${when}">Refund of ${amount} · ${when}</span>`
+    : `<span class="pill pill-info ledger-refund-pill" title="Refunded by the ${amount} return on ${when}">Refunded ${amount} · ${when}</span>`;
+}
+
+function ledgerEntryRow(transaction, index, transferMatch, refundPair = null) {
   // Same placeholder as Bank Stream's own lineOptions - without it, a
   // genuinely-unassigned transaction (lineId: "") has no matching "selected"
   // option and the browser silently displays whichever line sorts first
@@ -3045,6 +3068,7 @@ function ledgerEntryRow(transaction, index, transferMatch) {
       <button class="icon-button" data-assign-iou-ledger="${index}" type="button" aria-label="Split with a friend ${escapeHtml(transaction.payee)}" title="Split with a friend (they owe you)">👥</button>
       <button class="icon-button ${transferMatch ? "has-transfer-match" : ""}" data-move-to-transfer-ledger="${index}" type="button" aria-label="Move ${escapeHtml(transaction.payee)} to Transfers" title="${transferMatch ? `Matches ${escapeHtml(accountName(transferMatch.accountId))}'s ${exactMoney.format(Math.abs(transferMatch.amount))} on ${formatShortDate(transferMatch.date)}` : "Move to Transfers (account-to-account movement)"}">⇄</button>
       <button class="icon-button danger-button" data-delete-transaction="${index}" type="button" aria-label="Delete ${escapeHtml(transaction.payee)}">×</button>
+      ${ledgerRefundPill(refundPair)}
       ${!transaction.lineId && !isSplit ? `<span class="pill pill-warning ledger-needs-category" title="No subcategory yet - this counts toward your balance but not toward any budget line. Choose one on this row.">Needs a category</span>` : ""}
       ${tagChipsHtml(transaction.tags, "data-remove-ledger-tag", "data-add-ledger-tag", index)}
       ${splitEditorHtml(transaction, index)}
@@ -3342,10 +3366,13 @@ function renderTransactions() {
                 ${state.accounts.length ? `<button type="button" data-sort-transactions="account">Account${transactionSortIndicator("account")}</button>` : ""}
                 <span></span><span></span><span></span>
               </div>
-              <div class="ledger-entry-list">${sorted.map(({ transaction, index }) => ledgerEntryRow(transaction, index, findTransferCandidate(transaction, [
-                ...state.transactions.filter((other, otherIndex) => otherIndex !== index),
-                ...(state.transactionInboxDrafts || [])
-              ]))).join("")}</div>
+              <div class="ledger-entry-list">${(() => {
+                const refundPairs = ledgerRefundPairs();
+                return sorted.map(({ transaction, index }) => ledgerEntryRow(transaction, index, refundPairs.has(transaction) ? null : findTransferCandidate(transaction, [
+                  ...state.transactions.filter((other, otherIndex) => otherIndex !== index),
+                  ...(state.transactionInboxDrafts || [])
+                ]), refundPairs.get(transaction))).join("");
+              })()}</div>
             </div>`;
           })()}
         </section>
@@ -3434,7 +3461,7 @@ function renderTransactions() {
               ${transaction.accountHistoryMatch ? `<span class="pill pill-info" title="Account pre-filled from which account this payee's transactions have been linked to most recently - double-check before accepting">Account from history</span>` : ""}
               ${transaction.possibleDuplicate ? `<span class="pill pill-warning" title="Matches an existing transaction with the same amount within 2 days">Possible duplicate</span>` : ""}
               ${transaction.refundMatch ? `<span class="pill pill-info" title="Refund for the ${money.format(transaction.refundMatch.amount)} purchase on ${formatShortDate(transaction.refundMatch.date)}${transaction.orderNumber ? ` (order ${escapeHtml(transaction.orderNumber)})` : ""}">Refund match</span>` : ""}
-              ${transaction.transferMatch ? `<span class="pill pill-info" title="Matches ${escapeHtml(accountName(transaction.transferMatch.accountId))}'s ${exactMoney.format(Math.abs(transaction.transferMatch.amount))} on ${formatShortDate(transaction.transferMatch.date)}">Possible transfer</span>` : ""}
+              ${transaction.transferMatch && !transaction.refundMatch ? `<span class="pill pill-info" title="Matches ${escapeHtml(accountName(transaction.transferMatch.accountId))}'s ${exactMoney.format(Math.abs(transaction.transferMatch.amount))} on ${formatShortDate(transaction.transferMatch.date)}">Possible transfer</span>` : ""}
               <label class="row-field row-payee"><small>Payee</small><input data-bank-stream-payee="${transaction.id}" value="${escapeHtml(transaction.payee)}"></label>
               <label class="row-field row-date"><small>Date</small><input type="date" data-bank-stream-date="${transaction.id}" value="${transaction.date}"></label>
               <label class="row-field row-amount"><small>Amount</small><input class="money-input ${Number(transaction.amount || 0) < 0 ? "amount-in" : "amount-out"}" type="number" step="0.01" data-bank-stream-amount="${transaction.id}" value="${displayTransactionAmount(transaction)}"></label>

@@ -190,7 +190,10 @@ button on every screen. People with view-only access don't see it.
 - "Possible duplicate" and "Possible transfer" pills flag likely re-imports
   and account-to-account movements (like a credit card payment from
   checking) before you accept them — use the ⇄ icon to move a transfer
-  instead of counting it as an expense.
+  instead of counting it as an expense. A refund that matches the purchase it
+  reverses is never flagged as a possible transfer, and once it is in the ledger
+  both rows carry a tile: **Refund of $X** on the return and **Refunded $X** on
+  the purchase, each with the other row's date.
 - Tag transactions (e.g. "Florida trip") to see them grouped together later
   in Reports.
 - A new transaction's Subcategory **and** Wealth account are both pre-filled
