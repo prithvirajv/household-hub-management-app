@@ -578,10 +578,23 @@ the Accounts part - and counts toward the net worth total from there.
 - To reopen a closed account, select **Clear** under its **Close date** (or
   the open-lock icon on mobile).
 - An account's **Type** can be set to **Investment** (alongside Checking, Savings,
-  Cash, Credit card and Other) for a brokerage or retirement account you track
-  as a plain balance. It groups under its own **Investment** heading and counts
-  as an asset. For per-holding detail (shares, prices, gain/loss) use a
-  holdings group below instead.
+  Cash, Credit card and Other) for a brokerage, retirement or 529 account. It
+  groups under its own **Investment** heading and counts as an asset.
+- **Track holdings:** on an Investment account, select **Track holdings** to
+  list the stocks and funds it holds. Its balance becomes **what it holds plus
+  its cash**: the card shows **Invested** and **Cash**, a bar between them, and
+  **Manage list →** / **↻ Live price** for the holdings. Turning it on moves
+  today's balance into one placeholder holding ("Balance before holdings") for
+  you to replace with the real funds, so nothing moves in your balance or net
+  worth. A transfer into the account lands as **cash** and raises the balance
+  at once; record the purchase as a Ledger row on the account (money out) as
+  you buy shares, which takes the cash back out while the holdings grow. If the
+  account is linked through SimpleFIN, each sync keeps holdings plus cash equal
+  to the bank's balance with a "balance adjustment" holding. **Stop tracking
+  holdings** removes the holdings and folds their value back into the account's
+  balance. The type can't be changed while holdings are tracked. Holdings only
+  have today's price, so the account's chart is hidden and past months of net
+  worth use today's holdings value.
 - Under **Net worth**, a brokerage or retirement account (401(k), IRA) with
   several stocks or mutual funds shows as one card, not one row per symbol:
   select **+ Add holding**, then switch its Asset class to **Stock** or

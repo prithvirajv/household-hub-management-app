@@ -1191,12 +1191,13 @@ function ensureAccountsData() {
   });
   state.accounts.forEach((account) => {
     const balance = currentAccountBalance(account.id);
+    const assetBalance = currentAccountNetWorthValue(account.id);
     if (account.netWorthAssetId) {
       let asset = state.goals.netWorth.assets.find((item) => item.id === account.netWorthAssetId);
       // An account whose net worth line went missing (removed by hand or lost in an earlier edit) would silently drop out of net worth: the line is
       // made again under the same id, so the account counts once more.
-      if (!asset) { asset = { id: account.netWorthAssetId, name: account.name, value: balance, assetClass: "cash" }; state.goals.netWorth.assets.push(asset); }
-      asset.value = balance;
+      if (!asset) { asset = { id: account.netWorthAssetId, name: account.name, value: assetBalance, assetClass: "cash" }; state.goals.netWorth.assets.push(asset); }
+      asset.value = assetBalance;
     }
     if (account.netWorthLiabilityId) {
       let liability = state.goals.netWorth.liabilities.find((item) => item.id === account.netWorthLiabilityId);
@@ -1206,15 +1207,25 @@ function ensureAccountsData() {
   });
 }
 
-function currentAccountBalance(accountId) {
-  return accountBalance(accountId, {
+function accountBalanceContext() {
+  return {
     accounts: state.accounts,
     transactions: state.transactions,
     paychecks: state.paychecks,
     paycheckOccurrences: state.paycheckOccurrences,
     transfers: state.transfers,
-    ious: state.ious || []
-  }, dateKey(new Date()));
+    ious: state.ious || [],
+    assets: state.goals.netWorth.assets
+  };
+}
+
+function currentAccountBalance(accountId) {
+  return accountBalance(accountId, accountBalanceContext(), dateKey(new Date()));
+}
+
+// What the account's own net worth line carries: its whole balance, or just the cash when it holds investments (those are lines of their own).
+function currentAccountNetWorthValue(accountId) {
+  return accountNetWorthValue(accountId, accountBalanceContext(), dateKey(new Date()));
 }
 
 function accountName(accountId) {
@@ -1227,14 +1238,7 @@ function accountName(accountId) {
 // account's real balance as of that month's end, not a separately stored
 // series.
 function accountBalanceTrend(accountId, monthKeys) {
-  const context = {
-    accounts: state.accounts,
-    transactions: state.transactions,
-    paychecks: state.paychecks,
-    paycheckOccurrences: state.paycheckOccurrences,
-    transfers: state.transfers,
-    ious: state.ious || []
-  };
+  const context = accountBalanceContext();
   return monthKeys.map((monthKey) => accountBalance(accountId, context, monthEndDateKey(monthKey)));
 }
 
@@ -6418,7 +6422,8 @@ function wealthAccountsHtml() {
 // (the account row shows it). Each row inside keeps its own drag-to-reorder, edit and remove.
 function wealthItemGroupsHtml() {
   const assets = state.goals.netWorth.assets;
-  const holdingGroups = groupStockHoldings(assets);
+  const insideAccounts = accountHoldingGroupIds();
+  const holdingGroups = groupStockHoldings(assets).filter((group) => !insideAccounts.has(group.groupId));
   const groupTotal = (group) => group.items.reduce((sum, item) => sum + assetValue(item), 0);
   const sections = [
     { key: "nw-investments", label: "Investments", noun: "account", rows: holdingGroups.filter((group) => group.items[0]?.assetClass !== "retirement"), total: (rows) => rows.reduce((sum, group) => sum + groupTotal(group), 0), html: (group) => netWorthStockGroupCard(group) },
@@ -6569,6 +6574,63 @@ function netWorthStockGroupCard(group) {
 
 const accountTypeColors = { checking: "var(--blue)", savings: "var(--green)", cash: "var(--gold)", investment: "#8a63d2", credit_card: "var(--coral)", other: "var(--muted)" };
 
+// An Investment account can hold its own stocks and funds (account.holdingsGroupId points at the holdings group inside it). Its balance is the
+// holdings plus its cash. Turning it on moves the current balance into one placeholder holding ("Balance before holdings", for the person to
+// replace with the real funds) and starts the cash at zero, so the balance and net worth do not move. Turning it off drops the holdings and
+// hands their value back to the opening balance, again leaving the balance as it was.
+function startTrackingHoldings(account) {
+  const balance = currentAccountBalance(account.id);
+  const invested = Math.max(0, Math.round(balance * 100) / 100);
+  const groupId = uniqueId(`${account.name}-holdings`);
+  state.goals.netWorth.assets.push({ id: uniqueId(`${account.name}-holding`), name: "Balance before holdings", value: invested, assetClass: "stock", symbol: "", shares: 1, price: invested, costBasis: 0, holdingType: "fund", groupId, groupName: account.name });
+  account.holdingsGroupId = groupId;
+  account.openingBalance = Math.round((Number(account.openingBalance || 0) - invested) * 100) / 100;
+  // The account's own net worth line now carries only its cash; an account that never had one (made on mobile) gets one so the cash still counts.
+  if (!account.netWorthAssetId) {
+    const assetId = uniqueId(account.name);
+    state.goals.netWorth.assets.push({ id: assetId, name: account.name, value: 0, assetClass: "cash" });
+    account.netWorthAssetId = assetId;
+  }
+}
+
+function stopTrackingHoldings(account) {
+  const groupId = account.holdingsGroupId;
+  if (!groupId) return;
+  const invested = holdingsGroupTotal(state.goals.netWorth.assets, groupId);
+  state.goals.netWorth.assets = state.goals.netWorth.assets.filter((asset) => !(isHoldingAssetClass(asset.assetClass) && (asset.groupId || asset.id) === groupId));
+  account.openingBalance = Math.round((Number(account.openingBalance || 0) + invested) * 100) / 100;
+  account.holdingsGroupId = "";
+}
+
+// Holdings groups that live inside an account are shown in that account's card, not again under Investments or Retirement.
+function accountHoldingGroupIds() {
+  return new Set((state.accounts || []).map((account) => account.holdingsGroupId).filter(Boolean));
+}
+
+function accountHoldingsPanel(account, index, balance) {
+  const groupId = account.holdingsGroupId;
+  const group = groupStockHoldings(state.goals.netWorth.assets).find((item) => item.groupId === groupId);
+  const invested = holdingsGroupTotal(state.goals.netWorth.assets, groupId);
+  const cash = balance - invested;
+  const share = invested + Math.max(0, cash) > 0 ? Math.round((invested / (invested + Math.max(0, cash))) * 100) : 0;
+  const count = group ? group.items.length : 0;
+  return `<div class="account-holdings">
+    <div class="account-holdings-head">
+      <span>Inside this account</span>
+      <span class="account-holdings-actions">${group
+        ? `<button type="button" class="ghost" data-refresh-stock-group="${escapeHtml(groupId)}">↻ Live price</button><button type="button" class="ghost" data-manage-stock-group="${escapeHtml(groupId)}">Manage list →</button>`
+        : `<button type="button" class="ghost" data-add-account-holding="${index}">+ Add a holding</button>`}</span>
+    </div>
+    <div class="account-holdings-bar" role="img" aria-label="Invested ${money.format(invested)}, cash ${money.format(cash)}"><i style="width:${share}%"></i></div>
+    <div class="account-holdings-legend">
+      <span><i class="account-holdings-key invested"></i>Invested ${money.format(invested)}${count ? ` · ${count} holding${count === 1 ? "" : "s"}` : ""}</span>
+      <span title="Money in the account that is not invested yet. A transfer in lands here; recording the purchase takes it out."><i class="account-holdings-key cash"></i>Cash ${money.format(cash)}</span>
+    </div>
+    ${group ? `<div class="stock-group-chips">${group.items.map((item) => `<span class="stock-chip">${escapeHtml(item.symbol || item.name)}</span>`).join("")}</div>` : `<p class="muted">No holdings yet.</p>`}
+    <button type="button" class="ghost account-untrack-holdings" data-untrack-holdings="${index}">Stop tracking holdings</button>
+  </div>`;
+}
+
 function accountItemRow(account, index) {
   const balance = currentAccountBalance(account.id);
   const isLiability = account.type === "credit_card";
@@ -6579,7 +6641,7 @@ function accountItemRow(account, index) {
   const trendMonths = trailingMonthKeys(12);
   // A flat history draws no chart, so say why rather than leave a gap that looks like a bug (a linked account's opening balance absorbs
   // whatever came before its first sync, so it stays flat until a transaction moves it).
-  const sparkline = account.closedAt ? "" : (accountSparklineSvg(accountBalanceTrend(account.id, trendMonths), trendMonths) || `<span class="account-trend-empty" title="The chart appears once this account's balance changes from month to month.">No balance changes yet</span>`);
+  const sparkline = account.closedAt || account.holdingsGroupId ? "" : (accountSparklineSvg(accountBalanceTrend(account.id, trendMonths), trendMonths) || `<span class="account-trend-empty" title="The chart appears once this account's balance changes from month to month.">No balance changes yet</span>`);
   return `<article class="account-item ${isLiability ? "liability" : ""}" draggable="true" data-drag-account="${account.id}">
     <div class="debt-edit-grid">
       <label class="debt-name-field">Account name<input data-account-name="${index}" value="${escapeHtml(account.name)}" aria-label="Account name"></label>
@@ -6592,10 +6654,12 @@ function accountItemRow(account, index) {
       <i class="account-type-dot" style="background:${accountTypeColors[account.type] || accountTypeColors.other}" title="${typeLabels[account.type] || account.type}"></i>
       <div class="split-stat"><span>${isLiability ? "Owed" : "Balance"}</span><b class="${isLiability && balance > 0 ? "danger" : ""}">${money.format(balance)}</b></div>
       ${sparkline}
+      ${account.type === "investment" && !account.holdingsGroupId && !account.closedAt ? `<button type="button" class="ghost account-track-holdings" data-track-holdings="${index}" title="Add the stocks and funds this account holds. Its balance becomes what it holds plus its cash.">Track holdings</button>` : ""}
       ${account.closedAt ? `<span class="pill pill-warning" title="No new transactions can be added after ${formatShortDate(account.closedAt)}">Closed ${formatShortDate(account.closedAt)}</span>` : ""}
       ${account.syncedFrom ? `<span class="pill pill-info account-synced-tag" title="Fed by your bank: its records are complete from this date. For anything earlier, import a statement (Transactions, then Import a statement).">Synced from ${escapeHtml(new Date(`${account.syncedFrom}T00:00:00`).toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" }))}</span>` : ""}
       ${account.syncedThrough ? (() => { const behind = account.syncedThrough < dateKey(new Date(Date.now() - 2 * 86400000)); return `<span class="pill ${behind ? "pill-warning" : "pill-info"} account-synced-tag" title="${behind ? "The bank has not reported anything newer than this for the account - check the connection, or sync now." : "The bank's data for this account is loaded through this date."}">Synced through ${escapeHtml(new Date(`${account.syncedThrough}T00:00:00`).toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" }))}${behind ? " - behind" : ""}</span>`; })() : ""}
     </div>
+    ${account.holdingsGroupId ? accountHoldingsPanel(account, index, balance) : ""}
     <button class="icon-button danger-button card-close-button" data-delete-account="${index}" type="button" aria-label="Remove ${escapeHtml(account.name)}">×</button>
   </article>`;
 }
@@ -12518,6 +12582,8 @@ function bindViewEvents() {
         if (asset) asset.name = newName;
         const liability = state.goals.netWorth.liabilities.find((item) => item.id === account.netWorthLiabilityId);
         if (liability) liability.name = newName;
+        // The holdings inside an Investment account are labelled with its name.
+        if (account.holdingsGroupId) state.goals.netWorth.assets.forEach((item) => { if (item.groupId === account.holdingsGroupId) item.groupName = newName; });
         input.value = newName;
         autosaveState();
       };
@@ -12534,8 +12600,14 @@ function bindViewEvents() {
   });
 
   document.querySelectorAll("[data-account-type]").forEach((select) => {
-    select.addEventListener("change", () => {
+    select.addEventListener("change", async () => {
       const account = state.accounts[Number(select.dataset.accountType)];
+      // Holdings only live inside an Investment account, so the type stays put until they are stopped (that keeps the balance and net worth right).
+      if (account.holdingsGroupId && select.value !== "investment") {
+        select.value = account.type;
+        await showConfirm(`${account.name} is tracking its holdings. Use "Stop tracking holdings" on the account first, then change its type.`, { title: "Stop tracking holdings first", confirmLabel: "OK", cancelLabel: "Close", danger: false });
+        return;
+      }
       const wasLiability = account.type === "credit_card";
       const isLiability = select.value === "credit_card";
       account.type = select.value;
@@ -12585,6 +12657,39 @@ function bindViewEvents() {
     input.addEventListener("change", () => {
       const account = state.accounts[Number(input.dataset.accountCloseDate)];
       account.closedAt = input.value || "";
+      autosaveState();
+      render();
+    });
+  });
+
+  document.querySelectorAll("[data-track-holdings]").forEach((button) => {
+    button.addEventListener("click", () => {
+      const account = state.accounts[Number(button.dataset.trackHoldings)];
+      if (!account || account.holdingsGroupId) return;
+      startTrackingHoldings(account);
+      autosaveState();
+      render();
+    });
+  });
+
+  document.querySelectorAll("[data-add-account-holding]").forEach((button) => {
+    button.addEventListener("click", () => {
+      const account = state.accounts[Number(button.dataset.addAccountHolding)];
+      if (!account || !account.holdingsGroupId) return;
+      state.goals.netWorth.assets.push({ id: uniqueId(`${account.name}-holding`), name: "New holding", value: 0, assetClass: "stock", symbol: "", shares: 1, price: 0, costBasis: 0, holdingType: "fund", groupId: account.holdingsGroupId, groupName: account.name });
+      autosaveState();
+      render();
+    });
+  });
+
+  document.querySelectorAll("[data-untrack-holdings]").forEach((button) => {
+    button.addEventListener("click", async () => {
+      const account = state.accounts[Number(button.dataset.untrackHoldings)];
+      if (!account || !account.holdingsGroupId) return;
+      const invested = holdingsGroupTotal(state.goals.netWorth.assets, account.holdingsGroupId);
+      const ok = await showConfirm(`Stop tracking holdings for ${account.name}? Its ${money.format(invested)} of holdings are removed and counted as part of the account's balance again, so its balance and your net worth stay the same.`, { title: "Stop tracking holdings", confirmLabel: "Stop tracking" });
+      if (!ok) return;
+      stopTrackingHoldings(account);
       autosaveState();
       render();
     });
@@ -14676,7 +14781,8 @@ function renderLinkedMappingPanel() {
   const link = (linkedAccounts?.links || []).find((item) => item.id === linkedMapping.linkId);
   if (!link) return "";
   const isBrokerage = link.provider === "snaptrade";
-  const groups = groupStockHoldings(state.goals.netWorth.assets);
+  const insideAccounts = accountHoldingGroupIds();
+  const groups = groupStockHoldings(state.goals.netWorth.assets).filter((group) => !insideAccounts.has(group.groupId));
   const options = (remote) => {
     const selected = linkedMapping.choices[remote.remoteId] || "skip";
     const chosen = (value) => (selected === value ? "selected" : "");
@@ -14739,6 +14845,15 @@ function applySimplefinSync(link, payload, addRows, { ignoreRemembered = false }
     const accountId = link.mappings[remote.remoteId]?.accountId;
     const account = accountId ? state.accounts.find((item) => item.id === accountId) : null;
     if (!account || remote.balance === null) return;
+    if (account.holdingsGroupId) {
+      // An account that holds investments: the holdings plus its cash are matched to the bank's balance by the balance-adjustment line inside
+      // the holdings, so the opening balance (the cash) is left alone.
+      const cash = accountCashBalance(account.id, accountBalanceContext(), dateKey(new Date()));
+      const result = applyBalanceToHoldingsGroup(state.goals.netWorth.assets, { linkId: link.id, remoteId: remote.remoteId, groupId: account.holdingsGroupId, groupName: account.name, balance: Number(remote.balance) - cash }, uniqueId);
+      state.goals.netWorth.assets = result.assets;
+      if (result.adjustment) balancesUpdated += 1;
+      return;
+    }
     const opening = reconcileOpeningBalance(account, currentAccountBalance(account.id), remote.balance);
     if (opening !== Number(account.openingBalance || 0)) { account.openingBalance = opening; balancesUpdated += 1; }
   });
@@ -17243,10 +17358,10 @@ function mealRowsForMonth(monthKey) {
 
 function wealthRowsForMonth(monthKey) {
   const asOfDate = monthEndDateKey(monthKey);
-  const context = { accounts: state.accounts, transactions: state.transactions, paychecks: state.paychecks, paycheckOccurrences: state.paycheckOccurrences, transfers: state.transfers, ious: state.ious || [] };
+  const context = accountBalanceContext();
   const assetRows = state.goals.netWorth.assets.map((asset) => {
     const linkedAccount = state.accounts.find((account) => account.netWorthAssetId === asset.id);
-    return ["asset", asset.name, asset.assetClass || "other", (linkedAccount ? accountBalance(linkedAccount.id, context, asOfDate) : assetValue(asset)).toFixed(2)];
+    return ["asset", asset.name, asset.assetClass || "other", (linkedAccount ? accountNetWorthValue(linkedAccount.id, context, asOfDate) : assetValue(asset)).toFixed(2)];
   });
   const liabilityRows = state.goals.netWorth.liabilities.map((liability) => {
     const linkedAccount = state.accounts.find((account) => account.netWorthLiabilityId === liability.id);

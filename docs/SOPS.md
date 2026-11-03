@@ -234,6 +234,10 @@ user secret) are AES-256-GCM encrypted with `LINK_ENCRYPTION_KEY` and never retu
 - **Reading what a night did:** each household's apply logs `Overnight linked apply: household <id> {applied, imported, added, left, uncategorized,
   reasons, aiNote}` (counts only) and `Overnight AI fill-in: ... categorized N`; the sync-all request itself is logged with its latency.
 
+### Investment accounts that hold their own holdings (`account.holdingsGroupId`)
+
+An Investment account can point at a holdings group inside it. `accountBalance` = `accountCashBalance` (opening + ledger + transfers, the old formula) + `holdingsGroupTotal`. The account's net worth line (`netWorthAssetId`) carries only the **cash** (`accountNetWorthValue`), because the holdings are net worth lines of their own - using the full balance there double-counts. Any code that builds an `accountBalance` context must pass `assets` (`state.goals.netWorth.assets`), or a backed account silently reads as cash only. A SimpleFIN sync of such an account does not rewrite the opening balance: it sets the group's "balance adjustment" holding to `bank balance - cash - listed holdings` (never negative). Web only has the UI (Track holdings / Stop tracking); mobile has the logic but no control yet.
+
 ## Incident playbooks
 
 ### GCS uploads silently failing (documents never persist)
