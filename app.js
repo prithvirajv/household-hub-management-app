@@ -294,6 +294,8 @@ let documentsUploadProgress = null;
 const documentsThumbnailCache = new Map();
 let documentsInfoExpandedId = null;
 let wealthDocsExpandedKey = null;
+// Investment accounts whose account fields (name, type, opening balance, close date) are open for editing; they stay folded away otherwise.
+const wealthEditingAccounts = new Set();
 
 function currentMonthKey() {
   const now = new Date();
@@ -6401,7 +6403,7 @@ function assetAllocationRingHtml(segments) {
 function wealthAccountsHtml() {
   return `
           ${state.accounts.length
-            ? groupAccountsByType(state.accounts).map((group) => {
+            ? groupAccountsByType(state.accounts.filter((account) => !isInvestmentAccount(account))).map((group) => {
                 const isLiabilityGroup = group.type === "credit_card";
                 const groupTotal = group.accounts.reduce((sum, account) => sum + currentAccountBalance(account.id), 0);
                 return `<details class="account-type-group" data-account-group="${group.type}" ${wealthCollapsedGroups.has(group.type) ? "" : "open"}>
@@ -6426,7 +6428,7 @@ function wealthItemGroupsHtml() {
   const holdingGroups = groupStockHoldings(assets).filter((group) => !insideAccounts.has(group.groupId));
   const groupTotal = (group) => group.items.reduce((sum, item) => sum + assetValue(item), 0);
   const sections = [
-    { key: "nw-investments", label: "Investments", noun: "account", rows: holdingGroups.filter((group) => group.items[0]?.assetClass !== "retirement"), total: (rows) => rows.reduce((sum, group) => sum + groupTotal(group), 0), html: (group) => netWorthStockGroupCard(group) },
+    { key: "nw-investments", label: "Investments", noun: "account", rows: [...state.accounts.map((account, index) => ({ account, index })).filter(({ account }) => isInvestmentAccount(account)), ...holdingGroups.filter((group) => group.items[0]?.assetClass !== "retirement").map((group) => ({ group }))], total: (rows) => rows.reduce((sum, row) => sum + (row.account ? currentAccountBalance(row.account.id) : groupTotal(row.group)), 0), html: (row) => row.account ? investmentAccountCard(row.account, row.index) : netWorthStockGroupCard(row.group) },
     { key: "nw-retirement", label: "Retirement", noun: "account", rows: holdingGroups.filter((group) => group.items[0]?.assetClass === "retirement"), total: (rows) => rows.reduce((sum, group) => sum + groupTotal(group), 0), html: (group) => netWorthStockGroupCard(group) },
     { key: "nw-other-assets", label: "Other assets", noun: "item", rows: assets.map((asset, index) => ({ asset, index })).filter(({ asset }) => !isHoldingAssetClass(asset.assetClass) && !isAccountLinked("asset", asset.id)), total: (rows) => rows.reduce((sum, { asset }) => sum + assetValue(asset), 0), html: ({ asset, index }) => netWorthItemRow(asset, "asset", index) },
     { key: "nw-liabilities", label: "Loans and other liabilities", noun: "item", liability: true, rows: state.goals.netWorth.liabilities.map((item, index) => ({ item, index })).filter(({ item }) => !isAccountLinked("liability", item.id)), total: (rows) => rows.reduce((sum, { item }) => sum + Number(item.value || 0), 0), html: ({ item, index }) => netWorthItemRow(item, "liability", index) }
@@ -6545,33 +6547,55 @@ function renderWealth() {
 // live in the Manage holdings modal now (one entry point per action, same
 // principle as the chips below being read-only) - the card itself is a
 // read-only summary.
-// The holdings card. Inside an Investment account (embedded) it has no drag handle or remove button of its own - the account's handle drags the
-// whole account and Stop tracking holdings removes them - and no Name (the account row above already has it); cashNote adds the account's cash.
-function netWorthStockGroupCard(group, { embedded = false, cashNote = "" } = {}) {
+// The holdings card, shared by loose holdings (the ESPP) and Investment accounts so both read the same. An account's card shows the same
+// summary; its account fields (name, type, opening balance, close date, sync tags) sit behind Edit account, and it drags and removes as an account.
+function netWorthStockGroupCard(group, { account = null, accountIndex = -1, balance = 0, cash = 0 } = {}) {
+  const tracked = !account || Boolean(account.holdingsGroupId);
   const totalValue = group.items.reduce((sum, item) => sum + assetValue(item), 0);
-  const holdingsLabel = `${group.items.length} holding${group.items.length === 1 ? "" : "s"}`;
-  const gainLoss = groupGainLoss(group.items);
+  const holdingsLabel = group.items.length ? `${group.items.length} holding${group.items.length === 1 ? "" : "s"}` : (tracked ? "No holdings yet" : "Not tracked");
+  const gainLoss = group.items.length ? groupGainLoss(group.items) : { hasCostBasis: false };
   const lastUpdated = formatRelativeTime(state.goals.netWorth.priceLastUpdated?.[group.groupId]);
   const liveCaption = lastUpdated ? `Live pricing • updated ${lastUpdated}` : `Live pricing across ${holdingsLabel}`;
-  return `<article class="account-item stock-group-card ${embedded ? "stock-group-embedded" : ""}" ${embedded ? "" : `draggable="true" data-drag-networth-asset="${group.groupId}"`}>
-    ${embedded ? "" : `<span class="net-worth-drag-handle" aria-hidden="true" title="Drag to reorder">⠿</span>`}
+  const name = account ? account.name : group.groupName;
+  const hasCash = Math.abs(cash) >= 0.005;
+  const holdingsAction = !account
+    ? `<button type="button" class="ghost" data-manage-stock-group="${group.groupId}">Manage list →</button>`
+    : group.items.length
+      ? `<button type="button" class="ghost" data-manage-stock-group="${group.groupId}">Manage list →</button>`
+      : tracked
+        ? `<button type="button" class="ghost" data-add-account-holding="${accountIndex}">+ Add a holding</button>`
+        : account.closedAt ? "" : `<button type="button" class="ghost" data-track-holdings="${accountIndex}" title="Add the stocks and funds this account holds. Its balance becomes what it holds plus its cash.">Track holdings</button>`;
+  const dragAttrs = account ? `data-drag-account="${account.id}"` : `data-drag-networth-asset="${group.groupId}"`;
+  const valuePanel = account && !tracked
+    ? `<div class="stock-market-value stock-group-value-panel"><span>Balance</span><strong>${money.format(balance)}</strong><small class="muted">Add its holdings to value it by what it holds</small></div>`
+    : `<div class="stock-market-value stock-group-value-panel">
+      <span>Market value</span>
+      <strong>${money.format(totalValue)}</strong>
+      ${account && hasCash ? `<small class="muted">+ ${money.format(cash)} cash = ${money.format(balance)} in the account</small>` : ""}
+      ${gainLoss.hasCostBasis ? `<small class="gain-loss ${gainLoss.amount < 0 ? "loss" : "gain"}">${gainLoss.amount >= 0 ? "+" : ""}${money.format(gainLoss.amount)} (${gainLoss.percent >= 0 ? "+" : ""}${gainLoss.percent.toFixed(1)}%)</small>` : ""}
+      ${group.items.length ? `<button type="button" class="live-price-pill" data-refresh-stock-group="${group.groupId}">↻ Live price</button><small class="muted">${liveCaption}</small>` : ""}
+    </div>`;
+  const editing = account && wealthEditingAccounts.has(account.id);
+  return `<article class="account-item stock-group-card ${account ? "investment-account-card" : ""}" draggable="true" ${dragAttrs}>
+    <span class="net-worth-drag-handle" aria-hidden="true" title="Drag to reorder">⠿</span>
     <div class="stock-group-main">
       <div class="stock-group-grid">
-        ${embedded ? "" : `<div class="name-field"><span>Name</span><strong>${escapeHtml(group.groupName)}</strong></div>`}
-        <div class="stock-group-stat"><span>Asset class</span><strong>${assetClassLabelForHoldings(group.items)}</strong></div>
-        <div class="stock-group-stat"><span>Holdings</span><strong>${holdingsLabel}</strong><button type="button" class="ghost" data-manage-stock-group="${group.groupId}">Manage list →</button></div>
+        <div class="name-field"><span>Name</span><strong>${escapeHtml(name)}</strong>${account?.closedAt ? `<span class="pill pill-warning" title="No new transactions can be added after ${formatShortDate(account.closedAt)}">Closed ${formatShortDate(account.closedAt)}</span>` : ""}</div>
+        <div class="stock-group-stat"><span>Asset class</span><strong>${account && !group.items.length ? "Investment account" : assetClassLabelForHoldings(group.items)}</strong></div>
+        <div class="stock-group-stat"><span>Holdings</span><strong>${holdingsLabel}</strong>${holdingsAction}</div>
       </div>
       <div class="stock-group-chips">${group.items.map((item) => `<span class="stock-chip">${escapeHtml(holdingChipLabel(item))}</span>`).join("")}</div>
     </div>
-    <div class="stock-market-value stock-group-value-panel">
-      <span>Market value</span>
-      <strong>${money.format(totalValue)}</strong>
-      ${cashNote ? `<small class="muted">${cashNote}</small>` : ""}
-      ${gainLoss.hasCostBasis ? `<small class="gain-loss ${gainLoss.amount < 0 ? "loss" : "gain"}">${gainLoss.amount >= 0 ? "+" : ""}${money.format(gainLoss.amount)} (${gainLoss.percent >= 0 ? "+" : ""}${gainLoss.percent.toFixed(1)}%)</small>` : ""}
-      <button type="button" class="live-price-pill" data-refresh-stock-group="${group.groupId}">↻ Live price</button>
-      <small class="muted">${liveCaption}</small>
-    </div>
-    ${embedded ? "" : `<button class="icon-button danger-button card-close-button" data-delete-stock-group="${group.groupId}" type="button" aria-label="Remove ${escapeHtml(group.groupName)}">×</button>`}
+    ${valuePanel}
+    <button class="icon-button danger-button card-close-button" ${account ? `data-delete-account="${accountIndex}"` : `data-delete-stock-group="${group.groupId}"`} type="button" aria-label="Remove ${escapeHtml(name)}">×</button>
+    ${account ? `<div class="account-edit-region">
+      <button type="button" class="ghost account-edit-toggle" data-toggle-account-edit="${account.id}" aria-expanded="${editing ? "true" : "false"}">${editing ? "Hide account details" : "Edit account"}</button>
+      ${editing ? `<div class="account-edit-panel">
+        ${accountEditGridHtml(account, accountIndex)}
+        ${accountBalanceRowHtml(account, accountIndex, balance, { handle: false })}
+        ${account.holdingsGroupId ? `<button type="button" class="ghost account-untrack-holdings" data-untrack-holdings="${accountIndex}">Stop tracking holdings</button>` : ""}
+      </div>` : ""}
+    </div>` : ""}
   </article>`;
 }
 
@@ -6610,24 +6634,33 @@ function accountHoldingGroupIds() {
   return new Set((state.accounts || []).map((account) => account.holdingsGroupId).filter(Boolean));
 }
 
-function accountHoldingsPanel(account, index, balance) {
-  const groupId = account.holdingsGroupId;
-  const group = groupStockHoldings(state.goals.netWorth.assets).find((item) => item.groupId === groupId);
-  // What the holdings do not cover is the account's own cash (a transfer in lands here until the purchase is recorded).
-  const cash = balance - holdingsGroupTotal(state.goals.netWorth.assets, groupId);
-  const cashNote = Math.abs(cash) >= 0.005 ? `+ ${money.format(cash)} cash in the account` : "";
-  return `<div class="account-holdings">
-    ${group
-      ? netWorthStockGroupCard(group, { embedded: true, cashNote })
-      : `<div class="empty-inline"><span>No holdings yet.</span> <button type="button" class="ghost" data-add-account-holding="${index}">+ Add a holding</button></div>`}
-    <button type="button" class="ghost account-untrack-holdings" data-untrack-holdings="${index}">Stop tracking holdings</button>
-  </div>`;
+// Investment accounts sit in the Investments group beside loose holdings and use the same card; every other account type keeps its row.
+function isInvestmentAccount(account) {
+  return account.type === "investment" || Boolean(account.holdingsGroupId);
 }
 
-function accountItemRow(account, index) {
+const ACCOUNT_TYPE_LABELS = { checking: "Checking", savings: "Savings", cash: "Cash", investment: "Investment", credit_card: "Credit card", other: "Other" };
+
+function investmentAccountCard(account, index) {
   const balance = currentAccountBalance(account.id);
+  const groupId = account.holdingsGroupId;
+  const group = groupId ? groupStockHoldings(state.goals.netWorth.assets).find((item) => item.groupId === groupId) : null;
+  // What the holdings do not cover is the account's own cash (a transfer in lands here until the purchase is recorded).
+  const cash = groupId ? balance - holdingsGroupTotal(state.goals.netWorth.assets, groupId) : 0;
+  return netWorthStockGroupCard(group || { groupId: groupId || "", groupName: account.name, items: [] }, { account, accountIndex: index, balance, cash });
+}
+
+function accountEditGridHtml(account, index) {
+  return `<div class="debt-edit-grid">
+      <label class="debt-name-field">Account name<input data-account-name="${index}" value="${escapeHtml(account.name)}" aria-label="Account name"></label>
+      <label>Type<select data-account-type="${index}" aria-label="Type for ${escapeHtml(account.name)}">${Object.entries(ACCOUNT_TYPE_LABELS).map(([value, label]) => `<option value="${value}" ${account.type === value ? "selected" : ""}>${label}</option>`).join("")}</select></label>
+      <label>Opening balance<input data-account-opening-balance="${index}" type="number" step="0.01" inputmode="decimal" value="${account.openingBalance}" aria-label="Opening balance for ${escapeHtml(account.name)}"></label>
+      <label>Close date<input type="date" data-account-close-date="${index}" value="${account.closedAt}" aria-label="Close date for ${escapeHtml(account.name)}">${account.closedAt ? `<button type="button" class="ghost account-clear-close-date" data-clear-account-close-date="${index}" aria-label="Clear the close date for ${escapeHtml(account.name)} and reopen it">Clear</button>` : ""}</label>
+    </div>`;
+}
+
+function accountBalanceRowHtml(account, index, balance, { handle = true } = {}) {
   const isLiability = account.type === "credit_card";
-  const typeLabels = { checking: "Checking", savings: "Savings", cash: "Cash", investment: "Investment", credit_card: "Credit card", other: "Other" };
   // Closed accounts stop accruing new history worth trending, and a
   // just-added account has no past months behind it yet - both skip the
   // sparkline computation rather than rendering a flat/misleading line.
@@ -6635,24 +6668,23 @@ function accountItemRow(account, index) {
   // A flat history draws no chart, so say why rather than leave a gap that looks like a bug (a linked account's opening balance absorbs
   // whatever came before its first sync, so it stays flat until a transaction moves it).
   const sparkline = account.closedAt || account.holdingsGroupId ? "" : (accountSparklineSvg(accountBalanceTrend(account.id, trendMonths), trendMonths) || `<span class="account-trend-empty" title="The chart appears once this account's balance changes from month to month.">No balance changes yet</span>`);
-  return `<article class="account-item ${isLiability ? "liability" : ""}" draggable="true" data-drag-account="${account.id}">
-    <div class="debt-edit-grid">
-      <label class="debt-name-field">Account name<input data-account-name="${index}" value="${escapeHtml(account.name)}" aria-label="Account name"></label>
-      <label>Type<select data-account-type="${index}" aria-label="Type for ${escapeHtml(account.name)}">${Object.entries(typeLabels).map(([value, label]) => `<option value="${value}" ${account.type === value ? "selected" : ""}>${label}</option>`).join("")}</select></label>
-      <label>Opening balance<input data-account-opening-balance="${index}" type="number" step="0.01" inputmode="decimal" value="${account.openingBalance}" aria-label="Opening balance for ${escapeHtml(account.name)}"></label>
-      <label>Close date<input type="date" data-account-close-date="${index}" value="${account.closedAt}" aria-label="Close date for ${escapeHtml(account.name)}">${account.closedAt ? `<button type="button" class="ghost account-clear-close-date" data-clear-account-close-date="${index}" aria-label="Clear the close date for ${escapeHtml(account.name)} and reopen it">Clear</button>` : ""}</label>
-    </div>
-    <div class="account-balance-row">
-      <span class="account-drag-handle" aria-hidden="true" title="Drag to reorder">⠿</span>
-      <i class="account-type-dot" style="background:${accountTypeColors[account.type] || accountTypeColors.other}" title="${typeLabels[account.type] || account.type}"></i>
+  return `<div class="account-balance-row">
+      ${handle ? `<span class="account-drag-handle" aria-hidden="true" title="Drag to reorder">⠿</span>` : ""}
+      <i class="account-type-dot" style="background:${accountTypeColors[account.type] || accountTypeColors.other}" title="${ACCOUNT_TYPE_LABELS[account.type] || account.type}"></i>
       <div class="split-stat"><span>${isLiability ? "Owed" : "Balance"}</span><b class="${isLiability && balance > 0 ? "danger" : ""}">${money.format(balance)}</b></div>
       ${sparkline}
-      ${account.type === "investment" && !account.holdingsGroupId && !account.closedAt ? `<button type="button" class="ghost account-track-holdings" data-track-holdings="${index}" title="Add the stocks and funds this account holds. Its balance becomes what it holds plus its cash.">Track holdings</button>` : ""}
       ${account.closedAt ? `<span class="pill pill-warning" title="No new transactions can be added after ${formatShortDate(account.closedAt)}">Closed ${formatShortDate(account.closedAt)}</span>` : ""}
       ${account.syncedFrom ? `<span class="pill pill-info account-synced-tag" title="Fed by your bank: its records are complete from this date. For anything earlier, import a statement (Transactions, then Import a statement).">Synced from ${escapeHtml(new Date(`${account.syncedFrom}T00:00:00`).toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" }))}</span>` : ""}
       ${account.syncedThrough ? (() => { const behind = account.syncedThrough < dateKey(new Date(Date.now() - 2 * 86400000)); return `<span class="pill ${behind ? "pill-warning" : "pill-info"} account-synced-tag" title="${behind ? "The bank has not reported anything newer than this for the account - check the connection, or sync now." : "The bank's data for this account is loaded through this date."}">Synced through ${escapeHtml(new Date(`${account.syncedThrough}T00:00:00`).toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" }))}${behind ? " - behind" : ""}</span>`; })() : ""}
-    </div>
-    ${account.holdingsGroupId ? accountHoldingsPanel(account, index, balance) : ""}
+    </div>`;
+}
+
+function accountItemRow(account, index) {
+  const balance = currentAccountBalance(account.id);
+  const isLiability = account.type === "credit_card";
+  return `<article class="account-item ${isLiability ? "liability" : ""}" draggable="true" data-drag-account="${account.id}">
+    ${accountEditGridHtml(account, index)}
+    ${accountBalanceRowHtml(account, index, balance)}
     <button class="icon-button danger-button card-close-button" data-delete-account="${index}" type="button" aria-label="Remove ${escapeHtml(account.name)}">×</button>
   </article>`;
 }
@@ -12662,6 +12694,15 @@ function bindViewEvents() {
       const account = state.accounts[Number(input.dataset.accountCloseDate)];
       account.closedAt = input.value || "";
       autosaveState();
+      render();
+    });
+  });
+
+  document.querySelectorAll("[data-toggle-account-edit]").forEach((button) => {
+    button.addEventListener("click", () => {
+      const id = button.dataset.toggleAccountEdit;
+      if (wealthEditingAccounts.has(id)) wealthEditingAccounts.delete(id);
+      else wealthEditingAccounts.add(id);
       render();
     });
   });

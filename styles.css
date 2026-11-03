@@ -9371,22 +9371,6 @@ html[data-theme="dark"] .note-check-delete {
   font-style: italic;
 }
 
-.account-holdings {
-  display: grid;
-  gap: 0.45rem;
-  margin-top: 0.75rem;
-  padding-top: 0.75rem;
-  border-top: 1px solid var(--line);
-}
-
-
-
-
-
-
-
-
-
 .account-untrack-holdings {
   justify-self: start;
   min-height: 28px;
@@ -9394,18 +9378,33 @@ html[data-theme="dark"] .note-check-delete {
   font-size: 0.75rem;
 }
 
-.account-track-holdings {
-  min-height: 30px;
-  padding: 0.2rem 0.7rem;
-  font-size: 0.8rem;
+/* An Investment account uses the holdings card; its account fields fold under Edit account on a full-width row below the summary. */
+.stock-group-card.investment-account-card {
+  flex-wrap: wrap;
 }
 
-.stock-group-embedded {
-  margin: 0;
+.stock-group-grid .name-field .pill {
+  align-self: flex-start;
 }
 
-.stock-group-embedded .stock-group-grid {
-  grid-template-columns: minmax(90px, 0.8fr) minmax(140px, 1fr);
+.account-edit-region {
+  flex: 1 0 100%;
+  display: grid;
+  gap: 0.6rem;
+  padding-top: 0.6rem;
+  border-top: 1px solid var(--line);
+}
+
+.account-edit-toggle {
+  justify-self: start;
+  min-height: 28px;
+  padding: 0.15rem 0.6rem;
+  font-size: 0.75rem;
+}
+
+.account-edit-panel {
+  display: grid;
+  gap: 0.6rem;
 }
 
 .add-menu {

@@ -543,9 +543,9 @@ button on every screen. People with view-only access don't see it.
 
 All of this lives in one **Net worth** card: your **Accounts** (grouped as
 Checking, Savings, Investment, Credit cards, ...) with their type, opening
-balance, close date, balance chart and "synced from/through" tags, then your
-holdings,
-property and loans, then **Transfers** between accounts. One **+ Add** button at
+balance, close date, balance chart and "synced from/through" tags (Investment
+accounts sit in the **Investments** group instead, see below), then your
+holdings, property and loans, then **Transfers** between accounts. One **+ Add** button at
 the top of the card offers **Bank account or card**, **Investment account**
 and **Property or other asset**. An account is listed once - in
 the Accounts part - and counts toward the net worth total from there.
@@ -579,11 +579,13 @@ the Accounts part - and counts toward the net worth total from there.
 - To reopen a closed account, select **Clear** under its **Close date** (or
   the open-lock icon on mobile).
 - An account's **Type** can be set to **Investment** (alongside Checking, Savings,
-  Cash, Credit card and Other) for a brokerage, retirement or 529 account. It
-  groups under its own **Investment** heading and counts as an asset.
+  Cash, Credit card and Other) for a brokerage, retirement or 529 account. It is
+  listed under the **Investments** heading next to your loose stocks and funds,
+  on the same card, and counts as an asset. Its name, type, opening balance,
+  close date, balance and sync tags are under **Edit account** on the card.
 - **Track holdings:** on an Investment account, select **Track holdings** to
   list the stocks and funds it holds. Its balance becomes **what it holds plus
-  its cash**: the card shows **Invested** and **Cash**, a bar between them, and
+  its cash**: the card shows the market value with any cash under it, and
   **Manage list →** / **↻ Live price** for the holdings. Turning it on moves
   today's balance into one placeholder holding ("Balance before holdings") for
   you to replace with the real funds, so nothing moves in your balance or net
@@ -592,7 +594,7 @@ the Accounts part - and counts toward the net worth total from there.
   you buy shares, which takes the cash back out while the holdings grow. If the
   account is linked through SimpleFIN, each sync keeps holdings plus cash equal
   to the bank's balance with a "balance adjustment" holding. **Stop tracking
-  holdings** removes the holdings and folds their value back into the account's
+  holdings** (under **Edit account**) removes the holdings and folds their value back into the account's
   balance. The type can't be changed while holdings are tracked. Holdings only
   have today's price, so the account's chart is hidden and past months of net
   worth use today's holdings value.
