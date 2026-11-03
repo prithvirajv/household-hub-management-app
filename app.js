@@ -163,7 +163,7 @@ let mealsPickerSelectedRecipeId = "";
 let mealsShowSnacks = false;
 let bankImportFeedback = "";
 // Linked accounts (SimpleFIN Bridge / SnapTrade) - see server/linked-accounts.js. linkedMapping is the open "choose where each remote
-// account goes" panel: { linkId, remote: [...], choices: { remoteId: "skip" | "new" | <local account/group id> } }.
+// account goes" panel: { linkId, remote: [...], choices: { remoteId: "skip" | "new" | <local account/group id> }, types?: { remoteId: Type picked for a "new" account } }.
 let linkedAccounts = null;
 let linkedFeedback = "";
 let linkedBusyId = "";
@@ -6583,7 +6583,7 @@ function accountItemRow(account, index) {
       <label class="debt-name-field">Account name<input data-account-name="${index}" value="${escapeHtml(account.name)}" aria-label="Account name"></label>
       <label>Type<select data-account-type="${index}" aria-label="Type for ${escapeHtml(account.name)}">${Object.entries(typeLabels).map(([value, label]) => `<option value="${value}" ${account.type === value ? "selected" : ""}>${label}</option>`).join("")}</select></label>
       <label>Opening balance<input data-account-opening-balance="${index}" type="number" step="0.01" inputmode="decimal" value="${account.openingBalance}" aria-label="Opening balance for ${escapeHtml(account.name)}"></label>
-      <label>Close date<input type="date" data-account-close-date="${index}" value="${account.closedAt}" aria-label="Close date for ${escapeHtml(account.name)}"></label>
+      <label>Close date<input type="date" data-account-close-date="${index}" value="${account.closedAt}" aria-label="Close date for ${escapeHtml(account.name)}">${account.closedAt ? `<button type="button" class="ghost account-clear-close-date" data-clear-account-close-date="${index}" aria-label="Clear the close date for ${escapeHtml(account.name)} and reopen it">Clear</button>` : ""}</label>
     </div>
     <div class="account-balance-row">
       <span class="account-drag-handle" aria-hidden="true" title="Drag to reorder">⠿</span>
@@ -12426,7 +12426,20 @@ function bindViewEvents() {
   });
 
   document.querySelectorAll("[data-linked-choice]").forEach((select) => {
-    select.addEventListener("change", () => { if (linkedMapping) linkedMapping.choices[select.dataset.linkedChoice] = select.value; });
+    select.addEventListener("change", () => {
+      if (!linkedMapping) return;
+      const was = linkedMapping.choices[select.dataset.linkedChoice];
+      linkedMapping.choices[select.dataset.linkedChoice] = select.value;
+      // The Type picker only exists for a "New Wealth account", so it appears or goes away with that choice.
+      if (was === "new" || select.value === "new") render();
+    });
+  });
+
+  document.querySelectorAll("[data-linked-new-type]").forEach((select) => {
+    select.addEventListener("change", () => {
+      if (!linkedMapping) return;
+      linkedMapping.types = { ...(linkedMapping.types || {}), [select.dataset.linkedNewType]: select.value };
+    });
   });
 
   $("#linkedMappingCancel")?.addEventListener("click", () => { linkedMapping = null; render(); });
@@ -12451,7 +12464,7 @@ function bindViewEvents() {
         const group = groupStockHoldings(state.goals.netWorth.assets).find((item) => item.groupId === choice.slice(6));
         if (group) mappings[entry.remoteId] = { groupId: group.groupId, groupName: group.groupName };
       } else {
-        mappings[entry.remoteId] = { accountId: choice === "new" ? createLinkedWealthAccount(entry) : choice };
+        mappings[entry.remoteId] = { accountId: choice === "new" ? createLinkedWealthAccount(entry, linkedNewAccountType(entry)) : choice };
       }
     });
     try {
@@ -12570,6 +12583,17 @@ function bindViewEvents() {
     input.addEventListener("change", () => {
       const account = state.accounts[Number(input.dataset.accountCloseDate)];
       account.closedAt = input.value || "";
+      autosaveState();
+      render();
+    });
+  });
+
+  // A date field has no clear control of its own (Chrome only empties it once every part is deleted), so a closed account gets a Clear button.
+  document.querySelectorAll("[data-clear-account-close-date]").forEach((button) => {
+    button.addEventListener("click", () => {
+      const account = state.accounts[Number(button.dataset.clearAccountCloseDate)];
+      if (!account) return;
+      account.closedAt = "";
       autosaveState();
       render();
     });
@@ -14666,18 +14690,24 @@ function renderLinkedMappingPanel() {
     ${linkedMapping.remote.length ? linkedMapping.remote.map((remote) => `<div class="linked-mapping-row">
       <div><strong>${escapeHtml(remote.name)}</strong>${link.mappings && !Object.prototype.hasOwnProperty.call(link.mappings, remote.remoteId) ? ` <span class="pill pill-info">New</span>` : ""}<small>${escapeHtml(remote.orgName)}${remote.balance !== null ? ` · ${exactMoney.format(remote.balance)}` : ""}</small></div>
       <select data-linked-choice="${escapeHtml(remote.remoteId)}" aria-label="Where ${escapeHtml(remote.name)} goes">${options(remote)}</select>
+      ${!isBrokerage && linkedMapping.choices[remote.remoteId] === "new" ? `<label class="linked-mapping-type">Type <select data-linked-new-type="${escapeHtml(remote.remoteId)}" aria-label="Type for new account ${escapeHtml(remote.name)}">${["checking", "savings", "cash", "investment", "credit_card", "other"].map((value) => `<option value="${value}" ${linkedNewAccountType(remote) === value ? "selected" : ""}>${{ checking: "Checking", savings: "Savings", cash: "Cash", investment: "Investment", credit_card: "Credit card", other: "Other" }[value]}</option>`).join("")}</select></label>` : ""}
     </div>`).join("") : `<p class="muted">No accounts found yet.${isBrokerage ? " Finish connecting in the SnapTrade tab, then choose accounts again." : ""}</p>`}
     <div class="button-row"><button type="button" id="linkedMappingSave">Save and sync</button><button type="button" class="ghost" id="linkedMappingCancel">Cancel</button></div>
   </div>`;
 }
 
-function createLinkedWealthAccount(remote) {
-  const isCard = remote.balance !== null && remote.balance < 0;
+// The Type a "New Wealth account" will get: what the person picked in the mapping panel, else a guess from the name, institution and balance.
+function linkedNewAccountType(remote) {
+  return linkedMapping?.types?.[remote.remoteId] || guessAccountType(remote);
+}
+
+function createLinkedWealthAccount(remote, type = guessAccountType(remote)) {
+  const isCard = type === "credit_card";
   const name = remote.orgName ? `${remote.orgName} ${remote.name}` : remote.name;
   const netWorthId = uniqueId(name);
   if (isCard) state.goals.netWorth.liabilities.push({ id: netWorthId, name, value: 0 });
   else state.goals.netWorth.assets.push({ id: netWorthId, name, value: 0, assetClass: "cash" });
-  const account = { id: uniqueId(name), name, type: isCard ? "credit_card" : "checking", openingBalance: 0, netWorthAssetId: isCard ? "" : netWorthId, netWorthLiabilityId: isCard ? netWorthId : "", createdAt: dateKey(new Date()) };
+  const account = { id: uniqueId(name), name, type, openingBalance: 0, netWorthAssetId: isCard ? "" : netWorthId, netWorthLiabilityId: isCard ? netWorthId : "", createdAt: dateKey(new Date()) };
   state.accounts.push(account);
   return account.id;
 }

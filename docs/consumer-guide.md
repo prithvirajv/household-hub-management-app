@@ -575,6 +575,8 @@ the Accounts part - and counts toward the net worth total from there.
   the top. A grouped holdings card drags as one unit, moving every holding
   inside it together.
 - Under **Net worth**, everything sits under the same collapsible banners (name, how many, total): your accounts by type (Checking, Savings, Credit cards...), then **Investments**, **Retirement**, **Other assets** and **Loans and other liabilities**. A banner only appears when it has something in it, and collapsing one is remembered while you use the page.
+- To reopen a closed account, select **Clear** under its **Close date** (or
+  the open-lock icon on mobile).
 - An account's **Type** can be set to **Investment** (alongside Checking, Savings,
   Cash, Credit card and Other) for a brokerage or retirement account you track
   as a plain balance. It groups under its own **Investment** heading and counts
@@ -633,6 +635,13 @@ entry. It is read-only: FamilyLoop can never move money or place trades.
   afterwards choose a holdings group per brokerage account. Positions,
   prices, cost basis and cash update in place, and holdings you've sold
   disappear. (Needs the server to have SnapTrade keys.)
+- **Account type for a new linked account:** SimpleFIN doesn't say what kind of
+  account something is, so when you choose **New Wealth account**, a **Type**
+  picker appears under it, pre-filled from the account's name and institution
+  (a card or negative balance becomes Credit card; Brokerage, IRA, Roth, 401(k),
+  529 or an institution like Vanguard becomes Investment; Savings and Checking
+  by their words). Change it before **Save and sync** if the guess is wrong.
+  Accounts you already have are left as they are.
 - **New accounts:** if you add an account at SimpleFIN or SnapTrade later, the
   next sync shows "N new accounts found" on the link (and marks them **New**
   under **Choose accounts**). Until you choose where each goes it is ignored.
