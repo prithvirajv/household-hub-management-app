@@ -6545,17 +6545,19 @@ function renderWealth() {
 // live in the Manage holdings modal now (one entry point per action, same
 // principle as the chips below being read-only) - the card itself is a
 // read-only summary.
-function netWorthStockGroupCard(group) {
+// The holdings card. Inside an Investment account (embedded) it has no drag handle or remove button of its own - the account's handle drags the
+// whole account and Stop tracking holdings removes them - and no Name (the account row above already has it); cashNote adds the account's cash.
+function netWorthStockGroupCard(group, { embedded = false, cashNote = "" } = {}) {
   const totalValue = group.items.reduce((sum, item) => sum + assetValue(item), 0);
   const holdingsLabel = `${group.items.length} holding${group.items.length === 1 ? "" : "s"}`;
   const gainLoss = groupGainLoss(group.items);
   const lastUpdated = formatRelativeTime(state.goals.netWorth.priceLastUpdated?.[group.groupId]);
   const liveCaption = lastUpdated ? `Live pricing • updated ${lastUpdated}` : `Live pricing across ${holdingsLabel}`;
-  return `<article class="account-item stock-group-card" draggable="true" data-drag-networth-asset="${group.groupId}">
-    <span class="net-worth-drag-handle" aria-hidden="true" title="Drag to reorder">⠿</span>
+  return `<article class="account-item stock-group-card ${embedded ? "stock-group-embedded" : ""}" ${embedded ? "" : `draggable="true" data-drag-networth-asset="${group.groupId}"`}>
+    ${embedded ? "" : `<span class="net-worth-drag-handle" aria-hidden="true" title="Drag to reorder">⠿</span>`}
     <div class="stock-group-main">
       <div class="stock-group-grid">
-        <div class="name-field"><span>Name</span><strong>${escapeHtml(group.groupName)}</strong></div>
+        ${embedded ? "" : `<div class="name-field"><span>Name</span><strong>${escapeHtml(group.groupName)}</strong></div>`}
         <div class="stock-group-stat"><span>Asset class</span><strong>${assetClassLabelForHoldings(group.items)}</strong></div>
         <div class="stock-group-stat"><span>Holdings</span><strong>${holdingsLabel}</strong><button type="button" class="ghost" data-manage-stock-group="${group.groupId}">Manage list →</button></div>
       </div>
@@ -6564,11 +6566,12 @@ function netWorthStockGroupCard(group) {
     <div class="stock-market-value stock-group-value-panel">
       <span>Market value</span>
       <strong>${money.format(totalValue)}</strong>
+      ${cashNote ? `<small class="muted">${cashNote}</small>` : ""}
       ${gainLoss.hasCostBasis ? `<small class="gain-loss ${gainLoss.amount < 0 ? "loss" : "gain"}">${gainLoss.amount >= 0 ? "+" : ""}${money.format(gainLoss.amount)} (${gainLoss.percent >= 0 ? "+" : ""}${gainLoss.percent.toFixed(1)}%)</small>` : ""}
       <button type="button" class="live-price-pill" data-refresh-stock-group="${group.groupId}">↻ Live price</button>
       <small class="muted">${liveCaption}</small>
     </div>
-    <button class="icon-button danger-button card-close-button" data-delete-stock-group="${group.groupId}" type="button" aria-label="Remove ${escapeHtml(group.groupName)}">×</button>
+    ${embedded ? "" : `<button class="icon-button danger-button card-close-button" data-delete-stock-group="${group.groupId}" type="button" aria-label="Remove ${escapeHtml(group.groupName)}">×</button>`}
   </article>`;
 }
 
@@ -6610,26 +6613,13 @@ function accountHoldingGroupIds() {
 function accountHoldingsPanel(account, index, balance) {
   const groupId = account.holdingsGroupId;
   const group = groupStockHoldings(state.goals.netWorth.assets).find((item) => item.groupId === groupId);
-  const held = holdingsGroupTotal(state.goals.netWorth.assets, groupId);
-  // Cash holdings sit in the holdings list but are cash, not invested: the card counts them with the account's own cash.
-  const cashHoldings = group ? group.items.filter((item) => item.holdingType === "cash").reduce((sum, item) => sum + assetValue(item), 0) : 0;
-  const invested = held - cashHoldings;
-  const cash = balance - invested;
-  const share = invested + Math.max(0, cash) > 0 ? Math.round((invested / (invested + Math.max(0, cash))) * 100) : 0;
-  const count = group ? group.items.length : 0;
+  // What the holdings do not cover is the account's own cash (a transfer in lands here until the purchase is recorded).
+  const cash = balance - holdingsGroupTotal(state.goals.netWorth.assets, groupId);
+  const cashNote = Math.abs(cash) >= 0.005 ? `+ ${money.format(cash)} cash in the account` : "";
   return `<div class="account-holdings">
-    <div class="account-holdings-head">
-      <span>Inside this account</span>
-      <span class="account-holdings-actions">${group
-        ? `<button type="button" class="ghost" data-refresh-stock-group="${escapeHtml(groupId)}">↻ Live price</button><button type="button" class="ghost" data-manage-stock-group="${escapeHtml(groupId)}">Manage list →</button>`
-        : `<button type="button" class="ghost" data-add-account-holding="${index}">+ Add a holding</button>`}</span>
-    </div>
-    <div class="account-holdings-bar" role="img" aria-label="Invested ${money.format(invested)}, cash ${money.format(cash)}"><i style="width:${share}%"></i></div>
-    <div class="account-holdings-legend">
-      <span><i class="account-holdings-key invested"></i>Invested ${money.format(invested)}${count ? ` · ${count} holding${count === 1 ? "" : "s"}` : ""}</span>
-      <span title="Money in the account that is not invested yet. A transfer in lands here; recording the purchase takes it out."><i class="account-holdings-key cash"></i>Cash ${money.format(cash)}</span>
-    </div>
-    ${group ? `<div class="stock-group-chips">${group.items.map((item) => `<span class="stock-chip">${escapeHtml(holdingChipLabel(item))}</span>`).join("")}</div>` : `<p class="muted">No holdings yet.</p>`}
+    ${group
+      ? netWorthStockGroupCard(group, { embedded: true, cashNote })
+      : `<div class="empty-inline"><span>No holdings yet.</span> <button type="button" class="ghost" data-add-account-holding="${index}">+ Add a holding</button></div>`}
     <button type="button" class="ghost account-untrack-holdings" data-untrack-holdings="${index}">Stop tracking holdings</button>
   </div>`;
 }
