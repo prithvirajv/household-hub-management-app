@@ -14966,6 +14966,18 @@ function applySimplefinSync(link, payload, addRows, { ignoreRemembered = false }
   const { fresh, unmapped, alreadyImported } = selectNewLinkedTransactions(payload.transactions, link.mappings, knownIds);
   const posted = fresh.filter((transaction) => !transaction.pending);
   const pendingSkipped = fresh.length - posted.length;
+  // Which accounts those pending rows are on, and the newest posted row the bank sent for each, so "the bank shows it but FamilyLoop does not" can be
+  // told apart: still pending at the bank's data feed (it arrives once posted), or not sent at all.
+  const feedByAccount = new Map();
+  (payload.transactions || []).forEach((transaction) => {
+    const accountId = link.mappings?.[transaction.remoteAccountId]?.accountId;
+    if (!accountId) return;
+    const entry = feedByAccount.get(accountId) || { pending: 0, newestPending: "", newestPosted: "" };
+    if (transaction.pending) { entry.pending += 1; if (transaction.date > entry.newestPending) entry.newestPending = transaction.date; }
+    else if (transaction.date > entry.newestPosted) entry.newestPosted = transaction.date;
+    feedByAccount.set(accountId, entry);
+  });
+  const pendingDetail = [...feedByAccount].filter(([, entry]) => entry.pending).slice(0, 6).map(([accountId, entry]) => `${state.accounts.find((account) => account.id === accountId)?.name || "Account"}: ${entry.pending} pending (newest ${formatShortDate(entry.newestPending)}), newest posted row sent ${entry.newestPosted ? formatShortDate(entry.newestPosted) : "none"}`);
   // The whole household is saved in one request the server caps at about 1 MB; refuse a pull that would push it over rather than make
   // every later save fail.
   if (JSON.stringify(state).length + posted.length * 400 > 900000) throw new Error(`Importing ${posted.length} transactions would push your household data past the size the server can save. Import a shorter range (a later start date), or clean up old transactions first.`);
@@ -15013,7 +15025,7 @@ function applySimplefinSync(link, payload, addRows, { ignoreRemembered = false }
     state.goals.netWorth.liabilities = result.liabilities;
     debtsMatched += 1;
   });
-  return { imported: posted.length, pendingSkipped, unmapped, alreadyImported, balancesUpdated, groupsMatched, debtsMatched };
+  return { imported: posted.length, pendingSkipped, pendingDetail, unmapped, alreadyImported, balancesUpdated, groupsMatched, debtsMatched };
 }
 
 function applySnaptradeSync(link, payload) {
@@ -15078,7 +15090,7 @@ async function syncLinkedAccount(linkId, addRows, { quiet = false, sinceDate = "
     }
     if (link.provider === "simplefin") {
       const result = applySimplefinSync(link, payload, addRows, { ignoreRemembered: Boolean(sinceDate) });
-      summary = `${link.label}: ${result.imported} new transaction${result.imported === 1 ? "" : "s"} sent to Bank stream${result.balancesUpdated ? `, ${result.balancesUpdated} balance${result.balancesUpdated === 1 ? "" : "s"} updated` : ""}${result.groupsMatched ? `, ${result.groupsMatched} investment account${result.groupsMatched === 1 ? "" : "s"} matched to the bank balance` : ""}${result.debtsMatched ? `, ${result.debtsMatched} loan${result.debtsMatched === 1 ? "" : "s"} matched to the amount owed` : ""}${result.pendingSkipped ? `; ${result.pendingSkipped} pending skipped until they post` : ""}${result.unmapped ? `; ${result.unmapped} from accounts you chose not to import` : ""}.`;
+      summary = `${link.label}: ${result.imported} new transaction${result.imported === 1 ? "" : "s"} sent to Bank stream${result.balancesUpdated ? `, ${result.balancesUpdated} balance${result.balancesUpdated === 1 ? "" : "s"} updated` : ""}${result.groupsMatched ? `, ${result.groupsMatched} investment account${result.groupsMatched === 1 ? "" : "s"} matched to the bank balance` : ""}${result.debtsMatched ? `, ${result.debtsMatched} loan${result.debtsMatched === 1 ? "" : "s"} matched to the amount owed` : ""}${result.pendingSkipped ? `; ${result.pendingSkipped} pending skipped until they post${result.pendingDetail.length ? ` (${result.pendingDetail.join("; ")})` : ""}` : ""}${result.unmapped ? `; ${result.unmapped} from accounts you chose not to import` : ""}.`;
       if (payload.historyGaps?.length) summary += " Some months were left out because the bank did not return them - see Home for what to import from a statement.";
       if (payload.errors?.length) summary += ` The bank reported: ${payload.errors.join("; ")}`;
       // A history import that comes back short while the bank is complaining is not a quiet success: say so in a window, with the bank's own words.

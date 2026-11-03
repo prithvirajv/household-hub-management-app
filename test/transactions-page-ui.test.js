@@ -38,3 +38,9 @@ test("any removed row asks why, with remembered reasons, and the learned-rules l
   assert.equal(transactionsPage.includes("category-rules-card"), false, "the long category-rules list is gone from Transactions");
   assert.ok(transactionsPage.includes("data-open-learned-rules"), "a pointer to it stays");
 });
+
+test("a sync that skips pending rows says which accounts they are on and the newest posted row the bank sent for each", () => {
+  assert.match(app, /const pendingDetail = \[\.\.\.feedByAccount\]\.filter\(\(\[, entry\]\) => entry\.pending\)/);
+  assert.match(app, /pending skipped until they post\$\{result\.pendingDetail\.length \?/);
+  assert.match(app, /newest posted row sent \$\{entry\.newestPosted \? formatShortDate\(entry\.newestPosted\) : "none"\}/);
+});

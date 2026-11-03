@@ -661,7 +661,11 @@ entry. It is read-only: FamilyLoop can never move money or place trades.
   mapped account's balance is brought in line with the bank's, and stays there
   as you review waiting rows (the opening balance absorbs whatever your ledger
   doesn't know about, such as history before the first sync). Pending rows wait
-  until they post.
+  until they post; the **Sync now** result names the accounts they are on, with
+  the newest posted row the bank sent for each, so a charge your bank shows but
+  FamilyLoop doesn't can be told apart: still pending in the data feed (banks'
+  sites often show a charge as posted a day or more before the feed does), or
+  not sent at all.
 - **Investment accounts through SimpleFIN (401(k), IRA, ESPP…):** SimpleFIN
   only reports a total balance for these, so when choosing where the account
   goes, pick the holdings group under **Investment accounts (match balance)**.
