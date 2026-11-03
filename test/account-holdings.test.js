@@ -1,6 +1,6 @@
 const assert = require("node:assert/strict");
 const test = require("node:test");
-const { accountBalance, accountCashBalance, accountNetWorthValue, accountsWithBalances, computeNetWorthAtDate, holdingsGroupTotal } = require("../lib/shared-logic");
+const { accountBalance, accountCashBalance, accountNetWorthValue, accountsWithBalances, computeNetWorthAtDate, holdingsGroupTotal, assetClassLabelForHoldings, holdingChipLabel } = require("../lib/shared-logic");
 const { applyLinkedPayload } = require("../lib/linked-apply");
 
 const TODAY = "2026-11-02";
@@ -75,4 +75,15 @@ test("when the holdings and cash already exceed the bank's balance the adjustmen
   await sync(state, 500);
   assert.equal(state.goals.netWorth.assets.some((item) => item.linkedTo), false);
   assert.equal(total(state), 584, "the listed holdings stand; they are not cut to fit");
+});
+
+test("a cash holding counts toward the account's balance, is labelled Cash, and shows a Cash chip", () => {
+  const state = baseState();
+  state.goals.netWorth.assets.push({ ...fund("mm", 250), name: "College 529 - Cash", holdingType: "cash" });
+  assert.equal(total(state), 584 + 250, "it is part of the holdings total, so the balance includes it once");
+  const items = state.goals.netWorth.assets.filter((item) => item.groupId === "g1");
+  assert.equal(assetClassLabelForHoldings(items), "Mixed");
+  assert.equal(assetClassLabelForHoldings([items.find((item) => item.holdingType === "cash")]), "Cash");
+  assert.equal(holdingChipLabel(items.find((item) => item.holdingType === "cash")), "Cash");
+  assert.equal(holdingChipLabel({ symbol: "VTI", name: "x" }), "VTI");
 });

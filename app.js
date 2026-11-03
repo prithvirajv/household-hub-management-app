@@ -6559,7 +6559,7 @@ function netWorthStockGroupCard(group) {
         <div class="stock-group-stat"><span>Asset class</span><strong>${assetClassLabelForHoldings(group.items)}</strong></div>
         <div class="stock-group-stat"><span>Holdings</span><strong>${holdingsLabel}</strong><button type="button" class="ghost" data-manage-stock-group="${group.groupId}">Manage list →</button></div>
       </div>
-      <div class="stock-group-chips">${group.items.map((item) => `<span class="stock-chip">${escapeHtml(item.symbol || item.name)}</span>`).join("")}</div>
+      <div class="stock-group-chips">${group.items.map((item) => `<span class="stock-chip">${escapeHtml(holdingChipLabel(item))}</span>`).join("")}</div>
     </div>
     <div class="stock-market-value stock-group-value-panel">
       <span>Market value</span>
@@ -6610,7 +6610,10 @@ function accountHoldingGroupIds() {
 function accountHoldingsPanel(account, index, balance) {
   const groupId = account.holdingsGroupId;
   const group = groupStockHoldings(state.goals.netWorth.assets).find((item) => item.groupId === groupId);
-  const invested = holdingsGroupTotal(state.goals.netWorth.assets, groupId);
+  const held = holdingsGroupTotal(state.goals.netWorth.assets, groupId);
+  // Cash holdings sit in the holdings list but are cash, not invested: the card counts them with the account's own cash.
+  const cashHoldings = group ? group.items.filter((item) => item.holdingType === "cash").reduce((sum, item) => sum + assetValue(item), 0) : 0;
+  const invested = held - cashHoldings;
   const cash = balance - invested;
   const share = invested + Math.max(0, cash) > 0 ? Math.round((invested / (invested + Math.max(0, cash))) * 100) : 0;
   const count = group ? group.items.length : 0;
@@ -6626,7 +6629,7 @@ function accountHoldingsPanel(account, index, balance) {
       <span><i class="account-holdings-key invested"></i>Invested ${money.format(invested)}${count ? ` · ${count} holding${count === 1 ? "" : "s"}` : ""}</span>
       <span title="Money in the account that is not invested yet. A transfer in lands here; recording the purchase takes it out."><i class="account-holdings-key cash"></i>Cash ${money.format(cash)}</span>
     </div>
-    ${group ? `<div class="stock-group-chips">${group.items.map((item) => `<span class="stock-chip">${escapeHtml(item.symbol || item.name)}</span>`).join("")}</div>` : `<p class="muted">No holdings yet.</p>`}
+    ${group ? `<div class="stock-group-chips">${group.items.map((item) => `<span class="stock-chip">${escapeHtml(holdingChipLabel(item))}</span>`).join("")}</div>` : `<p class="muted">No holdings yet.</p>`}
     <button type="button" class="ghost account-untrack-holdings" data-untrack-holdings="${index}">Stop tracking holdings</button>
   </div>`;
 }
@@ -15912,23 +15915,26 @@ function holdingsModalRowHtml(item) {
   const gain = holdingGainLossMarkup(item);
   const costMode = holdingsCostEntryMode[item.id] === "total" ? "total" : "share";
   const costDisplayValue = costMode === "total" ? (Number(item.costBasis || 0) * Number(item.shares || 0)) || 0 : item.costBasis || 0;
+  // A cash holding (money held as cash inside the account, e.g. a money-market sleeve) is just a dollar amount: no symbol, shares, cost or live price.
+  const isCash = item.holdingType === "cash";
   return `<div class="holdings-modal-row" data-holding-row="${item.id}">
-    <input value="${escapeHtml(item.symbol || "")}" placeholder="e.g. AAPL" data-holding-symbol="${item.id}" aria-label="Symbol">
+    <input value="${escapeHtml(item.symbol || "")}" placeholder="${isCash ? "Cash" : "e.g. AAPL"}" data-holding-symbol="${item.id}" aria-label="Symbol" ${isCash ? "disabled" : ""}>
     <select data-holding-type="${item.id}" aria-label="Asset class">
-      <option value="stock" ${item.holdingType !== "fund" ? "selected" : ""}>Stock</option>
+      <option value="stock" ${item.holdingType !== "fund" && !isCash ? "selected" : ""}>Stock</option>
       <option value="fund" ${item.holdingType === "fund" ? "selected" : ""}>Mutual Fund</option>
+      <option value="cash" ${isCash ? "selected" : ""}>Cash</option>
     </select>
-    <input type="number" min="0" step="0.0001" inputmode="decimal" value="${item.shares || 0}" data-holding-shares="${item.id}" aria-label="Shares">
+    <input type="number" min="0" step="0.0001" inputmode="decimal" value="${item.shares || 0}" data-holding-shares="${item.id}" aria-label="Shares" ${isCash ? "disabled" : ""}>
     <div class="holdings-modal-cost-cell">
       <div class="holdings-modal-cost-row">
-        <input type="number" min="0" step="0.01" inputmode="decimal" value="${costDisplayValue}" data-holding-cost-basis="${item.id}" aria-label="${costMode === "total" ? "Total amount paid" : "Average share price paid"}" placeholder="${costMode === "total" ? "Total cost" : "Avg. cost"}">
+        <input type="number" min="0" step="0.01" inputmode="decimal" value="${costDisplayValue}" data-holding-cost-basis="${item.id}" aria-label="${costMode === "total" ? "Total amount paid" : "Average share price paid"}" ${isCash ? "disabled" : ""} placeholder=""${costMode === "total" ? "Total cost" : "Avg. cost"}">
         <button type="button" class="holdings-modal-cost-mode-toggle ${costMode === "total" ? "active" : ""}" data-holding-cost-mode-toggle="${item.id}" title="${costMode === "total" ? "Switch to entering the per-share cost instead" : "Switch to entering the total amount paid instead"}">${costMode === "total" ? "Total" : "/sh"}</button>
       </div>
     </div>
     <div class="holdings-modal-price-cell">
       <div class="holdings-modal-price-row">
         <input type="number" min="0" step="0.01" inputmode="decimal" value="${item.price || 0}" data-holding-price="${item.id}" aria-label="Price per share">
-        <button type="button" class="holdings-modal-refresh-button" data-holding-refresh="${item.id}" title="Refresh live price" aria-label="Refresh live price for ${escapeHtml(item.symbol || "this holding")}">⟳</button>
+        <button type="button" class="holdings-modal-refresh-button" data-holding-refresh="${item.id}" ${isCash ? "disabled" : ""} title="Refresh live price" aria-label="Refresh live price for ${escapeHtml(item.symbol || "this holding")}">⟳</button>
       </div>
       <small class="${feedback?.isError ? "stock-price-error" : ""}">${feedback ? feedback.message : "Not refreshed yet"}</small>
     </div>
@@ -15958,7 +15964,20 @@ function wireHoldingsModalRowEvents() {
       const asset = findAsset(select.dataset.holdingType);
       if (!asset) return;
       asset.holdingType = select.value;
+      if (asset.holdingType === "cash") {
+        // Cash keeps its dollar value but drops what only makes sense for a security: the symbol, share count, cost and price.
+        const amount = assetValue(asset);
+        asset.symbol = "";
+        asset.shares = 1;
+        asset.price = amount;
+        asset.value = amount;
+        asset.costBasis = 0;
+        const accountName = $("#holdingsModalAccountName").value.trim();
+        asset.name = accountName ? `${accountName} - Cash` : "Cash";
+      }
       autosaveState();
+      renderHoldingsModalRows();
+      updateHoldingsModalTotal();
     });
   });
   container.querySelectorAll("[data-holding-shares]").forEach((input) => {
