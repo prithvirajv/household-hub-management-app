@@ -1,4 +1,6 @@
 const assert = require("node:assert/strict");
+const fs = require("node:fs");
+const path = require("node:path");
 const test = require("node:test");
 const { accountBalance, accountCashBalance, accountNetWorthValue, accountsWithBalances, computeNetWorthAtDate, holdingsGroupTotal, assetClassLabelForHoldings, holdingChipLabel } = require("../lib/shared-logic");
 const { applyLinkedPayload } = require("../lib/linked-apply");
@@ -86,4 +88,14 @@ test("a cash holding counts toward the account's balance, is labelled Cash, and 
   assert.equal(assetClassLabelForHoldings([items.find((item) => item.holdingType === "cash")]), "Cash");
   assert.equal(holdingChipLabel(items.find((item) => item.holdingType === "cash")), "Cash");
   assert.equal(holdingChipLabel({ symbol: "VTI", name: "x" }), "VTI");
+});
+
+test("Net worth has one Add menu (bank or card, investment account, property or other asset) instead of separate Add account and Add holding buttons", () => {
+  const app = fs.readFileSync(path.join(__dirname, "..", "app.js"), "utf8");
+  const menu = app.match(/<details class="add-menu" id="wealthAddMenu">[\s\S]*?<\/details>/);
+  assert.ok(menu, "the Add menu is on the Net worth card");
+  for (const id of ["addAccountButton", "addInvestmentAccountButton", "addNetWorthItemButton"]) assert.ok(menu[0].includes(`id="${id}"`), `${id} is inside the menu`);
+  assert.equal(app.includes("+ Add account</button>"), false);
+  assert.equal(app.includes("+ Add holding</button>"), false);
+  assert.match(app, /addInvestmentAccountButton"\)\?\.addEventListener\("click", \(\) => addWealthAccount\("investment"\)\)/, "choosing it makes an Investment account");
 });

@@ -545,8 +545,9 @@ All of this lives in one **Net worth** card: your **Accounts** (grouped as
 Checking, Savings, Investment, Credit cards, ...) with their type, opening
 balance, close date, balance chart and "synced from/through" tags, then your
 holdings,
-property and loans, then **Transfers** between accounts. **+ Add account** and
-**+ Add holding** are at the top of the card. An account is listed once - in
+property and loans, then **Transfers** between accounts. One **+ Add** button at
+the top of the card offers **Bank account or card**, **Investment account**
+and **Property or other asset**. An account is listed once - in
 the Accounts part - and counts toward the net worth total from there.
 
 1. Add a real bank or credit-card **Account** with its opening balance.
@@ -561,7 +562,7 @@ the Accounts part - and counts toward the net worth total from there.
 5. The **Asset allocation** card breaks your net worth down into Cash,
    Stocks & funds, Property, and Other, with a ring chart and a dollar/percent
    legend — computed automatically from every asset's class, no setup needed.
-6. Switch the currency selector next to **+ Add holding** to EUR or GBP to
+6. Switch the currency selector next to **+ Add** to EUR or GBP to
    see the net worth summary (Assets/Liabilities/Net worth) converted using
    real, live exchange rates. This only reformats that summary strip —
    individual accounts and holdings underneath still show USD.
@@ -595,9 +596,11 @@ the Accounts part - and counts toward the net worth total from there.
   balance. The type can't be changed while holdings are tracked. Holdings only
   have today's price, so the account's chart is hidden and past months of net
   worth use today's holdings value.
-- Under **Net worth**, a brokerage or retirement account (401(k), IRA) with
-  several stocks or mutual funds shows as one card, not one row per symbol:
-  select **+ Add holding**, then switch its Asset class to **Stock** or
+- For a brokerage, retirement or 529 account, choose **+ Add → Investment
+  account** and use **Track holdings** (above). For stocks or funds you hold
+  outside an account, such as employer shares, several of them show as one
+  card, not one row per symbol: select **+ Add → Property or other asset**,
+  then switch its Asset class to **Stock** or
   **Retirement** to turn it into one. The card shows a chip per holding, an
   Asset class label that updates automatically (Stocks / Mutual Funds /
   Mixed), and a combined market value. Select **Manage list** on the card

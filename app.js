@@ -6529,7 +6529,7 @@ function renderWealth() {
           </article>`).join("") : `<div class="onboarding-empty compact-onboarding"><div class="empty-symbol" aria-hidden="true">↓</div><h3>Add a debt when you are ready</h3><p>Track its balance, rate, payment, and the asset it secures.</p></div>`}
         </section>
       </div>
-      <section class="card wealth-holdings"><div class="section-head"><div><span class="card-label">Net worth</span><h3>Assets, investments and liabilities</h3></div><div class="wealth-currency-row"><select id="wealthCurrencySelect" aria-label="Display currency">${[...new Set([state.household.currency || "USD", "USD", "EUR", "GBP", "INR"])].map((code) => `<option value="${code}" ${wealthDisplayCurrency() === code ? "selected" : ""}>${code}</option>`).join("")}</select><button id="addAccountButton" type="button">+ Add account</button><button id="addNetWorthItemButton" type="button">+ Add holding</button></div></div><div class="net-worth-strip"><strong data-net-worth-total>${wealthMoney(netWorth().total)}</strong><span>Assets <b data-net-worth-assets>${wealthMoney(netWorth().assets)}</b> Liabilities <b data-net-worth-liabilities>${wealthMoney(netWorth().liabilities)}</b></span></div>${wealthDisplayCurrency() !== (state.household.currency || "USD") ? `<p class="muted wealth-currency-note">Converted from ${state.household.currency || "USD"} using real exchange rates${wealthFxRates ? "" : " — loading…"}. Individual accounts and holdings below still show ${state.household.currency || "USD"}.</p>` : ""}<div class="net-worth-accounts"><div class="net-worth-subhead">Accounts</div>${wealthAccountsHtml()}</div>${wealthItemGroupsHtml()}${state.goals.netWorth.assets.length || state.goals.netWorth.liabilities.length || state.accounts.length ? "" : `<div class="empty-inline">No assets, investments or liabilities yet</div>`}<div class="net-worth-transfers"><div class="net-worth-subhead">Transfers</div>${wealthTransfersHtml()}</div></section>
+      <section class="card wealth-holdings"><div class="section-head"><div><span class="card-label">Net worth</span><h3>Assets, investments and liabilities</h3></div><div class="wealth-currency-row"><select id="wealthCurrencySelect" aria-label="Display currency">${[...new Set([state.household.currency || "USD", "USD", "EUR", "GBP", "INR"])].map((code) => `<option value="${code}" ${wealthDisplayCurrency() === code ? "selected" : ""}>${code}</option>`).join("")}</select><details class="add-menu" id="wealthAddMenu"><summary class="add-menu-button">+ Add</summary><div class="add-menu-list" role="menu"><button id="addAccountButton" type="button" role="menuitem"><strong>Bank account or card</strong><small>Checking, savings, cash or a credit card</small></button><button id="addInvestmentAccountButton" type="button" role="menuitem"><strong>Investment account</strong><small>Brokerage, retirement or 529 - track what it holds</small></button><button id="addNetWorthItemButton" type="button" role="menuitem"><strong>Property or other asset</strong><small>A home, a car, or a stock you hold outside an account</small></button></div></details></div></div><div class="net-worth-strip"><strong data-net-worth-total>${wealthMoney(netWorth().total)}</strong><span>Assets <b data-net-worth-assets>${wealthMoney(netWorth().assets)}</b> Liabilities <b data-net-worth-liabilities>${wealthMoney(netWorth().liabilities)}</b></span></div>${wealthDisplayCurrency() !== (state.household.currency || "USD") ? `<p class="muted wealth-currency-note">Converted from ${state.household.currency || "USD"} using real exchange rates${wealthFxRates ? "" : " — loading…"}. Individual accounts and holdings below still show ${state.household.currency || "USD"}.</p>` : ""}<div class="net-worth-accounts"><div class="net-worth-subhead">Accounts</div>${wealthAccountsHtml()}</div>${wealthItemGroupsHtml()}${state.goals.netWorth.assets.length || state.goals.netWorth.liabilities.length || state.accounts.length ? "" : `<div class="empty-inline">No assets, investments or liabilities yet</div>`}<div class="net-worth-transfers"><div class="net-worth-subhead">Transfers</div>${wealthTransfersHtml()}</div></section>
     </section>`;
 }
 
@@ -6585,7 +6585,7 @@ function startTrackingHoldings(account) {
   const balance = currentAccountBalance(account.id);
   const invested = Math.max(0, Math.round(balance * 100) / 100);
   const groupId = uniqueId(`${account.name}-holdings`);
-  state.goals.netWorth.assets.push({ id: uniqueId(`${account.name}-holding`), name: "Balance before holdings", value: invested, assetClass: "stock", symbol: "", shares: 1, price: invested, costBasis: 0, holdingType: "fund", groupId, groupName: account.name });
+  state.goals.netWorth.assets.push({ id: uniqueId(`${account.name}-holding`), name: invested > 0 ? "Balance before holdings" : "New holding", value: invested, assetClass: "stock", symbol: "", shares: 1, price: invested, costBasis: 0, holdingType: "fund", groupId, groupName: account.name });
   account.holdingsGroupId = groupId;
   account.openingBalance = Math.round((Number(account.openingBalance || 0) - invested) * 100) / 100;
   // The account's own net worth line now carries only its cash; an account that never had one (made on mobile) gets one so the cash still counts.
@@ -12549,17 +12549,28 @@ function bindViewEvents() {
   if (["wealth", "transactions", "home"].includes(currentView)) maybeAutoSyncLinkedAccounts(addBankStreamRows);
   maybeCatchUpBankStream();
 
-  $("#addAccountButton")?.addEventListener("click", () => {
+  const addWealthAccount = (type) => {
     const name = `New account ${state.accounts.length + 1}`;
     const netWorthId = uniqueId(name);
     state.goals.netWorth.assets.push({ id: netWorthId, name, value: 0, assetClass: "cash" });
     state.accounts.push({
-      id: uniqueId(name), name, type: "checking", openingBalance: 0,
+      id: uniqueId(name), name, type, openingBalance: 0,
       netWorthAssetId: netWorthId, netWorthLiabilityId: "", createdAt: dateKey(new Date())
     });
     autosaveState();
     render();
-  });
+  };
+  $("#addAccountButton")?.addEventListener("click", () => addWealthAccount("checking"));
+  // An investment account starts empty; its Track holdings button is right on the new card.
+  $("#addInvestmentAccountButton")?.addEventListener("click", () => addWealthAccount("investment"));
+  // The Add menu closes when something outside it is clicked (choosing an item re-renders the page, which closes it too).
+  if (!window.wealthAddMenuCloser) {
+    window.wealthAddMenuCloser = true;
+    document.addEventListener("click", (event) => {
+      const menu = document.getElementById("wealthAddMenu");
+      if (menu && menu.open && !menu.contains(event.target)) menu.open = false;
+    });
+  }
 
   document.querySelectorAll("[data-account-name]").forEach((input) => {
     input.addEventListener("change", () => {

@@ -9407,3 +9407,63 @@ html[data-theme="dark"] .note-check-delete {
 .stock-group-embedded .stock-group-grid {
   grid-template-columns: minmax(90px, 0.8fr) minmax(140px, 1fr);
 }
+
+.add-menu {
+  position: relative;
+}
+
+.add-menu-button {
+  list-style: none;
+  cursor: pointer;
+  padding: 0.55rem 0.75rem;
+  border-radius: 6px;
+  background: var(--green);
+  color: white;
+  font-weight: 800;
+  min-height: 34px;
+  display: inline-flex;
+  align-items: center;
+}
+
+.add-menu-button::-webkit-details-marker {
+  display: none;
+}
+
+.add-menu-list {
+  position: absolute;
+  right: 0;
+  top: calc(100% + 0.3rem);
+  z-index: 20;
+  display: grid;
+  gap: 0.15rem;
+  width: min(320px, 80vw);
+  padding: 0.35rem;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--panel);
+  box-shadow: var(--shadow);
+}
+
+.add-menu-list button {
+  display: grid;
+  gap: 0.1rem;
+  width: 100%;
+  padding: 0.5rem 0.65rem;
+  border: 0;
+  background: transparent;
+  color: var(--text);
+  text-align: left;
+  font-weight: 400;
+}
+
+.add-menu-list button:hover {
+  background: var(--soft-blue);
+}
+
+.add-menu-list strong {
+  font-weight: 800;
+}
+
+.add-menu-list small {
+  color: var(--muted);
+}
