@@ -9467,3 +9467,73 @@ html[data-theme="dark"] .note-check-delete {
 .add-menu-list small {
   color: var(--muted);
 }
+
+/* The new-transaction form is folded away on Transactions until asked for, so the list of transactions gets the page. */
+.new-transaction {
+  margin-bottom: 0.75rem;
+}
+
+.new-transaction > summary {
+  display: inline-block;
+  cursor: pointer;
+  list-style: none;
+  padding: 0.45rem 0.8rem;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--panel);
+  font-weight: 800;
+  font-size: 0.85rem;
+}
+
+.new-transaction > summary::-webkit-details-marker {
+  display: none;
+}
+
+.new-transaction[open] > summary {
+  margin-bottom: 0.6rem;
+}
+
+/* Radio choices in the "why did you remove this" dialog: the radio sits inline with its words instead of taking a full-width field. */
+.removal-reason {
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+  font-weight: 700;
+}
+
+.removal-reason input[type="radio"] {
+  width: auto;
+  min-height: 0;
+  margin: 0;
+}
+
+.removal-reason-form {
+  display: grid;
+  gap: 0.55rem;
+}
+
+.removal-reason-extra {
+  display: grid;
+  gap: 0.5rem;
+  padding-left: 1.6rem;
+}
+
+.removal-other-text {
+  margin-left: 1.6rem;
+}
+
+.learned-rules-group {
+  margin-top: 0.6rem;
+}
+
+.learned-rules-group > summary {
+  cursor: pointer;
+  font-weight: 800;
+}
+
+.learned-rules-pointer {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}

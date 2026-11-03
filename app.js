@@ -293,6 +293,8 @@ let documentsUploadProgress = null;
 // avoids storing derived thumbnail bytes anywhere).
 const documentsThumbnailCache = new Map();
 let documentsInfoExpandedId = null;
+// The new-transaction form on Transactions is folded away until asked for (it is rarely used and took most of the page).
+let newTransactionOpen = false;
 let wealthDocsExpandedKey = null;
 // Investment accounts whose account fields (name, type, opening balance, close date) are open for editing; they stay folded away otherwise.
 const wealthEditingAccounts = new Set();
@@ -3298,6 +3300,8 @@ function renderTransactions() {
         <section class="card">
           <div class="card-label">Entries</div><h3>Ledger</h3>
           ${transactionValidationFeedback ? `<p class="muted" role="status">${escapeHtml(transactionValidationFeedback)}</p>` : ""}
+          <details class="new-transaction" id="newTransactionDetails" ${newTransactionOpen ? "open" : ""}>
+          <summary>+ New transaction</summary>
           <form id="transactionForm" class="mini-form transaction-entry-form">
             <label>Payee<input name="payee" placeholder="Coffee House" required></label>
             <label>Amount<input name="amount" type="number" step="0.01" placeholder="18.72" required></label>
@@ -3317,6 +3321,7 @@ function renderTransactions() {
             <datalist id="transactionTagOptions">${allTransactionTagLabels().map((tag) => `<option value="${escapeHtml(tag)}">`).join("")}</datalist>
             <button type="submit" class="form-row-full">Add transaction</button>
           </form>
+          </details>
           ${(() => {
             const monthStart = `${state.budget.month}-01`;
             const monthEnd = monthEndDateKey(state.budget.month);
@@ -3343,7 +3348,14 @@ function renderTransactions() {
             const monthTransactions = state.transactions
               .map((transaction, index) => ({ transaction, index }))
               .filter(({ transaction }) => transaction.date?.slice(0, 7) === state.budget.month);
-            if (!monthTransactions.length) return `<div class="empty-inline">No transactions yet</div>`;
+            if (!monthTransactions.length) {
+              // Rows the bank has sent for this month can be waiting in Bank stream (held for a look), so say so instead of looking like nothing synced.
+              if (!imported.length) return `<div class="empty-inline">No transactions yet</div>`;
+              const held = {};
+              imported.forEach((transaction) => { const reason = transaction.heldReason || "waiting for a look"; held[reason] = (held[reason] || 0) + 1; });
+              const why = Object.entries(held).map(([reason, count]) => `${count} ${reason}`).join(", ");
+              return `<div class="empty-inline">No transactions in the ledger for this month yet. ${imported.length} row${imported.length === 1 ? " is" : "s are"} waiting in Bank stream (${escapeHtml(why)}); accept or move them to Transfers there and they land here.</div>`;
+            }
             const sorted = sortByTransactionField(monthTransactions, transactionSort.field, transactionSort.direction);
             const visibleIndices = sorted.map(({ index }) => index);
             const allVisibleSelected = visibleIndices.length > 0 && visibleIndices.every((index) => ledgerSelectedIndices.has(index));
@@ -3482,11 +3494,7 @@ function renderTransactions() {
             </div>
           `).join("") || `<div class="empty-inline">No bank stream items waiting</div>`}
         </section>
-        ${categorizationRuleEntries().length ? `<section class="card category-rules-card">
-          <div class="card-label">Learned</div><h3>Category rules</h3>
-          <p class="muted">Whenever you move a transaction to a different Subcategory, FamilyLoop remembers it for that payee and files the next one there too. Remove a rule to go back to guessing from history.</p>
-          ${categorizationRuleEntries().map((entry) => { const line = allLines().find((item) => item.id === entry.lineId); return `<div class="compact-row"><div><strong>${escapeHtml(entry.label)}</strong><small>${line ? escapeHtml(`${line.category} - ${line.name}`) : "A Subcategory that no longer exists"}</small></div><button type="button" class="icon-button danger-button" data-remove-category-rule="${escapeHtml(entry.keys.join(","))}" aria-label="Remove the rule for ${escapeHtml(entry.label)}">×</button></div>`; }).join("")}
-        </section>` : ""}
+        ${categorizationRuleEntries().length || (state.removalRules || []).length ? `<p class="muted learned-rules-pointer">FamilyLoop has learned ${categorizationRuleEntries().length} category rule${categorizationRuleEntries().length === 1 ? "" : "s"}${(state.removalRules || []).length ? ` and ${(state.removalRules || []).length} rule${(state.removalRules || []).length === 1 ? "" : "s"} from rows you removed` : ""}. <button type="button" class="ghost" data-open-learned-rules>Manage in Profile</button></p>` : ""}
         <section class="card cleanup-card">
           <div class="card-label">Housekeeping</div><h3>Clean up old transactions</h3>
           <p class="muted">Permanently remove ledger transactions and/or waiting Bank stream rows from before a date. A CSV backup of exactly what is removed can download first. Linked accounts re-match their bank balance afterwards.</p>
@@ -6427,8 +6435,16 @@ function assetAllocationRingHtml(segments) {
 
 // The accounts (checking, savings, credit cards, ...) live inside the Net worth card, grouped by type: each keeps its type, opening balance, close date,
 // balance, chart, synced-from/through tags, drag-to-reorder and remove.
+// Accounts saved as "Other" whose names read like brokerage, retirement or 529 accounts (the type guess only runs for accounts made after it was
+// added, so older ones stay "Other"): offered as one click to Investment so they sit with the rest in Investments.
+function accountsLookingLikeInvestments() {
+  return state.accounts.filter((account) => account.type === "other" && !account.closedAt && guessAccountType({ name: account.name }) === "investment");
+}
+
 function wealthAccountsHtml() {
+  const lookalikes = accountsLookingLikeInvestments();
   return `
+          ${lookalikes.length ? `<div class="empty-inline account-type-suggestion"><span>${lookalikes.length === 1 ? "This account looks" : `These ${lookalikes.length} accounts look`} like an Investment account, but ${lookalikes.length === 1 ? "is" : "are"} saved as Other: ${lookalikes.map((account) => escapeHtml(account.name)).join("; ")}.</span> <button type="button" class="ghost" data-retype-investment>Change to Investment</button></div>` : ""}
           ${state.accounts.length
             ? groupAccountsByType(state.accounts.filter((account) => !isInvestmentAccount(account))).map((group) => {
                 const isLiabilityGroup = group.type === "credit_card";
@@ -7110,6 +7126,27 @@ function renderReports() {
     </section>`;
 }
 
+// What FamilyLoop has learned from the household's own choices, kept out of Transactions (the lists get long) and gathered here: the "always
+// categorize this payee this way" rules, and the rules made when a row is removed and a reason given.
+function learnedRulesCardHtml() {
+  const categoryRules = categorizationRuleEntries();
+  const removalRules = state.removalRules || [];
+  return `<div class="card learned-rules-card" id="learnedRulesCard">
+    <div class="card-label">Learned</div>
+    <h3>Rules FamilyLoop learned</h3>
+    <details class="learned-rules-group">
+      <summary>Category rules <small class="muted">${categoryRules.length}</small></summary>
+      <p class="muted">Whenever you move a transaction to a different Subcategory, FamilyLoop remembers it for that payee and files the next one there too. Remove a rule to go back to guessing from history.</p>
+      ${categoryRules.map((entry) => { const line = allLines().find((item) => item.id === entry.lineId); return `<div class="compact-row"><div><strong>${escapeHtml(entry.label)}</strong><small>${line ? escapeHtml(`${line.category} - ${line.name}`) : "A Subcategory that no longer exists"}</small></div><button type="button" class="icon-button danger-button" data-remove-category-rule="${escapeHtml(entry.keys.join(","))}" aria-label="Remove the rule for ${escapeHtml(entry.label)}">×</button></div>`; }).join("") || `<div class="empty-inline">None yet</div>`}
+    </details>
+    <details class="learned-rules-group">
+      <summary>Rows you removed <small class="muted">${removalRules.length}</small></summary>
+      <p class="muted">When you remove a row you say why, and FamilyLoop remembers it for that payee. Remove a rule to go back to treating those rows normally.</p>
+      ${removalRules.map((rule) => `<div class="compact-row"><div><strong>${escapeHtml(rule.payee)}</strong><small>${rule.direction === "in" ? "Money in" : "Money out"} · ${escapeHtml(rule.reason)} · ${rule.effect === "skip" ? "left out automatically" : "held in Bank stream"}${rule.count > 1 ? ` · removed ${rule.count} times` : ""}</small></div><button type="button" class="icon-button danger-button" data-remove-removal-rule="${escapeHtml(rule.id)}" aria-label="Remove the rule for ${escapeHtml(rule.payee)}">×</button></div>`).join("") || `<div class="empty-inline">None yet</div>`}
+    </details>
+  </div>`;
+}
+
 function renderProfile() {
   const isDemo = sessionUser?.email === "demo@familyloop.net";
   return `<section class="profile-layout">
@@ -7141,6 +7178,7 @@ function renderProfile() {
         <p class="form-message ${profilePasswordFeedbackIsError ? "" : "success"}" data-profile-password-message>${escapeHtml(profilePasswordFeedback)}</p>
       </form>
     </div>`}
+    ${learnedRulesCardHtml()}
   </section>`;
 }
 
@@ -8912,6 +8950,9 @@ function bindViewEvents() {
   $("#homeAddBirthdayButton")?.addEventListener("click", () => goToViewAndRun("calendar", () => focusCalendarType("birthday")));
   $("#homeAddAnniversaryButton")?.addEventListener("click", () => goToViewAndRun("calendar", () => focusCalendarType("anniversary")));
   $("#homeAddTransactionButton")?.addEventListener("click", () => goToViewAndRun("transactions", () => {
+    newTransactionOpen = true;
+    const details = $("#newTransactionDetails");
+    if (details) details.open = true;
     $("#transactionForm")?.scrollIntoView({ behavior: "smooth", block: "center" });
     $("#transactionForm [name='payee']")?.focus();
   }));
@@ -10338,6 +10379,8 @@ function bindViewEvents() {
     render();
   });
 
+  $("#newTransactionDetails")?.addEventListener("toggle", (event) => { newTransactionOpen = event.currentTarget.open; });
+
   $("#transactionForm")?.addEventListener("submit", async (event) => {
     event.preventDefault();
     const data = Object.fromEntries(new FormData(event.currentTarget));
@@ -10690,6 +10733,12 @@ function bindViewEvents() {
     const removedBefore = new Set(rowsAlreadyRemoved(rows, state.removedRowSignatures));
     const removedBeforeCount = rows.filter((row) => !isRecorded(row) && removedBefore.has(row)).length;
     if (alreadyRecordedCount || removedBeforeCount) rows = rows.filter((row) => !isRecorded(row) && !removedBefore.has(row));
+    // Rows like ones removed before with "skip them" as the answer are left out too.
+    const skippedByRule = rowsSkippedByRemovalRules(rows, state.removalRules);
+    if (skippedByRule.length) {
+      rows = rows.filter((row) => !skippedByRule.includes(row));
+      state.household.activity.unshift(`Left out ${skippedByRule.length} row${skippedByRule.length === 1 ? "" : "s"} you told FamilyLoop to skip: ${[...new Set(skippedByRule.map((row) => row.payee))].slice(0, 3).join(", ")}`);
+    }
     const duplicateCount = rows.filter((row) => isDuplicateTransaction(row, alreadyKnown)).length;
     const rowRefundMatchPool = [...alreadyKnown, ...rows];
     const newDraftIds = [];
@@ -10982,6 +11031,16 @@ function bindViewEvents() {
         }
       }
       autosaveState();
+    });
+  });
+
+  document.querySelector("[data-open-learned-rules]")?.addEventListener("click", () => goToViewAndRun("profile", () => $("#learnedRulesCard")?.scrollIntoView({ behavior: "smooth", block: "start" })));
+
+  document.querySelectorAll("[data-remove-removal-rule]").forEach((button) => {
+    button.addEventListener("click", () => {
+      removeRemovalRule(state, button.dataset.removeRemovalRule);
+      autosaveState();
+      render();
     });
   });
 
@@ -12660,6 +12719,12 @@ function bindViewEvents() {
         onCancel: () => { input.value = account.name; }
       });
     });
+  });
+
+  document.querySelector("[data-retype-investment]")?.addEventListener("click", () => {
+    accountsLookingLikeInvestments().forEach((account) => { account.type = "investment"; });
+    autosaveState();
+    render();
   });
 
   document.querySelectorAll("[data-account-type]").forEach((select) => {
@@ -15075,6 +15140,7 @@ function bankStreamHeldReason(transaction) {
     refundMatch: transaction.refundMatch,
     refundMatchPosted: !!transaction.refundMatch && state.transactions.includes(transaction.refundMatch),
     transferMatch: transaction.transferMatch,
+    removalRule: lookupRemovalRule(state.removalRules, transaction),
     accountClosedForDate: !accountAllowsDate(transaction.accountId, transaction.date),
     bankFeed: true,
     paycheckMatch: matchesRecordedPaycheck(transaction, state.paycheckOccurrences, state.paychecks)
@@ -15159,6 +15225,7 @@ async function runAiImportPassOnce(draftIds, fileName, importedCount, rerun, pas
         refundMatch: returnOf,
         refundMatchPosted: returnOfPosted,
         transferMatch: findTransferCandidate(draft, others),
+        removalRule: lookupRemovalRule(state.removalRules, draft),
         accountClosedForDate: !accountAllowsDate(draft.accountId, draft.date),
         // Imported statement rows (a file or a linked bank) are the bank's own record, deposits and payments included; only a deposit that
         // duplicates a recorded paycheck is held back, along with the duplicate/refund/transfer/low-confidence cases above.
@@ -15309,10 +15376,128 @@ function dismissImportTransaction(button) {
 // from it are held, and offer to bring the paycheck's amount in line when the deposit differs.
 async function offerPaycheckLearning(row) {
   const plan = planPaycheckLearning(row, state.paychecks);
-  if (!plan) return;
+  if (!plan) {
+    await askRemovalReason(row);
+    return;
+  }
   let updateAmount = false;
   if (plan.differs) {
     updateAmount = await showConfirm(`This looks like your ${plan.paycheck.name} paycheck. You have ${exactMoney.format(plan.previous)} recorded as income, and this deposit was ${exactMoney.format(plan.received)}. Update the paycheck to ${exactMoney.format(plan.received)}, so your income follows what you actually receive? Later deposits from this payer will be recognised as this paycheck instead of being added again.`, { title: "Update your income?", confirmLabel: `Update to ${exactMoney.format(plan.received)}`, cancelLabel: `Keep ${exactMoney.format(plan.previous)}`, danger: false });
+  }
+  if (applyPaycheckLearning(state, plan, row, { updateAmount })) state.budget.income = budgetIncomeFromPaychecks();
+  autosaveState();
+  render();
+}
+
+// A row removed from the Ledger or skipped in Bank stream (one that is not already a recorded paycheck) asks why. The answer is free: a
+// built-in reason, one typed earlier, or new words. "It's my salary" teaches a paycheck (the payer is remembered so later deposits from it are
+// recognised instead of added again, and the income follows the amount). Any other reason becomes a rule for that payee: the next row like it
+// is either held in Bank stream with the reason shown, or left out, whichever the household picks. Skip leaves the row simply removed.
+function depositWorthAsking(row) {
+  const amount = Number(row?.amount);
+  if (!(amount <= -SALARY_MIN_AMOUNT) || SALARY_PAYEE_DENYLIST.test(String(row.payee || ""))) return false;
+  return !refundMatch(row, state.transactions);
+}
+
+function askRemovalReason(row) {
+  if (!row || !removalRuleKeys(row.payee).length) return Promise.resolve(false);
+  const received = Math.round(Math.abs(Number(row.amount)) * 100) / 100;
+  const isDeposit = Number(row.amount) < 0;
+  const salary = depositWorthAsking(row);
+  const paychecks = (state.paychecks || []).filter((paycheck) => Number(paycheck.amount) > 0)
+    .sort((a, b) => Math.abs(Number(a.amount) - received) - Math.abs(Number(b.amount) - received));
+  const choice = (value, label, checked = false) => `<label class="removal-reason"><input type="radio" name="reason" value="${escapeHtml(value)}" ${checked ? "checked" : ""}> ${escapeHtml(label)}</label>`;
+  const dialog = document.createElement("dialog");
+  dialog.className = "app-dialog confirm-dialog";
+  dialog.innerHTML = `<form method="dialog" class="delete-budget-line-dialog-content removal-reason-form">
+    <div class="section-head"><div><h2>Why did you remove this?</h2></div></div>
+    <p class="form-message">${escapeHtml(row.payee || "Transaction")} · ${isDeposit ? "deposit of" : ""} ${exactMoney.format(received)} · ${escapeHtml(formatShortDate(row.date))}</p>
+    ${salary ? choice("salary", "It's my salary or a paycheck") : ""}
+    ${salary ? `<div class="removal-reason-extra" data-removal-salary hidden>
+      <label>Which paycheck<select name="paycheckId">${paychecks.map((paycheck) => `<option value="${escapeHtml(paycheck.id)}">${escapeHtml(paycheck.name)} (${exactMoney.format(Number(paycheck.amount))})</option>`).join("")}<option value="new">A new paycheck from this deposit</option></select></label>
+      <label data-removal-new hidden>How often is it paid<select name="recurrence"><option value="biweekly">Every two weeks</option><option value="weekly">Weekly</option><option value="monthly">Monthly</option></select></label>
+    </div>` : ""}
+    ${REMOVAL_REASONS.map((reason) => choice(`built:${reason.id}`, reason.label)).join("")}
+    ${(state.removalReasons || []).map((label) => choice(`custom:${label}`, label)).join("")}
+    ${choice("other", "Something else:")}
+    <input type="text" name="otherText" class="removal-other-text" maxlength="80" placeholder="Say why, in your own words" disabled>
+    <label class="removal-effect" data-removal-effect hidden>Next time a row like this arrives
+      <select name="effect"><option value="hold">Hold it in Bank stream for me to check</option><option value="skip">Leave it out automatically</option><option value="none">Do nothing special</option></select>
+    </label>
+    <div class="dialog-actions"><button type="button" class="ghost" data-removal-skip>Skip</button><button type="submit" disabled>Save</button></div>
+  </form>`;
+  document.body.appendChild(dialog);
+  const form = dialog.querySelector("form");
+  const saveButton = form.querySelector("button[type=submit]");
+  const picked = () => form.elements.reason.value || "";
+  const sync = () => {
+    const reason = picked();
+    const isSalary = reason === "salary";
+    dialog.querySelector("[data-removal-salary]")?.toggleAttribute("hidden", !isSalary);
+    dialog.querySelector("[data-removal-new]")?.toggleAttribute("hidden", !isSalary || form.elements.paycheckId?.value !== "new");
+    form.elements.otherText.disabled = reason !== "other";
+    dialog.querySelector("[data-removal-effect]").toggleAttribute("hidden", !reason || isSalary);
+    saveButton.disabled = !reason || (reason === "other" && !form.elements.otherText.value.trim());
+  };
+  // The suggested follow-up depends on the reason; the household can still change it.
+  form.addEventListener("change", (event) => {
+    if (event.target.name === "reason") {
+      const reason = picked();
+      const builtIn = REMOVAL_REASONS.find((item) => `built:${item.id}` === reason);
+      form.elements.effect.value = builtIn ? builtIn.effect : "hold";
+      if (reason === "other") form.elements.otherText.focus();
+    }
+    sync();
+  });
+  form.elements.otherText.addEventListener("input", sync);
+  if (salary && !paychecks.length) form.elements.paycheckId.value = "new";
+  sync();
+  return new Promise((resolve) => {
+    const finish = async (save) => {
+      const reason = picked();
+      const values = { paycheckId: form.elements.paycheckId?.value, recurrence: form.elements.recurrence?.value, effect: form.elements.effect.value, otherText: form.elements.otherText.value };
+      dialog.close();
+      dialog.remove();
+      if (!save || !reason) { resolve(false); return; }
+      if (reason === "salary") { await learnSalaryFromRemovedDeposit(row, received, values.paycheckId, values.recurrence); resolve(true); return; }
+      const builtIn = REMOVAL_REASONS.find((item) => `built:${item.id}` === reason);
+      const label = builtIn ? builtIn.label : reason.startsWith("custom:") ? reason.slice(7) : values.otherText.trim();
+      if (!builtIn) rememberRemovalReason(state, label);
+      const rule = setRemovalRule(state, row, { reason: label, effect: values.effect }, dateKey(new Date()));
+      if (rule) state.household.activity.unshift(`Learned from removing ${row.payee}: rows like it are ${rule.effect === "skip" ? "left out" : "held for a look"} (${label})`);
+      autosaveState();
+      render();
+      resolve(true);
+    };
+    form.addEventListener("submit", (event) => { event.preventDefault(); void finish(true); });
+    dialog.querySelector("[data-removal-skip]").addEventListener("click", () => void finish(false));
+    dialog.addEventListener("cancel", (event) => { event.preventDefault(); void finish(false); });
+    dialog.showModal();
+  });
+}
+
+async function learnSalaryFromRemovedDeposit(row, received, paycheckId, recurrence) {
+  const key = depositPayerKey(row.payee);
+  if (paycheckId === "new") {
+    const cleaned = String(row.payee || "").replace(/\d{3,}/g, " ").replace(/[#*_/\\-]+\s*$/g, "").replace(/\s+/g, " ").trim().slice(0, 60) || "Salary";
+    state.paychecks.push({
+      id: uniqueId("paycheck"), name: cleaned, date: nextSalaryPayday(row.date, recurrence), amount: received, recurrence,
+      assignedLineIds: [], depositAccountId: row.accountId || "", depositPayeeKeys: key ? [key] : []
+    });
+    state.household.activity.unshift(`Income added from a deposit you removed: ${cleaned}, ${exactMoney.format(received)} ${recurrence}`);
+    state.budget.income = budgetIncomeFromPaychecks();
+    autosaveState();
+    render();
+    return;
+  }
+  const paycheck = state.paychecks.find((item) => item.id === paycheckId);
+  if (!paycheck) return;
+  if (!paycheck.depositAccountId && row.accountId) paycheck.depositAccountId = row.accountId;
+  const previous = Number(paycheck.amount);
+  const plan = { paycheck, key, received, previous, differs: Math.abs(received - previous) > previous * 0.005 };
+  let updateAmount = false;
+  if (plan.differs) {
+    updateAmount = await showConfirm(`You have ${exactMoney.format(previous)} recorded as income for ${paycheck.name}, and this deposit was ${exactMoney.format(received)}. Update the paycheck to ${exactMoney.format(received)}, so your income follows what you actually receive? Later deposits from this payer will be recognised as this paycheck instead of being added again.`, { title: "Update your income?", confirmLabel: `Update to ${exactMoney.format(received)}`, cancelLabel: `Keep ${exactMoney.format(previous)}`, danger: false });
   }
   if (applyPaycheckLearning(state, plan, row, { updateAmount })) state.budget.income = budgetIncomeFromPaychecks();
   autosaveState();

@@ -161,9 +161,11 @@ button on every screen. People with view-only access don't see it.
 
 ![A Bank Stream refund row with a Refund match pill and Subcategory pre-filled to the matched purchase's budget line](../assets/mockup-bank-stream.svg)
 
-1. Use **+ Add transaction** for something you're entering by hand, or
+1. Select **+ New transaction** (folded away so the list gets the page) for
+   something you're entering by hand, or
    **+ Import CSV/PDF** to bring in a bank or credit-card statement.
-2. Imported rows land in the **Bank Stream** review queue first — nothing
+2. Imported rows land in the **Bank Stream** review queue first (a month with
+   nothing in the Ledger yet says how many rows are waiting there and why) — nothing
    counts until you accept or dismiss each one.
 3. Pick the **Subcategory** (budget line) for each transaction so it counts
    toward that line's Spent total in Budget.
@@ -278,6 +280,26 @@ button on every screen. People with view-only access don't see it.
   $1,500.00"). Updating changes that payday and the later ones; past paydays
   stay as they were. Refunds, transfers and deposits to another account never
   count as a paycheck. Web and mobile.
+- **Removing a row asks why, and learns from the answer.** On web, deleting a
+  Ledger row or skipping a Bank stream row (one that isn't already a recorded
+  paycheck) opens "Why did you remove this?". Pick a reason, or type your own
+  under **Something else** - what you type is offered again next time:
+  - **It's my salary or a paycheck** (deposits of $100 or more that aren't
+    transfers, P2P payments or refunds): pick which paycheck, or **A new
+    paycheck from this deposit** and how often it's paid. The payer is
+    remembered so later deposits from it are held instead of added, the income
+    follows the amount, and a new paycheck starts at the next payday so the
+    removed deposit isn't counted twice.
+  - **Any other reason** becomes a rule for that payee (money in and out are
+    separate): next time a row like it arrives it is **held in Bank stream**
+    with "removed before: your reason" and never posts on its own, or **left
+    out automatically**, or nothing special - you choose in the box. "It's a
+    duplicate" suggests nothing special, "I don't want this tracked" suggests
+    leaving it out.
+  **Skip** just leaves the row removed. The rules are listed under Profile ->
+  **Rules FamilyLoop learned** -> **Rows you removed**, where **x** deletes one.
+  The category rules moved there too (**Category rules**); Transactions keeps
+  a one-line **Manage in Profile** pointer.
 - **FamilyLoop learns from your category changes.** When you move a
   transaction to a different Subcategory (in the Ledger, or by picking one on
   a Bank stream row), that becomes the rule for the payee: the next one - from
@@ -287,7 +309,7 @@ button on every screen. People with view-only access don't see it.
   `NAME*A1B2` and `NAME*C3D4`) counts as one payee; person-to-person payments
   and transfers only match exactly. If earlier Ledger transactions of the same
   payee are filed elsewhere, you are asked whether to move them too (the list
-  is shown first; **Just this one** leaves them). The **Category rules** card
+  is shown first; **Just this one** leaves them). The **Category rules** list (on web, under Profile)
   lists what it learned, each with a remove button. The mobile app does the
   same.
 - No history for a payee and AI import is off? Select **✨ Suggest with AI**
@@ -586,6 +608,8 @@ the Accounts part - and counts toward the net worth total from there.
   listed under the **Investments** heading next to your loose stocks and funds,
   on the same card, and counts as an asset. Its name, type, opening balance,
   close date, balance and sync tags are under **Edit account** on the card.
+  An older account saved as **Other** whose name reads like a brokerage, IRA or
+  529 gets a one-click **Change to Investment** note above the account list.
 - **Track holdings:** on an Investment account, select **Track holdings** to
   list the stocks and funds it holds. Its balance becomes **what it holds plus
   its cash**: the card shows the market value with any cash under it, and
