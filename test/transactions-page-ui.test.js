@@ -44,3 +44,11 @@ test("a sync that skips pending rows says which accounts they are on and the new
   assert.match(app, /pending skipped until they post\$\{result\.pendingDetail\.length \?/);
   assert.match(app, /newest posted row sent \$\{entry\.newestPosted \? formatShortDate\(entry\.newestPosted\) : "none"\}/);
 });
+
+test("every card in Investments has Edit account: a holding that is not an account edits its name and type there", () => {
+  const card = app.slice(app.indexOf("function netWorthStockGroupCard"), app.indexOf("const accountTypeColors"));
+  assert.match(card, /const editKey = account \? account\.id : `holding:\$\{group\.groupId\}`/);
+  assert.ok(card.includes("data-stock-group-name") && card.includes("data-stock-group-class"), "name and type inputs");
+  assert.doesNotMatch(card, /\$\{account \? `<div class="account-edit-region">/, "the Edit account region is no longer account-only");
+  assert.match(app, /\[data-stock-group-class\]/);
+});

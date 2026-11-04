@@ -608,6 +608,9 @@ the Accounts part - and counts toward the net worth total from there.
   listed under the **Investments** heading next to your loose stocks and funds,
   on the same card, and counts as an asset. Its name, type, opening balance,
   close date, balance and sync tags are under **Edit account** on the card.
+  A holding you track by hand (an ESPP, a stock outside any account) has the
+  same **Edit account** button, with its name and type (Stock, Retirement, Cash,
+  Property or Other asset; the last three move it out of Investments).
   An older account saved as **Other** whose name reads like a brokerage, IRA or
   529 gets a one-click **Change to Investment** note above the account list.
 - **Track holdings:** on an Investment account, select **Track holdings** to
@@ -660,7 +663,11 @@ entry. It is read-only: FamilyLoop can never move money or place trades.
   to the ledger; anything uncertain waits in **Bank stream** for review. Each
   mapped account's balance is brought in line with the bank's, and stays there
   as you review waiting rows (the opening balance absorbs whatever your ledger
-  doesn't know about, such as history before the first sync). Pending rows wait
+  doesn't know about, such as history before the first sync). Every night's
+  fetch re-asks for the last ten days before the previous sync (rows already
+  imported are skipped), and for an account whose bank connection had stopped
+  refreshing, back to where its data stopped (up to 50 days), so a charge the
+  bank's feed delivers late is still picked up. Pending rows wait
   until they post; the **Sync now** result names the accounts they are on, with
   the newest posted row the bank sent for each, so a charge your bank shows but
   FamilyLoop doesn't can be told apart: still pending in the data feed (banks'

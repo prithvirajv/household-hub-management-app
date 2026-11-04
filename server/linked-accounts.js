@@ -19,9 +19,30 @@ function firstOfPreviousMonth(nowMs = Date.now()) {
   const now = new Date(nowMs);
   return new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - 1, 1)).toISOString().slice(0, 10);
 }
-const SIMPLEFIN_OVERLAP_DAYS = 3;
+// Every fetch starts this many days before the last successful sync and asks again for rows it may already have (the app skips what it already
+// imported by bank id), so a row the bank's data feed delivers a few days late is still picked up. One request covers it: windows are 55 days.
+const SIMPLEFIN_OVERLAP_DAYS = 10;
+// An account whose data stopped at an earlier date (its bank connection was broken) is caught up from there when it recovers, but never from
+// further back than this, so the catch-up stays a single request. Older gaps are what Import history and the history-gap notices are for.
+const SIMPLEFIN_CATCH_UP_MAX_DAYS = 50;
+// An account is "behind" when its data runs through a date this many days before today.
+const SIMPLEFIN_BEHIND_DAYS = 2;
 const SIMPLEFIN_REQUEST_TIMEOUT_MS = 60000; // re-ask a few days we already saw; the client drops rows it already imported
 const BROKERAGE_KINDS_AS_FUND = new Set(["mutualfund"]);
+
+// The earliest date a link's nightly fetch must reach back to so no account's gap is left behind: the oldest "synced through" date among
+// the link's mapped accounts that are behind (their bank connection stopped refreshing), or "" when every account is current. `state` is the
+// household's saved state (accounts carry syncedThrough from the bank's own balance date).
+function behindAccountsSince(state, mappings, todayKey) {
+  const limit = new Date(Date.parse(`${todayKey}T00:00:00Z`) - SIMPLEFIN_BEHIND_DAYS * 86400000).toISOString().slice(0, 10);
+  const dates = Object.values(mappings || {})
+    .filter((mapping) => mapping && mapping.accountId && !mapping.skipped)
+    .map((mapping) => (state?.accounts || []).find((account) => account.id === mapping.accountId))
+    .filter((account) => account && !account.closedAt && account.syncedThrough && account.syncedThrough < limit)
+    .map((account) => account.syncedThrough)
+    .sort();
+  return dates[0] || "";
+}
 
 // ---- encryption ---------------------------------------------------------------------------------------------------
 
@@ -595,14 +616,17 @@ function registerLinkedAccountRoutes({ app, requireSession, requireEditAccess, r
 
   // Fetches fresh data for a link: SimpleFIN since the last successful fetch (minus a few days of overlap) or an explicit date, SnapTrade as a
   // snapshot of positions for the mapped accounts.
-  const fetchLinkPayload = async (link, { sinceDate, allowPartial = false, accountIds = [] } = {}) => {
+  const fetchLinkPayload = async (link, { sinceDate, catchUpFrom = "", allowPartial = false, accountIds = [] } = {}) => {
     const credentials = credentialsOf(link);
     if (link.provider === "simplefin") {
       const nowUnix = Math.floor(Date.now() / 1000);
       const requested = String(sinceDate || "").trim();
       const requestedUnix = /^\d{4}-\d{2}-\d{2}$/.test(requested) ? Math.floor(Date.parse(`${requested}T00:00:00Z`) / 1000) : null;
       const lastUnix = link.lastSyncAt ? Math.floor(new Date(link.lastSyncAt).getTime() / 1000) - SIMPLEFIN_OVERLAP_DAYS * 86400 : null;
-      const startUnix = Math.max(requestedUnix ?? lastUnix ?? Math.floor(Date.parse(`${firstOfPreviousMonth()}T00:00:00Z`) / 1000), nowUnix - 365 * 86400);
+      // A connection that stopped refreshing for a while (catchUpFrom: the oldest date an account's data stops at) is made up from there, within reason.
+      const catchUpUnix = /^\d{4}-\d{2}-\d{2}$/.test(catchUpFrom) ? Math.max(Math.floor(Date.parse(`${catchUpFrom}T00:00:00Z`) / 1000) - SIMPLEFIN_OVERLAP_DAYS * 86400, nowUnix - SIMPLEFIN_CATCH_UP_MAX_DAYS * 86400) : null;
+      const normalStart = requestedUnix ?? lastUnix ?? Math.floor(Date.parse(`${firstOfPreviousMonth()}T00:00:00Z`) / 1000);
+      const startUnix = Math.max(requestedUnix === null && catchUpUnix !== null ? Math.min(normalStart, catchUpUnix) : normalStart, nowUnix - 365 * 86400);
       const result = await syncSimplefin(credentials.accessUrl, { startUnix, endUnix: nowUnix, allowPartial: Boolean(allowPartial), accountIds }, { fetchImpl, allowInsecureHosts });
       // Only accounts sent to a Wealth account import transactions (investment and loan accounts follow their balance only), so only those are staged.
       const wanted = new Set(Object.entries(link.mappings || {}).filter(([remoteId, mapping]) => mapping && mapping.accountId && (!accountIds.length || accountIds.includes(remoteId))).map(([remoteId]) => remoteId));
@@ -752,7 +776,9 @@ function registerLinkedAccountRoutes({ app, requireSession, requireEditAccess, r
           entry.links.push(link);
           const at = new Date().toISOString();
           try {
-            const payload = await fetchLinkPayload(link);
+            // The nightly fetch reaches back past the last sync far enough to also make up an account whose bank connection had stopped refreshing.
+            const catchUpFrom = link.provider === "simplefin" && loadHouseholdState ? behindAccountsSince(await loadHouseholdState(link.householdId), link.mappings, at.slice(0, 10)) : "";
+            const payload = await fetchLinkPayload(link, { catchUpFrom });
             const { merged, newTransactionCount: stagedNew } = mergeStagedPayload(link.staged, payload, at);
             // Count only rows the household has not already imported (read-only look at its state), so the phone message is not inflated by
             // rows an app already applied and then cleared from staging.
@@ -833,6 +859,6 @@ function registerLinkedAccountRoutes({ app, requireSession, requireEditAccess, r
 }
 
 module.exports = {
-  registerLinkedAccountRoutes, trimPartialHistory, gapsFromFailedWindows, syncSimplefin, firstOfPreviousMonth, mergeStagedPayload, knownExternalIds, findNewAccounts, encryptJson, decryptJson, claimSimplefinToken, syncSimplefin, normalizeSimplefinAccount,
+  registerLinkedAccountRoutes, behindAccountsSince, SIMPLEFIN_OVERLAP_DAYS, trimPartialHistory, gapsFromFailedWindows, syncSimplefin, firstOfPreviousMonth, mergeStagedPayload, knownExternalIds, findNewAccounts, encryptJson, decryptJson, claimSimplefinToken, syncSimplefin, normalizeSimplefinAccount,
   normalizeSimplefinTransactions, normalizeSnaptradePositions, snaptradeConfig, assertSimplefinUrl
 };

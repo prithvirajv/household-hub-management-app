@@ -6618,7 +6618,8 @@ function netWorthStockGroupCard(group, { account = null, accountIndex = -1, bala
       ${gainLoss.hasCostBasis ? `<small class="gain-loss ${gainLoss.amount < 0 ? "loss" : "gain"}">${gainLoss.amount >= 0 ? "+" : ""}${money.format(gainLoss.amount)} (${gainLoss.percent >= 0 ? "+" : ""}${gainLoss.percent.toFixed(1)}%)</small>` : ""}
       ${group.items.length ? `<button type="button" class="live-price-pill" data-refresh-stock-group="${group.groupId}">↻ Live price</button><small class="muted">${liveCaption}</small>` : ""}
     </div>`;
-  const editing = account && wealthEditingAccounts.has(account.id);
+  const editKey = account ? account.id : `holding:${group.groupId}`;
+  const editing = wealthEditingAccounts.has(editKey);
   return `<article class="account-item stock-group-card ${account ? "investment-account-card" : ""}" draggable="true" ${dragAttrs}>
     <span class="net-worth-drag-handle" aria-hidden="true" title="Drag to reorder">⠿</span>
     <div class="stock-group-main">
@@ -6631,14 +6632,20 @@ function netWorthStockGroupCard(group, { account = null, accountIndex = -1, bala
     </div>
     ${valuePanel}
     <button class="icon-button danger-button card-close-button" ${account ? `data-delete-account="${accountIndex}"` : `data-delete-stock-group="${group.groupId}"`} type="button" aria-label="Remove ${escapeHtml(name)}">×</button>
-    ${account ? `<div class="account-edit-region">
-      <button type="button" class="ghost account-edit-toggle" data-toggle-account-edit="${account.id}" aria-expanded="${editing ? "true" : "false"}">${editing ? "Hide account details" : "Edit account"}</button>
-      ${editing ? `<div class="account-edit-panel">
+    <div class="account-edit-region">
+      <button type="button" class="ghost account-edit-toggle" data-toggle-account-edit="${editKey}" aria-expanded="${editing ? "true" : "false"}">${editing ? "Hide account details" : "Edit account"}</button>
+      ${editing ? (account ? `<div class="account-edit-panel">
         ${accountEditGridHtml(account, accountIndex)}
         ${accountBalanceRowHtml(account, accountIndex, balance, { handle: false })}
         ${account.holdingsGroupId ? `<button type="button" class="ghost account-untrack-holdings" data-untrack-holdings="${accountIndex}">Stop tracking holdings</button>` : ""}
-      </div>` : ""}
-    </div>` : ""}
+      </div>` : `<div class="account-edit-panel">
+        <div class="debt-edit-grid">
+          <label class="debt-name-field">Account name<input data-stock-group-name="${escapeHtml(group.groupId)}" value="${escapeHtml(group.groupName)}" aria-label="Account name"></label>
+          <label>Account type<select data-stock-group-class="${escapeHtml(group.groupId)}" aria-label="Account type for ${escapeHtml(group.groupName)}">${[["stock", "Stock"], ["retirement", "Retirement"], ["cash", "Cash"], ["property", "Property"], ["other", "Other asset"]].map(([value, label]) => `<option value="${value}" ${group.items[0]?.assetClass === value ? "selected" : ""}>${label}</option>`).join("")}</select></label>
+        </div>
+        <p class="muted">Holdings you track by hand, not tied to a bank account, so there is no opening balance or close date. Change the type to move it out of Investments.</p>
+      </div>`) : ""}
+    </div>
   </article>`;
 }
 
@@ -12785,6 +12792,35 @@ function bindViewEvents() {
     input.addEventListener("change", () => {
       const account = state.accounts[Number(input.dataset.accountCloseDate)];
       account.closedAt = input.value || "";
+      autosaveState();
+      render();
+    });
+  });
+
+  // A holdings card that is not an account (an ESPP, a stock held by hand) edits its name and type here; the same rules as the Manage list dialog.
+  const groupMembers = (groupId) => state.goals.netWorth.assets.filter((asset) => isHoldingAssetClass(asset.assetClass) && (asset.groupId || asset.id) === groupId);
+  document.querySelectorAll("[data-stock-group-name]").forEach((input) => {
+    input.addEventListener("change", () => {
+      const name = input.value.trim();
+      if (name) {
+        groupMembers(input.dataset.stockGroupName).forEach((asset) => {
+          asset.groupId = input.dataset.stockGroupName;
+          asset.groupName = name;
+          asset.name = asset.symbol ? `${name} - ${asset.symbol}` : name;
+        });
+        autosaveState();
+      }
+      render();
+    });
+  });
+  document.querySelectorAll("[data-stock-group-class]").forEach((select) => {
+    select.addEventListener("change", () => {
+      const leaving = !isHoldingAssetClass(select.value);
+      groupMembers(select.dataset.stockGroupClass).forEach((asset) => {
+        // Leaving Stock/Retirement drops the card back to a flat row, which reads only .value, so shares x price is kept there first.
+        if (leaving) asset.value = assetValue(asset);
+        asset.assetClass = select.value;
+      });
       autosaveState();
       render();
     });

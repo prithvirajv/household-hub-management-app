@@ -358,9 +358,9 @@ test("a night that never ran is made up: the next run starts from the last succe
     const dateOf = (offsetDays) => new Date(Date.now() - offsetDays * day).toISOString().slice(0, 10);
     const first = await run({});
     assert.equal(first.body.synced, 1);
-    assert.equal(requested[0] && new Date(Number(requested[0]) * 1000).toISOString().slice(0, 10), dateOf(9), "the fetch started three days of overlap before the last successful sync, not just from last night");
+    assert.equal(requested[0] && new Date(Number(requested[0]) * 1000).toISOString().slice(0, 10), dateOf(16), "the fetch started ten days of overlap before the last successful sync, not just from last night");
     const ran = (await call("/api/linked-accounts")).body.links[0].lastRun;
-    assert.equal(ran.sinceDate, dateOf(9), "the run says where it started, so the status line can say what it covered");
+    assert.equal(ran.sinceDate, dateOf(16), "the run says where it started, so the status line can say what it covered");
     assert.equal(new Date(row.last_sync_at).toISOString().slice(0, 10), dateOf(6), "a fetch alone does not move the link's last-sync date: nothing has been loaded into the household yet");
     // A manual sync stages data but the date only moves when the client has applied it and acknowledges it.
     const manual = await call(`/api/linked-accounts/${id}/sync`, { method: "POST", body: "{}" });
