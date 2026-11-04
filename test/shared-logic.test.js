@@ -2372,3 +2372,34 @@ test("transaction cleanup previews and removes only rows before the cutoff from 
   assert.ok(csv.includes('"Say ""hi"""') && csv.includes('"line1\nline2"'), "quotes and newlines are escaped");
   assert.ok(csv.includes("Bank stream,2026-02-01,Old draft,3"));
 });
+
+test("pairDebtsWithLiabilities creates a missing liability, adopts a same-name one, and leaves paired and plain liabilities alone", () => {
+  const { pairDebtsWithLiabilities } = require("../lib/shared-logic");
+  const paired = pairDebtsWithLiabilities({ debts: [{ id: "tesla", name: "Tesla Loan", balance: 100 }], liabilities: [{ id: "tesla", name: "Tesla Loan", value: 100 }] });
+  assert.equal(paired.changed, false);
+  const created = pairDebtsWithLiabilities({ debts: [{ id: "tesla", name: "Tesla Loan", balance: 28098.52 }], liabilities: [{ id: "plain", name: "Family loan", value: 50 }] });
+  assert.equal(created.changed, true);
+  assert.deepEqual(created.liabilities, [{ id: "plain", name: "Family loan", value: 50 }, { id: "tesla", name: "Tesla Loan", value: 28098.52 }]);
+  const input = { debts: [{ id: "mort", name: "Mortgage Loan", balance: 212076.48 }], liabilities: [{ id: "old-id", name: " mortgage loan ", value: 1 }], accounts: [{ id: "a", netWorthLiabilityId: "old-id" }, { id: "b", netWorthLiabilityId: "x" }] };
+  const adopted = pairDebtsWithLiabilities(input);
+  assert.equal(adopted.liabilities.length, 1, "no duplicate liability is created");
+  assert.deepEqual(adopted.liabilities[0], { id: "mort", name: " mortgage loan ", value: 212076.48 });
+  assert.deepEqual(adopted.accounts.map((a) => a.netWorthLiabilityId), ["mort", "x"], "accounts pointing at the adopted liability follow its new id");
+  assert.equal(input.liabilities[0].id, "old-id", "input is not mutated");
+});
+
+test("unapplyOrphanedDebtPayments takes a payment off a debt when its transaction moved to another category, and only forgets signatures with no payment", () => {
+  const { unapplyOrphanedDebtPayments } = require("../lib/shared-logic");
+  const sig = (t) => `${t.date}|${t.amount}`;
+  const mortgage = { id: "m", name: "Mortgage", balance: 1000, lineId: "mort", appliedPaymentSignatures: ["2026-10-17|702.23", "2026-10-19|2259", "2026-09-01|50"], payments: [{ date: "2026-10-17", amount: 702.23, principal: 328, interest: 374 }, { date: "2026-10-19", amount: 2259, principal: 1883, interest: 376 }] };
+  const transactions = [{ lineId: "tesla", date: "2026-10-17", amount: 702.23 }, { lineId: "mort", date: "2026-10-19", amount: 2259 }];
+  const result = unapplyOrphanedDebtPayments(mortgage, transactions, sig);
+  assert.equal(result.changed, true);
+  assert.equal(result.undone, 1);
+  assert.equal(result.debt.balance, 1328, "the principal the Tesla EMI took off the mortgage comes back");
+  assert.deepEqual(result.debt.payments.map((p) => p.amount), [2259]);
+  assert.deepEqual(result.debt.appliedPaymentSignatures, ["2026-10-19|2259"], "the moved transaction and the payment-less signature are forgotten");
+  assert.equal(mortgage.balance, 1000, "input is not mutated");
+  assert.equal(unapplyOrphanedDebtPayments(result.debt, transactions, sig).changed, false);
+  assert.equal(unapplyOrphanedDebtPayments({ id: "x", balance: 5 }, transactions, sig).changed, false, "a debt with no linked category is untouched");
+});

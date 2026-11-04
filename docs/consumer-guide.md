@@ -583,7 +583,14 @@ the Accounts part - and counts toward the net worth total from there.
 4. For debt, check the **Debt payoff tracker** — it estimates a payoff date
    and suggested payment from the balance, rate, and term you enter, and
    shows a progress bar of the real percent paid off so far, computed from
-   your logged payment history.
+   your logged payment history. Every debt here is paired with a line in
+   **Loans and other liabilities**: balances, names and payments stay in step
+   both ways, and if a debt ever loses its liability line, opening Wealth
+   adds it back (or reuses a liability with the same name) so net worth never
+   leaves the debt out. If a payment came from a ledger transaction and you
+   later move that transaction to another category (say a Tesla EMI first
+   filed under Mortgage), the payment comes off the first debt, its balance
+   goes back up, and the transaction is applied to the debt it now belongs to.
 5. The **Asset allocation** card breaks your net worth down into Cash,
    Stocks & funds, Property, and Other, with a ring chart and a dollar/percent
    legend — computed automatically from every asset's class, no setup needed.

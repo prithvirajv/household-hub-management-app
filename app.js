@@ -1102,7 +1102,16 @@ function ensureDebtNetWorthSync() {
     debt.termMonths = Math.max(0, Math.round(Number(debt.termMonths || 0)));
     debt.payments ||= [];
   });
-  if (state.goals.debtNetWorthLinked) return false;
+  // The one-time pairing below runs once per household; this repair runs every time so a debt that ever ends up without a liability
+  // (older data, a liability removed by hand) is paired again instead of staying out of net worth.
+  state.goals.debts.forEach((debt) => { debt.id ||= uniqueId(debt.name || "debt"); });
+  const repaired = pairDebtsWithLiabilities({ debts: state.goals.debts, liabilities: state.goals.netWorth.liabilities, accounts: state.accounts || [] }, uniqueId);
+  if (repaired.changed) {
+    state.goals.netWorth.liabilities = repaired.liabilities;
+    if (state.accounts) state.accounts = repaired.accounts;
+    state.household.activity.unshift("Paired a debt with its liability in Wealth");
+  }
+  if (state.goals.debtNetWorthLinked) return repaired.changed;
 
   const linkedDebtIds = new Set();
   state.goals.netWorth.liabilities.forEach((liability) => {
@@ -1167,17 +1176,30 @@ function applyDebtPayment(debt, rawAmount, date) {
 // and the "Record EMI payment" button marks its own created transaction the
 // same way so the two paths never double-count each other.
 function ensureDebtPaymentsAppliedFromLedger() {
+  let debtPaymentsChanged = false;
   state.goals.debts.forEach((debt) => {
     if (!debt.lineId) return;
     debt.appliedPaymentSignatures ||= [];
+    // A payment whose ledger transaction was re-categorised (or deleted) comes off this debt first, so the
+    // transaction can land on the debt it now belongs to.
+    const reconciled = unapplyOrphanedDebtPayments(debt, state.transactions, transactionSignature);
+    if (reconciled.changed) {
+      Object.assign(debt, reconciled.debt);
+      const liability = liabilityForDebt(debt);
+      if (liability) liability.value = debt.balance;
+      if (reconciled.undone) state.household.activity.unshift(`Took ${reconciled.undone} payment${reconciled.undone === 1 ? "" : "s"} off ${debt.name} because the transaction moved to another category`);
+      debtPaymentsChanged = true;
+    }
     state.transactions
       .filter((transaction) => transaction.lineId === debt.lineId && !debt.appliedPaymentSignatures.includes(transactionSignature(transaction)))
       .sort((a, b) => a.date.localeCompare(b.date))
       .forEach((transaction) => {
         applyDebtPayment(debt, transaction.amount, transaction.date);
         debt.appliedPaymentSignatures.push(transactionSignature(transaction));
+        debtPaymentsChanged = true;
       });
   });
+  return debtPaymentsChanged;
 }
 
 // Unlike ensureDebtNetWorthSync (which links once, then lets the two lists be
@@ -2096,7 +2118,7 @@ function render() {
   ensureFriendsData();
   state.budget.income = budgetIncomeFromPaychecks();
   syncHistoryToView();
-  if (currentView === "wealth") { ensureDebtNetWorthSync(); ensureAccountsData(); ensureDebtPaymentsAppliedFromLedger(); }
+  if (currentView === "wealth") { ensureDebtNetWorthSync(); ensureAccountsData(); if (ensureDebtPaymentsAppliedFromLedger()) autosaveState(); }
   renderShell();
   view.innerHTML = (renderers[currentView] || renderers.budget)();
   bindViewEvents();

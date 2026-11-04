@@ -340,3 +340,11 @@ Documents and Decisions) must sync via `user_shared_modules` (keyed by
 `owner_user_id`), not just live inside the per-household `app_state` blob —
 otherwise it will silently appear to "reset" or differ every time the user
 switches households. See [ARCHITECTURE.md §6](ARCHITECTURE.md#6-data-isolation-model).
+
+### Debt and liability pairing (self-healing)
+
+Each debt in `state.goals.debts` shares its id with a liability in `state.goals.netWorth.liabilities`. `ensureDebtNetWorthSync` (app.js) runs on every Wealth render and calls `pairDebtsWithLiabilities` (lib/shared-logic.js): a debt without a liability gets one at the debt's balance, or adopts an unclaimed liability with the same name (accounts pointing at it follow the new id). It never deletes anything, and liabilities with no debt are left alone. An activity entry "Paired a debt with its liability in Wealth" marks a repair.
+
+### Re-categorised debt payments
+
+`ensureDebtPaymentsAppliedFromLedger` first calls `unapplyOrphanedDebtPayments` (lib/shared-logic.js) for each debt linked to a category. A remembered `appliedPaymentSignatures` entry (`date|amount`) with no transaction left in that category means the transaction was moved or deleted: the matching payment (same `date|amount`) is removed from the debt's history, its principal is added back to the balance and liability, and the signature is forgotten so the transaction applies to its new debt. Signatures with no payment (bank-matched or removed by hand) are only forgotten. Runs when Wealth renders and saves on change. Mobile does not apply ledger payments to debts, so it needs no counterpart.
