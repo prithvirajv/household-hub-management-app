@@ -9379,8 +9379,8 @@ html[data-theme="dark"] .note-check-delete {
   font-size: 0.75rem;
 }
 
-/* An Investment account uses the holdings card; its account fields fold under Edit account on a full-width row below the summary. */
-.stock-group-card.investment-account-card {
+/* Every holdings card (Investment account or loose holding) folds its account fields under Edit account on a full-width row below the summary. */
+.stock-group-card {
   flex-wrap: wrap;
 }
 
