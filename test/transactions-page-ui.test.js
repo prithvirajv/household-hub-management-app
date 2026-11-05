@@ -58,3 +58,23 @@ test("the ledger list keeps its scroll position when a row is edited and the pag
   assert.match(app, /innerScrollKey === lastInnerScrollKey/);
   assert.match(app, /el\.scrollTop = top/);
 });
+
+test("the ledger offers to remove extra copies of a bank row that came in through two connections", () => {
+  assert.match(app, /findCrossConnectionDuplicates\(state\.transactions\)/);
+  assert.match(app, /data-remove-twin-rows/);
+  assert.match(app, /selectNewLinkedTransactions\(payload\.transactions, link\.mappings, knownIds, \[\.\.\.state\.transactions/);
+});
+
+test("an account type left out of a picker still shows when it is already the chosen account", () => {
+  assert.match(app, /account\.type !== excludeType \|\| \(selectedId && account\.id === selectedId\)/);
+});
+
+test("splitting a ledger row entirely with friends takes its duplicate copy out of the ledger with it", () => {
+  assert.match(app, /const twins = crossConnectionTwinsOf\(record, state\.transactions\);/);
+  assert.match(app, /state\.transactions\.splice\(at, 1\)/);
+});
+
+test("the ledger offers to remove a bank row that is already in Shared Expenses", () => {
+  assert.match(app, /findRowsAlreadyShared\(state\.transactions, state\.ious\)/);
+  assert.match(app, /data-remove-shared-rows/);
+});

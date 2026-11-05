@@ -2403,3 +2403,56 @@ test("unapplyOrphanedDebtPayments takes a payment off a debt when its transactio
   assert.equal(unapplyOrphanedDebtPayments(result.debt, transactions, sig).changed, false);
   assert.equal(unapplyOrphanedDebtPayments({ id: "x", balance: 5 }, transactions, sig).changed, false, "a debt with no linked category is untouched");
 });
+
+test("the same bank transaction arriving under a second remote account id is skipped, and found in the ledger as an extra copy", () => {
+  const { selectNewLinkedTransactions, findCrossConnectionDuplicates } = require("../lib/shared-logic");
+  const mappings = { "ACT-new": { accountId: "dcu" }, "ACT-old": { accountId: "dcu" } };
+  const existing = [{ externalId: "sf:ACT-old:TRN-1", accountId: "dcu", date: "2026-10-07", amount: -41.25, payee: "TRANSFER FROM ACCT ***4410-002 - PAYMENT TO JANE" }];
+  const incoming = [
+    { externalId: "sf:ACT-new:TRN-9", remoteAccountId: "ACT-new", date: "2026-10-07", amount: -41.25, payee: "TRANSFER FROM ACCT ***XXX0-002 - PAYMENT TO JANE" },
+    { externalId: "sf:ACT-new:TRN-10", remoteAccountId: "ACT-new", date: "2026-10-08", amount: -20, payee: "COFFEE" }
+  ];
+  const result = selectNewLinkedTransactions(incoming, mappings, [], existing);
+  assert.deepEqual(result.fresh.map((t) => t.externalId), ["sf:ACT-new:TRN-10"]);
+  assert.equal(result.crossDuplicates, 1);
+  assert.deepEqual(result.crossDuplicateIds, ["sf:ACT-new:TRN-9"]);
+  // Without existing rows (older callers) nothing changes.
+  assert.equal(selectNewLinkedTransactions(incoming, mappings, []).fresh.length, 2);
+  // Two equal purchases from the SAME remote account are both real.
+  const twoCoffees = [
+    { externalId: "sf:ACT-new:A", remoteAccountId: "ACT-new", date: "2026-10-09", amount: 4.5, payee: "STARBUCKS" },
+    { externalId: "sf:ACT-new:B", remoteAccountId: "ACT-new", date: "2026-10-09", amount: 4.5, payee: "STARBUCKS" }
+  ];
+  assert.equal(selectNewLinkedTransactions(twoCoffees, mappings, [], []).fresh.length, 2);
+
+  const ledger = [
+    { externalId: "sf:ACT-new:TRN-9", accountId: "dcu", date: "2026-10-07", amount: -41.25, payee: "TRANSFER FROM ACCT ***XXX0-002 - PAYMENT TO JANE", lineId: "" },
+    { externalId: "sf:ACT-old:TRN-1", accountId: "dcu", date: "2026-10-07", amount: -41.25, payee: "TRANSFER FROM ACCT ***4410-002 - PAYMENT TO JANE", lineId: "income" },
+    { externalId: "sf:ACT-new:A", accountId: "dcu", date: "2026-10-09", amount: 4.5, payee: "STARBUCKS", lineId: "" },
+    { externalId: "sf:ACT-new:B", accountId: "dcu", date: "2026-10-09", amount: 4.5, payee: "STARBUCKS", lineId: "" }
+  ];
+  const extra = findCrossConnectionDuplicates(ledger);
+  assert.equal(extra.length, 1);
+  assert.equal(extra[0].externalId, "sf:ACT-new:TRN-9", "the copy that has a category is kept");
+});
+
+test("crossConnectionTwinsOf finds the same bank row held under another remote account, and nothing else", () => {
+  const { crossConnectionTwinsOf } = require("../lib/shared-logic");
+  const a = { externalId: "sf:ACT-1:T1", accountId: "dcu", date: "2026-10-07", amount: -41.25, payee: "TRANSFER FROM ACCT ***4410-002 - PAYMENT" };
+  const twin = { externalId: "sf:ACT-2:T9", accountId: "dcu", date: "2026-10-07", amount: -41.25, payee: "TRANSFER FROM ACCT ***XXX0-002 - PAYMENT" };
+  const sameRemote = { externalId: "sf:ACT-1:T2", accountId: "dcu", date: "2026-10-07", amount: -41.25, payee: "TRANSFER FROM ACCT ***4410-002 - PAYMENT" };
+  const otherDay = { externalId: "sf:ACT-2:T3", accountId: "dcu", date: "2026-10-08", amount: -41.25, payee: "TRANSFER FROM ACCT ***4410-002 - PAYMENT" };
+  assert.deepEqual(crossConnectionTwinsOf(a, [a, twin, sameRemote, otherDay]), [twin]);
+  assert.deepEqual(crossConnectionTwinsOf({ accountId: "dcu", date: "x", amount: 1, payee: "p" }, [twin]), [], "a hand-entered row has no twins");
+});
+
+test("findRowsAlreadyShared finds the bank row that is a second copy of one already split out to Shared Expenses", () => {
+  const { findRowsAlreadyShared } = require("../lib/shared-logic");
+  const ious = [{ person: "Friend", amount: 41.25, reason: "TRANSFER FROM ACCT ***4410-002 - PAYMENT TO JANE Q SAMPLE", date: "2026-10-07", accountId: "dcu" }];
+  const copy = { externalId: "sf:ACT-2:T9", accountId: "dcu", date: "2026-10-07", amount: -41.25, payee: "TRANSFER FROM ACCT ***XXX0-002 - PAYMENT TO JANE Q SAMPLE" };
+  const otherAmount = { ...copy, externalId: "sf:ACT-2:T10", amount: -20 };
+  const otherDay = { ...copy, externalId: "sf:ACT-2:T11", date: "2026-10-08" };
+  const handEntered = { accountId: "dcu", date: "2026-10-07", amount: -41.25, payee: copy.payee };
+  assert.deepEqual(findRowsAlreadyShared([copy, otherAmount, otherDay, handEntered], ious), [copy]);
+  assert.deepEqual(findRowsAlreadyShared([copy], []), []);
+});

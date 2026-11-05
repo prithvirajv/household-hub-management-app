@@ -1457,7 +1457,9 @@ function isAccountLinked(type, id) {
 
 function accountOptions(selectedId, { excludeType } = {}) {
   return state.accounts
-    .filter((account) => !excludeType || account.type !== excludeType)
+    // An excluded type is not offered as a new choice, but one already chosen (a split from a card purchase keeps that card) still shows as selected
+    // instead of the picker falling back to "Not linked".
+    .filter((account) => !excludeType || account.type !== excludeType || (selectedId && account.id === selectedId))
     .map((account) => `<option value="${account.id}" ${account.id === selectedId ? "selected" : ""}>${escapeHtml(account.name)}${account.closedAt ? " (closed)" : ""}</option>`)
     .join("");
 }
@@ -3334,6 +3336,14 @@ function renderTransactions() {
         <section class="card">
           <div class="card-label">Entries</div><h3>Ledger</h3>
           ${transactionValidationFeedback ? `<p class="muted" role="status">${escapeHtml(transactionValidationFeedback)}</p>` : ""}
+          ${(() => {
+            const shared = findRowsAlreadyShared(state.transactions, state.ious);
+            return shared.length ? `<div class="empty-inline account-type-suggestion"><span>${shared.length} bank row${shared.length === 1 ? " is" : "s are"} already in Shared Expenses (split entirely with a friend), so ${shared.length === 1 ? "this is a second copy" : "these are second copies"} of the same bank transaction: ${shared.slice(0, 3).map((row) => `${escapeHtml(String(row.payee || "").slice(0, 28))} ${formatShortDate(row.date)}`).join("; ")}${shared.length > 3 ? "…" : ""}.</span> <button type="button" class="ghost" data-remove-shared-rows>Remove ${shared.length === 1 ? "it" : "them"} from the ledger</button></div>` : "";
+          })()}
+          ${(() => {
+            const twins = findCrossConnectionDuplicates(state.transactions);
+            return twins.length ? `<div class="empty-inline account-type-suggestion"><span>${twins.length} bank row${twins.length === 1 ? " appears" : "s appear"} twice in the ledger (the same transaction came in through two connections of the same bank, so it is counted twice): ${twins.slice(0, 3).map((row) => `${escapeHtml(String(row.payee || "").slice(0, 28))} ${formatShortDate(row.date)}`).join("; ")}${twins.length > 3 ? "…" : ""}.</span> <button type="button" class="ghost" data-remove-twin-rows>Remove the extra ${twins.length === 1 ? "copy" : "copies"}</button></div>` : "";
+          })()}
           <details class="new-transaction" id="newTransactionDetails" ${newTransactionOpen ? "open" : ""}>
           <summary>+ New transaction</summary>
           <form id="transactionForm" class="mini-form transaction-entry-form">
@@ -6006,7 +6016,7 @@ function iouRow(iou) {
     <div><strong>${escapeHtml(iou.person)}</strong><small>${iou.reason ? `${escapeHtml(iou.reason)} · ` : ""}${formatShortDate(iou.date)}</small></div>
     <b>${exactMoney.format(iou.amount)}</b>
     <div class="compact-row-line">
-      ${state.accounts.length ? `<select class="income-recurrence-select" data-iou-account="${iou.id}" aria-label="Account for ${escapeHtml(iou.person)}"><option value="">Not linked</option>${accountOptions(iou.accountId || "", { excludeType: "credit_card" })}</select>` : ""}
+      ${state.accounts.length ? `<select class="income-recurrence-select" data-iou-account="${iou.id}" aria-label="Account for ${escapeHtml(iou.person)}"><option value="">Not linked</option>${accountOptions(iou.accountId || "")}</select>` : ""}
       <div class="compact-row-actions">
         ${iou.receiptDocumentId
           ? `<button class="icon-button" data-documents-open-file="${iou.receiptDocumentId}" type="button" aria-label="View receipt for ${escapeHtml(iou.person)}" title="View receipt">📎</button>`
@@ -6186,7 +6196,7 @@ function renderIOUs() {
           </select></label>
           <label class="form-row-full">Reason (optional)<input name="reason" placeholder="Gas money"></label>
           <label>Date<input name="date" type="date" value="${today}"></label>
-          ${state.accounts.length ? `<label>Account (optional)<select name="accountId"><option value="">Not linked</option>${accountOptions("", { excludeType: "credit_card" })}</select></label>` : ""}
+          ${state.accounts.length ? `<label>Account (optional)<select name="accountId"><option value="">Not linked</option>${accountOptions("")}</select></label>` : ""}
           <button type="submit" class="form-row-full">Add debt</button>
         </form>
       </div>
@@ -6206,7 +6216,7 @@ function renderIOUs() {
           <div id="splitBillRows" class="iou-split-rows form-row-full"></div>
           <button id="addSplitBillRowButton" class="ghost form-row-full" type="button">+ Add another person</button>
           <div class="iou-split-total form-row-full"><span>Your share</span><b id="splitBillRemainder">$0.00</b></div>
-          ${state.accounts.length ? `<label>Account their repayment lands in (optional)<select name="accountId"><option value="">Not linked</option>${accountOptions("", { excludeType: "credit_card" })}</select></label>` : ""}
+          ${state.accounts.length ? `<label>Account their repayment lands in (optional)<select name="accountId"><option value="">Not linked</option>${accountOptions("")}</select></label>` : ""}
           <p id="splitBillMessage" class="form-message form-row-full"></p>
           <button type="submit" class="form-row-full">Split and add</button>
         </form>
@@ -12762,6 +12772,27 @@ function bindViewEvents() {
     });
   });
 
+  document.querySelector("[data-remove-shared-rows]")?.addEventListener("click", () => {
+    const rows = new Set(findRowsAlreadyShared(state.transactions, state.ious));
+    if (!rows.size) return;
+    allowLedgerRemoval();
+    rows.forEach((row) => rememberRemovedRow(state, row));
+    state.transactions = state.transactions.filter((row) => !rows.has(row));
+    state.household.activity.unshift(`Removed ${rows.size} ledger row${rows.size === 1 ? "" : "s"} already in Shared Expenses (second copies of the same bank transaction)`);
+    autosaveState();
+    render();
+  });
+
+  document.querySelector("[data-remove-twin-rows]")?.addEventListener("click", () => {
+    const twins = new Set(findCrossConnectionDuplicates(state.transactions));
+    if (!twins.size) return;
+    allowLedgerRemoval();
+    state.transactions = state.transactions.filter((row) => !twins.has(row));
+    state.household.activity.unshift(`Removed ${twins.size} duplicate bank row${twins.size === 1 ? "" : "s"} (the same transaction came in through two connections)`);
+    autosaveState();
+    render();
+  });
+
   document.querySelector("[data-retype-investment]")?.addEventListener("click", () => {
     accountsLookingLikeInvestments().forEach((account) => { account.type = "investment"; });
     autosaveState();
@@ -15033,7 +15064,7 @@ function applySimplefinSync(link, payload, addRows, { ignoreRemembered = false }
   // A history import is an explicit request, so rows imported before and since removed (Clean up, or dismissed) come back; only what is
   // currently in the ledger or waiting in Bank stream is skipped.
   const knownIds = new Set([...(ignoreRemembered ? [] : state.linkedImportedIds), ...state.transactions.map((t) => t.externalId).filter(Boolean), ...(state.transactionInboxDrafts || []).map((d) => d.externalId).filter(Boolean)]);
-  const { fresh, unmapped, alreadyImported } = selectNewLinkedTransactions(payload.transactions, link.mappings, knownIds);
+  const { fresh, unmapped, alreadyImported, crossDuplicateIds } = selectNewLinkedTransactions(payload.transactions, link.mappings, knownIds, [...state.transactions, ...(state.transactionInboxDrafts || [])]);
   const posted = fresh.filter((transaction) => !transaction.pending);
   const pendingSkipped = fresh.length - posted.length;
   // Which accounts those pending rows are on, and the newest posted row the bank sent for each, so "the bank shows it but FamilyLoop does not" can be
@@ -15054,7 +15085,7 @@ function applySimplefinSync(link, payload, addRows, { ignoreRemembered = false }
   const byAccount = new Map();
   posted.forEach((transaction) => { byAccount.set(transaction.accountId, [...(byAccount.get(transaction.accountId) || []), transaction]); });
   byAccount.forEach((rows, accountId) => addRows(rows, { name: `${link.label}` }, "linked-import", "", { accountId }));
-  state.linkedImportedIds = rememberLinkedImportedIds(state.linkedImportedIds, posted.map((transaction) => transaction.externalId));
+  state.linkedImportedIds = rememberLinkedImportedIds(state.linkedImportedIds, [...posted.map((transaction) => transaction.externalId), ...crossDuplicateIds]);
   updateAccountsSyncedFrom(state.accounts, link.mappings, payload.coverage, [...state.transactions, ...(state.transactionInboxDrafts || [])], dateKey(new Date()));
   markAccountsSynced(state.accounts, link.mappings, payload.accounts, dateKey(new Date()), new Date().toISOString());
   // Bring balances in line with the bank. The ledger alone is matched to the bank's figure (so the balance shown is the bank's), and a
@@ -16849,8 +16880,13 @@ $("#assignIouForm").addEventListener("submit", async (event) => {
   } else if (fullySplit) {
     const index = Number(source.id);
     allowLedgerRemoval();
-    if (index >= 0) state.transactions.splice(index, 1);
-    state.household.activity.unshift(`Split ${record.payee} entirely with friends - removed from the Ledger`);
+    // The same bank transaction can sit in the ledger twice (it came in through two connections of the bank); the twin leaves with it.
+    const twins = crossConnectionTwinsOf(record, state.transactions);
+    twins.forEach((twin) => rememberRemovedRow(state, twin));
+    state.transactions = state.transactions.filter((row) => !twins.includes(row));
+    const at = state.transactions.indexOf(record);
+    if (at >= 0) state.transactions.splice(at, 1);
+    state.household.activity.unshift(`Split ${record.payee} entirely with friends - removed from the Ledger${twins.length ? ` (with ${twins.length} duplicate cop${twins.length === 1 ? "y" : "ies"} of the same bank row)` : ""}`);
   } else {
     // Already an accepted Ledger transaction - no accept step needed, just
     // reduce it to your remaining share directly (the plain Ledger amount

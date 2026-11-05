@@ -352,3 +352,9 @@ Each debt in `state.goals.debts` shares its id with a liability in `state.goals.
 ### Scroll position of inner lists
 
 `render()` rebuilds the whole page on every edit. Lists with their own scrollbar (`INNER_SCROLL_SELECTORS` in app.js: the ledger list and the tag transaction list) have their `scrollTop` captured before the rebuild and restored after it, as long as the page and month are unchanged. Add any new scrollable list to that array.
+
+### Same bank transaction through two connections
+
+Re-authorising a bank in SimpleFIN Bridge can return its accounts with new ids, and a joint account can be visible through two logins; the same transaction then arrives with a different transaction id and the id check misses it. `selectNewLinkedTransactions` (lib/shared-logic.js) takes the existing ledger and Bank stream rows and skips an incoming row that matches one from a *different* remote account on the same app account, same date, same amount and same payee text (digits and masking ignored); skipped ids are remembered in `linkedImportedIds`. Equal purchases from the same remote account are kept. `findCrossConnectionDuplicates` finds copies already in the ledger (the copy with a category, split or tags is kept); Transactions shows a note with a one-click "Remove the extra copies" button. Mobile's in-app sync does not have the guard yet (the overnight server sync does).
+
+`crossConnectionTwinsOf` makes a row split entirely with a friend take its twin (same bank transaction under another remote account) out of the ledger with it. `findRowsAlreadyShared` finds a bank-fed ledger row that matches Shared Expenses records for the same account, date and payee text and adds up to its amount (a leftover twin from before that change); Transactions offers to remove it.

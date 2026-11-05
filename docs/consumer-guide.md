@@ -748,6 +748,16 @@ entry. It is read-only: FamilyLoop can never move money or place trades.
   a day, Home says so. The
   Home AI summary also reports the sync: whether it finished, what is missing
   (months not imported, accounts behind, rows waiting) and useful FYIs.
+- **Two copies of the same bank row:** if you re-authorise a bank in SimpleFIN
+  Bridge, or the same joint account is visible through two logins, the bank
+  can send the same transaction twice under different ids. New copies are
+  skipped automatically. If copies are already in the ledger, **Transactions**
+  shows a note naming them with a **Remove the extra copies** button; the copy
+  you already categorised or split is the one kept. Splitting a row entirely
+  with a friend (👥) moves it to Shared Expenses and takes its duplicate copy
+  out with it, so neither is left behind. If a second copy was already left
+  behind (it matches a Shared Expenses record), Transactions names it and
+  offers **Remove it from the ledger**.
 - **Import history:** under a bank link, **Import older transactions from**
   a date (for example January 1) fetches everything from then on for the
   accounts you chose; it goes to Bank stream like any import. How far back
