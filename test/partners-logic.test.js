@@ -157,3 +157,47 @@ test("partnersParseAiSuggestions keeps only offered ids, known kinds, and treats
   ]);
   assert.deepEqual(partnersParseAiSuggestions("not json", ["0"], [], []), []);
 });
+
+test("more categories: property tax and insurance count as costs, other income as income, and a category the group made up works the same way", () => {
+  const { partnersKindList, partnersSanitizeConfig } = require("../lib/partners-logic");
+  const cfg = partnersSanitizeConfig({
+    ...config,
+    customKinds: [{ id: "landscaping", label: "Landscaping", group: "cost" }, { id: "late", label: "Late fees", group: "income" }, { id: "rent", label: "dup of a built-in", group: "cost" }, { id: "nolabel", label: "", group: "cost" }],
+    rules: [...config.rules, { id: "t", match: "county tax", kind: "tax", propertyId: "a" }, { id: "i", match: "acme insurance", kind: "insurance", propertyId: "a" }, { id: "l", match: "green lawn", kind: "landscaping", propertyId: "a" }, { id: "f", match: "late fee", kind: "late", propertyId: "a" }, { id: "o", match: "deposit kept", kind: "other_income", propertyId: "a" }]
+  });
+  assert.deepEqual(cfg.customKinds.map((k) => k.id), ["landscaping", "late"], "a duplicate of a built-in and a label-less category are dropped");
+  assert.equal(partnersKindList(cfg).filter((k) => k.custom).length, 2);
+  assert.equal(cfg.rules.find((r) => r.id === "l").kind, "landscaping", "a rule may use a category the group made up");
+  const rows = [t("2026-08-01", "ZELLE FROM TINA TENANT", -2000), t("2026-08-02", "COUNTY TAX BILL", 300), t("2026-08-03", "ACME INSURANCE", 120), t("2026-08-04", "GREEN LAWN CO", 80), t("2026-08-05", "LATE FEE FROM TENANT", -50), t("2026-08-06", "DEPOSIT KEPT", -100)];
+  const s = buildPartnersStatement(cfg, rows, {});
+  const a = s.properties.find((p) => p.id === "a");
+  assert.deepEqual([a.income, a.expense, a.net], [2150, 500, 1650], "tax, insurance and landscaping are other costs; late fees and kept deposits are income");
+  assert.deepEqual(s.byKind.map((k) => [k.id, k.total]), [["rent", 2000], ["other_income", 100], ["tax", 300], ["insurance", 120], ["landscaping", 80], ["late", 50]], "a by-category breakdown in category order");
+});
+
+test("a withdrawal to a partner lowers that partner's balance and the pool's cash, but is not a property cost", () => {
+  const rows = [t("2026-08-01", "ZELLE FROM TINA TENANT", -2000), t("2026-08-02", "LOANCO CASH 1111", 1500), t("2026-08-05", "ZELLE FROM SAM", -600), t("2026-08-20", "ZELLE TO SAM DISTRIBUTION", 200)];
+  const withRule = { ...config, rules: [...config.rules, { id: "w", match: "distribution", kind: "withdrawal", partnerId: "p2" }] };
+  const s = buildPartnersStatement(withRule, rows, {});
+  const sam = s.partners.find((p) => p.id === "p2");
+  assert.deepEqual([sam.contributed, sam.withdrawn], [600, 200]);
+  assert.equal(s.pool.net, 500, "a withdrawal is not a cost of the properties");
+  assert.deepEqual([s.pool.contributions, s.pool.withdrawals, s.pool.cash], [600, 200, 900], "cash = put in - taken out + result");
+  assert.equal(sam.balance, Math.round((600 - 200 + sam.share) * 100) / 100);
+  assert.equal(Math.round(s.partners.reduce((sum, p) => sum + p.toSquare, 0) * 100) / 100, 0);
+  assert.equal(s.months[0].withdrawals, 200);
+});
+
+test("a row's amount can be corrected without losing the bank's own figure, and an amount-only change leaves the rules to classify it", () => {
+  const { partnersRowId } = require("../lib/partners-logic");
+  const rent = t("2026-08-01", "ZELLE FROM TINA TENANT", -2000);
+  const edited = { ...config, overrides: { [partnersRowId(rent)]: { amount: 1800 } } };
+  const s = buildPartnersStatement(edited, [rent], {});
+  assert.equal(s.properties.find((p) => p.id === "a").income, 1800, "the corrected amount is what counts");
+  assert.deepEqual([s.entries[0].money, s.entries[0].originalMoney, s.entries[0].edited, s.entries[0].kind], [1800, 2000, true, "rent"], "still classified by the rule, bank figure kept");
+  const out = buildPartnersStatement({ ...config, overrides: { [partnersRowId(rent)]: { amount: -50, kind: "loan", propertyId: "b" } } }, [rent], {});
+  assert.equal(out.properties.find((p) => p.id === "b").loan, 50, "a corrected amount can also flip a row to money out");
+  const { partnersSanitizeConfig } = require("../lib/partners-logic");
+  const clean = partnersSanitizeConfig({ ...config, overrides: { a: { amount: "12.345" }, b: { amount: "x" }, c: { kind: "rent", propertyId: "a", amount: 5 } } });
+  assert.deepEqual(clean.overrides, { a: { amount: 12.35 }, c: { kind: "rent", propertyId: "a", partnerId: "", amount: 5 } });
+});

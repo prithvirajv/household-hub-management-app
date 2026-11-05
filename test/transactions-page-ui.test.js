@@ -134,3 +134,17 @@ test("the Partners transaction list can show more, show all, and be searched", (
   assert.match(app, /id="partnersEntriesSearch"/);
   assert.match(app, /partnersEntriesLimit = Infinity/);
 });
+
+test("the Partners page does not show the household budget tiles in its header", () => {
+  assert.match(app, /if \(currentView === "partners"\) return \[\];/);
+});
+
+test("the Partners page edits amounts, adds rows by hand, takes custom categories and shares a read-only report link", () => {
+  assert.match(app, /data-partners-entry-amount="\$\{index\}"/);
+  assert.match(app, /partnersSetAmount\(data, entry\.rowId, money, entry\.originalMoney\)/);
+  assert.match(app, /id="partnersAddRowForm"/);
+  assert.match(app, /id="partnersAddKind"/);
+  assert.match(app, /partnersKindList\(data\)/);
+  assert.match(app, /id="partnersShareCreate"/);
+  assert.match(app, /\/partners\/share\/\$\{partnersShare\.token\}/);
+});

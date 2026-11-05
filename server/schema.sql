@@ -366,3 +366,12 @@ CREATE TABLE IF NOT EXISTS partner_group_members (
 );
 
 CREATE INDEX IF NOT EXISTS idx_partner_group_members_email ON partner_group_members(email);
+
+-- A read-only report link for a Partners group (partners without a login): one unguessable token per group, deleted to stop sharing.
+CREATE TABLE IF NOT EXISTS partner_group_shares (
+  group_id UUID PRIMARY KEY REFERENCES partner_groups(id) ON DELETE CASCADE,
+  token TEXT NOT NULL UNIQUE,
+  show_transactions BOOLEAN NOT NULL DEFAULT FALSE,
+  created_by UUID REFERENCES users(id) ON DELETE SET NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);

@@ -2094,6 +2094,8 @@ function metricsForView() {
   if (currentView === "goals") return [["Active goals", String(state.goals.sinkingFunds.length), "sinking funds"], ["Saved", money.format(state.goals.sinkingFunds.reduce((sum, fund) => sum + fund.saved, 0)), "across goals"], ["Remaining", money.format(state.goals.sinkingFunds.reduce((sum, fund) => sum + fund.target - fund.saved, 0)), "to targets"]];
   if (currentView === "wealth") return [["Assets", money.format(netWorth().assets), "tracked"], ["Liabilities", money.format(netWorth().liabilities), "tracked"], ["Net worth", money.format(netWorth().total), "current estimate"], ["Debt accounts", String(state.goals.debts.length), "payoff plan"]];
   if (currentView === "admin") return [];
+  // The Partners page has its own figures, and the household budget tiles (Income, Assigned...) are not about the partnership.
+  if (currentView === "partners") return [];
   return [["Income", money.format(state.budget.income), "ready to assign"], ["Assigned", money.format(plannedTotal()), "planned this month"], ["Available", money.format(state.budget.income - plannedTotal()), "left to budget"], ["Overdue", money.format(0), "no urgent items"]];
 }
 
@@ -6180,6 +6182,7 @@ let partnerGroupsInfo = null;
 let partnersGroup = null;
 let partnersSaveChain = Promise.resolve();
 let partnersBusy = false;
+let partnersShare = null; // the read-only report link of the open group (owner only): { shared, token, showTransactions }
 // Which folded sections the person has open, so a re-render after an edit does not fold them again (that shifts the page under them).
 let partnersEntriesOpen = false;
 let partnersSetupOpen = false;
@@ -6225,6 +6228,10 @@ async function openPartnersGroup(id, { quiet = false } = {}) {
     partnersGroup = null;
     showToast(error.message, { type: "error" });
   }
+  partnersShare = null;
+  if (partnersGroup && partnersGroup.role === "owner") {
+    try { partnersShare = await api(`/api/partner-groups/${id}/share`); } catch (_error) { partnersShare = { shared: false }; }
+  }
   // This household's bank feed for the Partners-page account waits in state.partnerTransactions; the group's owner hands it on to the group.
   if (partnersGroup && partnersGroup.role === "owner" && state.partnerGroupId === partnersGroup.id && (state.partnerTransactions || []).length) {
     try {
@@ -6235,6 +6242,23 @@ async function openPartnersGroup(id, { quiet = false } = {}) {
     } catch (error) { console.warn("Could not hand the bank feed to the Partners group", error); }
   }
   if (!quiet && currentView === "partners") render();
+}
+
+// A choice made for one row lives in setup.overrides[rowId]: { kind, propertyId, partnerId } (what it is) and/or { amount } (a corrected amount, money in).
+// The two are kept apart so fixing an amount never forgets what the row was assigned to, and the other way round.
+function partnersSetChoice(data, rowId, choice) {
+  const previous = data.overrides[rowId] || {};
+  const next = {};
+  if (previous.amount !== undefined) next.amount = previous.amount;
+  if (choice && choice.kind) Object.assign(next, choice.kind === "personal" ? { kind: "personal", propertyId: "", partnerId: "" } : { kind: choice.kind, propertyId: choice.propertyId || "", partnerId: choice.partnerId || "" });
+  if (Object.keys(next).length) data.overrides[rowId] = next; else delete data.overrides[rowId];
+}
+
+function partnersSetAmount(data, rowId, money, original) {
+  const next = { ...(data.overrides[rowId] || {}) };
+  if (money === null || !Number.isFinite(money) || Math.abs(money - original) < 0.005) delete next.amount;
+  else next.amount = Math.round(money * 100) / 100;
+  if (Object.keys(next).length) data.overrides[rowId] = next; else delete data.overrides[rowId];
 }
 
 // Setup edits are saved to the group one after another (each carries the version it was based on), so two quick changes never collide with each other.
@@ -6341,21 +6365,28 @@ function renderPartnersGroupPage() {
         ${isOwner && ownCount ? `<button type="button" class="ghost danger-button" id="partnersClearRows">Remove the ${ownCount} rows kept here</button>` : ""}
         ${isOwner && !feeding ? `<button type="button" class="ghost" id="partnersFeedButton">Send this household's bank feed to this group</button>` : ""}
       </div>
+      <form id="partnersAddRowForm" class="partners-name-row partners-addrow">
+        <input type="date" name="date" required aria-label="Date" value="${dateKey(new Date())}">
+        <input name="payee" required maxlength="120" placeholder="Add a row by hand: description (e.g. cash to a partner)" aria-label="Description">
+        <select name="direction" aria-label="Direction"><option value="in">Money in</option><option value="out">Money out</option></select>
+        <input type="number" name="amount" step="0.01" min="0.01" required placeholder="Amount" aria-label="Amount">
+        <button type="submit" class="ghost">Add row</button>
+      </form>
       <p class="muted">The CSV needs Date, Description and Amount columns (like a bank statement export; other columns are ignored). Importing the same file twice, or one that overlaps what the bank link brought, never adds a row twice.</p>` : ""}
       ${ownCount ? `<p class="muted"><b>${ownCount}</b> rows kept for this group${poolBalance ? `; the bank reports a balance of <b>${exactMoney.format(poolBalance.amount)}</b> (${escapeHtml(formatShortDate(poolBalance.date))})` : ""}.</p>` : `<p class="form-message">Add the shared account's transactions to see the statement.</p>`}
     </div>`;
   if (!ownCount) return `<section class="partners-layout">${groupBar}${intro}${poolPicker}</section>`;
   const statement = buildPartnersStatement({ ...data, accountIds: [...data.accountIds, PARTNERS_POOL_ID] }, partnersRows(data), partnersRange());
   const accountName = (id) => state.accounts.find((account) => account.id === id)?.name || "";
-  const kindOptions = (selected) => PARTNER_KINDS.map((kind) => `<option value="${kind.id}" ${kind.id === selected ? "selected" : ""}>${escapeHtml(kind.label)}</option>`).join("");
+  const kindOptions = (selected) => partnersKindList(data).map((kind) => `<option value="${kind.id}" ${kind.id === selected ? "selected" : ""}>${escapeHtml(kind.label)}</option>`).join("");
   const propertyOptions = (selected) => `<option value="">No property</option>${data.properties.map((property) => `<option value="${escapeHtml(property.id)}" ${property.id === selected ? "selected" : ""}>${escapeHtml(property.name)}</option>`).join("")}`;
   const partnerOptions = (selected) => `<option value="">No partner</option>${data.partners.map((partner) => `<option value="${escapeHtml(partner.id)}" ${partner.id === selected ? "selected" : ""}>${escapeHtml(partner.name)}</option>`).join("")}`;
   const pool = statement.pool;
   const tile = (label, value, note = "") => `<div class="partners-tile"><span>${label}</span><strong>${value}</strong>${note ? `<small class="muted">${note}</small>` : ""}</div>`;
   const rangeSelect = `<label class="partners-range">Period<select id="partnersRangeSelect">${[["all", "All time"], ["12", "Last 12 months"], ["3", "Last 3 months"], ["month", "This month"]].map(([value, label]) => `<option value="${value}" ${value === partnersRangeMode ? "selected" : ""}>${label}</option>`).join("")}</select></label>`;
   const propertyRows = statement.properties.map((row) => `<tr><th>${escapeHtml(row.name)}</th><td>${exactMoney.format(row.income)}</td><td>${exactMoney.format(row.loan)}</td><td>${exactMoney.format(row.hoa)}</td><td>${exactMoney.format(row.repair + row.expense)}</td><td>${partnersSigned(row.net)}</td></tr>`).join("");
-  const partnerRows = statement.partners.map((row) => `<tr><th>${escapeHtml(row.name)}</th><td>${row.effectivePct.toFixed(0)}%</td><td>${exactMoney.format(row.contributed)}</td><td>${partnersSigned(row.share)}</td><td>${partnersSigned(row.balance)}</td><td>${row.toSquare > 0.005 ? `<b>send ${exactMoney.format(row.toSquare)}</b>` : row.toSquare < -0.005 ? `receive ${exactMoney.format(-row.toSquare)}` : "even"}</td><td>${statement.averageShortfall > 0 ? exactMoney.format(row.suggested) : "-"}</td></tr>`).join("");
-  const monthRows = statement.months.slice().reverse().map((row) => `<tr><th>${escapeHtml(formatMonth(row.month))}</th><td>${exactMoney.format(row.income)}</td><td>${exactMoney.format(row.expenses)}</td><td>${partnersSigned(row.net)}</td><td>${exactMoney.format(row.contributions)}</td></tr>`).join("");
+  const partnerRows = statement.partners.map((row) => `<tr><th>${escapeHtml(row.name)}</th><td>${row.effectivePct.toFixed(0)}%</td><td>${exactMoney.format(row.contributed)}</td><td>${exactMoney.format(row.withdrawn)}</td><td>${partnersSigned(row.share)}</td><td>${partnersSigned(row.balance)}</td><td>${row.toSquare > 0.005 ? `<b>send ${exactMoney.format(row.toSquare)}</b>` : row.toSquare < -0.005 ? `receive ${exactMoney.format(-row.toSquare)}` : "even"}</td><td>${statement.averageShortfall > 0 ? exactMoney.format(row.suggested) : "-"}</td></tr>`).join("");
+  const monthRows = statement.months.slice().reverse().map((row) => `<tr><th>${escapeHtml(formatMonth(row.month))}</th><td>${exactMoney.format(row.income)}</td><td>${exactMoney.format(row.expenses)}</td><td>${partnersSigned(row.net)}</td><td>${exactMoney.format(row.contributions)}</td><td>${exactMoney.format(row.withdrawals)}</td></tr>`).join("");
   const unclassifiedRows = statement.unclassified.slice(0, 15).map((row, index) => `<tr><td>${escapeHtml(formatShortDate(row.date))}</td><td class="partners-payee">${escapeHtml(String(row.payee || "").slice(0, 70))}</td><td>${exactMoney.format(-Number(row.amount))}</td><td><button type="button" class="ghost" data-partners-make-rule="${index}">Make a rule</button></td></tr>`).join("");
   const rulesHtml = data.rules.map((rule, index) => `<div class="partners-rule">
       <input data-partners-rule-match="${index}" value="${escapeHtml(rule.match)}" aria-label="Payee contains" placeholder="Payee contains…">
@@ -6376,19 +6407,28 @@ function renderPartnersGroupPage() {
       ${(partnersGroup.members || []).map((member) => `<div class="partners-name-row"><span class="partners-member-email">${escapeHtml(member.email)}${member.isYou ? " (you)" : ""}</span>${isOwner && member.role !== "owner" ? `<select data-partners-member-role="${escapeHtml(member.id)}" aria-label="Access for ${escapeHtml(member.email)}"><option value="edit" ${member.role === "edit" ? "selected" : ""}>Can edit</option><option value="view" ${member.role === "view" ? "selected" : ""}>Can view</option></select><button type="button" class="icon-button danger-button" data-partners-member-remove="${escapeHtml(member.id)}" aria-label="Remove ${escapeHtml(member.email)}">×</button>` : `<span class="pill pill-info">${roleLabel(member.role)}</span>`}</div>`).join("")}
       ${isOwner ? `<form id="partnersAddMemberForm" class="partners-name-row"><input type="email" name="email" placeholder="Add someone by email" required aria-label="Email to add"><select name="role" aria-label="Access"><option value="edit">Can edit</option><option value="view">Can view</option></select><button type="submit" class="ghost">Add</button></form>` : ""}
       ${isOwner ? `<button type="button" class="ghost danger-button" id="partnersDeleteGroupButton">Delete this group</button>` : ""}`;
-  const kindLabel = (kind) => PARTNER_KINDS.find((item) => item.id === kind)?.label || kind;
+  const kindLabel = (kind) => partnersKindList(data).find((item) => item.id === kind)?.label || kind;
   const propertyName = (id) => data.properties.find((property) => property.id === id)?.name || "";
   const partnerName = (id) => data.partners.find((partner) => partner.id === id)?.name || "";
   const needle = partnersEntriesFilter.trim().toLowerCase();
   const matching = statement.entries.map((entry, index) => ({ entry, index })).filter(({ entry }) => !needle || `${entry.payee} ${kindLabel(entry.kind)} ${propertyName(entry.propertyId)} ${partnerName(entry.partnerId)}`.toLowerCase().includes(needle));
-  const entryRows = matching.slice(0, partnersEntriesLimit).map(({ entry, index }) => `<tr${entry.overridden ? ' class="partners-overridden"' : ""}><td>${escapeHtml(formatShortDate(entry.date))}</td><td class="partners-payee">${escapeHtml(String(entry.payee || "").slice(0, 80))}</td><td>${partnersSigned(entry.money)}</td><td class="partners-assign">
-      <select data-partners-entry-kind="${index}" aria-label="Counted as">${`<option value="">Needs a rule</option>${PARTNER_KINDS.map((kind) => `<option value="${kind.id}" ${kind.id === entry.kind ? "selected" : ""}>${escapeHtml(kind.label)}</option>`).join("")}`}</select>
+  const entryRows = matching.slice(0, partnersEntriesLimit).map(({ entry, index }) => `<tr${entry.overridden || entry.edited ? ' class="partners-overridden"' : ""}><td>${escapeHtml(formatShortDate(entry.date))}</td><td class="partners-payee">${escapeHtml(String(entry.payee || "").slice(0, 80))}${entry.manual ? ` <span class="pill pill-info">added by hand</span>${canEdit ? ` <button type="button" class="icon-button danger-button" data-partners-row-delete="${escapeHtml(entry.rowRef)}" aria-label="Delete this row" title="Delete this row">×</button>` : ""}` : ""}</td><td class="partners-amount">${canEdit ? `<input type="number" step="0.01" class="money-input" data-partners-entry-amount="${index}" value="${entry.money}" aria-label="Money in (negative for money out)" title="Money in is positive, money out negative">${entry.edited ? ` <button type="button" class="icon-button" data-partners-entry-amount-reset="${index}" title="Back to the bank's figure, ${escapeHtml(exactMoney.format(entry.originalMoney))}" aria-label="Reset the amount">↺</button>` : ""}` : partnersSigned(entry.money)}</td><td class="partners-assign">
+      <select data-partners-entry-kind="${index}" aria-label="Counted as">${`<option value="">Needs a rule</option>${partnersKindList(data).map((kind) => `<option value="${kind.id}" ${kind.id === entry.kind ? "selected" : ""}>${escapeHtml(kind.label)}</option>`).join("")}`}</select>
       <select data-partners-entry-property="${index}" aria-label="Property" ${entry.kind && entry.kind !== "personal" ? "" : "disabled"}>${propertyOptions(entry.propertyId)}</select>
       <select data-partners-entry-partner="${index}" aria-label="Partner" ${entry.kind && entry.kind !== "personal" ? "" : "disabled"}>${partnerOptions(entry.partnerId)}</select>
       ${entry.overridden ? `<button type="button" class="icon-button" data-partners-entry-reset="${index}" title="Go back to what the rules say" aria-label="Reset this row">↺</button>` : ""}
       <button type="button" class="ghost" data-partners-entry-rule="${index}" title="Count every row like this one the same way">Make a rule</button></td></tr>`).join("");
+  const shareCard = isOwner ? `<div class="card partners-share">
+      <div class="card-label">Partners</div><h3>Share a read-only report</h3>
+      <p class="muted">Send partners a link to this statement. They need no login and cannot change anything; they never see email addresses, rules or your household. Anyone with the link can read it, so share it only with them. Stopping the share, or making a new link, ends the old one at once.</p>
+      ${partnersShare?.shared ? `<div class="partners-name-row"><input readonly id="partnersShareUrl" value="${escapeHtml(`${location.origin}/partners/share/${partnersShare.token}`)}" aria-label="Report link" onclick="this.select()"><button type="button" class="ghost" id="partnersShareCopy">Copy link</button></div>
+        <label class="partners-check"><input type="checkbox" id="partnersShareRows" ${partnersShare.showTransactions ? "checked" : ""}> Include the list of transactions (descriptions and amounts)</label>
+        <div class="partners-toolbar"><button type="button" class="ghost" id="partnersShareRenew">Make a new link</button><button type="button" class="ghost danger-button" id="partnersShareStop">Stop sharing</button></div>` : `<label class="partners-check"><input type="checkbox" id="partnersShareRows"> Include the list of transactions (descriptions and amounts)</label>
+        <div class="partners-toolbar"><button type="button" id="partnersShareCreate">Create a link to share</button></div>`}
+    </div>` : "";
   return `<section class="partners-layout">${groupBar}${intro}
     ${poolPicker}
+    ${shareCard}
     <div class="card">
       <div class="card-label">Partners</div><h3>Statement</h3>
       <div class="partners-toolbar">${rangeSelect}
@@ -6398,15 +6438,16 @@ function renderPartnersGroupPage() {
         ${tile("Rent and income in", exactMoney.format(pool.income))}
         ${tile("Loans, HOA and repairs", exactMoney.format(pool.expenses))}
         ${tile(pool.net < 0 ? "Shortfall" : "Surplus", partnersSigned(pool.net), statement.months.length ? `${exactMoney.format(Math.abs(pool.net) / statement.months.length)} a month on average` : "")}
-        ${tile("Partners sent in", exactMoney.format(pool.contributions), statement.unassignedContributions ? `${exactMoney.format(statement.unassignedContributions)} not tied to a partner` : "")}
+        ${tile("Partners sent in", exactMoney.format(pool.contributions), [pool.withdrawals ? `${exactMoney.format(pool.withdrawals)} withdrawn` : "", statement.unassignedContributions ? `${exactMoney.format(statement.unassignedContributions)} not tied to a partner` : "", statement.unassignedWithdrawals ? `${exactMoney.format(statement.unassignedWithdrawals)} withdrawn, no partner named` : ""].filter(Boolean).join("; "))}
         ${poolBalance ? tile("Bank balance", exactMoney.format(poolBalance.amount), `as of ${escapeHtml(formatShortDate(poolBalance.date))}`) : ""}
       </div>
       <h4>By property</h4>
       <div class="partners-scroll"><table class="partners-table"><thead><tr><th></th><th>Rent in</th><th>Loan</th><th>HOA</th><th>Repairs and other</th><th>Result</th></tr></thead><tbody>${propertyRows}</tbody></table></div>
       <h4>By partner</h4>
-      <div class="partners-scroll"><table class="partners-table"><thead><tr><th></th><th>Share</th><th>Sent in</th><th>Share of result</th><th>Balance</th><th>To square up</th><th>Suggested a month</th></tr></thead><tbody>${partnerRows}</tbody></table></div>
-      <p class="muted">Balance is what a partner sent in plus their share of the result. To square up shares what was sent in by ownership: positive means send that much more, "receive" means they sent more than their share. Suggested a month is each partner's share of the average monthly shortfall over the last three active months (${exactMoney.format(statement.averageShortfall)}).</p>
-      ${statement.months.length ? `<h4>Month by month</h4><div class="partners-scroll"><table class="partners-table"><thead><tr><th></th><th>Income</th><th>Costs</th><th>Result</th><th>Sent in</th></tr></thead><tbody>${monthRows}</tbody></table></div>` : `<p class="muted">Nothing in this period matches a rule yet. Add rules below, or check the pool accounts.</p>`}
+      <div class="partners-scroll"><table class="partners-table"><thead><tr><th></th><th>Share</th><th>Sent in</th><th>Withdrawn</th><th>Share of result</th><th>Balance</th><th>To square up</th><th>Suggested a month</th></tr></thead><tbody>${partnerRows}</tbody></table></div>
+      <p class="muted">Balance is what a partner sent in, less what they withdrew, plus their share of the result. To square up shares what was sent in by ownership: positive means send that much more, "receive" means they sent more than their share. Suggested a month is each partner's share of the average monthly shortfall over the last three active months (${exactMoney.format(statement.averageShortfall)}).</p>
+      ${statement.byKind.length ? `<h4>By category</h4><div class="partners-scroll"><table class="partners-table"><thead><tr><th>Category</th><th>Type</th><th>Total</th></tr></thead><tbody>${statement.byKind.map((row) => `<tr><th>${escapeHtml(row.label)}</th><td>${row.group === "income" ? "Income" : row.group === "cost" ? "Cost" : "Partner money"}</td><td>${exactMoney.format(row.total)}</td></tr>`).join("")}</tbody></table></div>` : ""}
+      ${statement.months.length ? `<h4>Month by month</h4><div class="partners-scroll"><table class="partners-table"><thead><tr><th></th><th>Income</th><th>Costs</th><th>Result</th><th>Sent in</th><th>Withdrawn</th></tr></thead><tbody>${monthRows}</tbody></table></div>` : `<p class="muted">Nothing in this period matches a rule yet. Add rules below, or check the pool accounts.</p>`}
     </div>
     <details class="card partners-entries" ${partnersEntriesOpen ? "open" : ""}>
       <summary><span class="card-label">Partners</span> <b>Every transaction in the shared account (${statement.entries.length})</b></summary>
@@ -6437,6 +6478,10 @@ function renderPartnersGroupPage() {
       <h4>Ownership (percent)</h4>
       <p class="muted">Leave a row empty for an equal split. Numbers are scaled to add up to 100 for each property. "Shared / not assigned" covers costs that belong to no one property.</p>
       <div class="partners-scroll"><table class="partners-table"><thead><tr><th></th>${data.partners.map((partner) => `<th>${escapeHtml(partner.name)}</th>`).join("")}</tr></thead><tbody>${data.properties.map((property) => shareRow(property.name, property.id)).join("")}${shareRow("Shared / not assigned", "default")}</tbody></table></div>
+      <h4>Your own categories</h4>
+      <p class="muted">Besides rent, loan, HOA, repairs, tax, insurance, utilities, management, other income, contributions and withdrawals, add any category you need (for example Landscaping, or Refunds to tenants). Choose whether it is income or a cost; then use it in rules and on any row.</p>
+      ${(data.customKinds || []).map((kind, index) => `<div class="partners-name-row"><input data-partners-kind-label="${index}" value="${escapeHtml(kind.label)}" maxlength="40" aria-label="Category name"><select data-partners-kind-group="${index}" aria-label="Income or cost"><option value="cost" ${kind.group === "cost" ? "selected" : ""}>A cost</option><option value="income" ${kind.group === "income" ? "selected" : ""}>Income</option></select><button type="button" class="icon-button danger-button" data-partners-kind-remove="${index}" aria-label="Remove ${escapeHtml(kind.label)}">×</button></div>`).join("")}
+      <button type="button" class="ghost" id="partnersAddKind">+ Add a category</button>
       <h4>Rules</h4>
       <p class="muted">A rule reads a payee: when its words all appear in the bank's description, the row is that kind, for that property and partner. The first rule that matches wins, so put specific ones first. Money a partner sends in is a <b>Partner contribution</b> for that partner; <b>Personal</b> rows are left out entirely.</p>
       ${rulesHtml || `<p class="muted">No rules yet.</p>`}
@@ -6626,6 +6671,71 @@ function bindPartnersEvents() {
     else target[partnerId] = Math.min(100, Math.max(0, Number(input.value) || 0));
     partnersSave();
   }));
+  document.querySelectorAll("[data-partners-entry-amount]").forEach((input) => input.addEventListener("change", () => {
+    const entry = entryAt(input.dataset.partnersEntryAmount);
+    if (!entry) return;
+    const money = input.value === "" ? null : Number(input.value);
+    partnersSetAmount(data, entry.rowId, money, entry.originalMoney);
+    void partnersSave();
+  }));
+  document.querySelectorAll("[data-partners-entry-amount-reset]").forEach((button) => button.addEventListener("click", () => {
+    const entry = entryAt(button.dataset.partnersEntryAmountReset);
+    if (entry) { partnersSetAmount(data, entry.rowId, null, entry.originalMoney); void partnersSave(); }
+  }));
+  document.querySelectorAll("[data-partners-row-delete]").forEach((button) => button.addEventListener("click", guarded(async () => {
+    if (!await showConfirm("Delete this row you added by hand?", { title: "Delete row?" })) return;
+    await api(`${groupPath}/rows/${button.dataset.partnersRowDelete}`, { method: "DELETE" });
+    await openPartnersGroup(partnersGroup.id);
+  })));
+  $("#partnersAddRowForm")?.addEventListener("submit", guarded(async (event) => {
+    event.preventDefault();
+    const form = new FormData(event.currentTarget);
+    const amount = Math.abs(Number(form.get("amount")));
+    // Stored the way the rest of the app does: money out is positive, money in negative.
+    await api(`${groupPath}/rows/manual`, { method: "POST", body: JSON.stringify({ rows: [{ date: String(form.get("date") || ""), payee: String(form.get("payee") || ""), amount: form.get("direction") === "out" ? amount : -amount }] }) });
+    partnersEntriesOpen = true;
+    await openPartnersGroup(partnersGroup.id);
+  }));
+  document.querySelectorAll("[data-partners-kind-label]").forEach((input) => input.addEventListener("change", () => {
+    const kind = (data.customKinds || [])[Number(input.dataset.partnersKindLabel)];
+    if (kind && input.value.trim()) { kind.label = input.value.trim().slice(0, 40); void partnersSave(); }
+  }));
+  document.querySelectorAll("[data-partners-kind-group]").forEach((select) => select.addEventListener("change", () => {
+    const kind = (data.customKinds || [])[Number(select.dataset.partnersKindGroup)];
+    if (kind) { kind.group = select.value === "income" ? "income" : "cost"; void partnersSave(); }
+  }));
+  document.querySelectorAll("[data-partners-kind-remove]").forEach((button) => button.addEventListener("click", guarded(async () => {
+    const index = Number(button.dataset.partnersKindRemove);
+    const kind = (data.customKinds || [])[index];
+    if (!kind || !await showConfirm(`Remove the category "${kind.label}"? Rules and rows that use it go back to "needs a rule".`, { title: "Remove category?" })) return;
+    data.customKinds.splice(index, 1);
+    await partnersSave();
+  })));
+  $("#partnersAddKind")?.addEventListener("click", () => {
+    data.customKinds = [...(data.customKinds || []), { id: uniqueId("category"), label: `Category ${(data.customKinds || []).length + 1}`, group: "cost" }];
+    partnersSetupOpen = true;
+    void partnersSave();
+  });
+  const shareCall = guarded(async (method, body) => {
+    partnersShare = await api(`${groupPath}/share`, { method, ...(body ? { body: JSON.stringify(body) } : {}) });
+    if (method === "DELETE") partnersShare = { shared: false };
+    render();
+  });
+  $("#partnersShareCreate")?.addEventListener("click", () => shareCall("POST", { showTransactions: Boolean($("#partnersShareRows")?.checked) }));
+  $("#partnersShareRows")?.addEventListener("change", (event) => { if (partnersShare?.shared) shareCall("POST", { showTransactions: event.target.checked }); });
+  $("#partnersShareStop")?.addEventListener("click", async () => {
+    if (await showConfirm("Stop sharing the report? The current link stops working for everyone who has it.", { title: "Stop sharing?" })) shareCall("DELETE");
+  });
+  $("#partnersShareRenew")?.addEventListener("click", async () => {
+    if (!await showConfirm("Make a new link? The old one stops working for everyone who has it.", { title: "New link?" })) return;
+    const showTransactions = Boolean(partnersShare?.showTransactions);
+    await shareCall("DELETE");
+    await shareCall("POST", { showTransactions });
+  });
+  $("#partnersShareCopy")?.addEventListener("click", async () => {
+    const url = $("#partnersShareUrl")?.value || "";
+    try { await navigator.clipboard.writeText(url); showToast("Link copied.", { type: "info" }); } catch (_error) { $("#partnersShareUrl")?.select(); showToast("Press Cmd+C to copy the selected link.", { type: "info" }); }
+  });
   const ruleField = (attribute, field) => document.querySelectorAll(`[data-${attribute}]`).forEach((control) => control.addEventListener("change", () => {
     const rule = data.rules[Number(control.dataset[attribute.replace(/-([a-z])/g, (_m, letter) => letter.toUpperCase())])];
     if (!rule) return;
@@ -6660,13 +6770,13 @@ function bindPartnersEvents() {
     try {
       const { results } = await api("/api/partners/suggest", { method: "POST", body: JSON.stringify({
         rows: batch.map((transaction, index) => ({ id: String(index), payee: transaction.payee, money: -Number(transaction.amount), date: transaction.date })),
-        properties: data.properties, partners: data.partners, examples
+        properties: data.properties, partners: data.partners, examples, customKinds: data.customKinds || []
       }) });
       let assigned = 0;
       (results || []).forEach((result) => {
         const transaction = batch[Number(result.id)];
         if (!transaction || result.confidence !== "high" || !result.kind) return;
-        data.overrides[partnersRowId(transaction)] = result.kind === "personal" ? { kind: "personal", propertyId: "", partnerId: "" } : { kind: result.kind, propertyId: result.propertyId || "", partnerId: result.partnerId || "" };
+        partnersSetChoice(data, partnersRowId(transaction), { kind: result.kind, propertyId: result.propertyId, partnerId: result.partnerId });
         assigned += 1;
       });
       showToast(assigned ? `AI assigned ${assigned} of ${batch.length} rows (highlighted below); ${batch.length - assigned} are left for you.` : "The AI wasn't sure about any of them, so none were changed.", { type: "info" });
@@ -6688,13 +6798,12 @@ function bindPartnersEvents() {
     const entry = entryAt(index);
     if (!entry) return;
     const choice = entryChoice(index);
-    if (!choice.kind) delete data.overrides[entry.rowId];
-    else data.overrides[entry.rowId] = choice.kind === "personal" ? { kind: "personal", propertyId: "", partnerId: "" } : choice;
+    partnersSetChoice(data, entry.rowId, choice);
     partnersSave();
   })));
   document.querySelectorAll("[data-partners-entry-reset]").forEach((button) => button.addEventListener("click", () => {
     const entry = entryAt(button.dataset.partnersEntryReset);
-    if (entry) { delete data.overrides[entry.rowId]; partnersSave(); }
+    if (entry) { partnersSetChoice(data, entry.rowId, null); void partnersSave(); }
   }));
   document.querySelectorAll("[data-partners-entry-rule]").forEach((button) => button.addEventListener("click", () => {
     const index = button.dataset.partnersEntryRule;
@@ -6703,8 +6812,8 @@ function bindPartnersEvents() {
     const choice = entryChoice(index);
     const rule = { id: uniqueId("rule"), match: partnersSuggestMatch(entry.payee), kind: choice.kind || (entry.money > 0 ? "rent" : "expense"), propertyId: choice.propertyId, partnerId: choice.partnerId };
     data.rules.push(rule);
-    // The row now follows the rule, so its own override is dropped.
-    delete data.overrides[entry.rowId];
+    // The row now follows the rule, so its own choice of kind is dropped (a corrected amount stays).
+    partnersSetChoice(data, entry.rowId, null);
     partnersFocusRuleId = rule.id;
     showToast(`Rule added: rows with "${rule.match}" are counted this way. Check it under Setup.`, { type: "info" });
     partnersSave();

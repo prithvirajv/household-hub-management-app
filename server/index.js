@@ -17,7 +17,7 @@ const { countries } = require("countries-list");
 const { defaultState } = require("./default-state");
 const { registerLinkedAccountRoutes } = require("./linked-accounts");
 const { registerPartnerGroupRoutes, forwardHouseholdPartnerRows } = require("./partner-groups");
-const { partnersParseAiSuggestions, PARTNER_KINDS } = require("../lib/partners-logic");
+const { partnersParseAiSuggestions, partnersSanitizeConfig, PARTNER_KINDS } = require("../lib/partners-logic");
 const { validateJournalPayload, buildDocumentObjectPath, sanitizeFilename, wouldCreateFolderCycle, collectDescendantFolderIds, SMS_CARRIERS, smsGatewayAddress, rollAnnualNotifyAtForward, choreNotifyAt, parseBankStatementPdfText, extractAccountActivityLabel, isValidEmail, parseImageReminderDraft, parseBatchSuggestions, parseHomeBriefing, parseAssistantPlan, pgDumpArgs } = require("../lib/shared-logic");
 const pdfParse = require("pdf-parse");
 const ExcelJS = require("exceljs");
@@ -1647,11 +1647,12 @@ app.post("/api/transactions/suggest-batch", requireSession, async (req, res, nex
 
 // One AI pass over rows of the shared account: what each is (rent, loan, HOA, repair, a partner's contribution, personal...), for which property and partner.
 // Shared by the Partners page button and the overnight sync; the reply is checked against the exact ids offered, and callers act only on "high".
-async function partnersAiSuggest({ rows, properties, partners, examples }) {
+async function partnersAiSuggest({ rows, properties, partners, examples, customKinds = [] }) {
   const text = (value, max) => String(value == null ? "" : value).replace(/[\r\n|]+/g, " ").replace(/\s+/g, " ").trim().slice(0, max);
   examples = (Array.isArray(examples) ? examples : []).slice(0, 60)
     .map((item) => ({ payee: text(item?.payee, 60), kind: text(item?.kind, 20), propertyId: text(item?.propertyId, 60), partnerId: text(item?.partnerId, 60) }))
-    .filter((item) => item.payee && PARTNER_KINDS.some((kind) => kind.id === item.kind));
+    .filter((item) => item.payee && (PARTNER_KINDS.some((kind) => kind.id === item.kind) || customKinds.some((kind) => kind.id === item.kind)));
+  const kindIds = [...PARTNER_KINDS.map((kind) => kind.id), ...customKinds.map((kind) => kind.id)];
   const prompt = [
     "Kinds (id: meaning):",
     "rent: rent received from a tenant (money in)",
@@ -1662,6 +1663,10 @@ async function partnersAiSuggest({ rows, properties, partners, examples }) {
     "expense: any other cost of running a property (money out)",
     "interest: interest the account earned",
     "personal: nothing to do with the properties (one partner's personal money passing through, unrelated transfers)",
+    "other_income: income other than rent (late fees, a deposit the owners kept)",
+    "tax: property tax; insurance: insurance premiums; utilities: water, power, gas, internet; management: property management or agent fees",
+    "withdrawal: money paid out of the account to one of the partners (set partnerId to that partner)",
+    ...customKinds.map((kind) => `${kind.id}: ${kind.label} (${kind.group === "income" ? "income" : "a cost"} the group defined)`),
     "",
     "Properties (id: name):", ...properties.map((item) => `${item.id}: ${item.name}`), "",
     "Partners (id: name):", ...partners.map((item) => `${item.id}: ${item.name}`), "",
@@ -1672,7 +1677,7 @@ async function partnersAiSuggest({ rows, properties, partners, examples }) {
   const system = "You sort the rows of a shared rental-property bank account for the partners who own the properties together. For each row return the single best kind, the property id when it clearly belongs to one property, and the partner id when it is a partner's contribution. Reply with only a JSON array of {\"id\": string, \"kind\": string, \"propertyId\": string or null, \"partnerId\": string or null, \"confidence\": \"high\" or \"low\"}. Use only the ids offered. Say \"high\" only when the payee text makes it clear (a partner's name on a Zelle that sends money in, the lender's name, the HOA's name, a tenant already seen); otherwise \"low\". Never invent a person or property.";
 
   const answer = await geminiGenerateText({ prompt, system, maxOutputTokens: 6000 });
-  return partnersParseAiSuggestions(answer, rows.map((row) => row.id), properties.map((item) => item.id), partners.map((item) => item.id));
+  return partnersParseAiSuggestions(answer, rows.map((row) => row.id), properties.map((item) => item.id), partners.map((item) => item.id), kindIds);
 }
 
 // Partners page: suggests what each unmatched row of the shared account is (rent, loan, HOA, repair, a partner's contribution, personal...), for which
@@ -1689,7 +1694,8 @@ app.post("/api/partners/suggest", requireSession, async (req, res, next) => {
     const partners = (Array.isArray(req.body?.partners) ? req.body.partners : []).slice(0, 60).map((item) => ({ id: text(item?.id, 60), name: text(item?.name, 80) })).filter((item) => item.id && item.name);
     if (!rows.length) return res.status(400).json({ error: "No transactions to assign" });
     if (!properties.length || !partners.length) return res.status(400).json({ error: "Set up the properties and partners first" });
-    const results = await partnersAiSuggest({ rows, properties, partners, examples: req.body?.examples });
+    const customKinds = partnersSanitizeConfig({ customKinds: req.body?.customKinds }).customKinds;
+    const results = await partnersAiSuggest({ rows, properties, partners, examples: req.body?.examples, customKinds });
     res.json({ results });
   } catch (error) {
     if (error.statusCode) return res.status(error.statusCode).json({ error: error.message });

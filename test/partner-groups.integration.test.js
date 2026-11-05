@@ -103,3 +103,61 @@ test("an invite only works for an e-mail address the person has verified", async
   assert.equal(list.body.waitingForVerification.length, 1, "but they are told a group is waiting once they verify");
   assert.equal((await call(strict, person, `/api/partner-groups/${group.id}`)).status, 404);
 });
+
+test("rows typed in by hand can be added and deleted by editors, and nothing else can be deleted that way", async () => {
+  const owner = await signUp(server, "pg-owner4@example.com", "Owner Four");
+  const group = (await call(server, owner, "/api/partner-groups", "POST", { name: "Manual", setup, rows: [{ date: "2026-08-01", payee: "FROM BANK", amount: -100, source: "csv" }] })).body;
+  await call(server, owner, `/api/partner-groups/${group.id}/members`, "POST", { email: "pg-view4@example.com", role: "view" });
+  const viewer = await signUp(server, "pg-view4@example.com", "Viewer Four");
+  assert.equal((await call(server, viewer, `/api/partner-groups/${group.id}/rows/manual`, "POST", { rows: [{ date: "2026-08-05", payee: "CASH", amount: 20 }] })).status, 403);
+  const added = await call(server, owner, `/api/partner-groups/${group.id}/rows/manual`, "POST", { rows: [{ date: "2026-08-05", payee: "Cash to Sam", amount: 200 }, { date: "bad", payee: "x", amount: 1 }] });
+  assert.equal(added.status, 201);
+  assert.equal(added.body.added, 1, "a row without a real date is dropped");
+  assert.equal((await call(server, owner, `/api/partner-groups/${group.id}/rows/manual`, "POST", { rows: [{ date: "2026-08-05", payee: "", amount: 0 }] })).status, 400);
+  const rows = (await call(server, owner, `/api/partner-groups/${group.id}`)).body.rows;
+  const manual = rows.find((row) => row.source === "manual");
+  assert.ok(manual.id.startsWith("m-"));
+  assert.equal((await call(server, owner, `/api/partner-groups/${group.id}/rows/${rows.find((row) => row.source === "csv").id || "none"}`, "DELETE")).status, 400, "a bank or CSV row cannot be deleted one by one");
+  assert.equal((await call(server, viewer, `/api/partner-groups/${group.id}/rows/${manual.id}`, "DELETE")).status, 403);
+  assert.equal((await call(server, owner, `/api/partner-groups/${group.id}/rows/${manual.id}`, "DELETE")).status, 200);
+  assert.equal((await call(server, owner, `/api/partner-groups/${group.id}`)).body.rows.length, 1);
+});
+
+test("the owner can share a read-only report by link: no login, no e-mail addresses, transactions only if chosen, gone once revoked", async () => {
+  const owner = await signUp(server, "pg-owner5@example.com", "Owner Five");
+  const reportSetup = { properties: [{ id: "a", name: "Maple House" }], partners: [{ id: "p1", name: "Pat", email: "pat-secret@example.com" }, { id: "p2", name: "Sam" }], shares: {}, defaultShares: {}, overrides: {},
+    rules: [{ id: "r1", match: "zelle tina", kind: "rent", propertyId: "a" }, { id: "r2", match: "loanco", kind: "loan", propertyId: "a" }, { id: "r3", match: "zelle sam", kind: "contribution", partnerId: "p2" }] };
+  const rows = [{ date: "2026-08-01", payee: "ZELLE FROM TINA TENANT", amount: -2000 }, { date: "2026-08-08", payee: "LOANCO CASH 1111", amount: 2600 }, { date: "2026-08-31", payee: "ZELLE FROM SAM", amount: -500 }];
+  const group = (await call(server, owner, "/api/partner-groups", "POST", { name: "Report <Group>", setup: reportSetup, rows, poolBalance: { amount: 1234.5, date: "2026-09-01", name: "Shared" } })).body;
+  await call(server, owner, `/api/partner-groups/${group.id}/members`, "POST", { email: "pg-view5@example.com", role: "edit" });
+  const editor = await signUp(server, "pg-view5@example.com", "Editor Five");
+  assert.equal((await call(server, editor, `/api/partner-groups/${group.id}/share`, "POST", {})).status, 403, "only the owner shares a report");
+  assert.deepEqual((await call(server, owner, `/api/partner-groups/${group.id}/share`)).body, { shared: false });
+
+  const made = await call(server, owner, `/api/partner-groups/${group.id}/share`, "POST", { showTransactions: false });
+  assert.equal(made.status, 201);
+  const path = `/partners/share/${made.body.token}`;
+  const page = await server.request(path);
+  assert.equal(page.status, 200);
+  assert.match(page.body, /<meta name="robots" content="noindex, nofollow">/);
+  assert.ok(page.body.includes("Report &lt;Group&gt;"), "the group name is escaped");
+  assert.ok(page.body.includes("$2,000.00") && page.body.includes("$2,600.00"), "the figures are there");
+  assert.ok(page.body.includes("Maple House") && page.body.includes("Sam"));
+  assert.equal(page.body.includes("pat-secret@example.com"), false, "no e-mail address is ever shown");
+  assert.equal(page.body.includes("ZELLE FROM TINA"), false, "the transaction list is left out unless the owner chose it");
+  assert.ok(page.body.includes("$1,234.50"), "the bank balance is shown");
+
+  const withRows = await call(server, owner, `/api/partner-groups/${group.id}/share`, "POST", { showTransactions: true });
+  assert.equal(withRows.body.token, made.body.token, "changing the option keeps the same link");
+  const full = await server.request(path);
+  assert.ok(full.body.includes("ZELLE FROM TINA TENANT") && full.body.includes("Rent received"));
+  assert.ok((await server.request(`${path}?period=month`)).body.includes("This month"));
+
+  assert.equal((await server.request("/partners/share/not-a-real-token-at-all-0000")).status, 404);
+  assert.equal((await server.request("/partners/share/x")).status, 404);
+  assert.equal((await call(server, editor, `/api/partner-groups/${group.id}/share`, "DELETE")).status, 403);
+  assert.equal((await call(server, owner, `/api/partner-groups/${group.id}/share`, "DELETE")).status, 200);
+  assert.equal((await server.request(path)).status, 404, "a revoked link stops working at once");
+  const again = await call(server, owner, `/api/partner-groups/${group.id}/share`, "POST", {});
+  assert.notEqual(again.body.token, made.body.token, "a new link is a new token");
+});

@@ -2,6 +2,8 @@
 // partners, ownership, rules, per-row choices) and the shared account's rows, and it belongs to no household: each member signs in to their own
 // FamilyLoop, keeps their own household for their own home, and sees the group beside it. Roles: owner (everything, including who has access),
 // edit (change the setup, import rows) and view (read only). Membership is matched on the signed-in person's verified e-mail address.
+const crypto = require("node:crypto");
+const { renderPartnerReportHtml } = require("./partner-report");
 const { partnersSanitizeConfig, partnersMergeCsvRows, partnersMergeBankRows, buildPartnersStatement, partnersRowId, partnersSuggestMatch, PARTNERS_POOL_ID } = require("../lib/partners-logic");
 
 const MAX_ROWS = 20000;
@@ -47,7 +49,11 @@ function createGroupStore({ MEMORY_DB, memoryDb, pool }) {
       },
       async saveRows(id, rows, poolBalance) { const group = find(id); group.rows = rows; if (poolBalance !== undefined) group.poolBalance = poolBalance; return true; },
       async rename(id, name) { find(id).name = name; return true; },
-      async remove(id) { memoryDb.partnerGroups = memoryDb.partnerGroups.filter((group) => group.id !== id); return true; }
+      async remove(id) { memoryDb.partnerGroups = memoryDb.partnerGroups.filter((group) => group.id !== id); return true; },
+      async getShare(id) { const share = find(id)?.share; return share ? { ...share } : null; },
+      async saveShare(id, share) { find(id).share = { token: share.token, showTransactions: Boolean(share.showTransactions) }; return { ...find(id).share }; },
+      async deleteShare(id) { const group = find(id); const had = Boolean(group.share); delete group.share; return had; },
+      async groupByToken(token) { const group = memoryDb.partnerGroups.find((item) => item.share && item.share.token === token); return group ? { group: view(group), share: { ...group.share } } : null; }
     };
   }
   const view = (row) => row && ({ id: row.id, name: row.name, ownerUserId: row.owner_user_id, setup: row.setup || {}, rows: row.tx_rows || [], poolBalance: row.pool_balance || null, version: row.version });
@@ -80,7 +86,21 @@ function createGroupStore({ MEMORY_DB, memoryDb, pool }) {
       return true;
     },
     async rename(id, name) { await pool.query("UPDATE partner_groups SET name = $2, updated_at = now() WHERE id::text = $1", [id, name]); return true; },
-    async remove(id) { await pool.query("DELETE FROM partner_groups WHERE id::text = $1", [id]); return true; }
+    async remove(id) { await pool.query("DELETE FROM partner_groups WHERE id::text = $1", [id]); return true; },
+    async getShare(id) { const row = (await pool.query("SELECT token, show_transactions FROM partner_group_shares WHERE group_id::text = $1", [id])).rows[0]; return row ? { token: row.token, showTransactions: row.show_transactions } : null; },
+    async saveShare(id, share, createdBy) {
+      const row = (await pool.query(
+        `INSERT INTO partner_group_shares (group_id, token, show_transactions, created_by) VALUES ($1, $2, $3, $4)
+         ON CONFLICT (group_id) DO UPDATE SET show_transactions = EXCLUDED.show_transactions RETURNING token, show_transactions`, [id, share.token, Boolean(share.showTransactions), createdBy || null])).rows[0];
+      return { token: row.token, showTransactions: row.show_transactions };
+    },
+    async deleteShare(id) { return (await pool.query("DELETE FROM partner_group_shares WHERE group_id::text = $1", [id])).rowCount > 0; },
+    async groupByToken(token) {
+      const share = (await pool.query("SELECT group_id, token, show_transactions FROM partner_group_shares WHERE token = $1", [token])).rows[0];
+      if (!share) return null;
+      const group = await this.get(String(share.group_id));
+      return group ? { group, share: { token: share.token, showTransactions: share.show_transactions } } : null;
+    }
   };
 }
 
@@ -91,7 +111,8 @@ function cleanRows(rows) {
     payee: String((row && row.payee) || "").replace(/[\r\n]+/g, " ").trim().slice(0, 200),
     amount: Number(row && row.amount),
     externalId: String((row && row.externalId) || "").slice(0, 200),
-    source: row && row.source === "csv" ? "csv" : (row && row.source === "bank" ? "bank" : "")
+    id: String((row && row.id) || "").slice(0, 60),
+    source: row && ["csv", "bank", "manual"].includes(row.source) ? row.source : ""
   })).filter((row) => row.date && Number.isFinite(row.amount) && row.amount !== 0 && Math.abs(row.amount) < 1e9);
 }
 
@@ -209,11 +230,57 @@ function registerPartnerGroupRoutes({ app, requireSession, sendTransactionalEmai
     res.json({ ok: true, added: merged.added, skipped: merged.skipped ?? (incoming.length - merged.added), total: merged.rows.length });
   }));
 
+  // A row typed in by hand (cash paid outside the bank, a partner's withdrawal, a correction): kept as it is, never merged with others.
+  app.post("/api/partner-groups/:id/rows/manual", requireSession, wrap(async (req, res) => {
+    const { group } = await loadGroup(req, { need: "edit" });
+    const incoming = cleanRows(req.body?.rows).slice(0, 50).map((row) => ({ ...row, externalId: "", source: "manual", id: `m-${Date.now().toString(36)}-${crypto.randomBytes(4).toString("hex")}` }));
+    if (!incoming.length) throw clientError("Enter a date, a description and an amount", 400);
+    if (group.rows.length + incoming.length > MAX_ROWS) throw clientError(`A group keeps at most ${MAX_ROWS} transactions`, 413);
+    await store.saveRows(group.id, [...group.rows, ...incoming], undefined);
+    res.status(201).json({ ok: true, added: incoming.length });
+  }));
+
+  app.delete("/api/partner-groups/:id/rows/:rowId", requireSession, wrap(async (req, res) => {
+    const { group } = await loadGroup(req, { need: "edit" });
+    const target = group.rows.find((row) => row.id && row.id === String(req.params.rowId));
+    if (!target || target.source !== "manual") throw clientError("Only a row added by hand can be deleted", 400);
+    await store.saveRows(group.id, group.rows.filter((row) => row !== target), undefined);
+    res.json({ ok: true });
+  }));
+
   app.delete("/api/partner-groups/:id/rows", requireSession, wrap(async (req, res) => {
     const { group } = await loadGroup(req, { need: "owner" });
     await store.saveRows(group.id, [], undefined);
     res.json({ ok: true });
   }));
+
+  // The read-only report link for partners without a login: unguessable token, owner only, revoked by deleting it (a new link is a new token).
+  app.get("/api/partner-groups/:id/share", requireSession, wrap(async (req, res) => {
+    const { group } = await loadGroup(req, { need: "owner" });
+    const share = await store.getShare(group.id);
+    res.json(share ? { shared: true, token: share.token, showTransactions: share.showTransactions } : { shared: false });
+  }));
+  app.post("/api/partner-groups/:id/share", requireSession, wrap(async (req, res) => {
+    const { group } = await loadGroup(req, { need: "owner" });
+    const existing = await store.getShare(group.id);
+    const share = await store.saveShare(group.id, { token: existing ? existing.token : crypto.randomBytes(24).toString("base64url"), showTransactions: Boolean(req.body?.showTransactions) }, req.sessionUser.id);
+    res.status(existing ? 200 : 201).json({ shared: true, token: share.token, showTransactions: share.showTransactions });
+  }));
+  app.delete("/api/partner-groups/:id/share", requireSession, wrap(async (req, res) => {
+    const { group } = await loadGroup(req, { need: "owner" });
+    await store.deleteShare(group.id);
+    res.json({ ok: true });
+  }));
+
+  app.get("/partners/share/:token", async (req, res, next) => {
+    try {
+      res.set({ "Cache-Control": "no-store", "X-Robots-Tag": "noindex, nofollow", "Referrer-Policy": "no-referrer" });
+      const token = String(req.params.token || "");
+      const found = /^[A-Za-z0-9_-]{20,80}$/.test(token) ? await store.groupByToken(token) : null;
+      if (!found) return res.status(404).type("text/plain").send("This report link is not valid, or the owner stopped sharing it.");
+      res.type("html").send(renderPartnerReportHtml({ group: found.group, period: String(req.query.period || "all"), showTransactions: found.share.showTransactions, path: `/partners/share/${token}` }));
+    } catch (error) { next(error); }
+  });
 
   app.post("/api/partner-groups/:id/members", requireSession, wrap(async (req, res) => {
     const { group } = await loadGroup(req, { need: "owner" });
@@ -299,7 +366,7 @@ async function assignNewRowsWithAi(store, groupId, incoming, suggest) {
     });
     const results = await suggest({
       rows: targets.map((row, index) => ({ id: String(index), payee: row.payee, money: -Number(row.amount), date: row.date })),
-      properties: setup.properties, partners: setup.partners, examples
+      properties: setup.properties, partners: setup.partners, examples, customKinds: setup.customKinds || []
     });
     const overrides = { ...(setup.overrides || {}) };
     let assigned = 0;
