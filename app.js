@@ -2102,6 +2102,10 @@ function syncHistoryToView() {
   history[method]({ view: currentView }, "", `#${currentView}`);
 }
 
+// Scrollable lists inside a page whose position survives a re-render (see render).
+const INNER_SCROLL_SELECTORS = [".ledger-entry-list", ".tag-transaction-list"];
+let lastInnerScrollKey = "";
+
 function render() {
   if (!state) return;
   // Captured once per household so the server can format reminder-email due
@@ -2120,7 +2124,15 @@ function render() {
   syncHistoryToView();
   if (currentView === "wealth") { ensureDebtNetWorthSync(); ensureAccountsData(); if (ensureDebtPaymentsAppliedFromLedger()) autosaveState(); }
   renderShell();
+  // Lists with their own scrollbar (the ledger) are rebuilt on every edit; put each back where it was so editing a row
+  // does not throw the person back to the top of the list. Only within the same page and month.
+  const innerScrollKey = `${currentView}|${state.budget?.month || ""}`;
+  const innerScroll = innerScrollKey === lastInnerScrollKey
+    ? INNER_SCROLL_SELECTORS.map((selector) => [selector, view.querySelector(selector)?.scrollTop || 0])
+    : [];
   view.innerHTML = (renderers[currentView] || renderers.budget)();
+  innerScroll.forEach(([selector, top]) => { const el = top ? view.querySelector(selector) : null; if (el) el.scrollTop = top; });
+  lastInnerScrollKey = innerScrollKey;
   bindViewEvents();
   syncAssistantButton();
   if (currentView === "admin" && !adminData) loadAdminData();

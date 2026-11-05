@@ -348,3 +348,7 @@ Each debt in `state.goals.debts` shares its id with a liability in `state.goals.
 ### Re-categorised debt payments
 
 `ensureDebtPaymentsAppliedFromLedger` first calls `unapplyOrphanedDebtPayments` (lib/shared-logic.js) for each debt linked to a category. A remembered `appliedPaymentSignatures` entry (`date|amount`) with no transaction left in that category means the transaction was moved or deleted: the matching payment (same `date|amount`) is removed from the debt's history, its principal is added back to the balance and liability, and the signature is forgotten so the transaction applies to its new debt. Signatures with no payment (bank-matched or removed by hand) are only forgotten. Runs when Wealth renders and saves on change. Mobile does not apply ledger payments to debts, so it needs no counterpart.
+
+### Scroll position of inner lists
+
+`render()` rebuilds the whole page on every edit. Lists with their own scrollbar (`INNER_SCROLL_SELECTORS` in app.js: the ledger list and the tag transaction list) have their `scrollTop` captured before the rebuild and restored after it, as long as the page and month are unchanged. Add any new scrollable list to that array.

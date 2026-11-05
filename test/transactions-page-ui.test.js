@@ -52,3 +52,9 @@ test("every card in Investments has Edit account: a holding that is not an accou
   assert.doesNotMatch(card, /\$\{account \? `<div class="account-edit-region">/, "the Edit account region is no longer account-only");
   assert.match(app, /\[data-stock-group-class\]/);
 });
+
+test("the ledger list keeps its scroll position when a row is edited and the page re-renders", () => {
+  assert.match(app, /INNER_SCROLL_SELECTORS = \["\.ledger-entry-list"/);
+  assert.match(app, /innerScrollKey === lastInnerScrollKey/);
+  assert.match(app, /el\.scrollTop = top/);
+});
