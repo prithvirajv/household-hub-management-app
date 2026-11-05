@@ -148,3 +148,9 @@ test("the Partners page edits amounts, adds rows by hand, takes custom categorie
   assert.match(app, /id="partnersShareCreate"/);
   assert.match(app, /\/partners\/share\/\$\{partnersShare\.token\}/);
 });
+
+test("Ask FamilyLoop answers about the rental properties from the open Partners group, from any page", () => {
+  assert.match(app, /function partnersAssistantFacts\(\)/);
+  assert.match(app, /if \(partnerGroupsInfo === null\) await loadPartnerGroups\(\);/);
+  assert.match(app, /currentView === "partners" && partnersFacts \? \[partnersFacts, householdFacts\] : \[householdFacts, partnersFacts\]/);
+});

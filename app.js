@@ -2654,11 +2654,47 @@ function syncAssistantButton() {
   if (button) button.hidden = !(state && sessionUser && sessionUser.accessLevel !== "view");
 }
 
+// What Ask FamilyLoop may answer about the open Partners group ("how is my rental property doing?"): the same figures as the Partners page, as plain
+// text, so the answer comes from the group's own numbers. Empty when no group is open.
+function partnersAssistantFacts() {
+  if (!partnersGroup) return "";
+  const data = ensurePartnersData();
+  if (!data.properties.length || !data.partners.length) return `PARTNERS GROUP "${partnersGroup.name}": set up with no properties or partners yet.`;
+  const config = { ...data, accountIds: [PARTNERS_POOL_ID] };
+  const rows = partnersRows();
+  const money$ = (value) => money.format(Number(value) || 0);
+  const now = new Date();
+  const monthKey = (offset) => dateKey(new Date(now.getFullYear(), now.getMonth() - offset, 1)).slice(0, 7);
+  const all = buildPartnersStatement(config, rows, {});
+  const recent = buildPartnersStatement(config, rows, { fromMonth: monthKey(2), toMonth: monthKey(0) });
+  const summary = (st) => `income ${money$(st.pool.income)}, costs (loans, HOA, repairs and other) ${money$(st.pool.expenses)}, result ${money$(st.pool.net)} (${st.pool.net < 0 ? "a shortfall" : "a surplus"}), partners sent in ${money$(st.pool.contributions)}, withdrawn by partners ${money$(st.pool.withdrawals)}`;
+  const lines = [
+    `PARTNERS GROUP "${partnersGroup.name}" - the shared rental properties run by ${data.partners.map((partner) => partner.name).join(", ")} from one shared bank account (you are ${partnersGroup.role === "owner" ? "its owner" : partnersGroup.role === "edit" ? "an editor" : "a viewer"}). This is the data for questions about the rental properties or the partners:`,
+    `ALL TIME: ${summary(all)}; ${all.rowCount} transactions, ${all.unclassified.length} not yet sorted into a category.${partnersGroup.poolBalance ? ` The bank reports a balance of ${money$(partnersGroup.poolBalance.amount)} (${partnersGroup.poolBalance.date}).` : ""}`,
+    `LAST 3 MONTHS (${monthKey(2)} to ${monthKey(0)}): ${summary(recent)}; average monthly shortfall suggested for next month ${money$(all.averageShortfall)}.`,
+    "PROPERTIES (all time):",
+    ...all.properties.map((row) => `- ${row.name}: rent and income in ${money$(row.income)}, loan ${money$(row.loan)}, HOA ${money$(row.hoa)}, repairs and other ${money$(row.repair + row.expense)}, result ${money$(row.net)}`),
+    "PARTNERS (all time; balance = sent in - withdrawn + share of the result; to square up shares the money put in by ownership):",
+    ...all.partners.map((row) => `- ${row.name}: owns ${row.effectivePct.toFixed(0)}%, sent in ${money$(row.contributed)}, withdrawn ${money$(row.withdrawn)}, share of result ${money$(row.share)}, balance ${money$(row.balance)}, ${row.toSquare > 0.005 ? `should send ${money$(row.toSquare)}` : row.toSquare < -0.005 ? `should receive ${money$(-row.toSquare)}` : "square"}, suggested monthly send ${money$(row.suggested)}`),
+    "CATEGORIES (all time):",
+    ...all.byKind.map((row) => `- ${row.label}: ${money$(row.total)}`),
+    "RECENT MONTHS (newest first):",
+    ...all.months.slice().reverse().slice(0, 6).map((row) => `- ${formatMonth(row.month)}: income ${money$(row.income)}, costs ${money$(row.expenses)}, result ${money$(row.net)}, sent in ${money$(row.contributions)}, withdrawn ${money$(row.withdrawals)}`)
+  ];
+  return lines.join("\n").slice(0, 3000);
+}
+
 async function askAssistant(request) {
   assistantUi = { ...assistantUi, request, status: "planning", error: "", say: "", answer: "", clarify: "", actions: [], skipped: [], done: "", undo: null };
   renderAssistantDialog();
   try {
-    const plan = await api("/api/assistant/plan", { method: "POST", body: JSON.stringify({ request, context: assistantContext(state), facts: assistantFacts(state, dateKey(new Date()), (value) => money.format(value)) }) });
+    // The Partners groups are loaded on first use, so a question from any page can be answered from them.
+    if (partnerGroupsInfo === null) await loadPartnerGroups();
+    const householdFacts = assistantFacts(state, dateKey(new Date()), (value) => money.format(value)).slice(0, 8800);
+    const partnersFacts = partnersAssistantFacts();
+    // Asked from the Partners page, the group's numbers come first; from anywhere else, the household's do.
+    const facts = (currentView === "partners" && partnersFacts ? [partnersFacts, householdFacts] : [householdFacts, partnersFacts]).filter(Boolean).join("\n\n");
+    const plan = await api("/api/assistant/plan", { method: "POST", body: JSON.stringify({ request, context: assistantContext(state), facts }) });
     assistantUi = { ...assistantUi, status: "ready", say: plan.say || "", answer: plan.answer || "", clarify: plan.clarify || "", actions: plan.actions || [] };
   } catch (error) {
     assistantUi = { ...assistantUi, status: "error", error: error?.message || "The assistant couldn't be reached." };
