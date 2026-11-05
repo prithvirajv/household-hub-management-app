@@ -15223,16 +15223,18 @@ function renderBankSyncHealthCard() {
 // What Sync now and Import history can be limited to on one connection: a kind of account (all checking accounts, all credit cards, ...) or any
 // individual accounts under it. linkedAccountPick[linkId] holds the ticked remote account ids; none ticked (or every one ticked) = every account.
 // SimpleFIN counts requests, not accounts, so ticking a whole group costs the same as ticking one account.
-const LINKED_ACCOUNT_KINDS = [["checking", "Checking accounts"], ["savings", "Savings accounts"], ["credit_card", "Credit cards"], ["cash", "Cash accounts"], ["investment", "Investment accounts"], ["other", "Other accounts"]];
+const LINKED_ACCOUNT_KINDS = [["checking", "Checking accounts"], ["savings", "Savings accounts"], ["credit_card", "Credit cards"], ["cash", "Cash accounts"], ["investment", "Investment accounts"], ["other", "Other accounts"], ["partners", "Partners page"]];
 
 function linkedPickableKinds(link) {
   const byKind = new Map();
   Object.entries(link.mappings || {}).forEach(([remoteId, mapping]) => {
     if (!mapping || !mapping.accountId) return;
-    const account = (state.accounts || []).find((item) => item.id === mapping.accountId);
-    const type = account?.type || "other";
+    // The account kept for the Partners page is not a Wealth account, so it has no name of its own here: use the one the bank reported.
+    const isPool = mapping.accountId === PARTNERS_POOL_ID;
+    const account = isPool ? null : (state.accounts || []).find((item) => item.id === mapping.accountId);
+    const type = isPool ? "partners" : (account?.type || "other");
     const kind = LINKED_ACCOUNT_KINDS.some(([key]) => key === type) ? type : "other";
-    byKind.set(kind, [...(byKind.get(kind) || []), { remoteId, name: account?.name || "Account" }]);
+    byKind.set(kind, [...(byKind.get(kind) || []), { remoteId, name: isPool ? (state.partnerPoolBalance?.name || "Shared account") : (account?.name || "Account") }]);
   });
   return LINKED_ACCOUNT_KINDS.filter(([key]) => byKind.has(key)).map(([key, label]) => ({ key, label, accounts: byKind.get(key).sort((a, b) => a.name.localeCompare(b.name)), remoteIds: byKind.get(key).map((entry) => entry.remoteId) }));
 }

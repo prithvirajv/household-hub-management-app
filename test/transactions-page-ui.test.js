@@ -99,3 +99,8 @@ test("the bank-link mapping offers a Partners-only choice and the Partners page 
   assert.match(app, /state\.partnerTransactions = partnersMergeBankRows/);
   assert.match(app, /Every transaction in the shared account/);
 });
+
+test("the Sync account picker names the Partners-page account instead of showing it as a plain Account", () => {
+  assert.match(app, /\["partners", "Partners page"\]/);
+  assert.match(app, /isPool \? \(state\.partnerPoolBalance\?\.name \|\| "Shared account"\)/);
+});

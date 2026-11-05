@@ -597,7 +597,7 @@ test("a slow SimpleFIN range is split and retried instead of losing the import; 
   const { syncSimplefin, gapsFromFailedWindows } = require("../server/linked-accounts");
   const day = 86400;
   const start = Math.floor(Date.parse("2026-01-01T00:00:00Z") / 1000);
-  const end = start + 130 * day; // three windows of up to 55 days
+  const end = start + 130 * day; // three windows of up to 44 days
   const respond = (accounts) => ({ ok: true, status: 200, json: async () => ({ errors: [], accounts }) });
   const accountFor = (from, to) => ({ id: "A1", name: "Checking", org: { name: "B" }, currency: "USD", balance: "10", "balance-date": to, transactions: [{ id: `t-${from}`, posted: from + day, amount: "-1", description: "X" }] });
   const rangeOf = (url) => { const u = new URL(url); return [Number(u.searchParams.get("start-date")), Number(u.searchParams.get("end-date"))]; };
@@ -681,4 +681,20 @@ test("a save can never drop an entry that came from the bank unless the person a
     assert.equal((await server.request("/api/state", { method: "PUT", headers: { cookie, "x-allow-shrink": "1" }, body: JSON.stringify(deleted) })).status, 200);
     assert.deepEqual((await server.request("/api/state", { headers: { cookie } })).body.transactions.map((t) => t.externalId || "hand"), ["sf:a:1", "sf:a:4", "hand", "sf:a:6"]);
   } finally { await server.stop(); }
+});
+
+test("no single SimpleFIN request asks for more than the Bridge's recommended 45 days", async () => {
+  const { syncSimplefin } = require("../server/linked-accounts");
+  const day = 86400;
+  const start = Math.floor(Date.parse("2026-09-01T00:00:00Z") / 1000);
+  const end = start + 66 * day;
+  const spans = [];
+  const fetchImpl = async (url) => {
+    const u = new URL(url);
+    spans.push((Number(u.searchParams.get("end-date")) - Number(u.searchParams.get("start-date"))) / day);
+    return { ok: true, status: 200, json: async () => ({ errors: [], accounts: [] }) };
+  };
+  await syncSimplefin("https://u:p@bridge.simplefin.org/simplefin", { startUnix: start, endUnix: end }, { fetchImpl });
+  assert.ok(spans.length >= 2, "a 66-day range is asked for in more than one piece");
+  assert.ok(spans.every((span) => span <= 45), `every request stays within 45 days (saw ${spans.join(", ")})`);
 });

@@ -12,7 +12,7 @@
 const crypto = require("node:crypto");
 const { applyLinkedPayload, fillUncategorizedLedgerRows, retryWaitingDrafts, uniqueIdFactory } = require("../lib/linked-apply");
 
-const SIMPLEFIN_WINDOW_DAYS = 55; // the Bridge hard-caps one request at 60 days and only warns above 45 (data still comes back); every request counts against its daily limit, so use few
+const SIMPLEFIN_WINDOW_DAYS = 44; // the Bridge recommends at most 45 days per request and has started returning nothing for longer ranges (a 65-day history import came back empty); every request counts against its daily limit, so use few
 // A link's first sync (and the first after its accounts are changed) starts at the first day of last month, not "30 days ago": whole months
 // only, so no account begins with a half-filled month (see trimPartialHistory for when the bank returns less).
 function firstOfPreviousMonth(nowMs = Date.now()) {
@@ -20,7 +20,7 @@ function firstOfPreviousMonth(nowMs = Date.now()) {
   return new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - 1, 1)).toISOString().slice(0, 10);
 }
 // Every fetch starts this many days before the last successful sync and asks again for rows it may already have (the app skips what it already
-// imported by bank id), so a row the bank's data feed delivers a few days late is still picked up. One request covers it: windows are 55 days.
+// imported by bank id), so a row the bank's data feed delivers a few days late is still picked up. One request covers it: windows are 44 days.
 const SIMPLEFIN_OVERLAP_DAYS = 10;
 // An account whose data stopped at an earlier date (its bank connection was broken) is caught up from there when it recovers, but never from
 // further back than this, so the catch-up stays a single request. Older gaps are what Import history and the history-gap notices are for.
