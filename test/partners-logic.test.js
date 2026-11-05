@@ -201,3 +201,31 @@ test("a row's amount can be corrected without losing the bank's own figure, and 
   const clean = partnersSanitizeConfig({ ...config, overrides: { a: { amount: "12.345" }, b: { amount: "x" }, c: { kind: "rent", propertyId: "a", amount: 5 } } });
   assert.deepEqual(clean.overrides, { a: { amount: 12.35 }, c: { kind: "rent", propertyId: "a", partnerId: "", amount: 5 } });
 });
+
+test("a tenant's deposit is held, not income: received raises it, returned lowers it, and a part kept becomes income with no money moving", () => {
+  const { partnersSanitizeConfig } = require("../lib/partners-logic");
+  const cfg = partnersSanitizeConfig({
+    ...config,
+    properties: [{ id: "a", name: "Maple", tenant: "Tina Tenant", leaseEnd: "2026-12-31" }, { id: "b", name: "Oak", leaseEnd: "not a date" }],
+    rules: [...config.rules, { id: "d1", match: "deposit from tina", kind: "deposit_in", propertyId: "a" }, { id: "d2", match: "deposit back to tina", kind: "deposit_out", propertyId: "a" }, { id: "d3", match: "damage kept", kind: "deposit_kept", propertyId: "a" }]
+  });
+  assert.deepEqual([cfg.properties[0].tenant, cfg.properties[0].leaseEnd, cfg.properties[1].leaseEnd], ["Tina Tenant", "2026-12-31", ""], "tenant and lease end are kept, a bad date is dropped");
+  const rows = [
+    t("2026-01-02", "ZELLE FROM TINA TENANT", -2000),
+    t("2026-01-02", "DEPOSIT FROM TINA", -2000),
+    t("2026-12-20", "DEPOSIT BACK TO TINA", 1700),
+    t("2026-12-20", "DAMAGE KEPT", -300)
+  ];
+  const s = buildPartnersStatement(cfg, rows, {});
+  const a = s.properties.find((p) => p.id === "a");
+  assert.deepEqual([a.depositIn, a.depositOut, a.depositKept, a.depositHeld], [2000, 1700, 300, 0], "everything received was returned or kept, nothing is held");
+  assert.equal(a.income, 2300, "only the rent and the part kept are income; the deposit itself is not");
+  assert.equal(s.pool.depositsHeld, 0);
+  assert.deepEqual([a.tenant, a.leaseEnd], ["Tina Tenant", "2026-12-31"]);
+  const midLease = buildPartnersStatement(cfg, rows.slice(0, 2), {});
+  assert.equal(midLease.pool.depositsHeld, 2000, "while the lease runs the whole deposit is held");
+  assert.equal(midLease.pool.income, 2000, "and is not income");
+  assert.equal(midLease.pool.cash, 4000, "the account does hold the money: rent plus the deposit");
+  assert.deepEqual(s.byKind.filter((k) => k.group === "deposit").map((k) => [k.id, k.total]), [["deposit_in", 2000], ["deposit_out", 1700], ["deposit_kept", 300]]);
+  assert.equal(s.pool.cash, 2300 - 0 + 0, "cash = rent in (2000) + deposits received (2000) - returned (1700) = 2300, the kept 300 moved no money");
+});

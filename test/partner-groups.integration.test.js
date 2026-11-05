@@ -161,3 +161,17 @@ test("the owner can share a read-only report by link: no login, no e-mail addres
   const again = await call(server, owner, `/api/partner-groups/${group.id}/share`, "POST", {});
   assert.notEqual(again.body.token, made.body.token, "a new link is a new token");
 });
+
+test("the shared report lists deposits still held for tenants, with the lease end but never the tenant's name", async () => {
+  const owner = await signUp(server, "pg-owner6@example.com", "Owner Six");
+  const soon = new Date(Date.now() + 20 * 86400000).toISOString().slice(0, 10);
+  const depositSetup = { properties: [{ id: "a", name: "Maple House", tenant: "Tina Secretname", leaseEnd: soon }], partners: [{ id: "p1", name: "Pat" }], shares: {}, defaultShares: {}, overrides: {},
+    rules: [{ id: "d1", match: "deposit from tina", kind: "deposit_in", propertyId: "a" }] };
+  const group = (await call(server, owner, "/api/partner-groups", "POST", { name: "Deposits", setup: depositSetup, rows: [{ date: "2026-01-02", payee: "DEPOSIT FROM TINA", amount: -1800, source: "csv" }] })).body;
+  assert.equal(group.setup.properties[0].tenant, "Tina Secretname", "the owner's own page keeps the tenant");
+  const share = await call(server, owner, `/api/partner-groups/${group.id}/share`, "POST", {});
+  const page = await server.request(`/partners/share/${share.body.token}`);
+  assert.ok(page.body.includes("Tenant deposits held") && page.body.includes("$1,800.00"));
+  assert.ok(/return due in (19|20|21) days/.test(page.body), "the lease end drives the status");
+  assert.equal(page.body.includes("Tina Secretname"), false, "a shared report never shows the tenant's name");
+});

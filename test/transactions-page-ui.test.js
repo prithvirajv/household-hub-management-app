@@ -154,3 +154,11 @@ test("Ask FamilyLoop answers about the rental properties from the open Partners 
   assert.match(app, /if \(partnerGroupsInfo === null\) await loadPartnerGroups\(\);/);
   assert.match(app, /currentView === "partners" && partnersFacts \? \[partnersFacts, householdFacts\] : \[householdFacts, partnersFacts\]/);
 });
+
+test("the Partners page tracks tenant deposits: tenant and lease end in Setup, a held-deposits table, and a reminder when one is due", () => {
+  assert.match(app, /data-partners-property-tenant="\$\{index\}"/);
+  assert.match(app, /data-partners-property-leaseend="\$\{index\}"/);
+  assert.match(app, /Tenant deposits held/);
+  assert.match(app, /return due in \$\{days\} day/);
+  assert.match(app, /<div class="partners-statement-wrap" \$\{hasRows \? "" : "hidden"\}>/);
+});

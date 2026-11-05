@@ -9579,3 +9579,6 @@ html[data-theme="dark"] .note-check-delete {
 .partners-addrow input[name="payee"] { flex: 2; min-width: 14rem; }
 .partners-addrow input[type="number"] { width: 8rem; }
 .partners-share input[readonly] { flex: 1; min-width: 16rem; }
+.partners-leaseend { display: inline-flex; align-items: center; gap: 0.35rem; font-size: 0.8rem; color: var(--muted); white-space: nowrap; }
+.partners-statement-wrap { display: grid; gap: 1rem; }
+.partners-statement-wrap[hidden] { display: none; }

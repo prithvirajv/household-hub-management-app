@@ -42,7 +42,15 @@ function renderPartnerReportHtml({ group, period = "all", showTransactions = fal
   const propertyRows = statement.properties.map((row) => `<tr><th>${escapeHtml(row.name)}</th><td>${money(row.income)}</td><td>${money(row.loan)}</td><td>${money(row.hoa)}</td><td>${money(row.repair + row.expense)}</td><td>${signed(row.net)}</td></tr>`).join("");
   const partnerRows = statement.partners.map((row) => `<tr><th>${escapeHtml(row.name)}</th><td>${row.effectivePct.toFixed(0)}%</td><td>${money(row.contributed)}</td><td>${money(row.withdrawn)}</td><td>${signed(row.share)}</td><td>${signed(row.balance)}</td><td>${row.toSquare > 0.005 ? `<b>send ${money(row.toSquare)}</b>` : row.toSquare < -0.005 ? `receive ${money(-row.toSquare)}` : "even"}</td><td>${statement.averageShortfall > 0 ? money(row.suggested) : "-"}</td></tr>`).join("");
   const monthRows = statement.months.slice().reverse().map((row) => `<tr><th>${escapeHtml(monthLabel(row.month))}</th><td>${money(row.income)}</td><td>${money(row.expenses)}</td><td>${signed(row.net)}</td><td>${money(row.contributions)}</td><td>${money(row.withdrawals)}</td></tr>`).join("");
-  const kindRows = statement.byKind.map((row) => `<tr><th>${escapeHtml(row.label)}</th><td>${row.group === "income" ? "Income" : row.group === "cost" ? "Cost" : "Partner money"}</td><td>${money(row.total)}</td></tr>`).join("");
+  const kindRows = statement.byKind.map((row) => `<tr><th>${escapeHtml(row.label)}</th><td>${row.group === "income" ? "Income" : row.group === "cost" ? "Cost" : row.group === "deposit" ? "Tenant deposit" : "Partner money"}</td><td>${money(row.total)}</td></tr>`).join("");
+  const today = now.toISOString().slice(0, 10);
+  const daysUntil = (key) => Math.round((Date.parse(`${key}T00:00:00Z`) - Date.parse(`${today}T00:00:00Z`)) / 86400000);
+  // Deposits still held for tenants: per property, with the lease end (the tenant's name is not shown on a shared report).
+  const depositRows = statement.properties.filter((row) => row.id && (row.depositHeld || row.depositIn)).map((row) => {
+    const days = row.leaseEnd ? daysUntil(row.leaseEnd) : null;
+    const status = row.depositHeld <= 0.005 ? "nothing held" : days === null ? "lease end not set" : days < 0 ? `lease ended ${-days} days ago: return it` : days <= 60 ? `return due in ${days} days` : `lease ends ${shortDate(row.leaseEnd)}`;
+    return `<tr><th>${escapeHtml(row.name)}</th><td>${money(row.depositHeld)}</td><td>${escapeHtml(row.leaseEnd ? shortDate(row.leaseEnd) : "")}</td><td class="left">${escapeHtml(status)}</td></tr>`;
+  }).join("");
   const entryRows = showTransactions ? statement.entries.slice(0, MAX_TRANSACTION_ROWS).map((entry) => {
     const counted = entry.kind ? [kindLabel(entry.kind), propertyName(entry.propertyId), partnerName(entry.partnerId)].filter(Boolean).join(" · ") : "not yet sorted";
     return `<tr><td>${escapeHtml(shortDate(entry.date))}</td><td class="left">${escapeHtml(String(entry.payee || "").slice(0, 90))}</td><td>${signed(entry.money)}${entry.edited ? ` <small title="The bank's own figure was ${escapeHtml(money(entry.originalMoney))}">(corrected)</small>` : ""}</td><td class="left">${escapeHtml(counted)}</td></tr>`;
@@ -71,11 +79,13 @@ ${tile("Rent and income in", money(pool.income))}
 ${tile("Loans, HOA and repairs", money(pool.expenses))}
 ${tile(pool.net < 0 ? "Shortfall" : "Surplus", signed(pool.net), statement.months.length ? `${money(Math.abs(pool.net) / statement.months.length)} a month on average` : "")}
 ${tile("Partners sent in", money(pool.contributions), pool.withdrawals ? `${money(pool.withdrawals)} withdrawn` : "")}
+${pool.depositsHeld ? tile("Tenant deposits held", money(pool.depositsHeld), "owed back to tenants, not income") : ""}
 ${group.poolBalance ? tile("Bank balance", money(group.poolBalance.amount), group.poolBalance.date ? `as of ${escapeHtml(shortDate(group.poolBalance.date))}` : "") : ""}
 </div>
 <h2>By property</h2><div class="scroll"><table><thead><tr><th></th><th>Rent in</th><th>Loan</th><th>HOA</th><th>Repairs and other</th><th>Result</th></tr></thead><tbody>${propertyRows}</tbody></table></div>
 <h2>By partner</h2><div class="scroll"><table><thead><tr><th></th><th>Share</th><th>Sent in</th><th>Withdrawn</th><th>Share of result</th><th>Balance</th><th>To square up</th><th>Suggested a month</th></tr></thead><tbody>${partnerRows}</tbody></table></div>
 <p class="muted">Balance is what a partner sent in, less what they withdrew, plus their share of the result. To square up shares the money put in by ownership: "send" means send that much more, "receive" means they put in more than their share.</p>
+${depositRows ? `<h2>Tenant deposits held</h2><div class="scroll"><table><thead><tr><th>Property</th><th>Held</th><th>Lease ends</th><th class="left">Status</th></tr></thead><tbody>${depositRows}</tbody></table></div><p class="muted">Deposits and advances from tenants are owed back at the end of the lease, so they are not counted as income.</p>` : ""}
 ${kindRows ? `<h2>By category</h2><div class="scroll"><table><thead><tr><th>Category</th><th>Type</th><th>Total</th></tr></thead><tbody>${kindRows}</tbody></table></div>` : ""}
 ${monthRows ? `<h2>Month by month</h2><div class="scroll"><table><thead><tr><th></th><th>Income</th><th>Costs</th><th>Result</th><th>Sent in</th><th>Withdrawn</th></tr></thead><tbody>${monthRows}</tbody></table></div>` : ""}
 ${showTransactions ? `<h2>Transactions</h2><div class="scroll"><table><thead><tr><th>Date</th><th class="left">Description</th><th>Money in / out</th><th class="left">Counted as</th></tr></thead><tbody>${entryRows}</tbody></table></div>${statement.entries.length > MAX_TRANSACTION_ROWS ? `<p class="muted">Showing the newest ${MAX_TRANSACTION_ROWS} of ${statement.entries.length}.</p>` : ""}` : ""}

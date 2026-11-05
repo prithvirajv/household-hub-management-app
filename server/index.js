@@ -1666,6 +1666,7 @@ async function partnersAiSuggest({ rows, properties, partners, examples, customK
     "other_income: income other than rent (late fees, a deposit the owners kept)",
     "tax: property tax; insurance: insurance premiums; utilities: water, power, gas, internet; management: property management or agent fees",
     "withdrawal: money paid out of the account to one of the partners (set partnerId to that partner)",
+    "deposit_in: a security deposit or advance rent received from a tenant, to be returned at the end of the lease (money in, NOT income; set propertyId); deposit_out: a deposit returned to a tenant (money out); deposit_kept: part of a deposit the owners keep (no money moves)",
     ...customKinds.map((kind) => `${kind.id}: ${kind.label} (${kind.group === "income" ? "income" : "a cost"} the group defined)`),
     "",
     "Properties (id: name):", ...properties.map((item) => `${item.id}: ${item.name}`), "",
