@@ -2,7 +2,7 @@
 // partners, ownership, rules, per-row choices) and the shared account's rows, and it belongs to no household: each member signs in to their own
 // FamilyLoop, keeps their own household for their own home, and sees the group beside it. Roles: owner (everything, including who has access),
 // edit (change the setup, import rows) and view (read only). Membership is matched on the signed-in person's verified e-mail address.
-const { partnersSanitizeConfig, partnersMergeCsvRows, partnersMergeBankRows, PARTNERS_POOL_ID } = require("../lib/partners-logic");
+const { partnersSanitizeConfig, partnersMergeCsvRows, partnersMergeBankRows, buildPartnersStatement, partnersRowId, partnersSuggestMatch, PARTNERS_POOL_ID } = require("../lib/partners-logic");
 
 const MAX_ROWS = 20000;
 const MAX_ROWS_PER_REQUEST = 6000;
@@ -261,7 +261,10 @@ function registerPartnerGroupRoutes({ app, requireSession, sendTransactionalEmai
 
 // The overnight bank sync forwards what it fetched for the account kept for the Partners page into the group the household is linked to. It checks
 // that the household's owner owns that group, so a household can never write into someone else's group. Returns true when the rows landed.
-async function forwardHouseholdPartnerRows(store, { groupId, householdOwnerId, rows, poolBalance }) {
+// Rows the group's rules already read are simply counted. For the new rows no rule matches, `suggest` (the AI) is asked what they are; only a
+// confident answer is kept, and it is stored as that row's own choice (highlighted on the page, one click to undo). Rows a person has already
+// decided, and rows the AI is unsure about, are never touched, and an AI failure never stops the rows from landing.
+async function forwardHouseholdPartnerRows(store, { groupId, householdOwnerId, rows, poolBalance, suggest = null }) {
   if (!groupId || !householdOwnerId) return false;
   const group = await store.get(String(groupId));
   if (!group || group.ownerUserId !== householdOwnerId) return false;
@@ -269,7 +272,50 @@ async function forwardHouseholdPartnerRows(store, { groupId, householdOwnerId, r
   const merged = incoming.length ? partnersMergeBankRows(group.rows, incoming) : { rows: group.rows, added: 0 };
   if (merged.rows.length > MAX_ROWS) return false;
   await store.saveRows(group.id, merged.rows, cleanBalance(poolBalance) || undefined);
+  if (suggest && merged.added) {
+    try { await assignNewRowsWithAi(store, group.id, incoming, suggest); } catch (error) { console.warn(`Partners group AI assignment skipped: ${error.message}`); }
+  }
   return true;
+}
+
+async function assignNewRowsWithAi(store, groupId, incoming, suggest) {
+  const newIds = new Set(incoming.map((row) => row.externalId).filter(Boolean));
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    const group = await store.get(String(groupId));
+    const setup = group.setup || {};
+    if (!(setup.properties || []).length || !(setup.partners || []).length) return 0;
+    const pool = group.rows.map((row) => ({ ...row, accountId: PARTNERS_POOL_ID }));
+    const statement = buildPartnersStatement({ ...setup, accountIds: [PARTNERS_POOL_ID] }, pool, {});
+    const targets = statement.unclassified.filter((row) => newIds.has(row.externalId)).slice(0, 60);
+    if (!targets.length) return 0;
+    // What has already been decided here is shown to the AI so it follows it.
+    const seen = new Set();
+    const examples = [];
+    statement.entries.forEach((entry) => {
+      const key = partnersSuggestMatch(entry.payee) || entry.payee;
+      if (!entry.kind || seen.has(key) || examples.length >= 50) return;
+      seen.add(key);
+      examples.push({ payee: key, kind: entry.kind, propertyId: entry.propertyId, partnerId: entry.partnerId });
+    });
+    const results = await suggest({
+      rows: targets.map((row, index) => ({ id: String(index), payee: row.payee, money: -Number(row.amount), date: row.date })),
+      properties: setup.properties, partners: setup.partners, examples
+    });
+    const overrides = { ...(setup.overrides || {}) };
+    let assigned = 0;
+    (results || []).forEach((result) => {
+      const row = targets[Number(result.id)];
+      if (!row || result.confidence !== "high" || !result.kind) return;
+      const key = partnersRowId(row);
+      if (overrides[key]) return;
+      overrides[key] = result.kind === "personal" ? { kind: "personal", propertyId: "", partnerId: "" } : { kind: result.kind, propertyId: result.propertyId || "", partnerId: result.partnerId || "" };
+      assigned += 1;
+    });
+    if (!assigned) return 0;
+    const saved = await store.saveSetup(group.id, partnersSanitizeConfig({ ...setup, overrides }), group.version);
+    if (!saved.conflict) return assigned;
+  }
+  return 0;
 }
 
 module.exports = { registerPartnerGroupRoutes, createGroupStore, forwardHouseholdPartnerRows, PARTNERS_POOL_ID, ROLES };

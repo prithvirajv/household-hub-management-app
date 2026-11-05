@@ -120,3 +120,17 @@ test("the Partners page works from a group: create, roles, invitations by email,
   assert.match(app, /<fieldset class="partners-fieldset" \$\{canEdit \? "" : "disabled"\}>/);
   assert.match(app, /state\.partnerGroupId/);
 });
+
+test("editing a Partners row keeps the folded sections open and the page where it was", () => {
+  assert.match(app, /partnersEntriesOpen \? "open" : ""/);
+  assert.match(app, /partnersSetupOpen \|\| !data\.rules\.length \? "open" : ""/);
+  assert.match(app, /currentView === "partners" && innerScrollKey === lastInnerScrollKey \? window\.scrollY : null/);
+  assert.match(app, /window\.scrollTo\(0, pageScroll\)/);
+});
+
+test("the Partners transaction list can show more, show all, and be searched", () => {
+  assert.match(app, /id="partnersEntriesMore"/);
+  assert.match(app, /id="partnersEntriesAll"/);
+  assert.match(app, /id="partnersEntriesSearch"/);
+  assert.match(app, /partnersEntriesLimit = Infinity/);
+});

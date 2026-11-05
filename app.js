@@ -2135,7 +2135,10 @@ function render() {
   const innerScroll = innerScrollKey === lastInnerScrollKey
     ? INNER_SCROLL_SELECTORS.map((selector) => [selector, view.querySelector(selector)?.scrollTop || 0])
     : [];
+  // The Partners page is edited in place row by row; keep the page where it was instead of letting each save pull it back up.
+  const pageScroll = currentView === "partners" && innerScrollKey === lastInnerScrollKey ? window.scrollY : null;
   view.innerHTML = (renderers[currentView] || renderers.budget)();
+  if (pageScroll !== null) window.scrollTo(0, pageScroll);
   innerScroll.forEach(([selector, top]) => { const el = top ? view.querySelector(selector) : null; if (el) el.scrollTop = top; });
   lastInnerScrollKey = innerScrollKey;
   bindViewEvents();
@@ -6177,6 +6180,12 @@ let partnerGroupsInfo = null;
 let partnersGroup = null;
 let partnersSaveChain = Promise.resolve();
 let partnersBusy = false;
+// Which folded sections the person has open, so a re-render after an edit does not fold them again (that shifts the page under them).
+let partnersEntriesOpen = false;
+let partnersSetupOpen = false;
+// How much of the "every transaction" list is shown, and the search typed above it.
+let partnersEntriesLimit = 200;
+let partnersEntriesFilter = "";
 
 function ensurePartnersData() {
   const data = partnersGroup.setup;
@@ -6370,7 +6379,9 @@ function renderPartnersGroupPage() {
   const kindLabel = (kind) => PARTNER_KINDS.find((item) => item.id === kind)?.label || kind;
   const propertyName = (id) => data.properties.find((property) => property.id === id)?.name || "";
   const partnerName = (id) => data.partners.find((partner) => partner.id === id)?.name || "";
-  const entryRows = statement.entries.slice(0, 200).map((entry, index) => `<tr${entry.overridden ? ' class="partners-overridden"' : ""}><td>${escapeHtml(formatShortDate(entry.date))}</td><td class="partners-payee">${escapeHtml(String(entry.payee || "").slice(0, 80))}</td><td>${partnersSigned(entry.money)}</td><td class="partners-assign">
+  const needle = partnersEntriesFilter.trim().toLowerCase();
+  const matching = statement.entries.map((entry, index) => ({ entry, index })).filter(({ entry }) => !needle || `${entry.payee} ${kindLabel(entry.kind)} ${propertyName(entry.propertyId)} ${partnerName(entry.partnerId)}`.toLowerCase().includes(needle));
+  const entryRows = matching.slice(0, partnersEntriesLimit).map(({ entry, index }) => `<tr${entry.overridden ? ' class="partners-overridden"' : ""}><td>${escapeHtml(formatShortDate(entry.date))}</td><td class="partners-payee">${escapeHtml(String(entry.payee || "").slice(0, 80))}</td><td>${partnersSigned(entry.money)}</td><td class="partners-assign">
       <select data-partners-entry-kind="${index}" aria-label="Counted as">${`<option value="">Needs a rule</option>${PARTNER_KINDS.map((kind) => `<option value="${kind.id}" ${kind.id === entry.kind ? "selected" : ""}>${escapeHtml(kind.label)}</option>`).join("")}`}</select>
       <select data-partners-entry-property="${index}" aria-label="Property" ${entry.kind && entry.kind !== "personal" ? "" : "disabled"}>${propertyOptions(entry.propertyId)}</select>
       <select data-partners-entry-partner="${index}" aria-label="Partner" ${entry.kind && entry.kind !== "personal" ? "" : "disabled"}>${partnerOptions(entry.partnerId)}</select>
@@ -6397,11 +6408,12 @@ function renderPartnersGroupPage() {
       <p class="muted">Balance is what a partner sent in plus their share of the result. To square up shares what was sent in by ownership: positive means send that much more, "receive" means they sent more than their share. Suggested a month is each partner's share of the average monthly shortfall over the last three active months (${exactMoney.format(statement.averageShortfall)}).</p>
       ${statement.months.length ? `<h4>Month by month</h4><div class="partners-scroll"><table class="partners-table"><thead><tr><th></th><th>Income</th><th>Costs</th><th>Result</th><th>Sent in</th></tr></thead><tbody>${monthRows}</tbody></table></div>` : `<p class="muted">Nothing in this period matches a rule yet. Add rules below, or check the pool accounts.</p>`}
     </div>
-    <details class="card partners-entries">
+    <details class="card partners-entries" ${partnersEntriesOpen ? "open" : ""}>
       <summary><span class="card-label">Partners</span> <b>Every transaction in the shared account (${statement.entries.length})</b></summary>
       <p class="muted">Each row of the account in this period and how it is counted. Change what a row is, which property it belongs to or which partner sent it right here; <b>Make a rule</b> then applies that to every similar row, now and as new ones arrive.</p>
+      <label class="partners-range">Search these rows<input type="search" id="partnersEntriesSearch" value="${escapeHtml(partnersEntriesFilter)}" placeholder="Payee, kind, property or partner (press Enter)"></label>
       <fieldset class="partners-fieldset" ${canEdit ? "" : "disabled"}><div class="partners-scroll"><table class="partners-table"><thead><tr><th>Date</th><th>Description</th><th>Money in / out</th><th>Counted as${canEdit ? " (change it here)" : ""}</th></tr></thead><tbody>${entryRows}</tbody></table></div></fieldset>
-      ${statement.entries.length > 200 ? `<p class="muted">Showing the newest 200 of ${statement.entries.length}; pick a shorter period to see the rest.</p>` : ""}
+      <p class="muted">${needle ? `${matching.length} of ${statement.entries.length} rows match. ` : ""}Showing ${Math.min(partnersEntriesLimit, matching.length)} of ${matching.length}, newest first.${matching.length > partnersEntriesLimit ? ` <button type="button" class="ghost" id="partnersEntriesMore">Show ${Math.min(200, matching.length - partnersEntriesLimit)} more</button> <button type="button" class="ghost" id="partnersEntriesAll">Show all ${matching.length}</button>` : ""}</p>
     </details>
     ${statement.unclassified.length ? `<div class="card">
       <div class="card-label">Needs a rule</div><h3>${statement.unclassified.length} row${statement.unclassified.length === 1 ? "" : "s"} not matched</h3>
@@ -6410,7 +6422,7 @@ function renderPartnersGroupPage() {
       <div class="partners-scroll"><table class="partners-table"><thead><tr><th>Date</th><th>Payee</th><th>Money in (out is negative)</th><th></th></tr></thead><tbody>${unclassifiedRows}</tbody></table></div>
       ${statement.unclassified.length > 15 ? `<p class="muted">Showing 15 of ${statement.unclassified.length}.</p>` : ""}
     </div>` : ""}
-    <details class="card partners-setup" ${data.rules.length ? "" : "open"}>
+    <details class="card partners-setup" ${partnersSetupOpen || !data.rules.length ? "open" : ""}>
       <summary><span class="card-label">Partners</span> <b>Setup: who, what share, who has access, which rules</b></summary>
       <fieldset class="partners-fieldset" ${canEdit ? "" : "disabled"}>
       <h4>Properties</h4>
@@ -6468,6 +6480,11 @@ function bindPartnersEvents() {
     partnersBusy = true;
     try { await handler(...args); } catch (error) { showToast(error.message, { type: "error" }); } finally { partnersBusy = false; }
   };
+  document.querySelector(".partners-entries")?.addEventListener("toggle", (event) => { partnersEntriesOpen = event.currentTarget.open; });
+  $("#partnersEntriesMore")?.addEventListener("click", () => { partnersEntriesLimit += 200; partnersEntriesOpen = true; render(); });
+  $("#partnersEntriesAll")?.addEventListener("click", () => { partnersEntriesLimit = Infinity; partnersEntriesOpen = true; render(); });
+  $("#partnersEntriesSearch")?.addEventListener("change", (event) => { partnersEntriesFilter = event.target.value; partnersEntriesLimit = 200; partnersEntriesOpen = true; render(); });
+  document.querySelector(".partners-setup")?.addEventListener("toggle", (event) => { partnersSetupOpen = event.currentTarget.open; });
   $("#partnersGroupSelect")?.addEventListener("change", (event) => { void openPartnersGroup(event.target.value); });
   $("#partnersNewGroupButton")?.addEventListener("click", () => { partnersGroup = null; render(); });
   $("#partnersRenameGroupButton")?.addEventListener("click", guarded(async () => {
@@ -6705,6 +6722,7 @@ function bindPartnersEvents() {
     const rule = { id: uniqueId("rule"), match: partnersSuggestMatch(row.payee), kind: money ? "rent" : "expense", propertyId: "", partnerId: "" };
     data.rules.push(rule);
     partnersFocusRuleId = rule.id;
+    partnersSetupOpen = true;
     document.querySelector(".partners-setup")?.setAttribute("open", "");
     partnersSave();
   }));
