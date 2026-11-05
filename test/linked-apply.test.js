@@ -143,3 +143,24 @@ test("an account's sync marks move only when loading is complete, and not at all
   await assert.rejects(() => applyLinkedPayload(failing, link, payload({ transactions: [row("1", "A", 1, "2026-10-21")] }), { suggest: async () => { throw new Error("x"); }, createId: () => { throw new Error("boom"); }, todayKey: TODAY }));
   assert.equal(failing.accounts.find((a) => a.id === "chk").lastSyncedAt, undefined, "a load that throws leaves the marks alone");
 });
+
+test("an account mapped to the Partners page keeps its rows and balance there, never in the ledger, Bank stream or Wealth", async () => {
+  const state = baseState();
+  const poolLink = { id: "L2", label: "Pool bank", provider: "simplefin", mappings: { A1: { accountId: "chk" }, P1: { accountId: "partners-pool" } } };
+  const payload = { provider: "simplefin", accounts: [{ remoteId: "A1", balance: 100 }, { remoteId: "P1", balance: 4000, balanceDate: "2026-10-25", name: "Shared savings" }], transactions: [
+    row("1", "KNOWN GROCER", 35.5, "2026-10-20"),
+    row("p1", "ZELLE FROM JANE Q SAMPLE", -500, "2026-10-21", "P1"),
+    row("p2", "LOANCO CASH 1111", 2600, "2026-10-22", "P1"),
+    row("p3", "PENDING POOL ROW", -5, "2026-10-26", "P1", { pending: true })
+  ] };
+  const result = await applyLinkedPayload(state, poolLink, payload, { suggest: async () => [], createId: ids(), todayKey: TODAY });
+  assert.deepEqual(state.partnerTransactions.map((r) => [r.payee, r.amount, r.externalId]), [["ZELLE FROM JANE Q SAMPLE", -500, "sf:P1:p1"], ["LOANCO CASH 1111", 2600, "sf:P1:p2"]], "posted rows only; pending waits");
+  assert.equal(state.transactions.some((t) => t.accountId === "partners-pool" || /JANE|LOANCO/.test(t.payee)), false);
+  assert.equal(state.transactionInboxDrafts.some((d) => d.accountId === "partners-pool"), false);
+  assert.deepEqual(state.partnerPoolBalance, { amount: 4000, date: "2026-10-25", name: "Shared savings" });
+  assert.equal(state.accounts.length, 2, "no Wealth account was created");
+  assert.ok(state.linkedImportedIds.includes("sf:P1:p1"), "the ids are remembered so a later sync does not re-add them");
+  const again = await applyLinkedPayload(state, poolLink, payload, { suggest: async () => [], createId: ids(), todayKey: TODAY });
+  assert.equal(state.partnerTransactions.length, 2, "nothing doubled on a second run");
+  assert.ok(result.imported >= 1 && again);
+});

@@ -90,5 +90,12 @@ test("the Partners page is in the Money navigation and loads its own logic file"
   assert.match(app, /\["partners", "Partners", "🏘️"\]/);
   assert.match(app, /\["Money", \["budget", "bills", "transactions", "paychecks", "wealth", "reports", "partners"\]\]/);
   assert.match(app, /partners: renderPartners,/);
-  assert.match(app, /buildPartnersStatement\(data, state\.transactions, partnersRange\(\)\)/);
+  assert.match(app, /buildPartnersStatement\(\{ \.\.\.data, accountIds: \[\.\.\.data\.accountIds, PARTNERS_POOL_ID\] \}, partnersRows\(data\), partnersRange\(\)\)/);
+});
+
+test("the bank-link mapping offers a Partners-only choice and the Partners page reads its own rows", () => {
+  assert.match(app, /Partners page only \(not in Wealth\)/);
+  assert.match(app, /partnersRows\(data\)/);
+  assert.match(app, /state\.partnerTransactions = partnersMergeBankRows/);
+  assert.match(app, /Every transaction in the shared account/);
 });

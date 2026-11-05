@@ -139,11 +139,17 @@ function isoDate(unixSeconds) {
   return new Date(Number(unixSeconds) * 1000).toISOString().slice(0, 10);
 }
 
+// A bank sometimes sends a symbol (the (R) in a product name) in an encoding the Bridge cannot read, and it arrives as U+FFFD replacement
+// characters ("WAY2SAVE?? SAVINGS"). They carry no information, so they are dropped and the spacing closed up.
+function cleanBankText(value) {
+  return String(value == null ? "" : value).replace(/\uFFFD+/g, "").replace(/ {2,}/g, " ");
+}
+
 function normalizeSimplefinAccount(account) {
   return {
     remoteId: String(account.id),
-    name: String(account.name || "Account"),
-    orgName: String(account.org?.name || account.org?.domain || ""),
+    name: cleanBankText(account.name || "Account").trim() || "Account",
+    orgName: cleanBankText(account.org?.name || account.org?.domain || "").trim(),
     currency: String(account.currency || "USD"),
     balance: numberOrNull(account.balance),
     balanceDate: account["balance-date"] ? isoDate(account["balance-date"]) : ""
@@ -161,7 +167,7 @@ function normalizeSimplefinTransactions(account, { today = new Date() } = {}) {
       externalId: `sf:${account.id}:${transaction.id}`,
       remoteAccountId: String(account.id),
       date: stamp ? isoDate(stamp) : today.toISOString().slice(0, 10),
-      payee: String(transaction.description || transaction.memo || "Unknown").trim().slice(0, 200),
+      payee: cleanBankText(transaction.description || transaction.memo || "Unknown").trim().slice(0, 200),
       amount: -amount,
       pending: Boolean(transaction.pending) || !(Number(transaction.posted) > 0)
     };

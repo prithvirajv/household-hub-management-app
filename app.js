@@ -6179,7 +6179,16 @@ function ensurePartnersData() {
   data.defaultShares ||= {};
   data.rules ||= [];
   data.accountIds ||= [];
+  // Only one account in the household: that is the pool, no choice to make.
+  if (!data.accountIds.length && state.accounts?.length === 1) data.accountIds = [state.accounts[0].id];
   return data;
+}
+
+// What the Partners page reads: the rows kept for it alone (an account mapped to "Partners page only", or a CSV) plus the ledger rows of any
+// ordinary account ticked below.
+function partnersRows(data) {
+  const own = (state.partnerTransactions || []).map((row) => ({ ...row, accountId: PARTNERS_POOL_ID }));
+  return [...own, ...state.transactions];
 }
 
 function partnersRange() {
@@ -6214,7 +6223,25 @@ function renderPartners() {
       </div>
     </section>`;
   }
-  const statement = buildPartnersStatement(data, state.transactions, partnersRange());
+  const ownCount = (state.partnerTransactions || []).length;
+  const poolBalance = state.partnerPoolBalance;
+  const poolPicker = `<div class="card partners-pool">
+      <div class="card-label">Partners</div><h3>Shared account</h3>
+      <p class="muted">The shared checking account's transactions live on this page only: they are not in Wealth, your budget, Transactions or net worth. To bring them in, link the bank under Wealth → Bank connections and choose <b>Partners page only (not in Wealth)</b> for that account. For older history, import its CSV below.</p>
+      <div class="partners-toolbar">
+        <label class="partners-file ghost-button">Import a CSV<input type="file" accept=".csv,text/csv" id="partnersCsvFile" hidden></label>
+        <label class="partners-check"><input type="checkbox" id="partnersCsvMoneyOut"> The file shows money <b>out</b> as positive</label>
+        ${ownCount ? `<button type="button" class="ghost danger-button" id="partnersClearRows">Remove the ${ownCount} rows kept here</button>` : ""}
+      </div>
+      <p class="muted">The CSV needs Date, Description and Amount columns (like a bank statement export; other columns are ignored). Importing the same file twice, or one that overlaps what the bank link brought, never adds a row twice.</p>
+      ${ownCount ? `<p class="muted"><b>${ownCount}</b> rows kept for this page${poolBalance ? `; the bank reports a balance of <b>${exactMoney.format(poolBalance.amount)}</b> (${escapeHtml(formatShortDate(poolBalance.date))})` : ""}.</p>` : ""}
+      ${state.accounts.length ? `<details ${data.accountIds.length ? "open" : ""}><summary class="muted">Also read an account that is in Wealth</summary>
+        <p class="muted">If the shared account is already a Wealth account, tick it to read its ledger rows here as well.</p>
+        ${state.accounts.map((account) => `<label class="partners-check"><input type="checkbox" data-partners-account="${escapeHtml(account.id)}" ${data.accountIds.includes(account.id) ? "checked" : ""}> ${escapeHtml(account.name)}</label>`).join("")}</details>` : ""}
+      ${ownCount || data.accountIds.length ? "" : `<p class="form-message">Add the shared account's transactions to see the statement.</p>`}
+    </div>`;
+  if (!ownCount && !data.accountIds.length) return `<section class="partners-layout">${intro}${poolPicker}</section>`;
+  const statement = buildPartnersStatement({ ...data, accountIds: [...data.accountIds, PARTNERS_POOL_ID] }, partnersRows(data), partnersRange());
   const accountName = (id) => state.accounts.find((account) => account.id === id)?.name || "";
   const kindOptions = (selected) => PARTNER_KINDS.map((kind) => `<option value="${kind.id}" ${kind.id === selected ? "selected" : ""}>${escapeHtml(kind.label)}</option>`).join("");
   const propertyOptions = (selected) => `<option value="">No property</option>${data.properties.map((property) => `<option value="${escapeHtml(property.id)}" ${property.id === selected ? "selected" : ""}>${escapeHtml(property.name)}</option>`).join("")}`;
@@ -6239,7 +6266,12 @@ function renderPartners() {
     const normalised = partnersSharesFor(data, propertyKey === "default" ? "" : propertyKey);
     return `<tr><th>${escapeHtml(label)}</th>${data.partners.map((partner) => `<td><input type="number" min="0" max="100" step="1" data-partners-share="${escapeHtml(propertyKey)}|${escapeHtml(partner.id)}" value="${source[partner.id] ?? ""}" placeholder="${(normalised[partner.id] || 0).toFixed(0)}" aria-label="${escapeHtml(partner.name)} share of ${escapeHtml(label)}"></td>`).join("")}</tr>`;
   };
+  const kindLabel = (kind) => PARTNER_KINDS.find((item) => item.id === kind)?.label || kind;
+  const propertyName = (id) => data.properties.find((property) => property.id === id)?.name || "";
+  const partnerName = (id) => data.partners.find((partner) => partner.id === id)?.name || "";
+  const entryRows = statement.entries.slice(0, 200).map((entry) => `<tr><td>${escapeHtml(formatShortDate(entry.date))}</td><td class="partners-payee">${escapeHtml(String(entry.payee || "").slice(0, 80))}</td><td>${partnersSigned(entry.money)}</td><td class="partners-payee">${entry.kind ? escapeHtml([kindLabel(entry.kind), propertyName(entry.propertyId), partnerName(entry.partnerId)].filter(Boolean).join(" · ")) : "<span class=\"muted\">needs a rule</span>"}</td></tr>`).join("");
   return `<section class="partners-layout">${intro}
+    ${poolPicker}
     <div class="card">
       <div class="card-label">Partners</div><h3>Statement</h3>
       <div class="partners-toolbar">${rangeSelect}
@@ -6250,6 +6282,7 @@ function renderPartners() {
         ${tile("Loans, HOA and repairs", exactMoney.format(pool.expenses))}
         ${tile(pool.net < 0 ? "Shortfall" : "Surplus", partnersSigned(pool.net), statement.months.length ? `${exactMoney.format(Math.abs(pool.net) / statement.months.length)} a month on average` : "")}
         ${tile("Partners sent in", exactMoney.format(pool.contributions), statement.unassignedContributions ? `${exactMoney.format(statement.unassignedContributions)} not tied to a partner` : "")}
+        ${poolBalance ? tile("Bank balance", exactMoney.format(poolBalance.amount), `as of ${escapeHtml(formatShortDate(poolBalance.date))}`) : ""}
       </div>
       <h4>By property</h4>
       <div class="partners-scroll"><table class="partners-table"><thead><tr><th></th><th>Rent in</th><th>Loan</th><th>HOA</th><th>Repairs and other</th><th>Result</th></tr></thead><tbody>${propertyRows}</tbody></table></div>
@@ -6258,6 +6291,12 @@ function renderPartners() {
       <p class="muted">Balance is what a partner sent in plus their share of the result. To square up shares what was sent in by ownership: positive means send that much more, "receive" means they sent more than their share. Suggested a month is each partner's share of the average monthly shortfall over the last three active months (${exactMoney.format(statement.averageShortfall)}).</p>
       ${statement.months.length ? `<h4>Month by month</h4><div class="partners-scroll"><table class="partners-table"><thead><tr><th></th><th>Income</th><th>Costs</th><th>Result</th><th>Sent in</th></tr></thead><tbody>${monthRows}</tbody></table></div>` : `<p class="muted">Nothing in this period matches a rule yet. Add rules below, or check the pool accounts.</p>`}
     </div>
+    <details class="card partners-entries">
+      <summary><span class="card-label">Partners</span> <b>Every transaction in the shared account (${statement.entries.length})</b></summary>
+      <p class="muted">Each row of the account in this period, and how it is counted: who sent the money, which property it belongs to, or that it still needs a rule.</p>
+      <div class="partners-scroll"><table class="partners-table"><thead><tr><th>Date</th><th>Description</th><th>Money in / out</th><th>Counted as</th></tr></thead><tbody>${entryRows}</tbody></table></div>
+      ${statement.entries.length > 200 ? `<p class="muted">Showing the newest 200 of ${statement.entries.length}; pick a shorter period to see the rest.</p>` : ""}
+    </details>
     ${statement.unclassified.length ? `<div class="card">
       <div class="card-label">Needs a rule</div><h3>${statement.unclassified.length} row${statement.unclassified.length === 1 ? "" : "s"} not matched</h3>
       <p class="muted">These rows in the pool account match no rule, so they are not in the numbers above. Make a rule from one and every row like it is read the same way, now and as new rows arrive.</p>
@@ -6275,9 +6314,6 @@ function renderPartners() {
       <h4>Ownership (percent)</h4>
       <p class="muted">Leave a row empty for an equal split. Numbers are scaled to add up to 100 for each property. "Shared / not assigned" covers costs that belong to no one property.</p>
       <div class="partners-scroll"><table class="partners-table"><thead><tr><th></th>${data.partners.map((partner) => `<th>${escapeHtml(partner.name)}</th>`).join("")}</tr></thead><tbody>${data.properties.map((property) => shareRow(property.name, property.id)).join("")}${shareRow("Shared / not assigned", "default")}</tbody></table></div>
-      <h4>Pool account</h4>
-      <p class="muted">${state.accounts.length ? "Which account is the shared checking account? Nothing ticked means every account." : "Add the account under Wealth first, or leave this empty to read every transaction."}</p>
-      ${state.accounts.map((account) => `<label class="partners-check"><input type="checkbox" data-partners-account="${escapeHtml(account.id)}" ${data.accountIds.includes(account.id) ? "checked" : ""}> ${escapeHtml(account.name)}</label>`).join("")}
       <h4>Rules</h4>
       <p class="muted">A rule reads a payee: when its words all appear in the bank's description, the row is that kind, for that property and partner. The first rule that matches wins, so put specific ones first. Money a partner sends in is a <b>Partner contribution</b> for that partner; <b>Personal</b> rows are left out entirely.</p>
       ${rulesHtml || `<p class="muted">No rules yet.</p>`}
@@ -6323,6 +6359,22 @@ function bindPartnersEvents() {
     partnersSave();
   };
   readFile($("#partnersImportFile"), importHandler);
+  readFile($("#partnersCsvFile"), (text) => {
+    const parsed = partnersParseCsv(text, { moneyInPositive: !$("#partnersCsvMoneyOut")?.checked });
+    if (parsed.problem || !parsed.rows.length) { showToast(parsed.problem || "No transactions were found in that file.", { type: "error" }); return; }
+    const merged = partnersMergeCsvRows(state.partnerTransactions || [], parsed.rows);
+    if (JSON.stringify(state).length + merged.added * 200 > 900000) { showToast("That would make your household data too large to save.", { type: "error" }); return; }
+    state.partnerTransactions = merged.rows;
+    state.household.activity.unshift(`Imported ${merged.added} rows for the Partners page${merged.skipped ? ` (${merged.skipped} were already there)` : ""}`);
+    showToast(`Added ${merged.added} rows${merged.skipped ? `; ${merged.skipped} were already here` : ""}.`, { type: "info" });
+    partnersSave();
+  });
+  $("#partnersClearRows")?.addEventListener("click", async () => {
+    const count = (state.partnerTransactions || []).length;
+    if (!count || !await showConfirm(`Remove the ${count} rows kept for the Partners page? Your rules and setup stay. Rows from the bank link come back on the next history import.`, { title: "Remove rows?" })) return;
+    state.partnerTransactions = [];
+    partnersSave();
+  });
   $("#partnersExportButton")?.addEventListener("click", () => downloadTextFile("partners-setup.json", "application/json", JSON.stringify(partnersSanitizeConfig(data), null, 2)));
   $("#partnersRangeSelect")?.addEventListener("change", (event) => { partnersRangeMode = event.target.value; render(); });
 
@@ -6388,7 +6440,7 @@ function bindPartnersEvents() {
     partnersSave();
   });
   document.querySelectorAll("[data-partners-make-rule]").forEach((button) => button.addEventListener("click", () => {
-    const row = buildPartnersStatement(data, state.transactions, partnersRange()).unclassified[Number(button.dataset.partnersMakeRule)];
+    const row = buildPartnersStatement({ ...data, accountIds: [...data.accountIds, PARTNERS_POOL_ID] }, partnersRows(data), partnersRange()).unclassified[Number(button.dataset.partnersMakeRule)];
     if (!row) return;
     const money = Number(row.amount) < 0;
     const rule = { id: uniqueId("rule"), match: partnersSuggestMatch(row.payee), kind: money ? "rent" : "expense", propertyId: "", partnerId: "" };
@@ -15275,7 +15327,7 @@ function renderLinkedMappingPanel() {
     }
     // A bank feed can also drive a holdings group (401(k), IRA, ESPP...): the group's total is matched to the bank's balance while its
     // individual holdings keep their own shares and prices.
-    return `<option value="skip" ${chosen("skip")}>Don't import</option><option value="new" ${chosen("new")}>New Wealth account</option><optgroup label="Wealth accounts">${state.accounts.filter((account) => !account.closedAt).map((account) => `<option value="${account.id}" ${chosen(account.id)}>${escapeHtml(account.name)}</option>`).join("")}</optgroup>${groups.length ? `<optgroup label="Investment accounts (match balance)">${groups.map((group) => `<option value="group:${group.groupId}" ${chosen(`group:${group.groupId}`)}>${escapeHtml(group.groupName)}</option>`).join("")}</optgroup>` : ""}${state.goals.debts.length ? `<optgroup label="Loans and debts (match balance owed)">${state.goals.debts.map((debt) => `<option value="debt:${debt.id}" ${chosen(`debt:${debt.id}`)}>${escapeHtml(debt.name)}</option>`).join("")}</optgroup>` : ""}`;
+    return `<option value="skip" ${chosen("skip")}>Don't import</option><option value="new" ${chosen("new")}>New Wealth account</option><option value="${PARTNERS_POOL_ID}" ${chosen(PARTNERS_POOL_ID)}>Partners page only (not in Wealth)</option><optgroup label="Wealth accounts">${state.accounts.filter((account) => !account.closedAt).map((account) => `<option value="${account.id}" ${chosen(account.id)}>${escapeHtml(account.name)}</option>`).join("")}</optgroup>${groups.length ? `<optgroup label="Investment accounts (match balance)">${groups.map((group) => `<option value="group:${group.groupId}" ${chosen(`group:${group.groupId}`)}>${escapeHtml(group.groupName)}</option>`).join("")}</optgroup>` : ""}${state.goals.debts.length ? `<optgroup label="Loans and debts (match balance owed)">${state.goals.debts.map((debt) => `<option value="debt:${debt.id}" ${chosen(`debt:${debt.id}`)}>${escapeHtml(debt.name)}</option>`).join("")}</optgroup>` : ""}`;
   };
   return `<div class="linked-mapping-panel">
     <h4>Where should each account go?</h4>
@@ -15309,9 +15361,13 @@ function applySimplefinSync(link, payload, addRows, { ignoreRemembered = false }
   state.linkedImportedIds ||= [];
   // A history import is an explicit request, so rows imported before and since removed (Clean up, or dismissed) come back; only what is
   // currently in the ledger or waiting in Bank stream is skipped.
-  const knownIds = new Set([...(ignoreRemembered ? [] : state.linkedImportedIds), ...state.transactions.map((t) => t.externalId).filter(Boolean), ...(state.transactionInboxDrafts || []).map((d) => d.externalId).filter(Boolean)]);
+  const knownIds = new Set([...(ignoreRemembered ? [] : state.linkedImportedIds), ...state.transactions.map((t) => t.externalId).filter(Boolean), ...(state.transactionInboxDrafts || []).map((d) => d.externalId).filter(Boolean), ...(state.partnerTransactions || []).map((t) => t.externalId).filter(Boolean)]);
   const { fresh, unmapped, alreadyImported, crossDuplicateIds } = selectNewLinkedTransactions(payload.transactions, link.mappings, knownIds, [...state.transactions, ...(state.transactionInboxDrafts || [])]);
-  const posted = fresh.filter((transaction) => !transaction.pending);
+  const allPosted = fresh.filter((transaction) => !transaction.pending);
+  // An account mapped to the Partners page keeps its rows there only: not in Bank stream, the ledger, the budget or net worth.
+  const partnerRows = allPosted.filter((transaction) => transaction.accountId === PARTNERS_POOL_ID);
+  if (partnerRows.length) state.partnerTransactions = partnersMergeBankRows(state.partnerTransactions || [], partnerRows).rows;
+  const posted = allPosted.filter((transaction) => transaction.accountId !== PARTNERS_POOL_ID);
   const pendingSkipped = fresh.length - posted.length;
   // Which accounts those pending rows are on, and the newest posted row the bank sent for each, so "the bank shows it but FamilyLoop does not" can be
   // told apart: still pending at the bank's data feed (it arrives once posted), or not sent at all.
@@ -15327,11 +15383,16 @@ function applySimplefinSync(link, payload, addRows, { ignoreRemembered = false }
   const pendingDetail = [...feedByAccount].filter(([, entry]) => entry.pending).slice(0, 6).map(([accountId, entry]) => `${state.accounts.find((account) => account.id === accountId)?.name || "Account"}: ${entry.pending} pending (newest ${formatShortDate(entry.newestPending)}), newest posted row sent ${entry.newestPosted ? formatShortDate(entry.newestPosted) : "none"}`);
   // The whole household is saved in one request the server caps at about 1 MB; refuse a pull that would push it over rather than make
   // every later save fail.
-  if (JSON.stringify(state).length + posted.length * 400 > 900000) throw new Error(`Importing ${posted.length} transactions would push your household data past the size the server can save. Import a shorter range (a later start date), or clean up old transactions first.`);
+  if (JSON.stringify(state).length + allPosted.length * 400 > 900000) throw new Error(`Importing ${posted.length} transactions would push your household data past the size the server can save. Import a shorter range (a later start date), or clean up old transactions first.`);
   const byAccount = new Map();
   posted.forEach((transaction) => { byAccount.set(transaction.accountId, [...(byAccount.get(transaction.accountId) || []), transaction]); });
   byAccount.forEach((rows, accountId) => addRows(rows, { name: `${link.label}` }, "linked-import", "", { accountId }));
-  state.linkedImportedIds = rememberLinkedImportedIds(state.linkedImportedIds, [...posted.map((transaction) => transaction.externalId), ...crossDuplicateIds]);
+  state.linkedImportedIds = rememberLinkedImportedIds(state.linkedImportedIds, [...allPosted.map((transaction) => transaction.externalId), ...crossDuplicateIds]);
+  // The shared account's bank balance is kept for the Partners page (it is not a Wealth account, so nothing else reads it).
+  (payload.accounts || []).forEach((remote) => {
+    if (link.mappings[remote.remoteId]?.accountId !== PARTNERS_POOL_ID || remote.balance === null || remote.balance === undefined) return;
+    state.partnerPoolBalance = { amount: Number(remote.balance), date: remote.balanceDate || dateKey(new Date()), name: remote.name || "" };
+  });
   updateAccountsSyncedFrom(state.accounts, link.mappings, payload.coverage, [...state.transactions, ...(state.transactionInboxDrafts || [])], dateKey(new Date()));
   markAccountsSynced(state.accounts, link.mappings, payload.accounts, dateKey(new Date()), new Date().toISOString());
   // Bring balances in line with the bank. The ledger alone is matched to the bank's figure (so the balance shown is the bank's), and a
@@ -15372,7 +15433,7 @@ function applySimplefinSync(link, payload, addRows, { ignoreRemembered = false }
     state.goals.netWorth.liabilities = result.liabilities;
     debtsMatched += 1;
   });
-  return { imported: posted.length, pendingSkipped, pendingDetail, unmapped, alreadyImported, balancesUpdated, groupsMatched, debtsMatched };
+  return { imported: posted.length + partnerRows.length, pendingSkipped, pendingDetail, unmapped, alreadyImported, balancesUpdated, groupsMatched, debtsMatched };
 }
 
 function applySnaptradeSync(link, payload) {

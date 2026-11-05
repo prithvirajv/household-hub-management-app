@@ -103,3 +103,26 @@ test("partnersSanitizeConfig keeps only what the page understands", () => {
   assert.equal(clean.rules[0].propertyId, "");
   assert.deepEqual(partnersSanitizeConfig(null).properties, []);
 });
+
+test("partnersParseCsv reads a statement the way a savings or checking account shows it (money in positive), including two-digit years", () => {
+  const { partnersParseCsv } = require("../lib/partners-logic");
+  const csv = 'DATE,DESCRIPTION,AMOUNT,CHECK #,STATUS,Paid By\n9/1/26,"ZELLE FROM JANE Q SAMPLE, REF 1",2075,,Posted,Rent\n8/10/26,LOANCO CASH 1111,-2663.72,,Posted,EMI\nnot a row,,,,,\n';
+  const parsed = partnersParseCsv(csv);
+  assert.deepEqual(parsed.rows, [{ date: "2026-09-01", payee: "ZELLE FROM JANE Q SAMPLE, REF 1", amount: -2075 }, { date: "2026-08-10", payee: "LOANCO CASH 1111", amount: 2663.72 }]);
+  assert.equal(parsed.skipped, 1);
+  assert.equal(partnersParseCsv(csv, { moneyInPositive: false }).rows[0].amount, 2075);
+  assert.match(partnersParseCsv("a,b\n1,2").problem, /Date, Description and Amount/);
+});
+
+test("rows kept for the Partners page are merged without doubling: CSV over CSV, CSV over the bank, and the bank over a CSV row", () => {
+  const { partnersMergeBankRows, partnersMergeCsvRows } = require("../lib/partners-logic");
+  const csv = [{ date: "2026-08-01", payee: "A", amount: -100 }, { date: "2026-08-01", payee: "B", amount: -100 }, { date: "2026-08-02", payee: "C", amount: 40 }];
+  const first = partnersMergeCsvRows([], csv);
+  assert.equal(first.added, 3, "two equal rows on one day are both real");
+  assert.equal(partnersMergeCsvRows(first.rows, csv).added, 0, "the same file twice adds nothing");
+  const bank = partnersMergeBankRows(first.rows, [{ externalId: "sf:X:1", date: "2026-08-02", payee: "C BANK TEXT", amount: 40 }, { externalId: "sf:X:2", date: "2026-08-05", payee: "D", amount: 9 }]);
+  assert.equal(bank.rows.length, 4, "the bank row matching a CSV row takes its place, the new one is added");
+  assert.equal(bank.rows.find((r) => r.payee === "C").externalId, "sf:X:1");
+  assert.equal(partnersMergeBankRows(bank.rows, [{ externalId: "sf:X:2", date: "2026-08-05", payee: "D", amount: 9 }]).added, 0, "a known id is never added twice");
+  assert.equal(partnersMergeCsvRows(bank.rows, csv).added, 0, "a CSV that overlaps the bank's rows adds nothing");
+});
