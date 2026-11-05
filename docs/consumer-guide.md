@@ -286,7 +286,9 @@ button on every screen. People with view-only access don't see it.
   under **Something else** - what you type is offered again next time:
   - **It's my salary or a paycheck** (deposits of $100 or more that aren't
     transfers, P2P payments or refunds): pick which paycheck, or **A new
-    paycheck from this deposit** and how often it's paid. The payer is
+    paycheck from this deposit** and how often it's paid. The list shows each
+    paycheck's payday and offers first the one that matches the payer's name
+    and has a payday within a week of the deposit date. The payer is
     remembered so later deposits from it are held instead of added, the income
     follows the amount, and a new paycheck starts at the next payday so the
     removed deposit isn't counted twice.
@@ -561,6 +563,17 @@ button on every screen. People with view-only access don't see it.
   it lands. Both run automatically every time you open the app — no manual
   step required — and pick up only new transactions/paychecks since it was
   turned on.
+
+## Partners (shared rental properties)
+
+Use this when several people put money into one checking account that collects the rent and pays the loans, HOA and repairs of rental properties you own together. It lives under **Money → Partners**.
+
+1. **Set up.** List the properties and the partners (one per line). Ownership starts equal; open **Setup** to change each property's percentages per partner (a row left empty is an equal split, numbers are scaled to add up to 100). Tick the shared checking account under **Pool account** (nothing ticked reads every account), ideally one linked through SimpleFIN so rows arrive by themselves.
+2. **Rules read the bank's wording.** A rule says "when the payee contains these words, it is this kind of row, for this property and partner": rent received, loan payment, HOA, repairs, other expense, interest, a **partner contribution** (money a partner sends in, for that partner) or **personal** (left out of the books entirely, for example money passing through the account). All the words must appear, in any order, so `loanco 1234567890` finds that loan's payments and `zelle jane sample` finds that tenant's rent. The first matching rule wins. Rows no rule matches are listed under **Needs a rule** with a **Make a rule** button that starts a rule from the row.
+3. **Read the statement.** Choose a period (all time, last 12 or 3 months, this month). You get the pool's income, costs and shortfall or surplus; each **property's** rent, loan, HOA, repairs and result; and each **partner's** share, what they sent in, their balance (sent in plus their share of the result), **to square up** (send or receive, if the money sent in were shared by ownership) and a **suggested monthly send** (their share of the average monthly shortfall over the last three months in which costs were paid).
+4. **Share the setup.** Add the other partners to the household under **Sharing** so everyone sees the same page. **Export setup** saves the properties, partners, percentages and rules as a file; **Import setup** loads one.
+
+Rows are not changed by any of this; the page only reads the ledger. Rows in the pool account that arrive through SimpleFIN appear in the numbers as soon as they are in the ledger.
 
 ## Wealth
 

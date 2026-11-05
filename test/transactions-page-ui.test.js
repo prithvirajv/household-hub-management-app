@@ -78,3 +78,17 @@ test("the ledger offers to remove a bank row that is already in Shared Expenses"
   assert.match(app, /findRowsAlreadyShared\(state\.transactions, state\.ious\)/);
   assert.match(app, /data-remove-shared-rows/);
 });
+
+test("the removal dialog's paycheck list is ranked by payer name and payday and shows the payday", () => {
+  assert.match(app, /rankPaychecksForDeposit\(row, state\.paychecks\)/);
+  assert.match(app, / · payday \$\{escapeHtml\(formatShortDate\(paydayOf\.get\(paycheck\.id\)\)\)\}/);
+});
+
+test("the Partners page is in the Money navigation and loads its own logic file", () => {
+  const html = fs.readFileSync(path.join(__dirname, "..", "index.html"), "utf8");
+  assert.match(html, /<script src="\/lib\/partners-logic\.js\?v=[^"]+"><\/script>/);
+  assert.match(app, /\["partners", "Partners", "🏘️"\]/);
+  assert.match(app, /\["Money", \["budget", "bills", "transactions", "paychecks", "wealth", "reports", "partners"\]\]/);
+  assert.match(app, /partners: renderPartners,/);
+  assert.match(app, /buildPartnersStatement\(data, state\.transactions, partnersRange\(\)\)/);
+});

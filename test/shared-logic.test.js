@@ -2456,3 +2456,18 @@ test("findRowsAlreadyShared finds the bank row that is a second copy of one alre
   assert.deepEqual(findRowsAlreadyShared([copy, otherAmount, otherDay, handEntered], ious), [copy]);
   assert.deepEqual(findRowsAlreadyShared([copy], []), []);
 });
+
+test("rankPaychecksForDeposit offers first the paycheck that matches both the payer's name and a payday near the deposit date", () => {
+  const { rankPaychecksForDeposit, paydayNear } = require("../lib/shared-logic");
+  const row = { payee: "ELECTRONIC DEPOSIT - ACME TECH SVC PAYROLL 261106", date: "2026-11-04", amount: -551.86, accountId: "chk" };
+  const paychecks = [
+    { id: "far", name: "Acme Tech", amount: 551.86, recurrence: "monthly", date: "2026-09-20", depositAccountId: "chk" },
+    { id: "near", name: "Acme Tech", amount: 969.17, recurrence: "biweekly", date: "2026-10-23", depositAccountId: "chk" },
+    { id: "other", name: "Other Co", amount: 551.86, recurrence: "biweekly", date: "2026-11-06", depositAccountId: "chk" }
+  ];
+  const ranked = rankPaychecksForDeposit(row, paychecks);
+  assert.deepEqual(ranked.map((entry) => entry.paycheck.id), ["near", "far", "other"], "name AND payday match first, even though another amount is closer");
+  assert.equal(ranked[0].payday, "2026-11-06");
+  assert.equal(paydayNear(paychecks[0], "2026-11-04"), null, "no payday of the monthly one within two weeks");
+  assert.equal(paydayNear(paychecks[1], "2026-11-04").days, 2);
+});

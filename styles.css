@@ -9537,3 +9537,29 @@ html[data-theme="dark"] .note-check-delete {
   flex-wrap: wrap;
   gap: 0.5rem;
 }
+
+/* Partners: shared rental properties */
+.partners-layout { display: grid; gap: 1rem; }
+.partners-toolbar { display: flex; flex-wrap: wrap; gap: 0.6rem; align-items: end; margin-bottom: 0.8rem; }
+.partners-range { display: grid; gap: 0.2rem; font-size: 0.8rem; font-weight: 800; }
+.partners-file { cursor: pointer; text-decoration: underline; }
+.partners-file.ghost-button { text-decoration: none; border: 1px solid var(--line); border-radius: 6px; padding: 0.5rem 0.75rem; font-weight: 800; }
+.partners-tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 0.6rem; margin-bottom: 0.6rem; }
+.partners-tile { display: grid; gap: 0.15rem; padding: 0.7rem 0.8rem; border-radius: 8px; background: var(--green-soft); }
+.partners-tile span { color: var(--muted); font-size: 0.68rem; font-weight: 900; text-transform: uppercase; }
+.partners-tile strong { font-size: 1.15rem; }
+.partners-scroll { overflow-x: auto; }
+.partners-table { width: 100%; border-collapse: collapse; font-size: 0.88rem; }
+.partners-table th, .partners-table td { padding: 0.45rem 0.6rem; border-bottom: 1px solid var(--line); text-align: right; white-space: nowrap; }
+.partners-table th:first-child, .partners-table td:first-child { text-align: left; }
+.partners-table thead th { color: var(--muted); font-size: 0.7rem; font-weight: 900; text-transform: uppercase; }
+.partners-table .partners-payee { text-align: left; white-space: normal; max-width: 28rem; }
+.partners-table input[type="number"] { width: 5rem; }
+.partners-setup summary { cursor: pointer; padding: 0.2rem 0; }
+.partners-setup h4 { margin: 1rem 0 0.4rem; }
+.partners-name-row { display: flex; gap: 0.5rem; align-items: center; margin-bottom: 0.4rem; max-width: 26rem; }
+.partners-name-row input { flex: 1; }
+.partners-check { display: flex; gap: 0.5rem; align-items: center; padding: 0.15rem 0; }
+.partners-check input { width: auto; }
+.partners-rule { display: grid; grid-template-columns: minmax(150px, 2fr) minmax(130px, 1fr) minmax(110px, 1fr) minmax(110px, 1fr) auto auto; gap: 0.4rem; margin-bottom: 0.4rem; align-items: center; }
+@media (max-width: 720px) { .partners-rule { grid-template-columns: 1fr 1fr; } }

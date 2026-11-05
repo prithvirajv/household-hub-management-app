@@ -11,6 +11,7 @@ const views = [
   ["documents", "Documents", "📁"],
   ["decisions", "Decisions", "⚖️"],
   ["ious", "Shared Expenses", "💸"],
+  ["partners", "Partners", "🏘️"],
   ["meals", "Meals", "🍲"],
   ["recipes", "Recipes", "📖"],
   ["goals", "Goals", "🎯"],
@@ -30,7 +31,7 @@ const views = [
 // this list wasn't updated alongside it.
 const NAV_SECTIONS = [
   ["Overview", ["home"]],
-  ["Money", ["budget", "bills", "transactions", "paychecks", "wealth", "reports"]],
+  ["Money", ["budget", "bills", "transactions", "paychecks", "wealth", "reports", "partners"]],
   ["Household", ["calendar", "notes", "meals", "recipes", "documents", "decisions", "ious", "sharing"]],
   ["Personal", ["journal", "plan", "goals"]],
   ["Settings", ["profile", "help", "admin"]]
@@ -1965,6 +1966,8 @@ function renderShell() {
                       ? "Household decisions"
                       : isIousView
                         ? "Shared expenses & debts"
+                        : currentView === "partners"
+                        ? "Property partners"
                         : isProfileView
                           ? "Your profile"
                           : isHomeView
@@ -2005,9 +2008,9 @@ function renderShell() {
   const selectedHousehold = households.find((household) => household.selected);
   $("#defaultHouseholdButton").disabled = Boolean(selectedHousehold?.isDefault);
   $("#defaultHouseholdButton").textContent = selectedHousehold?.isDefault ? "Default household" : "Set as default";
-  $(".month-control").hidden = isAdminView || isNotesView || isHelpView || isRecipesView || isGoalsView || isWealthView || isJournalView || isPlanView || isDocumentsView || isDecisionsView || isIousView || isProfileView || isHomeView;
+  $(".month-control").hidden = isAdminView || isNotesView || isHelpView || isRecipesView || isGoalsView || isWealthView || isJournalView || isPlanView || isDocumentsView || isDecisionsView || isIousView || currentView === "partners" || isProfileView || isHomeView;
   $("#syncButton").hidden = isAdminView || isHelpView;
-  $("#downloadCsvButton").hidden = isAdminView || isNotesView || isHelpView || isJournalView || isPlanView || isDocumentsView || isDecisionsView || isIousView || isProfileView || isHomeView;
+  $("#downloadCsvButton").hidden = isAdminView || isNotesView || isHelpView || isJournalView || isPlanView || isDocumentsView || isDecisionsView || isIousView || currentView === "partners" || isProfileView || isHomeView;
   renderNav();
   renderMobileTabBar();
   renderNotificationBell();
@@ -2165,6 +2168,7 @@ const renderers = {
   documents: renderDocuments,
   decisions: renderDecisions,
   ious: renderIOUs,
+  partners: renderPartners,
   meals: renderMeals,
   recipes: renderRecipes,
   goals: renderGoals,
@@ -6160,6 +6164,247 @@ function renderSplitBillRows() {
   recomputeSplitBillRows();
 }
 
+// ---- Partners: shared rental properties run from one checking account ----
+// Setup lives in state.partners (properties, partners, ownership percentages, rules that read a payee into rent / loan / HOA / contribution,
+// and which accounts are the pool). The numbers are computed by buildPartnersStatement (lib/partners-logic.js); nothing is stored but the setup.
+let partnersRangeMode = "all";
+let partnersFocusRuleId = "";
+
+function ensurePartnersData() {
+  state.partners ||= {};
+  const data = state.partners;
+  data.properties ||= [];
+  data.partners ||= [];
+  data.shares ||= {};
+  data.defaultShares ||= {};
+  data.rules ||= [];
+  data.accountIds ||= [];
+  return data;
+}
+
+function partnersRange() {
+  const now = new Date();
+  const current = dateKey(now).slice(0, 7);
+  const back = (count) => dateKey(new Date(now.getFullYear(), now.getMonth() - count + 1, 1)).slice(0, 7);
+  if (partnersRangeMode === "month") return { fromMonth: current, toMonth: current };
+  if (partnersRangeMode === "3") return { fromMonth: back(3), toMonth: current };
+  if (partnersRangeMode === "12") return { fromMonth: back(12), toMonth: current };
+  return {};
+}
+
+function partnersSigned(value) {
+  const number = Number(value) || 0;
+  return `<span class="gain-loss ${number < 0 ? "loss" : "gain"}">${number < 0 ? "-" : ""}${exactMoney.format(Math.abs(number))}</span>`;
+}
+
+function renderPartners() {
+  const data = ensurePartnersData();
+  const configured = data.properties.length > 0 && data.partners.length > 0;
+  const intro = `<p class="muted">Several people put money into one checking account that collects the rent and pays the loans, HOA and repairs of shared rental properties. Pick the account, tell FamilyLoop who the partners are and what each owns, and it works out each property's profit or loss and what every partner has put in and should send.</p>`;
+  if (!configured) {
+    return `<section class="partners-layout">${intro}
+      <div class="card">
+        <div class="card-label">Partners</div><h3>Set up</h3>
+        <form id="partnersSetupForm" class="mini-form">
+          <label class="form-row-full">Properties (one per line)<textarea name="properties" rows="3" placeholder="First property&#10;Second property"></textarea></label>
+          <label class="form-row-full">Partners (one per line)<textarea name="partners" rows="3" placeholder="Partner one&#10;Partner two&#10;Partner three"></textarea></label>
+          <button type="submit" class="form-row-full">Start</button>
+        </form>
+        <p class="muted">Ownership starts equal for everyone; you can change it per property afterwards. Or <label class="partners-file">import a saved setup<input type="file" accept="application/json,.json" id="partnersImportFile" hidden></label>.</p>
+      </div>
+    </section>`;
+  }
+  const statement = buildPartnersStatement(data, state.transactions, partnersRange());
+  const accountName = (id) => state.accounts.find((account) => account.id === id)?.name || "";
+  const kindOptions = (selected) => PARTNER_KINDS.map((kind) => `<option value="${kind.id}" ${kind.id === selected ? "selected" : ""}>${escapeHtml(kind.label)}</option>`).join("");
+  const propertyOptions = (selected) => `<option value="">No property</option>${data.properties.map((property) => `<option value="${escapeHtml(property.id)}" ${property.id === selected ? "selected" : ""}>${escapeHtml(property.name)}</option>`).join("")}`;
+  const partnerOptions = (selected) => `<option value="">No partner</option>${data.partners.map((partner) => `<option value="${escapeHtml(partner.id)}" ${partner.id === selected ? "selected" : ""}>${escapeHtml(partner.name)}</option>`).join("")}`;
+  const pool = statement.pool;
+  const tile = (label, value, note = "") => `<div class="partners-tile"><span>${label}</span><strong>${value}</strong>${note ? `<small class="muted">${note}</small>` : ""}</div>`;
+  const rangeSelect = `<label class="partners-range">Period<select id="partnersRangeSelect">${[["all", "All time"], ["12", "Last 12 months"], ["3", "Last 3 months"], ["month", "This month"]].map(([value, label]) => `<option value="${value}" ${value === partnersRangeMode ? "selected" : ""}>${label}</option>`).join("")}</select></label>`;
+  const propertyRows = statement.properties.map((row) => `<tr><th>${escapeHtml(row.name)}</th><td>${exactMoney.format(row.income)}</td><td>${exactMoney.format(row.loan)}</td><td>${exactMoney.format(row.hoa)}</td><td>${exactMoney.format(row.repair + row.expense)}</td><td>${partnersSigned(row.net)}</td></tr>`).join("");
+  const partnerRows = statement.partners.map((row) => `<tr><th>${escapeHtml(row.name)}</th><td>${row.effectivePct.toFixed(0)}%</td><td>${exactMoney.format(row.contributed)}</td><td>${partnersSigned(row.share)}</td><td>${partnersSigned(row.balance)}</td><td>${row.toSquare > 0.005 ? `<b>send ${exactMoney.format(row.toSquare)}</b>` : row.toSquare < -0.005 ? `receive ${exactMoney.format(-row.toSquare)}` : "even"}</td><td>${statement.averageShortfall > 0 ? exactMoney.format(row.suggested) : "-"}</td></tr>`).join("");
+  const monthRows = statement.months.slice().reverse().map((row) => `<tr><th>${escapeHtml(formatMonth(row.month))}</th><td>${exactMoney.format(row.income)}</td><td>${exactMoney.format(row.expenses)}</td><td>${partnersSigned(row.net)}</td><td>${exactMoney.format(row.contributions)}</td></tr>`).join("");
+  const unclassifiedRows = statement.unclassified.slice(0, 15).map((row, index) => `<tr><td>${escapeHtml(formatShortDate(row.date))}</td><td class="partners-payee">${escapeHtml(String(row.payee || "").slice(0, 70))}</td><td>${exactMoney.format(-Number(row.amount))}</td><td><button type="button" class="ghost" data-partners-make-rule="${index}">Make a rule</button></td></tr>`).join("");
+  const rulesHtml = data.rules.map((rule, index) => `<div class="partners-rule">
+      <input data-partners-rule-match="${index}" value="${escapeHtml(rule.match)}" aria-label="Payee contains" placeholder="Payee contains…">
+      <select data-partners-rule-kind="${index}" aria-label="What it is">${kindOptions(rule.kind)}</select>
+      <select data-partners-rule-property="${index}" aria-label="Property">${propertyOptions(rule.propertyId)}</select>
+      <select data-partners-rule-partner="${index}" aria-label="Partner">${partnerOptions(rule.partnerId)}</select>
+      <button type="button" class="icon-button" data-partners-rule-up="${index}" aria-label="Move rule up" ${index === 0 ? "disabled" : ""}>↑</button>
+      <button type="button" class="icon-button danger-button" data-partners-rule-delete="${index}" aria-label="Delete rule">×</button>
+    </div>`).join("");
+  const shareRow = (label, propertyKey) => {
+    const source = propertyKey === "default" ? data.defaultShares : (data.shares[propertyKey] || {});
+    const normalised = partnersSharesFor(data, propertyKey === "default" ? "" : propertyKey);
+    return `<tr><th>${escapeHtml(label)}</th>${data.partners.map((partner) => `<td><input type="number" min="0" max="100" step="1" data-partners-share="${escapeHtml(propertyKey)}|${escapeHtml(partner.id)}" value="${source[partner.id] ?? ""}" placeholder="${(normalised[partner.id] || 0).toFixed(0)}" aria-label="${escapeHtml(partner.name)} share of ${escapeHtml(label)}"></td>`).join("")}</tr>`;
+  };
+  return `<section class="partners-layout">${intro}
+    <div class="card">
+      <div class="card-label">Partners</div><h3>Statement</h3>
+      <div class="partners-toolbar">${rangeSelect}
+        <button type="button" class="ghost" id="partnersExportButton">Export setup</button>
+        <label class="partners-file ghost-button">Import setup<input type="file" accept="application/json,.json" id="partnersImportFile" hidden></label></div>
+      <div class="partners-tiles">
+        ${tile("Rent and income in", exactMoney.format(pool.income))}
+        ${tile("Loans, HOA and repairs", exactMoney.format(pool.expenses))}
+        ${tile(pool.net < 0 ? "Shortfall" : "Surplus", partnersSigned(pool.net), statement.months.length ? `${exactMoney.format(Math.abs(pool.net) / statement.months.length)} a month on average` : "")}
+        ${tile("Partners sent in", exactMoney.format(pool.contributions), statement.unassignedContributions ? `${exactMoney.format(statement.unassignedContributions)} not tied to a partner` : "")}
+      </div>
+      <h4>By property</h4>
+      <div class="partners-scroll"><table class="partners-table"><thead><tr><th></th><th>Rent in</th><th>Loan</th><th>HOA</th><th>Repairs and other</th><th>Result</th></tr></thead><tbody>${propertyRows}</tbody></table></div>
+      <h4>By partner</h4>
+      <div class="partners-scroll"><table class="partners-table"><thead><tr><th></th><th>Share</th><th>Sent in</th><th>Share of result</th><th>Balance</th><th>To square up</th><th>Suggested a month</th></tr></thead><tbody>${partnerRows}</tbody></table></div>
+      <p class="muted">Balance is what a partner sent in plus their share of the result. To square up shares what was sent in by ownership: positive means send that much more, "receive" means they sent more than their share. Suggested a month is each partner's share of the average monthly shortfall over the last three active months (${exactMoney.format(statement.averageShortfall)}).</p>
+      ${statement.months.length ? `<h4>Month by month</h4><div class="partners-scroll"><table class="partners-table"><thead><tr><th></th><th>Income</th><th>Costs</th><th>Result</th><th>Sent in</th></tr></thead><tbody>${monthRows}</tbody></table></div>` : `<p class="muted">Nothing in this period matches a rule yet. Add rules below, or check the pool accounts.</p>`}
+    </div>
+    ${statement.unclassified.length ? `<div class="card">
+      <div class="card-label">Needs a rule</div><h3>${statement.unclassified.length} row${statement.unclassified.length === 1 ? "" : "s"} not matched</h3>
+      <p class="muted">These rows in the pool account match no rule, so they are not in the numbers above. Make a rule from one and every row like it is read the same way, now and as new rows arrive.</p>
+      <div class="partners-scroll"><table class="partners-table"><thead><tr><th>Date</th><th>Payee</th><th>Money in (out is negative)</th><th></th></tr></thead><tbody>${unclassifiedRows}</tbody></table></div>
+      ${statement.unclassified.length > 15 ? `<p class="muted">Showing 15 of ${statement.unclassified.length}.</p>` : ""}
+    </div>` : ""}
+    <details class="card partners-setup" ${data.rules.length ? "" : "open"}>
+      <summary><span class="card-label">Partners</span> <b>Setup: who, what share, which account, which rules</b></summary>
+      <h4>Properties</h4>
+      ${data.properties.map((property, index) => `<div class="partners-name-row"><input data-partners-property-name="${index}" value="${escapeHtml(property.name)}" aria-label="Property name"><button type="button" class="icon-button danger-button" data-partners-remove-property="${index}" aria-label="Remove ${escapeHtml(property.name)}">×</button></div>`).join("")}
+      <button type="button" class="ghost" id="partnersAddProperty">+ Add a property</button>
+      <h4>Partners</h4>
+      ${data.partners.map((partner, index) => `<div class="partners-name-row"><input data-partners-partner-name="${index}" value="${escapeHtml(partner.name)}" aria-label="Partner name"><button type="button" class="icon-button danger-button" data-partners-remove-partner="${index}" aria-label="Remove ${escapeHtml(partner.name)}">×</button></div>`).join("")}
+      <button type="button" class="ghost" id="partnersAddPartner">+ Add a partner</button>
+      <h4>Ownership (percent)</h4>
+      <p class="muted">Leave a row empty for an equal split. Numbers are scaled to add up to 100 for each property. "Shared / not assigned" covers costs that belong to no one property.</p>
+      <div class="partners-scroll"><table class="partners-table"><thead><tr><th></th>${data.partners.map((partner) => `<th>${escapeHtml(partner.name)}</th>`).join("")}</tr></thead><tbody>${data.properties.map((property) => shareRow(property.name, property.id)).join("")}${shareRow("Shared / not assigned", "default")}</tbody></table></div>
+      <h4>Pool account</h4>
+      <p class="muted">${state.accounts.length ? "Which account is the shared checking account? Nothing ticked means every account." : "Add the account under Wealth first, or leave this empty to read every transaction."}</p>
+      ${state.accounts.map((account) => `<label class="partners-check"><input type="checkbox" data-partners-account="${escapeHtml(account.id)}" ${data.accountIds.includes(account.id) ? "checked" : ""}> ${escapeHtml(account.name)}</label>`).join("")}
+      <h4>Rules</h4>
+      <p class="muted">A rule reads a payee: when its words all appear in the bank's description, the row is that kind, for that property and partner. The first rule that matches wins, so put specific ones first. Money a partner sends in is a <b>Partner contribution</b> for that partner; <b>Personal</b> rows are left out entirely.</p>
+      ${rulesHtml || `<p class="muted">No rules yet.</p>`}
+      <button type="button" class="ghost" id="partnersAddRule">+ Add a rule</button>
+    </details>
+  </section>`;
+}
+
+function partnersSave() {
+  autosaveState();
+  render();
+}
+
+function bindPartnersEvents() {
+  if (currentView !== "partners") return;
+  const data = ensurePartnersData();
+  const readFile = (input, onText) => {
+    input?.addEventListener("change", () => {
+      const file = input.files?.[0];
+      if (!file) return;
+      const reader = new FileReader();
+      reader.onload = () => onText(String(reader.result || ""));
+      reader.readAsText(file);
+      input.value = "";
+    });
+  };
+  $("#partnersSetupForm")?.addEventListener("submit", (event) => {
+    event.preventDefault();
+    const lines = (name) => String(new FormData(event.currentTarget).get(name) || "").split("\n").map((line) => line.trim()).filter(Boolean);
+    const properties = lines("properties").map((name) => ({ id: uniqueId(name), name }));
+    const people = lines("partners").map((name) => ({ id: uniqueId(name), name }));
+    if (!properties.length || !people.length) { showToast("Add at least one property and one partner.", { type: "info" }); return; }
+    Object.assign(data, { properties, partners: people, shares: {}, defaultShares: {} });
+    partnersSave();
+  });
+  const importHandler = (text) => {
+    let parsed;
+    try { parsed = JSON.parse(text); } catch (_error) { showToast("That file is not a Partners setup.", { type: "error" }); return; }
+    const clean = partnersSanitizeConfig(parsed);
+    if (!clean.properties.length || !clean.partners.length) { showToast("That file has no properties or partners.", { type: "error" }); return; }
+    Object.assign(data, clean);
+    state.household.activity.unshift(`Imported a Partners setup (${clean.properties.length} properties, ${clean.partners.length} partners, ${clean.rules.length} rules)`);
+    partnersSave();
+  };
+  readFile($("#partnersImportFile"), importHandler);
+  $("#partnersExportButton")?.addEventListener("click", () => downloadTextFile("partners-setup.json", "application/json", JSON.stringify(partnersSanitizeConfig(data), null, 2)));
+  $("#partnersRangeSelect")?.addEventListener("change", (event) => { partnersRangeMode = event.target.value; render(); });
+
+  document.querySelectorAll("[data-partners-property-name]").forEach((input) => input.addEventListener("change", () => {
+    const property = data.properties[Number(input.dataset.partnersPropertyName)];
+    if (property) { property.name = input.value.trim() || property.name; partnersSave(); }
+  }));
+  document.querySelectorAll("[data-partners-partner-name]").forEach((input) => input.addEventListener("change", () => {
+    const partner = data.partners[Number(input.dataset.partnersPartnerName)];
+    if (partner) { partner.name = input.value.trim() || partner.name; partnersSave(); }
+  }));
+  $("#partnersAddProperty")?.addEventListener("click", () => { data.properties.push({ id: uniqueId("property"), name: `Property ${data.properties.length + 1}` }); partnersSave(); });
+  $("#partnersAddPartner")?.addEventListener("click", () => { data.partners.push({ id: uniqueId("partner"), name: `Partner ${data.partners.length + 1}` }); partnersSave(); });
+  document.querySelectorAll("[data-partners-remove-property]").forEach((button) => button.addEventListener("click", () => {
+    const [removed] = data.properties.splice(Number(button.dataset.partnersRemoveProperty), 1);
+    if (removed) {
+      delete data.shares[removed.id];
+      data.rules.forEach((rule) => { if (rule.propertyId === removed.id) rule.propertyId = ""; });
+      partnersSave();
+    }
+  }));
+  document.querySelectorAll("[data-partners-remove-partner]").forEach((button) => button.addEventListener("click", () => {
+    const [removed] = data.partners.splice(Number(button.dataset.partnersRemovePartner), 1);
+    if (removed) {
+      Object.values(data.shares).forEach((shares) => { delete shares[removed.id]; });
+      delete data.defaultShares[removed.id];
+      data.rules.forEach((rule) => { if (rule.partnerId === removed.id) rule.partnerId = ""; });
+      partnersSave();
+    }
+  }));
+  document.querySelectorAll("[data-partners-share]").forEach((input) => input.addEventListener("change", () => {
+    const [propertyKey, partnerId] = input.dataset.partnersShare.split("|");
+    const target = propertyKey === "default" ? data.defaultShares : (data.shares[propertyKey] ||= {});
+    if (input.value === "") delete target[partnerId];
+    else target[partnerId] = Math.min(100, Math.max(0, Number(input.value) || 0));
+    partnersSave();
+  }));
+  document.querySelectorAll("[data-partners-account]").forEach((box) => box.addEventListener("change", () => {
+    const id = box.dataset.partnersAccount;
+    data.accountIds = box.checked ? [...new Set([...data.accountIds, id])] : data.accountIds.filter((item) => item !== id);
+    partnersSave();
+  }));
+
+  const ruleField = (attribute, field) => document.querySelectorAll(`[data-${attribute}]`).forEach((control) => control.addEventListener("change", () => {
+    const rule = data.rules[Number(control.dataset[attribute.replace(/-([a-z])/g, (_m, letter) => letter.toUpperCase())])];
+    if (!rule) return;
+    rule[field] = control.value;
+    partnersSave();
+  }));
+  ruleField("partners-rule-match", "match");
+  ruleField("partners-rule-kind", "kind");
+  ruleField("partners-rule-property", "propertyId");
+  ruleField("partners-rule-partner", "partnerId");
+  document.querySelectorAll("[data-partners-rule-delete]").forEach((button) => button.addEventListener("click", () => { data.rules.splice(Number(button.dataset.partnersRuleDelete), 1); partnersSave(); }));
+  document.querySelectorAll("[data-partners-rule-up]").forEach((button) => button.addEventListener("click", () => {
+    const index = Number(button.dataset.partnersRuleUp);
+    if (index > 0) { [data.rules[index - 1], data.rules[index]] = [data.rules[index], data.rules[index - 1]]; partnersSave(); }
+  }));
+  $("#partnersAddRule")?.addEventListener("click", () => {
+    const rule = { id: uniqueId("rule"), match: "", kind: "rent", propertyId: "", partnerId: "" };
+    data.rules.push(rule);
+    partnersFocusRuleId = rule.id;
+    partnersSave();
+  });
+  document.querySelectorAll("[data-partners-make-rule]").forEach((button) => button.addEventListener("click", () => {
+    const row = buildPartnersStatement(data, state.transactions, partnersRange()).unclassified[Number(button.dataset.partnersMakeRule)];
+    if (!row) return;
+    const money = Number(row.amount) < 0;
+    const rule = { id: uniqueId("rule"), match: partnersSuggestMatch(row.payee), kind: money ? "rent" : "expense", propertyId: "", partnerId: "" };
+    data.rules.push(rule);
+    partnersFocusRuleId = rule.id;
+    document.querySelector(".partners-setup")?.setAttribute("open", "");
+    partnersSave();
+  }));
+  if (partnersFocusRuleId) {
+    const index = data.rules.findIndex((rule) => rule.id === partnersFocusRuleId);
+    partnersFocusRuleId = "";
+    const input = document.querySelector(`[data-partners-rule-match="${index}"]`);
+    if (input) { input.closest(".partners-setup")?.setAttribute("open", ""); input.scrollIntoView({ block: "center" }); input.focus(); }
+  }
+}
+
 function renderIOUs() {
   ensureIOUsData();
   const today = dateKey(new Date());
@@ -8944,6 +9189,7 @@ function transactionInboxItems() {
 // same matching rules.
 
 function bindViewEvents() {
+  bindPartnersEvents();
   if (googleMapsApiKey) attachLocationAutocomplete();
   updateLocationDirectionsPreview();
   $("#calendarQuickAdd [name='location']")?.addEventListener("input", updateLocationDirectionsPreview);
@@ -15517,8 +15763,10 @@ function askRemovalReason(row) {
   const received = Math.round(Math.abs(Number(row.amount)) * 100) / 100;
   const isDeposit = Number(row.amount) < 0;
   const salary = depositWorthAsking(row);
-  const paychecks = (state.paychecks || []).filter((paycheck) => Number(paycheck.amount) > 0)
-    .sort((a, b) => Math.abs(Number(a.amount) - received) - Math.abs(Number(b.amount) - received));
+  // Best match first: the payer's name AND a payday near the deposit date, so the right paycheck is already selected.
+  const ranked = rankPaychecksForDeposit(row, state.paychecks);
+  const paychecks = ranked.map((entry) => entry.paycheck);
+  const paydayOf = new Map(ranked.map((entry) => [entry.paycheck.id, entry.payday]));
   const choice = (value, label, checked = false) => `<label class="removal-reason"><input type="radio" name="reason" value="${escapeHtml(value)}" ${checked ? "checked" : ""}> ${escapeHtml(label)}</label>`;
   const dialog = document.createElement("dialog");
   dialog.className = "app-dialog confirm-dialog";
@@ -15527,7 +15775,7 @@ function askRemovalReason(row) {
     <p class="form-message">${escapeHtml(row.payee || "Transaction")} · ${isDeposit ? "deposit of" : ""} ${exactMoney.format(received)} · ${escapeHtml(formatShortDate(row.date))}</p>
     ${salary ? choice("salary", "It's my salary or a paycheck") : ""}
     ${salary ? `<div class="removal-reason-extra" data-removal-salary hidden>
-      <label>Which paycheck<select name="paycheckId">${paychecks.map((paycheck) => `<option value="${escapeHtml(paycheck.id)}">${escapeHtml(paycheck.name)} (${exactMoney.format(Number(paycheck.amount))})</option>`).join("")}<option value="new">A new paycheck from this deposit</option></select></label>
+      <label>Which paycheck<select name="paycheckId">${paychecks.map((paycheck) => `<option value="${escapeHtml(paycheck.id)}">${escapeHtml(paycheck.name)} (${exactMoney.format(Number(paycheck.amount))})${paydayOf.get(paycheck.id) ? ` · payday ${escapeHtml(formatShortDate(paydayOf.get(paycheck.id)))}` : ""}</option>`).join("")}<option value="new">A new paycheck from this deposit</option></select></label>
       <label data-removal-new hidden>How often is it paid<select name="recurrence"><option value="biweekly">Every two weeks</option><option value="weekly">Weekly</option><option value="monthly">Monthly</option></select></label>
     </div>` : ""}
     ${REMOVAL_REASONS.map((reason) => choice(`built:${reason.id}`, reason.label)).join("")}
