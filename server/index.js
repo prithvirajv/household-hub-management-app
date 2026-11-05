@@ -16,6 +16,8 @@ const { OAuth2Client } = require("google-auth-library");
 const { countries } = require("countries-list");
 const { defaultState } = require("./default-state");
 const { registerLinkedAccountRoutes } = require("./linked-accounts");
+const { registerPartnerGroupRoutes, forwardHouseholdPartnerRows } = require("./partner-groups");
+const { partnersParseAiSuggestions, PARTNER_KINDS } = require("../lib/partners-logic");
 const { validateJournalPayload, buildDocumentObjectPath, sanitizeFilename, wouldCreateFolderCycle, collectDescendantFolderIds, SMS_CARRIERS, smsGatewayAddress, rollAnnualNotifyAtForward, choreNotifyAt, parseBankStatementPdfText, extractAccountActivityLabel, isValidEmail, parseImageReminderDraft, parseBatchSuggestions, parseHomeBriefing, parseAssistantPlan, pgDumpArgs } = require("../lib/shared-logic");
 const pdfParse = require("pdf-parse");
 const ExcelJS = require("exceljs");
@@ -1546,6 +1548,29 @@ function learnedExamplesText(examples) {
     : [];
 }
 
+// One JSON-answering Gemini call with the same busy-model handling as geminiBatchSuggest (next model in the list, one more pass after a pause).
+async function geminiGenerateText({ prompt, system, maxOutputTokens = 6000 }) {
+  if (!GEMINI_API_KEY) { const failure = new Error("AI suggestions are not configured for this deployment"); failure.statusCode = 503; throw failure; }
+  const request = (model) => fetch(`${GEMINI_API_BASE_URL}/v1beta/models/${encodeURIComponent(model)}:generateContent?key=${encodeURIComponent(GEMINI_API_KEY)}`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ contents: [{ role: "user", parts: [{ text: prompt }] }], systemInstruction: { parts: [{ text: system }] }, generationConfig: { maxOutputTokens, responseMimeType: "application/json" } })
+  });
+  const models = [GEMINI_MODEL, ...GEMINI_FALLBACK_MODELS];
+  let response;
+  let body;
+  for (let attempt = 0; attempt < models.length + 1; attempt += 1) {
+    const model = models[attempt % models.length];
+    response = await request(model);
+    body = await response.json().catch(() => ({}));
+    if (response.ok || ![404, 429, 500, 502, 503, 504].includes(response.status)) break;
+    console.warn(`Gemini ${model} attempt ${attempt + 1} failed: HTTP ${response.status} ${String(body?.error?.message || "").slice(0, 200)}`);
+    if (attempt + 1 === models.length) await new Promise((resolve) => setTimeout(resolve, 3000));
+  }
+  if (!response.ok) { const failure = new Error(body?.error?.message || "The AI suggestion service is unavailable right now"); failure.statusCode = 502; throw failure; }
+  return body.candidates?.[0]?.content?.parts?.[0]?.text || "";
+}
+
 async function geminiBatchSuggest({ cleanRows, lines, accounts, knownTags, examples = [] }) {
   if (!GEMINI_API_KEY) { const failure = new Error("AI suggestions are not configured for this deployment"); failure.statusCode = 503; throw failure; }
   const lineIds = lines.map((line) => String(line?.id || "")).filter(Boolean);
@@ -1616,6 +1641,49 @@ app.post("/api/transactions/suggest-batch", requireSession, async (req, res, nex
     }
     res.json({ results });
   } catch (error) {
+    next(error);
+  }
+});
+
+// Partners page: suggests what each unmatched row of the shared account is (rent, loan, HOA, repair, a partner's contribution, personal...), for which
+// property and partner. Same trust rules as the categorizing endpoint: the reply is checked against the exact ids this request offered, only
+// confident answers are acted on by the client, and the client records them as per-row choices that can be reset.
+const PARTNERS_SUGGEST_MAX_ROWS = 60;
+app.post("/api/partners/suggest", requireSession, async (req, res, next) => {
+  try {
+    if (!GEMINI_API_KEY) return res.status(503).json({ error: "AI suggestions are not configured for this deployment" });
+    const text = (value, max) => String(value == null ? "" : value).replace(/[\r\n|]+/g, " ").replace(/\s+/g, " ").trim().slice(0, max);
+    const rows = (Array.isArray(req.body?.rows) ? req.body.rows : []).slice(0, PARTNERS_SUGGEST_MAX_ROWS)
+      .map((row) => ({ id: text(row?.id, 60), payee: text(row?.payee, 200), money: Number(row?.money) || 0, date: text(row?.date, 10) })).filter((row) => row.id && row.payee);
+    const properties = (Array.isArray(req.body?.properties) ? req.body.properties : []).slice(0, 60).map((item) => ({ id: text(item?.id, 60), name: text(item?.name, 80) })).filter((item) => item.id && item.name);
+    const partners = (Array.isArray(req.body?.partners) ? req.body.partners : []).slice(0, 60).map((item) => ({ id: text(item?.id, 60), name: text(item?.name, 80) })).filter((item) => item.id && item.name);
+    if (!rows.length) return res.status(400).json({ error: "No transactions to assign" });
+    if (!properties.length || !partners.length) return res.status(400).json({ error: "Set up the properties and partners first" });
+    const examples = (Array.isArray(req.body?.examples) ? req.body.examples : []).slice(0, 60)
+      .map((item) => ({ payee: text(item?.payee, 60), kind: text(item?.kind, 20), propertyId: text(item?.propertyId, 60), partnerId: text(item?.partnerId, 60) }))
+      .filter((item) => item.payee && PARTNER_KINDS.some((kind) => kind.id === item.kind));
+    const prompt = [
+      "Kinds (id: meaning):",
+      "rent: rent received from a tenant (money in)",
+      "contribution: money one of the partners sent into the account (money in; set partnerId to that partner)",
+      "loan: a mortgage or loan payment (money out)",
+      "hoa: homeowners association dues or fees (money out)",
+      "repair: repairs, maintenance, contractors (money out)",
+      "expense: any other cost of running a property (money out)",
+      "interest: interest the account earned",
+      "personal: nothing to do with the properties (one partner's personal money passing through, unrelated transfers)",
+      "",
+      "Properties (id: name):", ...properties.map((item) => `${item.id}: ${item.name}`), "",
+      "Partners (id: name):", ...partners.map((item) => `${item.id}: ${item.name}`), "",
+      examples.length ? "Decisions already made for this account (payee | kind | property id | partner id). Follow them for the same or a very similar payee:" : "",
+      ...examples.map((item) => `${item.payee} | ${item.kind} | ${item.propertyId} | ${item.partnerId}`), "",
+      "Rows (id | payee | money in (+) or out (-) | date):", ...rows.map((row) => `${row.id} | ${row.payee} | ${row.money} | ${row.date}`)
+    ].join("\n");
+    const system = "You sort the rows of a shared rental-property bank account for the partners who own the properties together. For each row return the single best kind, the property id when it clearly belongs to one property, and the partner id when it is a partner's contribution. Reply with only a JSON array of {\"id\": string, \"kind\": string, \"propertyId\": string or null, \"partnerId\": string or null, \"confidence\": \"high\" or \"low\"}. Use only the ids offered. Say \"high\" only when the payee text makes it clear (a partner's name on a Zelle that sends money in, the lender's name, the HOA's name, a tenant already seen); otherwise \"low\". Never invent a person or property.";
+    const answer = await geminiGenerateText({ prompt, system, maxOutputTokens: 6000 });
+    res.json({ results: partnersParseAiSuggestions(answer, rows.map((row) => row.id), properties.map((item) => item.id), partners.map((item) => item.id)) });
+  } catch (error) {
+    if (error.statusCode) return res.status(error.statusCode).json({ error: error.message });
     next(error);
   }
 });
@@ -5063,7 +5131,15 @@ app.get("/shared-notes/:token/:slug?", async (req, res, next) => {
   }
 });
 
+const partnerGroups = registerPartnerGroupRoutes({ app, requireSession, sendTransactionalEmail, appBaseUrl: APP_BASE_URL, escapeHtml, MEMORY_DB, memoryDb, pool });
+
 registerLinkedAccountRoutes({
+  // The overnight bank sync hands the rows it fetched for the Partners-page account to the group this household feeds.
+  forwardPartnerRows: async (householdId, working) => forwardHouseholdPartnerRows(partnerGroups.store, {
+    groupId: working.partnerGroupId,
+    householdOwnerId: MEMORY_DB ? memoryPrimaryOwnerId(householdId) : await databasePrimaryOwnerId(pool, householdId),
+    rows: working.partnerTransactions, poolBalance: working.partnerPoolBalance
+  }),
   app, requireSession, requireEditAccess, requireJobSecret: requireNotificationSecret, notifyHousehold: notifyHouseholdMembers, loadHouseholdState: loadHouseholdAppState,
   stateStore: { load: loadHouseholdStateVersioned, saveIfVersion: saveHouseholdStateIfVersion },
   // The AI answers the overnight apply asks for: the same batched categorization the app uses, validated against what was offered.

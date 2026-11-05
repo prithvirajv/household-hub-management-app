@@ -126,3 +126,34 @@ test("rows kept for the Partners page are merged without doubling: CSV over CSV,
   assert.equal(partnersMergeBankRows(bank.rows, [{ externalId: "sf:X:2", date: "2026-08-05", payee: "D", amount: 9 }]).added, 0, "a known id is never added twice");
   assert.equal(partnersMergeCsvRows(bank.rows, csv).added, 0, "a CSV that overlaps the bank's rows adds nothing");
 });
+
+test("a choice made for one row overrides the rules, can be reset, and survives an export", () => {
+  const { partnersRowId, partnersSanitizeConfig } = require("../lib/partners-logic");
+  const odd = t("2026-08-20", "ZELLE FROM TINA TENANT ON 08/20", -300);
+  const sameDay = t("2026-08-21", "SOMETHING ELSE", 40);
+  const rowId = partnersRowId(odd);
+  const withOverride = { ...config, overrides: { [rowId]: { kind: "contribution", propertyId: "", partnerId: "p1" }, [partnersRowId(sameDay)]: { kind: "repair", propertyId: "b", partnerId: "" } } };
+  assert.equal(classifyPartnerRow(odd, config.rules).kind, "rent", "the rule alone says rent");
+  assert.equal(classifyPartnerRow(odd, config.rules, withOverride.overrides).kind, "contribution", "the row's own choice wins");
+  const s = buildPartnersStatement(withOverride, [odd, sameDay], {});
+  assert.equal(s.partners.find((p) => p.id === "p1").contributed, 300);
+  assert.equal(s.properties.find((p) => p.id === "b").repair, 40);
+  assert.equal(s.unclassified.length, 0, "a row that needed a rule is settled by assigning it");
+  assert.equal(s.entries.filter((entry) => entry.overridden).length, 2);
+  assert.equal(partnersRowId({ externalId: "sf:X:1", date: "x", amount: 1, payee: "p" }), "x:sf:X:1", "a bank row is found by its bank id");
+  const clean = partnersSanitizeConfig({ ...withOverride, overrides: { ...withOverride.overrides, junk: { kind: "bogus" } } });
+  assert.equal(Object.keys(clean.overrides).length, 2, "an unknown kind is dropped, valid choices stay");
+});
+
+test("partnersParseAiSuggestions keeps only offered ids, known kinds, and treats anything but 'high' as unsure", () => {
+  const { partnersParseAiSuggestions } = require("../lib/partners-logic");
+  const reply = '```json\n[{"id":"0","kind":"contribution","propertyId":null,"partnerId":"p2","confidence":"high"},{"id":"1","kind":"nonsense","confidence":"high"},{"id":"2","kind":"repair","propertyId":"zz","partnerId":"nobody","confidence":"high"},{"id":"9","kind":"rent","confidence":"high"},{"id":"0","kind":"loan","confidence":"high"},{"id":"3","kind":"rent","propertyId":"a","confidence":"maybe"}]\n```';
+  const results = partnersParseAiSuggestions(reply, ["0", "1", "2", "3"], ["a", "b"], ["p1", "p2"]);
+  assert.deepEqual(results.map((r) => [r.id, r.kind, r.propertyId, r.partnerId, r.confidence]), [
+    ["0", "contribution", "", "p2", "high"],
+    ["1", "", "", "", "low"],
+    ["2", "repair", "", "", "high"],
+    ["3", "rent", "a", "", "low"]
+  ]);
+  assert.deepEqual(partnersParseAiSuggestions("not json", ["0"], [], []), []);
+});

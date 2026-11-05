@@ -23,3 +23,11 @@ test("the nightly fetch reaches back to the oldest date an account's data stops 
 test("every fetch re-asks for rows from more than a few days before the last sync", () => {
   assert.ok(SIMPLEFIN_OVERLAP_DAYS >= 7, "a row the data feed delivers days late is still inside the window");
 });
+
+test("the shared account kept for the Partners page counts in the nightly catch-up through its bank balance date", () => {
+  const { behindAccountsSince } = require("../server/linked-accounts");
+  const mappings = { P1: { accountId: "partners-pool" } };
+  assert.equal(behindAccountsSince({ accounts: [], partnerPoolBalance: { amount: 1, date: "2026-10-20" } }, mappings, "2026-11-05"), "2026-10-20");
+  assert.equal(behindAccountsSince({ accounts: [], partnerPoolBalance: { amount: 1, date: "2026-11-04" } }, mappings, "2026-11-05"), "", "a current account needs no catch-up");
+  assert.equal(behindAccountsSince({ accounts: [] }, mappings, "2026-11-05"), "", "no balance date yet means nothing to compare");
+});

@@ -104,3 +104,19 @@ test("the Sync account picker names the Partners-page account instead of showing
   assert.match(app, /\["partners", "Partners page"\]/);
   assert.match(app, /isPool \? \(state\.partnerPoolBalance\?\.name \|\| "Shared account"\)/);
 });
+
+test("Partners rows can be reassigned in place, turned into a rule, and assigned by AI", () => {
+  assert.match(app, /data-partners-entry-kind="\$\{index\}"/);
+  assert.match(app, /data-partners-entry-rule="\$\{index\}"/);
+  assert.match(app, /\/api\/partners\/suggest/);
+  assert.match(app, /Assign with AI/);
+});
+
+test("the Partners page works from a group: create, roles, invitations by email, rows kept on the server", () => {
+  assert.match(app, /\/api\/partner-groups/);
+  assert.match(app, /renderPartnersStart/);
+  assert.match(app, /data-partners-invite=/);
+  assert.match(app, /partnersAddMemberForm/);
+  assert.match(app, /<fieldset class="partners-fieldset" \$\{canEdit \? "" : "disabled"\}>/);
+  assert.match(app, /state\.partnerGroupId/);
+});

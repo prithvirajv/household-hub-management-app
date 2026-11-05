@@ -339,3 +339,30 @@ ALTER TABLE linked_accounts ADD COLUMN IF NOT EXISTS staged JSONB NOT NULL DEFAU
 ALTER TABLE linked_accounts ADD COLUMN IF NOT EXISTS staged_at TIMESTAMPTZ;
 -- What the last overnight run did for this link ({at, ok, stage, error, applied, imported, added, left}); read by the apps to show whether the sync completed.
 ALTER TABLE linked_accounts ADD COLUMN IF NOT EXISTS last_run JSONB NOT NULL DEFAULT '{}'::jsonb;
+
+
+-- Partners groups: a space shared by e-mail between partners who own rental properties together (see server/partner-groups.js). It belongs to no
+-- household; members are matched on their verified e-mail. setup is the Partners page's configuration, tx_rows the shared account's transactions.
+CREATE TABLE IF NOT EXISTS partner_groups (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  name TEXT NOT NULL,
+  owner_user_id UUID REFERENCES users(id) ON DELETE SET NULL,
+  setup JSONB NOT NULL DEFAULT '{}'::jsonb,
+  tx_rows JSONB NOT NULL DEFAULT '[]'::jsonb,
+  pool_balance JSONB,
+  version INTEGER NOT NULL DEFAULT 1,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS partner_group_members (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  group_id UUID NOT NULL REFERENCES partner_groups(id) ON DELETE CASCADE,
+  email TEXT NOT NULL,
+  role TEXT NOT NULL CHECK (role IN ('owner', 'edit', 'view')),
+  invited_by UUID REFERENCES users(id) ON DELETE SET NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  UNIQUE (group_id, email)
+);
+
+CREATE INDEX IF NOT EXISTS idx_partner_group_members_email ON partner_group_members(email);

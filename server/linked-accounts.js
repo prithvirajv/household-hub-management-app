@@ -37,7 +37,8 @@ function behindAccountsSince(state, mappings, todayKey) {
   const limit = new Date(Date.parse(`${todayKey}T00:00:00Z`) - SIMPLEFIN_BEHIND_DAYS * 86400000).toISOString().slice(0, 10);
   const dates = Object.values(mappings || {})
     .filter((mapping) => mapping && mapping.accountId && !mapping.skipped)
-    .map((mapping) => (state?.accounts || []).find((account) => account.id === mapping.accountId))
+    // The account kept for the Partners page is not a Wealth account; the bank's own balance date, kept for that page, says how current it is.
+    .map((mapping) => (mapping.accountId === "partners-pool" ? { syncedThrough: state?.partnerPoolBalance?.date || "" } : (state?.accounts || []).find((account) => account.id === mapping.accountId)))
     .filter((account) => account && !account.closedAt && account.syncedThrough && account.syncedThrough < limit)
     .map((account) => account.syncedThrough)
     .sort();
@@ -511,7 +512,7 @@ function createStore({ MEMORY_DB, memoryDb, pool }) {
 
 // ---- routes -------------------------------------------------------------------------------------------------------
 
-function registerLinkedAccountRoutes({ app, requireSession, requireEditAccess, requireJobSecret, notifyHousehold, loadHouseholdState, stateStore = null, suggestBatch = null, MEMORY_DB, memoryDb, pool, env = process.env, snaptradeAdapterFactory = createSnaptradeAdapter, fetchImpl = fetch }) {
+function registerLinkedAccountRoutes({ forwardPartnerRows = null, app, requireSession, requireEditAccess, requireJobSecret, notifyHousehold, loadHouseholdState, stateStore = null, suggestBatch = null, MEMORY_DB, memoryDb, pool, env = process.env, snaptradeAdapterFactory = createSnaptradeAdapter, fetchImpl = fetch }) {
   const encryptionKey = String(env.LINK_ENCRYPTION_KEY || "").trim();
   const snaptrade = snaptradeConfig(env);
   const allowInsecureHosts = env.NODE_ENV === "test" && String(env.SIMPLEFIN_ALLOW_TEST_HOSTS || "") === "true";
@@ -716,6 +717,10 @@ function registerLinkedAccountRoutes({ app, requireSession, requireEditAccess, r
         } catch (error) {
           outcomes.push({ link, error });
         }
+      }
+      // Rows kept for the Partners page go on to the Partners group this household feeds; only once they have landed there are they dropped here.
+      if (forwardPartnerRows && working.partnerGroupId && ((working.partnerTransactions || []).length || working.partnerPoolBalance)) {
+        try { if (await forwardPartnerRows(householdId, working)) working.partnerTransactions = []; } catch (error) { console.warn(`Partners group forward failed: ${error.message}`); }
       }
       const applied = outcomes.filter((outcome) => outcome.result);
       for (const outcome of outcomes.filter((item) => item.error)) {

@@ -2143,6 +2143,7 @@ function render() {
   if (currentView === "admin" && !adminData) loadAdminData();
   if (["documents", "wealth", "notes"].includes(currentView) && !documentsData) loadDocumentsData();
   if (["wealth", "transactions", "home"].includes(currentView) && !linkedAccounts) loadLinkedAccounts();
+  if (currentView === "partners" && partnerGroupsInfo === null) void loadPartnerGroups();
   if (currentView === "notes" && sharedWithMeNotes === null) loadSharedWithMeNotes();
   if (["sharing", "calendar"].includes(currentView) && !sharingAccess) loadSharingAccess();
   if (currentView === "calendar" && sharedCalendarMembers.length === 0) loadCalendarMembers();
@@ -6170,25 +6171,81 @@ function renderSplitBillRows() {
 let partnersRangeMode = "all";
 let partnersFocusRuleId = "";
 
+// The Partners page works from a Partners group: a space shared by e-mail between the partners, kept on the server and belonging to no household.
+// partnerGroupsInfo is the list of groups the signed-in person can open (null until loaded); partnersGroup is the open one in full.
+let partnerGroupsInfo = null;
+let partnersGroup = null;
+let partnersSaveChain = Promise.resolve();
+let partnersBusy = false;
+
 function ensurePartnersData() {
-  state.partners ||= {};
-  const data = state.partners;
+  const data = partnersGroup.setup;
   data.properties ||= [];
   data.partners ||= [];
   data.shares ||= {};
   data.defaultShares ||= {};
   data.rules ||= [];
-  data.accountIds ||= [];
-  // Only one account in the household: that is the pool, no choice to make.
-  if (!data.accountIds.length && state.accounts?.length === 1) data.accountIds = [state.accounts[0].id];
+  data.overrides ||= {};
+  data.accountIds = [];
   return data;
 }
 
-// What the Partners page reads: the rows kept for it alone (an account mapped to "Partners page only", or a CSV) plus the ledger rows of any
-// ordinary account ticked below.
-function partnersRows(data) {
-  const own = (state.partnerTransactions || []).map((row) => ({ ...row, accountId: PARTNERS_POOL_ID }));
-  return [...own, ...state.transactions];
+// What the page reads: the group's rows (kept apart from every household's ledger, budget and net worth).
+function partnersRows() {
+  return (partnersGroup?.rows || []).map((row) => ({ ...row, accountId: PARTNERS_POOL_ID }));
+}
+
+async function loadPartnerGroups({ select = "" } = {}) {
+  try {
+    partnerGroupsInfo = await api("/api/partner-groups");
+  } catch (error) {
+    partnerGroupsInfo = { groups: [], waitingForVerification: [], emailVerified: true, error: error.message };
+  }
+  const wanted = select || partnersGroup?.id || state.partnerGroupId || (() => { try { return localStorage.getItem("partnersGroupId") || ""; } catch (_error) { return ""; } })();
+  const pick = partnerGroupsInfo.groups.find((group) => group.id === wanted) || partnerGroupsInfo.groups[0];
+  partnersGroup = null;
+  if (pick) await openPartnersGroup(pick.id, { quiet: true });
+  if (currentView === "partners") render();
+}
+
+async function openPartnersGroup(id, { quiet = false } = {}) {
+  try {
+    partnersGroup = await api(`/api/partner-groups/${id}`);
+    try { localStorage.setItem("partnersGroupId", id); } catch (_error) { /* a remembered choice is only a convenience */ }
+  } catch (error) {
+    partnersGroup = null;
+    showToast(error.message, { type: "error" });
+  }
+  // This household's bank feed for the Partners-page account waits in state.partnerTransactions; the group's owner hands it on to the group.
+  if (partnersGroup && partnersGroup.role === "owner" && state.partnerGroupId === partnersGroup.id && (state.partnerTransactions || []).length) {
+    try {
+      await api(`/api/partner-groups/${id}/rows`, { method: "POST", body: JSON.stringify({ rows: state.partnerTransactions, mode: "bank", poolBalance: state.partnerPoolBalance }) });
+      state.partnerTransactions = [];
+      autosaveState();
+      partnersGroup = await api(`/api/partner-groups/${id}`);
+    } catch (error) { console.warn("Could not hand the bank feed to the Partners group", error); }
+  }
+  if (!quiet && currentView === "partners") render();
+}
+
+// Setup edits are saved to the group one after another (each carries the version it was based on), so two quick changes never collide with each other.
+function partnersSave() {
+  if (!partnersGroup) return;
+  partnersSaveChain = partnersSaveChain.then(async () => {
+    const group = partnersGroup;
+    if (!group) return;
+    if (group.role === "view") { showToast("You have view-only access to this group.", { type: "info" }); await openPartnersGroup(group.id); return; }
+    try {
+      const result = await api(`/api/partner-groups/${group.id}/setup`, { method: "PUT", body: JSON.stringify({ setup: group.setup, version: group.version }) });
+      group.setup = result.setup;
+      group.version = result.version;
+    } catch (error) {
+      showToast(error.message, { type: "error" });
+      await openPartnersGroup(group.id, { quiet: true });
+    }
+    if (currentView === "partners") render();
+  });
+  return partnersSaveChain;
 }
 
 function partnersRange() {
@@ -6207,11 +6264,51 @@ function partnersSigned(value) {
 }
 
 function renderPartners() {
+  if (partnerGroupsInfo === null) return `<section class="partners-layout"><p class="muted">Loading your Partners groups…</p></section>`;
+  if (!partnersGroup) return renderPartnersStart();
+  return renderPartnersGroupPage();
+}
+
+// No group yet (or none opened): start one, or explain how to be added to someone else's.
+function renderPartnersStart() {
+  const legacyRows = (state.partnerTransactions || []).length;
+  const hasLegacy = Boolean(state.partners && ((state.partners.properties || []).length || legacyRows));
+  const waiting = partnerGroupsInfo.waitingForVerification || [];
+  return `<section class="partners-layout">
+    <p class="muted">Several people put money into one checking account that collects the rent and pays the loans, HOA and repairs of shared rental properties. A <b>Partners group</b> is a shared space for exactly that: the owner adds each partner by email, and each one signs in to their own FamilyLoop and sees only this group, never anyone else's household. Every partner keeps their own household for their own home.</p>
+    ${partnerGroupsInfo.error ? `<p class="form-message">${escapeHtml(partnerGroupsInfo.error)}</p>` : ""}
+    ${waiting.length ? `<div class="card"><h3>${waiting.length === 1 ? "A group is" : `${waiting.length} groups are`} waiting for you</h3><p class="muted">${waiting.map((group) => `<b>${escapeHtml(group.name)}</b>`).join(", ")}: you were added by email, but your email address isn't verified yet. Verify it (the link we sent when you signed up, or from Profile) and this page will show the group.</p></div>` : ""}
+    <div class="card">
+      <div class="card-label">Partners</div><h3>Start a Partners group</h3>
+      <form id="partnersCreateForm" class="mini-form">
+        <label class="form-row-full">Name<input name="name" maxlength="80" placeholder="Rental properties" required></label>
+        ${hasLegacy ? `<label class="form-row-full partners-check"><input type="checkbox" name="fromHousehold" checked> Start from the Partners setup${legacyRows ? ` and ${legacyRows} rows` : ""} already in this household</label>` : ""}
+        <button type="submit" class="form-row-full">Create the group</button>
+      </form>
+      <p class="muted">You become its owner. After it exists you add the other partners by email with <b>Can edit</b> or <b>Can view</b>.</p>
+    </div>
+  </section>`;
+}
+
+function renderPartnersGroupPage() {
   const data = ensurePartnersData();
+  const role = partnersGroup.role;
+  const canEdit = role !== "view";
+  const isOwner = role === "owner";
   const configured = data.properties.length > 0 && data.partners.length > 0;
   const intro = `<p class="muted">Several people put money into one checking account that collects the rent and pays the loans, HOA and repairs of shared rental properties. Pick the account, tell FamilyLoop who the partners are and what each owns, and it works out each property's profit or loss and what every partner has put in and should send.</p>`;
+  const groupBar = `<div class="card partners-groupbar">
+      <div class="partners-toolbar">
+        ${(partnerGroupsInfo.groups || []).length > 1 ? `<label class="partners-range">Group<select id="partnersGroupSelect">${partnerGroupsInfo.groups.map((group) => `<option value="${escapeHtml(group.id)}" ${group.id === partnersGroup.id ? "selected" : ""}>${escapeHtml(group.name)}</option>`).join("")}</select></label>` : `<div><span class="card-label">Partners group</span><h3>${escapeHtml(partnersGroup.name)}</h3></div>`}
+        <span class="pill pill-info">${isOwner ? "You own this group" : canEdit ? "You can edit" : "You can view"}</span>
+        <button type="button" class="ghost" id="partnersNewGroupButton">+ New group</button>
+        ${isOwner ? `<button type="button" class="ghost" id="partnersRenameGroupButton">Rename</button>` : `<button type="button" class="ghost danger-button" id="partnersLeaveGroupButton">Leave this group</button>`}
+      </div>
+      ${canEdit ? "" : `<p class="muted">You have view-only access: you can see everything here, but only the owner or an editor can change it.</p>`}
+    </div>`;
   if (!configured) {
-    return `<section class="partners-layout">${intro}
+    if (!canEdit) return `<section class="partners-layout">${groupBar}<p class="muted">The group's owner hasn't set up the properties and partners yet.</p></section>`;
+    return `<section class="partners-layout">${groupBar}${intro}
       <div class="card">
         <div class="card-label">Partners</div><h3>Set up</h3>
         <form id="partnersSetupForm" class="mini-form">
@@ -6223,24 +6320,22 @@ function renderPartners() {
       </div>
     </section>`;
   }
-  const ownCount = (state.partnerTransactions || []).length;
-  const poolBalance = state.partnerPoolBalance;
+  const ownCount = partnersGroup.rows.length;
+  const poolBalance = partnersGroup.poolBalance;
+  const feeding = state.partnerGroupId === partnersGroup.id;
   const poolPicker = `<div class="card partners-pool">
       <div class="card-label">Partners</div><h3>Shared account</h3>
-      <p class="muted">The shared checking account's transactions live on this page only: they are not in Wealth, your budget, Transactions or net worth. To bring them in, link the bank under Wealth → Bank connections and choose <b>Partners page only (not in Wealth)</b> for that account. For older history, import its CSV below.</p>
-      <div class="partners-toolbar">
+      <p class="muted">The shared checking account's transactions are kept in this group only: they are not in anyone's Wealth, budget, Transactions or net worth.${isOwner ? ` To bring them in automatically, link the bank under Wealth → Bank connections, choose <b>Partners page only (not in Wealth)</b> for that account, and ${feeding ? "this household's feed is already sending it here." : "use the button below to send that account's feed to this group."}` : ""} For older history, import its CSV.</p>
+      ${canEdit ? `<div class="partners-toolbar">
         <label class="partners-file ghost-button">Import a CSV<input type="file" accept=".csv,text/csv" id="partnersCsvFile" hidden></label>
         <label class="partners-check"><input type="checkbox" id="partnersCsvMoneyOut"> The file shows money <b>out</b> as positive</label>
-        ${ownCount ? `<button type="button" class="ghost danger-button" id="partnersClearRows">Remove the ${ownCount} rows kept here</button>` : ""}
+        ${isOwner && ownCount ? `<button type="button" class="ghost danger-button" id="partnersClearRows">Remove the ${ownCount} rows kept here</button>` : ""}
+        ${isOwner && !feeding ? `<button type="button" class="ghost" id="partnersFeedButton">Send this household's bank feed to this group</button>` : ""}
       </div>
-      <p class="muted">The CSV needs Date, Description and Amount columns (like a bank statement export; other columns are ignored). Importing the same file twice, or one that overlaps what the bank link brought, never adds a row twice.</p>
-      ${ownCount ? `<p class="muted"><b>${ownCount}</b> rows kept for this page${poolBalance ? `; the bank reports a balance of <b>${exactMoney.format(poolBalance.amount)}</b> (${escapeHtml(formatShortDate(poolBalance.date))})` : ""}.</p>` : ""}
-      ${state.accounts.length ? `<details ${data.accountIds.length ? "open" : ""}><summary class="muted">Also read an account that is in Wealth</summary>
-        <p class="muted">If the shared account is already a Wealth account, tick it to read its ledger rows here as well.</p>
-        ${state.accounts.map((account) => `<label class="partners-check"><input type="checkbox" data-partners-account="${escapeHtml(account.id)}" ${data.accountIds.includes(account.id) ? "checked" : ""}> ${escapeHtml(account.name)}</label>`).join("")}</details>` : ""}
-      ${ownCount || data.accountIds.length ? "" : `<p class="form-message">Add the shared account's transactions to see the statement.</p>`}
+      <p class="muted">The CSV needs Date, Description and Amount columns (like a bank statement export; other columns are ignored). Importing the same file twice, or one that overlaps what the bank link brought, never adds a row twice.</p>` : ""}
+      ${ownCount ? `<p class="muted"><b>${ownCount}</b> rows kept for this group${poolBalance ? `; the bank reports a balance of <b>${exactMoney.format(poolBalance.amount)}</b> (${escapeHtml(formatShortDate(poolBalance.date))})` : ""}.</p>` : `<p class="form-message">Add the shared account's transactions to see the statement.</p>`}
     </div>`;
-  if (!ownCount && !data.accountIds.length) return `<section class="partners-layout">${intro}${poolPicker}</section>`;
+  if (!ownCount) return `<section class="partners-layout">${groupBar}${intro}${poolPicker}</section>`;
   const statement = buildPartnersStatement({ ...data, accountIds: [...data.accountIds, PARTNERS_POOL_ID] }, partnersRows(data), partnersRange());
   const accountName = (id) => state.accounts.find((account) => account.id === id)?.name || "";
   const kindOptions = (selected) => PARTNER_KINDS.map((kind) => `<option value="${kind.id}" ${kind.id === selected ? "selected" : ""}>${escapeHtml(kind.label)}</option>`).join("");
@@ -6266,17 +6361,28 @@ function renderPartners() {
     const normalised = partnersSharesFor(data, propertyKey === "default" ? "" : propertyKey);
     return `<tr><th>${escapeHtml(label)}</th>${data.partners.map((partner) => `<td><input type="number" min="0" max="100" step="1" data-partners-share="${escapeHtml(propertyKey)}|${escapeHtml(partner.id)}" value="${source[partner.id] ?? ""}" placeholder="${(normalised[partner.id] || 0).toFixed(0)}" aria-label="${escapeHtml(partner.name)} share of ${escapeHtml(label)}"></td>`).join("")}</tr>`;
   };
+  const roleLabel = (value) => (value === "owner" ? "Owner" : value === "edit" ? "Can edit" : "Can view");
+  const membersHtml = `<h4>Who has access</h4>
+      <p class="muted">Each person signs in to their own FamilyLoop with the email below (and verifies it), and sees this group next to their own household. They never see anyone else's household.${isOwner ? "" : " Only the owner can change this list."}</p>
+      ${(partnersGroup.members || []).map((member) => `<div class="partners-name-row"><span class="partners-member-email">${escapeHtml(member.email)}${member.isYou ? " (you)" : ""}</span>${isOwner && member.role !== "owner" ? `<select data-partners-member-role="${escapeHtml(member.id)}" aria-label="Access for ${escapeHtml(member.email)}"><option value="edit" ${member.role === "edit" ? "selected" : ""}>Can edit</option><option value="view" ${member.role === "view" ? "selected" : ""}>Can view</option></select><button type="button" class="icon-button danger-button" data-partners-member-remove="${escapeHtml(member.id)}" aria-label="Remove ${escapeHtml(member.email)}">×</button>` : `<span class="pill pill-info">${roleLabel(member.role)}</span>`}</div>`).join("")}
+      ${isOwner ? `<form id="partnersAddMemberForm" class="partners-name-row"><input type="email" name="email" placeholder="Add someone by email" required aria-label="Email to add"><select name="role" aria-label="Access"><option value="edit">Can edit</option><option value="view">Can view</option></select><button type="submit" class="ghost">Add</button></form>` : ""}
+      ${isOwner ? `<button type="button" class="ghost danger-button" id="partnersDeleteGroupButton">Delete this group</button>` : ""}`;
   const kindLabel = (kind) => PARTNER_KINDS.find((item) => item.id === kind)?.label || kind;
   const propertyName = (id) => data.properties.find((property) => property.id === id)?.name || "";
   const partnerName = (id) => data.partners.find((partner) => partner.id === id)?.name || "";
-  const entryRows = statement.entries.slice(0, 200).map((entry) => `<tr><td>${escapeHtml(formatShortDate(entry.date))}</td><td class="partners-payee">${escapeHtml(String(entry.payee || "").slice(0, 80))}</td><td>${partnersSigned(entry.money)}</td><td class="partners-payee">${entry.kind ? escapeHtml([kindLabel(entry.kind), propertyName(entry.propertyId), partnerName(entry.partnerId)].filter(Boolean).join(" · ")) : "<span class=\"muted\">needs a rule</span>"}</td></tr>`).join("");
-  return `<section class="partners-layout">${intro}
+  const entryRows = statement.entries.slice(0, 200).map((entry, index) => `<tr${entry.overridden ? ' class="partners-overridden"' : ""}><td>${escapeHtml(formatShortDate(entry.date))}</td><td class="partners-payee">${escapeHtml(String(entry.payee || "").slice(0, 80))}</td><td>${partnersSigned(entry.money)}</td><td class="partners-assign">
+      <select data-partners-entry-kind="${index}" aria-label="Counted as">${`<option value="">Needs a rule</option>${PARTNER_KINDS.map((kind) => `<option value="${kind.id}" ${kind.id === entry.kind ? "selected" : ""}>${escapeHtml(kind.label)}</option>`).join("")}`}</select>
+      <select data-partners-entry-property="${index}" aria-label="Property" ${entry.kind && entry.kind !== "personal" ? "" : "disabled"}>${propertyOptions(entry.propertyId)}</select>
+      <select data-partners-entry-partner="${index}" aria-label="Partner" ${entry.kind && entry.kind !== "personal" ? "" : "disabled"}>${partnerOptions(entry.partnerId)}</select>
+      ${entry.overridden ? `<button type="button" class="icon-button" data-partners-entry-reset="${index}" title="Go back to what the rules say" aria-label="Reset this row">↺</button>` : ""}
+      <button type="button" class="ghost" data-partners-entry-rule="${index}" title="Count every row like this one the same way">Make a rule</button></td></tr>`).join("");
+  return `<section class="partners-layout">${groupBar}${intro}
     ${poolPicker}
     <div class="card">
       <div class="card-label">Partners</div><h3>Statement</h3>
       <div class="partners-toolbar">${rangeSelect}
         <button type="button" class="ghost" id="partnersExportButton">Export setup</button>
-        <label class="partners-file ghost-button">Import setup<input type="file" accept="application/json,.json" id="partnersImportFile" hidden></label></div>
+        ${canEdit ? `<label class="partners-file ghost-button">Import setup<input type="file" accept="application/json,.json" id="partnersImportFile" hidden></label>` : ""}</div>
       <div class="partners-tiles">
         ${tile("Rent and income in", exactMoney.format(pool.income))}
         ${tile("Loans, HOA and repairs", exactMoney.format(pool.expenses))}
@@ -6293,23 +6399,28 @@ function renderPartners() {
     </div>
     <details class="card partners-entries">
       <summary><span class="card-label">Partners</span> <b>Every transaction in the shared account (${statement.entries.length})</b></summary>
-      <p class="muted">Each row of the account in this period, and how it is counted: who sent the money, which property it belongs to, or that it still needs a rule.</p>
-      <div class="partners-scroll"><table class="partners-table"><thead><tr><th>Date</th><th>Description</th><th>Money in / out</th><th>Counted as</th></tr></thead><tbody>${entryRows}</tbody></table></div>
+      <p class="muted">Each row of the account in this period and how it is counted. Change what a row is, which property it belongs to or which partner sent it right here; <b>Make a rule</b> then applies that to every similar row, now and as new ones arrive.</p>
+      <fieldset class="partners-fieldset" ${canEdit ? "" : "disabled"}><div class="partners-scroll"><table class="partners-table"><thead><tr><th>Date</th><th>Description</th><th>Money in / out</th><th>Counted as${canEdit ? " (change it here)" : ""}</th></tr></thead><tbody>${entryRows}</tbody></table></div></fieldset>
       ${statement.entries.length > 200 ? `<p class="muted">Showing the newest 200 of ${statement.entries.length}; pick a shorter period to see the rest.</p>` : ""}
     </details>
     ${statement.unclassified.length ? `<div class="card">
       <div class="card-label">Needs a rule</div><h3>${statement.unclassified.length} row${statement.unclassified.length === 1 ? "" : "s"} not matched</h3>
-      <p class="muted">These rows in the pool account match no rule, so they are not in the numbers above. Make a rule from one and every row like it is read the same way, now and as new rows arrive.</p>
+      <p class="muted">These rows in the pool account match no rule, so they are not in the numbers above. Make a rule from one and every row like it is read the same way, now and as new rows arrive, or let the AI assign them: it only acts when the payee makes it clear, follows the choices already made here, and every row it assigns can be changed or reset in the list above.</p>
+      ${canEdit ? `<div class="partners-toolbar"><button type="button" id="partnersAiButton">✨ Assign with AI</button></div>` : ""}
       <div class="partners-scroll"><table class="partners-table"><thead><tr><th>Date</th><th>Payee</th><th>Money in (out is negative)</th><th></th></tr></thead><tbody>${unclassifiedRows}</tbody></table></div>
       ${statement.unclassified.length > 15 ? `<p class="muted">Showing 15 of ${statement.unclassified.length}.</p>` : ""}
     </div>` : ""}
     <details class="card partners-setup" ${data.rules.length ? "" : "open"}>
-      <summary><span class="card-label">Partners</span> <b>Setup: who, what share, which account, which rules</b></summary>
+      <summary><span class="card-label">Partners</span> <b>Setup: who, what share, who has access, which rules</b></summary>
+      <fieldset class="partners-fieldset" ${canEdit ? "" : "disabled"}>
       <h4>Properties</h4>
       ${data.properties.map((property, index) => `<div class="partners-name-row"><input data-partners-property-name="${index}" value="${escapeHtml(property.name)}" aria-label="Property name"><button type="button" class="icon-button danger-button" data-partners-remove-property="${index}" aria-label="Remove ${escapeHtml(property.name)}">×</button></div>`).join("")}
       <button type="button" class="ghost" id="partnersAddProperty">+ Add a property</button>
       <h4>Partners</h4>
-      ${data.partners.map((partner, index) => `<div class="partners-name-row"><input data-partners-partner-name="${index}" value="${escapeHtml(partner.name)}" aria-label="Partner name"><button type="button" class="icon-button danger-button" data-partners-remove-partner="${index}" aria-label="Remove ${escapeHtml(partner.name)}">×</button></div>`).join("")}
+      ${data.partners.map((partner, index) => {
+        const member = (partnersGroup.members || []).find((item) => partner.email && item.email === partner.email);
+        return `<div class="partners-name-row partners-partner-row"><input data-partners-partner-name="${index}" value="${escapeHtml(partner.name)}" aria-label="Partner name"><input type="email" data-partners-partner-email="${index}" value="${escapeHtml(partner.email || "")}" placeholder="Email (to give them access)" aria-label="Email of ${escapeHtml(partner.name)}">${isOwner && partner.email && !member ? `<select data-partners-invite-role="${index}" aria-label="Access for ${escapeHtml(partner.name)}"><option value="edit">Can edit</option><option value="view">Can view</option></select><button type="button" class="ghost" data-partners-invite="${index}">Give access</button>` : ""}${member ? `<span class="pill pill-info">${member.role === "owner" ? "Owner" : member.role === "edit" ? "Can edit" : "Can view"}</span>` : ""}<button type="button" class="icon-button danger-button" data-partners-remove-partner="${index}" aria-label="Remove ${escapeHtml(partner.name)}">×</button></div>`;
+      }).join("")}
       <button type="button" class="ghost" id="partnersAddPartner">+ Add a partner</button>
       <h4>Ownership (percent)</h4>
       <p class="muted">Leave a row empty for an equal split. Numbers are scaled to add up to 100 for each property. "Shared / not assigned" covers costs that belong to no one property.</p>
@@ -6318,18 +6429,102 @@ function renderPartners() {
       <p class="muted">A rule reads a payee: when its words all appear in the bank's description, the row is that kind, for that property and partner. The first rule that matches wins, so put specific ones first. Money a partner sends in is a <b>Partner contribution</b> for that partner; <b>Personal</b> rows are left out entirely.</p>
       ${rulesHtml || `<p class="muted">No rules yet.</p>`}
       <button type="button" class="ghost" id="partnersAddRule">+ Add a rule</button>
+      </fieldset>
+      ${membersHtml}
     </details>
   </section>`;
 }
 
-function partnersSave() {
-  autosaveState();
-  render();
-}
 
 function bindPartnersEvents() {
   if (currentView !== "partners") return;
+  $("#partnersCreateForm")?.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    const form = new FormData(event.currentTarget);
+    const fromHousehold = form.get("fromHousehold") === "on";
+    const button = event.currentTarget.querySelector("button[type=submit]");
+    button.disabled = true;
+    try {
+      const created = await api("/api/partner-groups", { method: "POST", body: JSON.stringify({
+        name: String(form.get("name") || ""),
+        ...(fromHousehold ? { setup: state.partners || {}, rows: state.partnerTransactions || [], poolBalance: state.partnerPoolBalance } : {})
+      }) });
+      // This household's Partners-page bank feed now goes to the new group; what was kept here has moved into it.
+      state.partnerGroupId = created.id;
+      if (fromHousehold) { state.partnerTransactions = []; delete state.partners; }
+      autosaveState();
+      showToast(`Created "${created.name}". Add your partners under Setup.`, { type: "info" });
+      await loadPartnerGroups({ select: created.id });
+    } catch (error) {
+      showToast(error.message, { type: "error" });
+      button.disabled = false;
+    }
+  });
+  if (!partnersGroup) return;
   const data = ensurePartnersData();
+  const groupPath = `/api/partner-groups/${partnersGroup.id}`;
+  const guarded = (handler) => async (...args) => {
+    if (partnersBusy) return;
+    partnersBusy = true;
+    try { await handler(...args); } catch (error) { showToast(error.message, { type: "error" }); } finally { partnersBusy = false; }
+  };
+  $("#partnersGroupSelect")?.addEventListener("change", (event) => { void openPartnersGroup(event.target.value); });
+  $("#partnersNewGroupButton")?.addEventListener("click", () => { partnersGroup = null; render(); });
+  $("#partnersRenameGroupButton")?.addEventListener("click", guarded(async () => {
+    const name = window.prompt("Name of this group", partnersGroup.name);
+    if (!name || !name.trim()) return;
+    await api(groupPath, { method: "PATCH", body: JSON.stringify({ name: name.trim() }) });
+    await loadPartnerGroups({ select: partnersGroup.id });
+  }));
+  $("#partnersLeaveGroupButton")?.addEventListener("click", guarded(async () => {
+    if (!await showConfirm(`Leave "${partnersGroup.name}"? You will lose access until the owner adds you again.`, { title: "Leave group?" })) return;
+    const mine = partnersGroup.members.find((member) => member.isYou);
+    await api(`${groupPath}/members/${mine.id}`, { method: "DELETE" });
+    partnersGroup = null;
+    await loadPartnerGroups();
+  }));
+  $("#partnersDeleteGroupButton")?.addEventListener("click", guarded(async () => {
+    if (!await showConfirm(`Delete "${partnersGroup.name}" for everyone? Its setup, rules and ${partnersGroup.rows.length} rows are removed and every partner loses access. This cannot be undone.`, { title: "Delete group?" })) return;
+    await api(groupPath, { method: "DELETE" });
+    if (state.partnerGroupId === partnersGroup.id) { delete state.partnerGroupId; autosaveState(); }
+    partnersGroup = null;
+    await loadPartnerGroups();
+  }));
+  $("#partnersFeedButton")?.addEventListener("click", guarded(async () => {
+    state.partnerGroupId = partnersGroup.id;
+    autosaveState();
+    showToast("This household's Partners-page bank feed now goes to this group.", { type: "info" });
+    await openPartnersGroup(partnersGroup.id);
+  }));
+  $("#partnersAddMemberForm")?.addEventListener("submit", guarded(async (event) => {
+    event.preventDefault();
+    const form = new FormData(event.currentTarget);
+    const result = await api(`${groupPath}/members`, { method: "POST", body: JSON.stringify({ email: String(form.get("email") || ""), role: String(form.get("role") || "edit") }) });
+    showToast(result.emailed ? `Added ${result.member.email} and sent them an email.` : `Added ${result.member.email}. The email could not be sent, so tell them to sign in with that address.`, { type: "info" });
+    await openPartnersGroup(partnersGroup.id);
+  }));
+  document.querySelectorAll("[data-partners-member-role]").forEach((select) => select.addEventListener("change", guarded(async () => {
+    await api(`${groupPath}/members/${select.dataset.partnersMemberRole}`, { method: "PATCH", body: JSON.stringify({ role: select.value }) });
+    await openPartnersGroup(partnersGroup.id);
+  })));
+  document.querySelectorAll("[data-partners-member-remove]").forEach((button) => button.addEventListener("click", guarded(async () => {
+    const member = partnersGroup.members.find((item) => item.id === button.dataset.partnersMemberRemove);
+    if (!member || !await showConfirm(`Remove ${member.email}? They lose access to this group right away.`, { title: "Remove access?" })) return;
+    await api(`${groupPath}/members/${member.id}`, { method: "DELETE" });
+    await openPartnersGroup(partnersGroup.id);
+  })));
+  document.querySelectorAll("[data-partners-partner-email]").forEach((input) => input.addEventListener("change", () => {
+    const partner = data.partners[Number(input.dataset.partnersPartnerEmail)];
+    if (partner) { partner.email = input.value.trim().toLowerCase(); void partnersSave(); }
+  }));
+  document.querySelectorAll("[data-partners-invite]").forEach((button) => button.addEventListener("click", guarded(async () => {
+    const index = Number(button.dataset.partnersInvite);
+    const partner = data.partners[index];
+    const role = document.querySelector(`[data-partners-invite-role="${index}"]`)?.value || "edit";
+    const result = await api(`${groupPath}/members`, { method: "POST", body: JSON.stringify({ email: partner.email, role }) });
+    showToast(result.emailed ? `${partner.name} now has access and was sent an email.` : `${partner.name} now has access. The email could not be sent, so tell them to sign in with ${partner.email}.`, { type: "info" });
+    await openPartnersGroup(partnersGroup.id);
+  })));
   const readFile = (input, onText) => {
     input?.addEventListener("change", () => {
       const file = input.files?.[0];
@@ -6355,26 +6550,28 @@ function bindPartnersEvents() {
     const clean = partnersSanitizeConfig(parsed);
     if (!clean.properties.length || !clean.partners.length) { showToast("That file has no properties or partners.", { type: "error" }); return; }
     Object.assign(data, clean);
-    state.household.activity.unshift(`Imported a Partners setup (${clean.properties.length} properties, ${clean.partners.length} partners, ${clean.rules.length} rules)`);
-    partnersSave();
+    void partnersSave();
   };
   readFile($("#partnersImportFile"), importHandler);
-  readFile($("#partnersCsvFile"), (text) => {
+  readFile($("#partnersCsvFile"), guarded(async (text) => {
     const parsed = partnersParseCsv(text, { moneyInPositive: !$("#partnersCsvMoneyOut")?.checked });
     if (parsed.problem || !parsed.rows.length) { showToast(parsed.problem || "No transactions were found in that file.", { type: "error" }); return; }
-    const merged = partnersMergeCsvRows(state.partnerTransactions || [], parsed.rows);
-    if (JSON.stringify(state).length + merged.added * 200 > 900000) { showToast("That would make your household data too large to save.", { type: "error" }); return; }
-    state.partnerTransactions = merged.rows;
-    state.household.activity.unshift(`Imported ${merged.added} rows for the Partners page${merged.skipped ? ` (${merged.skipped} were already there)` : ""}`);
-    showToast(`Added ${merged.added} rows${merged.skipped ? `; ${merged.skipped} were already here` : ""}.`, { type: "info" });
-    partnersSave();
-  });
-  $("#partnersClearRows")?.addEventListener("click", async () => {
-    const count = (state.partnerTransactions || []).length;
-    if (!count || !await showConfirm(`Remove the ${count} rows kept for the Partners page? Your rules and setup stay. Rows from the bank link come back on the next history import.`, { title: "Remove rows?" })) return;
-    state.partnerTransactions = [];
-    partnersSave();
-  });
+    let added = 0;
+    let skipped = 0;
+    for (let start = 0; start < parsed.rows.length; start += 5000) {
+      const result = await api(`${groupPath}/rows`, { method: "POST", body: JSON.stringify({ rows: parsed.rows.slice(start, start + 5000), mode: "csv" }) });
+      added += result.added;
+      skipped += result.skipped;
+    }
+    showToast(`Added ${added} rows${skipped ? `; ${skipped} were already here` : ""}.`, { type: "info" });
+    await openPartnersGroup(partnersGroup.id);
+  }));
+  $("#partnersClearRows")?.addEventListener("click", guarded(async () => {
+    const count = partnersGroup.rows.length;
+    if (!count || !await showConfirm(`Remove the ${count} rows kept in this group? The setup and rules stay. Rows from the bank link come back on the next history import.`, { title: "Remove rows?" })) return;
+    await api(`${groupPath}/rows`, { method: "DELETE" });
+    await openPartnersGroup(partnersGroup.id);
+  }));
   $("#partnersExportButton")?.addEventListener("click", () => downloadTextFile("partners-setup.json", "application/json", JSON.stringify(partnersSanitizeConfig(data), null, 2)));
   $("#partnersRangeSelect")?.addEventListener("change", (event) => { partnersRangeMode = event.target.value; render(); });
 
@@ -6412,12 +6609,6 @@ function bindPartnersEvents() {
     else target[partnerId] = Math.min(100, Math.max(0, Number(input.value) || 0));
     partnersSave();
   }));
-  document.querySelectorAll("[data-partners-account]").forEach((box) => box.addEventListener("change", () => {
-    const id = box.dataset.partnersAccount;
-    data.accountIds = box.checked ? [...new Set([...data.accountIds, id])] : data.accountIds.filter((item) => item !== id);
-    partnersSave();
-  }));
-
   const ruleField = (attribute, field) => document.querySelectorAll(`[data-${attribute}]`).forEach((control) => control.addEventListener("change", () => {
     const rule = data.rules[Number(control.dataset[attribute.replace(/-([a-z])/g, (_m, letter) => letter.toUpperCase())])];
     if (!rule) return;
@@ -6432,6 +6623,74 @@ function bindPartnersEvents() {
   document.querySelectorAll("[data-partners-rule-up]").forEach((button) => button.addEventListener("click", () => {
     const index = Number(button.dataset.partnersRuleUp);
     if (index > 0) { [data.rules[index - 1], data.rules[index]] = [data.rules[index], data.rules[index - 1]]; partnersSave(); }
+  }));
+  $("#partnersAiButton")?.addEventListener("click", async (event) => {
+    const button = event.currentTarget;
+    const current = buildPartnersStatement({ ...data, accountIds: [...data.accountIds, PARTNERS_POOL_ID] }, partnersRows(data), partnersRange());
+    const batch = current.unclassified.slice(0, 60);
+    if (!batch.length) return;
+    // What has already been decided here (distinct payees, rules and your own row choices) is sent so the AI follows it instead of guessing again.
+    const seen = new Set();
+    const examples = [];
+    current.entries.forEach((entry) => {
+      const key = partnersSuggestMatch(entry.payee) || entry.payee;
+      if (!entry.kind || seen.has(key) || examples.length >= 50) return;
+      seen.add(key);
+      examples.push({ payee: key, kind: entry.kind, propertyId: entry.propertyId, partnerId: entry.partnerId });
+    });
+    button.disabled = true;
+    button.textContent = "Working…";
+    try {
+      const { results } = await api("/api/partners/suggest", { method: "POST", body: JSON.stringify({
+        rows: batch.map((transaction, index) => ({ id: String(index), payee: transaction.payee, money: -Number(transaction.amount), date: transaction.date })),
+        properties: data.properties, partners: data.partners, examples
+      }) });
+      let assigned = 0;
+      (results || []).forEach((result) => {
+        const transaction = batch[Number(result.id)];
+        if (!transaction || result.confidence !== "high" || !result.kind) return;
+        data.overrides[partnersRowId(transaction)] = result.kind === "personal" ? { kind: "personal", propertyId: "", partnerId: "" } : { kind: result.kind, propertyId: result.propertyId || "", partnerId: result.partnerId || "" };
+        assigned += 1;
+      });
+      showToast(assigned ? `AI assigned ${assigned} of ${batch.length} rows (highlighted below); ${batch.length - assigned} are left for you.` : "The AI wasn't sure about any of them, so none were changed.", { type: "info" });
+      partnersSave();
+    } catch (error) {
+      showToast(error.message || "The AI could not be reached.", { type: "error" });
+      button.disabled = false;
+      button.textContent = "✨ Assign with AI";
+    }
+  });
+  const entryAt = (index) => buildPartnersStatement({ ...data, accountIds: [...data.accountIds, PARTNERS_POOL_ID] }, partnersRows(data), partnersRange()).entries[Number(index)];
+  const entryChoice = (index) => ({
+    kind: document.querySelector(`[data-partners-entry-kind="${index}"]`)?.value || "",
+    propertyId: document.querySelector(`[data-partners-entry-property="${index}"]`)?.value || "",
+    partnerId: document.querySelector(`[data-partners-entry-partner="${index}"]`)?.value || ""
+  });
+  ["kind", "property", "partner"].forEach((field) => document.querySelectorAll(`[data-partners-entry-${field}]`).forEach((control) => control.addEventListener("change", () => {
+    const index = control.dataset[`partnersEntry${field[0].toUpperCase()}${field.slice(1)}`];
+    const entry = entryAt(index);
+    if (!entry) return;
+    const choice = entryChoice(index);
+    if (!choice.kind) delete data.overrides[entry.rowId];
+    else data.overrides[entry.rowId] = choice.kind === "personal" ? { kind: "personal", propertyId: "", partnerId: "" } : choice;
+    partnersSave();
+  })));
+  document.querySelectorAll("[data-partners-entry-reset]").forEach((button) => button.addEventListener("click", () => {
+    const entry = entryAt(button.dataset.partnersEntryReset);
+    if (entry) { delete data.overrides[entry.rowId]; partnersSave(); }
+  }));
+  document.querySelectorAll("[data-partners-entry-rule]").forEach((button) => button.addEventListener("click", () => {
+    const index = button.dataset.partnersEntryRule;
+    const entry = entryAt(index);
+    if (!entry) return;
+    const choice = entryChoice(index);
+    const rule = { id: uniqueId("rule"), match: partnersSuggestMatch(entry.payee), kind: choice.kind || (entry.money > 0 ? "rent" : "expense"), propertyId: choice.propertyId, partnerId: choice.partnerId };
+    data.rules.push(rule);
+    // The row now follows the rule, so its own override is dropped.
+    delete data.overrides[entry.rowId];
+    partnersFocusRuleId = rule.id;
+    showToast(`Rule added: rows with "${rule.match}" are counted this way. Check it under Setup.`, { type: "info" });
+    partnersSave();
   }));
   $("#partnersAddRule")?.addEventListener("click", () => {
     const rule = { id: uniqueId("rule"), match: "", kind: "rent", propertyId: "", partnerId: "" };
