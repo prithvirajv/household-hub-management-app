@@ -164,3 +164,21 @@ test("an account mapped to the Partners page keeps its rows and balance there, n
   assert.equal(state.partnerTransactions.length, 2, "nothing doubled on a second run");
   assert.ok(result.imported >= 1 && again);
 });
+
+test("the overnight import leaves out a bank row already covered by a recorded transfer, or like one the household deleted before - the same checks the in-app import makes", async () => {
+  const { rememberRemovedRow } = require("../lib/shared-logic");
+  const state = baseState({ transfers: [{ id: "t1", date: "2026-10-20", fromAccountId: "chk", toAccountId: "card", amount: 300 }] });
+  const deleted = { date: "2026-10-18", payee: "OLD GYM FEE", amount: 45, accountId: "chk" };
+  rememberRemovedRow(state, deleted);
+  const payload = { provider: "simplefin", accounts: [{ remoteId: "A1", balance: 100 }], transactions: [
+    row("1", "TRANSFER TO CARD", 300, "2026-10-20"),
+    row("2", "OLD GYM FEE", 45, "2026-10-18"),
+    row("3", "NEW CAFE", 12, "2026-10-21")
+  ] };
+  const result = await applyLinkedPayload(state, link, payload, { suggest: async () => [], createId: ids(), todayKey: TODAY });
+  const payees = state.transactions.filter((t) => t.externalId).map((t) => t.payee);
+  assert.deepEqual(payees, ["NEW CAFE"], "the transfer's own bank row and the row deleted before are not brought in again");
+  assert.ok(state.household.activity.some((line) => /already recorded as a transfer or deleted before/.test(line)));
+  assert.ok(state.linkedImportedIds.includes("sf:A1:1") && state.linkedImportedIds.includes("sf:A1:2"), "their ids are remembered so they are not fetched again");
+  assert.ok(result.imported >= 1);
+});

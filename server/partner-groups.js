@@ -121,7 +121,7 @@ function cleanBalance(balance) {
   return { amount: Number(balance.amount), date: /^\d{4}-\d{2}-\d{2}$/.test(String(balance.date)) ? String(balance.date) : "", name: String(balance.name || "").slice(0, 120) };
 }
 
-function registerPartnerGroupRoutes({ app, requireSession, sendTransactionalEmail, appBaseUrl, escapeHtml, MEMORY_DB, memoryDb, pool, env = process.env }) {
+function registerPartnerGroupRoutes({ app, requireSession, sendTransactionalEmail, appBaseUrl, escapeHtml, MEMORY_DB, memoryDb, pool, suggest = null, env = process.env }) {
   const store = createGroupStore({ MEMORY_DB, memoryDb, pool });
   // A person is matched to a group by e-mail, so the address has to be one they have proved is theirs. (Tests may relax this.)
   const requireVerified = String(env.PARTNER_GROUPS_ALLOW_UNVERIFIED_EMAIL || "") !== "true";
@@ -227,7 +227,13 @@ function registerPartnerGroupRoutes({ app, requireSession, sendTransactionalEmai
     const merged = req.body?.mode === "bank" ? partnersMergeBankRows(group.rows, incoming) : partnersMergeCsvRows(group.rows, incoming);
     if (merged.rows.length > MAX_ROWS) throw clientError(`A group keeps at most ${MAX_ROWS} transactions`, 413);
     await store.saveRows(group.id, merged.rows, req.body?.poolBalance === undefined ? undefined : cleanBalance(req.body.poolBalance));
-    res.json({ ok: true, added: merged.added, skipped: merged.skipped ?? (incoming.length - merged.added), total: merged.rows.length });
+    // The same pass the overnight sync makes: what the group's rules read counts at once, and the AI assigns the new rows no rule matches (only
+    // when the payee makes it clear), so an imported statement is treated exactly like the night's bank rows.
+    let aiAssigned = 0;
+    if (suggest && merged.added) {
+      try { aiAssigned = await assignNewRowsWithAi(store, group.id, incoming, suggest); } catch (error) { console.warn(`Partners group AI assignment skipped: ${error.message}`); }
+    }
+    res.json({ ok: true, added: merged.added, skipped: merged.skipped ?? (incoming.length - merged.added), total: merged.rows.length, aiAssigned });
   }));
 
   // A row typed in by hand (cash paid outside the bank, a partner's withdrawal, a correction): kept as it is, never merged with others.
@@ -345,15 +351,18 @@ async function forwardHouseholdPartnerRows(store, { groupId, householdOwnerId, r
   return true;
 }
 
+const AI_ASSIGN_CHUNK = 60;
+const AI_ASSIGN_MAX_ROWS = 120;
+
 async function assignNewRowsWithAi(store, groupId, incoming, suggest) {
-  const newIds = new Set(incoming.map((row) => row.externalId).filter(Boolean));
+  const newKeys = new Set(incoming.map((row) => partnersRowId(row)));
   for (let attempt = 0; attempt < 3; attempt += 1) {
     const group = await store.get(String(groupId));
     const setup = group.setup || {};
     if (!(setup.properties || []).length || !(setup.partners || []).length) return 0;
     const pool = group.rows.map((row) => ({ ...row, accountId: PARTNERS_POOL_ID }));
     const statement = buildPartnersStatement({ ...setup, accountIds: [PARTNERS_POOL_ID] }, pool, {});
-    const targets = statement.unclassified.filter((row) => newIds.has(row.externalId)).slice(0, 60);
+    const targets = statement.unclassified.filter((row) => newKeys.has(partnersRowId(row))).slice(0, AI_ASSIGN_MAX_ROWS);
     if (!targets.length) return 0;
     // What has already been decided here is shown to the AI so it follows it.
     const seen = new Set();
@@ -364,20 +373,23 @@ async function assignNewRowsWithAi(store, groupId, incoming, suggest) {
       seen.add(key);
       examples.push({ payee: key, kind: entry.kind, propertyId: entry.propertyId, partnerId: entry.partnerId });
     });
-    const results = await suggest({
-      rows: targets.map((row, index) => ({ id: String(index), payee: row.payee, money: -Number(row.amount), date: row.date })),
-      properties: setup.properties, partners: setup.partners, examples, customKinds: setup.customKinds || []
-    });
     const overrides = { ...(setup.overrides || {}) };
     let assigned = 0;
-    (results || []).forEach((result) => {
-      const row = targets[Number(result.id)];
-      if (!row || result.confidence !== "high" || !result.kind) return;
-      const key = partnersRowId(row);
-      if (overrides[key]) return;
-      overrides[key] = result.kind === "personal" ? { kind: "personal", propertyId: "", partnerId: "" } : { kind: result.kind, propertyId: result.propertyId || "", partnerId: result.partnerId || "" };
-      assigned += 1;
-    });
+    for (let start = 0; start < targets.length; start += AI_ASSIGN_CHUNK) {
+      const chunk = targets.slice(start, start + AI_ASSIGN_CHUNK);
+      const results = await suggest({
+        rows: chunk.map((row, index) => ({ id: String(index), payee: row.payee, money: -Number(row.amount), date: row.date })),
+        properties: setup.properties, partners: setup.partners, examples, customKinds: setup.customKinds || []
+      });
+      (results || []).forEach((result) => {
+        const row = chunk[Number(result.id)];
+        if (!row || result.confidence !== "high" || !result.kind) return;
+        const key = partnersRowId(row);
+        if (overrides[key] && overrides[key].kind) return;
+        overrides[key] = { ...(overrides[key] || {}), ...(result.kind === "personal" ? { kind: "personal", propertyId: "", partnerId: "" } : { kind: result.kind, propertyId: result.propertyId || "", partnerId: result.partnerId || "" }) };
+        assigned += 1;
+      });
+    }
     if (!assigned) return 0;
     const saved = await store.saveSetup(group.id, partnersSanitizeConfig({ ...setup, overrides }), group.version);
     if (!saved.conflict) return assigned;
@@ -385,4 +397,4 @@ async function assignNewRowsWithAi(store, groupId, incoming, suggest) {
   return 0;
 }
 
-module.exports = { registerPartnerGroupRoutes, createGroupStore, forwardHouseholdPartnerRows, PARTNERS_POOL_ID, ROLES };
+module.exports = { registerPartnerGroupRoutes, createGroupStore, forwardHouseholdPartnerRows, assignNewRowsWithAi, PARTNERS_POOL_ID, ROLES };

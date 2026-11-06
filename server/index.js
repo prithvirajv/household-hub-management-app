@@ -5147,7 +5147,7 @@ app.get("/shared-notes/:token/:slug?", async (req, res, next) => {
   }
 });
 
-const partnerGroups = registerPartnerGroupRoutes({ app, requireSession, sendTransactionalEmail, appBaseUrl: APP_BASE_URL, escapeHtml, MEMORY_DB, memoryDb, pool });
+const partnerGroups = registerPartnerGroupRoutes({ app, requireSession, sendTransactionalEmail, appBaseUrl: APP_BASE_URL, escapeHtml, MEMORY_DB, memoryDb, pool, suggest: GEMINI_API_KEY ? partnersAiSuggest : null });
 
 registerLinkedAccountRoutes({
   // The overnight bank sync hands the rows it fetched for the Partners-page account to the group this household feeds.

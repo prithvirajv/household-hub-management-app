@@ -581,6 +581,8 @@ Use this when several people put money into one checking account that collects t
 
 **Share a read-only report without logins.** As the owner, **Share a read-only report** creates a link anyone can open in a browser, with no account: it shows the same statement (pool, by property, by partner, by category, month by month, and the bank balance) and, only if you tick it, the list of transactions. It never shows email addresses, rules or anything of your household, and it cannot change anything. Anyone with the link can read it, so send it only to the partners; **Stop sharing** or **Make a new link** ends the old link at once.
 
+An imported statement is treated exactly like the night's bank rows: what your rules read counts at once, and the AI sorts the new rows no rule covers when the payee makes it clear (highlighted, one click to undo).
+
 **Ask FamilyLoop** (the ✨ button) knows the open group: ask "how is my rental property doing?", "who should send money this month?" or "how much has each partner put in?" from any page and it answers from the group's own figures (pool, properties, partners, categories, recent months).
 
 If two people change the setup at the same moment, the second change is refused and the page reloads with the first, so nothing is silently overwritten.

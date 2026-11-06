@@ -6466,12 +6466,17 @@ function renderPartnersGroupPage() {
   const partnerName = (id) => data.partners.find((partner) => partner.id === id)?.name || "";
   const needle = partnersEntriesFilter.trim().toLowerCase();
   const matching = statement.entries.map((entry, index) => ({ entry, index })).filter(({ entry }) => !needle || `${entry.payee} ${kindLabel(entry.kind)} ${propertyName(entry.propertyId)} ${partnerName(entry.partnerId)}`.toLowerCase().includes(needle));
-  const entryRows = matching.slice(0, partnersEntriesLimit).map(({ entry, index }) => `<tr${entry.overridden || entry.edited ? ' class="partners-overridden"' : ""}><td>${escapeHtml(formatShortDate(entry.date))}</td><td class="partners-payee">${escapeHtml(String(entry.payee || "").slice(0, 80))}${entry.manual ? ` <span class="pill pill-info">added by hand</span>${canEdit ? ` <button type="button" class="icon-button danger-button" data-partners-row-delete="${escapeHtml(entry.rowRef)}" aria-label="Delete this row" title="Delete this row">×</button>` : ""}` : ""}</td><td class="partners-amount">${canEdit ? `<input type="number" step="0.01" class="money-input" data-partners-entry-amount="${index}" value="${entry.money}" aria-label="Money in (negative for money out)" title="Money in is positive, money out negative">${entry.edited ? ` <button type="button" class="icon-button" data-partners-entry-amount-reset="${index}" title="Back to the bank's figure, ${escapeHtml(exactMoney.format(entry.originalMoney))}" aria-label="Reset the amount">↺</button>` : ""}` : partnersSigned(entry.money)}</td><td class="partners-assign">
-      <select data-partners-entry-kind="${index}" aria-label="Counted as">${`<option value="">Needs a rule</option>${partnersKindList(data).map((kind) => `<option value="${kind.id}" ${kind.id === entry.kind ? "selected" : ""}>${escapeHtml(kind.label)}</option>`).join("")}`}</select>
-      <select data-partners-entry-property="${index}" aria-label="Property" ${entry.kind && entry.kind !== "personal" ? "" : "disabled"}>${propertyOptions(entry.propertyId)}</select>
-      <select data-partners-entry-partner="${index}" aria-label="Partner" ${entry.kind && entry.kind !== "personal" ? "" : "disabled"}>${partnerOptions(entry.partnerId)}</select>
-      ${entry.overridden ? `<button type="button" class="icon-button" data-partners-entry-reset="${index}" title="Go back to what the rules say" aria-label="Reset this row">↺</button>` : ""}
-      <button type="button" class="ghost" data-partners-entry-rule="${index}" title="Count every row like this one the same way">Make a rule</button></td></tr>`).join("");
+  const entryRows = matching.slice(0, partnersEntriesLimit).map(({ entry, index }) => {
+    const editable = entry.kind && entry.kind !== "personal";
+    return `<tr${entry.overridden || entry.edited ? ' class="partners-overridden"' : ""}>
+      <td class="partners-date">${escapeHtml(formatShortDate(entry.date))}</td>
+      <td class="partners-payee">${escapeHtml(String(entry.payee || "").slice(0, 80))}${entry.manual ? ` <span class="pill pill-info">added by hand</span>${canEdit ? ` <button type="button" class="icon-button danger-button" data-partners-row-delete="${escapeHtml(entry.rowRef)}" aria-label="Delete this row" title="Delete this row">×</button>` : ""}` : ""}</td>
+      <td class="partners-amount">${canEdit ? `<input type="number" step="0.01" class="money-input" data-partners-entry-amount="${index}" value="${entry.money}" aria-label="Money in (negative for money out)" title="Money in is positive, money out negative">${entry.edited ? ` <button type="button" class="icon-button" data-partners-entry-amount-reset="${index}" title="Back to the bank's figure, ${escapeHtml(exactMoney.format(entry.originalMoney))}" aria-label="Reset the amount">↺</button>` : ""}` : partnersSigned(entry.money)}</td>
+      <td class="partners-cell"><select data-partners-entry-kind="${index}" aria-label="Counted as"><option value="">Needs a rule</option>${partnersKindList(data).map((kind) => `<option value="${kind.id}" ${kind.id === entry.kind ? "selected" : ""}>${escapeHtml(kind.label)}</option>`).join("")}</select></td>
+      <td class="partners-cell"><select data-partners-entry-property="${index}" aria-label="Property" ${editable ? "" : "disabled"}>${propertyOptions(entry.propertyId)}</select></td>
+      <td class="partners-cell"><select data-partners-entry-partner="${index}" aria-label="Partner" ${editable ? "" : "disabled"}>${partnerOptions(entry.partnerId)}</select></td>
+      <td class="partners-actions">${entry.overridden ? `<button type="button" class="icon-button" data-partners-entry-reset="${index}" title="Go back to what the rules say" aria-label="Reset this row">↺</button> ` : ""}<button type="button" class="ghost" data-partners-entry-rule="${index}" title="Count every row like this one the same way">Make a rule</button></td></tr>`;
+  }).join("");
   const shareCard = isOwner ? `<div class="card partners-share">
       <div class="card-label">Partners</div><h3>Share a read-only report</h3>
       <p class="muted">Send partners a link to this statement. They need no login and cannot change anything; they never see email addresses, rules or your household. Anyone with the link can read it, so share it only with them. Stopping the share, or making a new link, ends the old one at once.</p>
@@ -6509,7 +6514,7 @@ function renderPartnersGroupPage() {
       <summary><span class="card-label">Partners</span> <b>Every transaction in the shared account (${statement.entries.length})</b></summary>
       <p class="muted">Each row of the account in this period and how it is counted. Change what a row is, which property it belongs to or which partner sent it right here; <b>Make a rule</b> then applies that to every similar row, now and as new ones arrive.</p>
       <label class="partners-range">Search these rows<input type="search" id="partnersEntriesSearch" value="${escapeHtml(partnersEntriesFilter)}" placeholder="Payee, kind, property or partner (press Enter)"></label>
-      <fieldset class="partners-fieldset" ${canEdit ? "" : "disabled"}><div class="partners-scroll"><table class="partners-table"><thead><tr><th>Date</th><th>Description</th><th>Money in / out</th><th>Counted as${canEdit ? " (change it here)" : ""}</th></tr></thead><tbody>${entryRows}</tbody></table></div></fieldset>
+      <fieldset class="partners-fieldset" ${canEdit ? "" : "disabled"}><div class="partners-scroll"><table class="partners-table partners-entries-table"><thead><tr><th>Date</th><th>Description</th><th>Money in / out</th><th>Counted as</th><th>Property</th><th>Partner</th><th></th></tr></thead><tbody>${entryRows}</tbody></table></div></fieldset>
       <p class="muted">${needle ? `${matching.length} of ${statement.entries.length} rows match. ` : ""}Showing ${Math.min(partnersEntriesLimit, matching.length)} of ${matching.length}, newest first.${matching.length > partnersEntriesLimit ? ` <button type="button" class="ghost" id="partnersEntriesMore">Show ${Math.min(200, matching.length - partnersEntriesLimit)} more</button> <button type="button" class="ghost" id="partnersEntriesAll">Show all ${matching.length}</button>` : ""}</p>
     </details>
     ${statement.unclassified.length ? `<div class="card">
@@ -6678,12 +6683,14 @@ function bindPartnersEvents() {
     if (parsed.problem || !parsed.rows.length) { showToast(parsed.problem || "No transactions were found in that file.", { type: "error" }); return; }
     let added = 0;
     let skipped = 0;
+    let aiAssigned = 0;
     for (let start = 0; start < parsed.rows.length; start += 5000) {
       const result = await api(`${groupPath}/rows`, { method: "POST", body: JSON.stringify({ rows: parsed.rows.slice(start, start + 5000), mode: "csv" }) });
       added += result.added;
       skipped += result.skipped;
+      aiAssigned += result.aiAssigned || 0;
     }
-    showToast(`Added ${added} rows${skipped ? `; ${skipped} were already here` : ""}.`, { type: "info" });
+    showToast(`Added ${added} rows${skipped ? `; ${skipped} were already here` : ""}${aiAssigned ? `; the AI sorted ${aiAssigned} that no rule covered (highlighted in the list)` : ""}.`, { type: "info" });
     await openPartnersGroup(partnersGroup.id);
   }));
   $("#partnersClearRows")?.addEventListener("click", guarded(async () => {

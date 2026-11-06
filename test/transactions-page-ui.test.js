@@ -162,3 +162,18 @@ test("the Partners page tracks tenant deposits: tenant and lease end in Setup, a
   assert.match(app, /return due in \$\{days\} day/);
   assert.match(app, /<div class="partners-statement-wrap" \$\{hasRows \? "" : "hidden"\}>/);
 });
+
+test("the Partners transaction list has one column each for amount, category, property and partner", () => {
+  assert.match(app, /class="partners-table partners-entries-table"/);
+  assert.match(app, /<th>Money in \/ out<\/th><th>Counted as<\/th><th>Property<\/th><th>Partner<\/th>/);
+  assert.match(app, /<td class="partners-cell"><select data-partners-entry-property=/);
+});
+
+test("checkboxes are always small squares, and the Linked accounts rows share one control height", () => {
+  const css = fs.readFileSync(path.join(__dirname, "..", "styles.css"), "utf8");
+  const tail = css.slice(css.lastIndexOf("/* ---- Checkboxes and the Linked accounts rows"));
+  assert.match(tail, /input\[type="checkbox"\] \{\s*width: 18px;\s*height: 18px;[^}]*padding: 0;/);
+  assert.match(tail, /\.invite-form label > input\[type="checkbox"\] \{ width: 18px; \}/);
+  assert.match(tail, /\.linked-history-row > button \{ min-height: 38px; height: 38px;/);
+  assert.match(tail, /\.linked-account-row \.button-row button \{ min-height: 38px;/);
+});

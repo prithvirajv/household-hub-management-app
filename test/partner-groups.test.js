@@ -56,3 +56,21 @@ test("overnight rows no rule matches are sent to the AI once, only confident ans
   assert.equal(failing, true);
   assert.equal((await store.get(group.id)).rows.length, 4);
 });
+
+test("an imported statement (rows with no bank id) gets the same AI assignment as the night's rows, in chunks, keeping only confident answers", async () => {
+  const { assignNewRowsWithAi } = require("../server/partner-groups");
+  const store = memory();
+  const setup = { properties: [{ id: "a", name: "Maple" }], partners: [{ id: "p1", name: "Pat" }], shares: {}, defaultShares: {}, overrides: {}, rules: [{ id: "r1", match: "zelle tina", kind: "rent", propertyId: "a" }] };
+  const rows = [];
+  for (let i = 0; i < 70; i += 1) rows.push({ date: "2026-09-01", payee: `PAYEE NUMBER ${i}`, amount: 10 + i, externalId: "", source: "csv" });
+  rows.push({ date: "2026-09-02", payee: "ZELLE FROM TINA TENANT", amount: -2000, externalId: "", source: "csv" });
+  const group = await store.create({ name: "G", ownerUserId: "owner-1", ownerEmail: "o@example.com", setup, rows, poolBalance: null });
+  const calls = [];
+  const suggest = async ({ rows: asked }) => { calls.push(asked.length); return asked.map((row, index) => ({ id: row.id, kind: "expense", propertyId: "a", partnerId: "", confidence: index % 2 === 0 ? "high" : "low" })); };
+  const assigned = await assignNewRowsWithAi(store, group.id, rows, suggest);
+  assert.deepEqual(calls, [60, 10], "70 unmatched rows go in two chunks; the row a rule reads is not sent");
+  assert.equal(assigned, 35, "30 + 5 confident answers kept");
+  const saved = await store.get(group.id);
+  assert.equal(Object.keys(saved.setup.overrides).length, 35);
+  assert.equal(await assignNewRowsWithAi(store, group.id, [{ date: "2026-09-01", payee: "NOT IN THE GROUP", amount: 5, externalId: "" }], suggest), 0, "rows not in the group are ignored");
+});
