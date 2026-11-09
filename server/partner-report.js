@@ -1,6 +1,6 @@
 // The read-only report a group's owner can share by link, for partners who have no login: a plain HTML page (no scripts) with the same figures as the
 // Partners page. It shows names, amounts and descriptions the owner chose to share, never e-mail addresses, rules or the household behind the group.
-const { buildPartnersStatement, partnersKindList, PARTNERS_POOL_ID } = require("../lib/partners-logic");
+const { buildPartnersStatement, partnersContributionPlan, partnersKindList, PARTNERS_POOL_ID } = require("../lib/partners-logic");
 
 const PERIODS = [["all", "All time"], ["12", "Last 12 months"], ["3", "Last 3 months"], ["month", "This month"]];
 const MAX_TRANSACTION_ROWS = 500;
@@ -51,6 +51,14 @@ function renderPartnerReportHtml({ group, period = "all", showTransactions = fal
     const status = row.depositHeld <= 0.005 ? "nothing held" : days === null ? "lease end not set" : days < 0 ? `lease ended ${-days} days ago: return it` : days <= 60 ? `return due in ${days} days` : `lease ends ${shortDate(row.leaseEnd)}`;
     return `<tr><th>${escapeHtml(row.name)}</th><td>${money(row.depositHeld)}</td><td>${escapeHtml(row.leaseEnd ? shortDate(row.leaseEnd) : "")}</td><td class="left">${escapeHtml(status)}</td></tr>`;
   }).join("");
+  // The agreed monthly contribution, if the group set one: who has sent it each month (read from all rows, whatever period is shown).
+  const plan = partnersContributionPlan({ ...setup, accountIds: [PARTNERS_POOL_ID] }, (group.rows || []).map((row) => ({ ...row, accountId: PARTNERS_POOL_ID })), now.toISOString().slice(0, 7));
+  const planCell = (cell) => (cell.state === "paid" ? `<td class="pos">&#10003; ${money(cell.sent)}</td>` : cell.state === "covered" ? `<td class="pos">&#10003; covered by an earlier extra${cell.sent > 0.005 ? ` (${money(cell.sent)})` : ""}</td>` : cell.state === "partial" ? `<td class="warn">${money(cell.sent)} (short ${money(cell.short)})</td>` : cell.state === "pending" ? `<td class="muted">due this month</td>` : `<td class="neg">not sent</td>`);
+  const planStatus = (row) => (row.status === "behind" ? `<span class="neg">behind ${money(row.behind)} (${row.monthsBehind} month${row.monthsBehind === 1 ? "" : "s"})</span>` : row.status === "due" ? `${money(row.dueNow)} due this month` : row.ahead > 0.005 ? `paid up, ${money(row.ahead)} ahead` : "paid up");
+  const planHtml = plan.enabled ? `<h2>Monthly contribution: ${money(plan.amount)} each since ${escapeHtml(monthLabel(plan.startMonth))}</h2>
+<div class="scroll"><table><thead><tr><th></th><th>Sent since then</th><th>Should have sent</th><th class="left">Status</th></tr></thead><tbody>${plan.partners.map((row) => `<tr><th>${escapeHtml(row.name)}</th><td>${money(row.sent)}</td><td>${money(row.expected)}</td><td class="left">${planStatus(row)}</td></tr>`).join("")}</tbody></table></div>
+<div class="scroll"><table><thead><tr><th>Month</th>${plan.partners.map((row) => `<th>${escapeHtml(row.name)}</th>`).join("")}</tr></thead><tbody>${plan.months.slice().reverse().slice(0, 36).map((row) => `<tr><th>${escapeHtml(monthLabel(row.month))}</th>${plan.partners.map((partner) => planCell(row.cells[partner.id])).join("")}</tr>`).join("")}</tbody></table></div>
+<p class="muted">Counts money received as a partner contribution from that partner. Sending more than ${money(plan.amount)} once covers the next months too, and the current month is not late until it ends.</p>` : "";
   const entryRows = showTransactions ? statement.entries.slice(0, MAX_TRANSACTION_ROWS).map((entry) => {
     const counted = entry.kind ? [kindLabel(entry.kind), propertyName(entry.propertyId), partnerName(entry.partnerId)].filter(Boolean).join(" · ") : "not yet sorted";
     return `<tr><td>${escapeHtml(shortDate(entry.date))}</td><td class="left">${escapeHtml(String(entry.payee || "").slice(0, 90))}</td><td>${signed(entry.money)}${entry.edited ? ` <small title="The bank's own figure was ${escapeHtml(money(entry.originalMoney))}">(corrected)</small>` : ""}</td><td class="left">${escapeHtml(counted)}</td></tr>`;
@@ -69,7 +77,7 @@ main { max-width: 1000px; margin: 0 auto; padding: 24px 16px 48px; } h1 { margin
 .tile { background: var(--soft); border-radius: 10px; padding: 12px 14px; display: grid; gap: 2px; } .tile span { font-size: 0.7rem; font-weight: 800; text-transform: uppercase; color: var(--muted); } .tile strong { font-size: 1.25rem; } .tile small { color: var(--muted); }
 .scroll { overflow-x: auto; } table { width: 100%; border-collapse: collapse; font-size: 0.9rem; } th, td { padding: 7px 10px; border-bottom: 1px solid var(--line); text-align: right; white-space: nowrap; }
 th:first-child, td:first-child, td.left { text-align: left; } td.left { white-space: normal; } thead th { font-size: 0.7rem; text-transform: uppercase; color: var(--muted); }
-.neg { color: var(--red); font-weight: 700; } .pos { color: var(--green); font-weight: 700; } a { color: var(--green); } footer { margin-top: 32px; font-size: 0.8rem; color: var(--muted); }
+.neg { color: var(--red); font-weight: 700; } .warn { color: #a56a00; font-weight: 700; } .pos { color: var(--green); font-weight: 700; } a { color: var(--green); } footer { margin-top: 32px; font-size: 0.8rem; color: var(--muted); }
 </style></head><body><main>
 <p class="muted" style="margin:0">Partners report, read-only</p>
 <h1>${escapeHtml(group.name)}</h1>
@@ -85,6 +93,7 @@ ${group.poolBalance ? tile("Bank balance", money(group.poolBalance.amount), grou
 <h2>By property</h2><div class="scroll"><table><thead><tr><th></th><th>Rent in</th><th>Loan</th><th>HOA</th><th>Repairs and other</th><th>Result</th></tr></thead><tbody>${propertyRows}</tbody></table></div>
 <h2>By partner</h2><div class="scroll"><table><thead><tr><th></th><th>Share</th><th>Sent in</th><th>Withdrawn</th><th>Share of result</th><th>Balance</th><th>To square up</th><th>Suggested a month</th></tr></thead><tbody>${partnerRows}</tbody></table></div>
 <p class="muted">Balance is what a partner sent in, less what they withdrew, plus their share of the result. To square up shares the money put in by ownership: "send" means send that much more, "receive" means they put in more than their share.</p>
+${planHtml}
 ${depositRows ? `<h2>Tenant deposits held</h2><div class="scroll"><table><thead><tr><th>Property</th><th>Held</th><th>Lease ends</th><th class="left">Status</th></tr></thead><tbody>${depositRows}</tbody></table></div><p class="muted">Deposits and advances from tenants are owed back at the end of the lease, so they are not counted as income.</p>` : ""}
 ${kindRows ? `<h2>By category</h2><div class="scroll"><table><thead><tr><th>Category</th><th>Type</th><th>Total</th></tr></thead><tbody>${kindRows}</tbody></table></div>` : ""}
 ${monthRows ? `<h2>Month by month</h2><div class="scroll"><table><thead><tr><th></th><th>Income</th><th>Costs</th><th>Result</th><th>Sent in</th><th>Withdrawn</th></tr></thead><tbody>${monthRows}</tbody></table></div>` : ""}

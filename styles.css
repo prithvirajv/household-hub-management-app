@@ -9635,3 +9635,12 @@ label.ai-import-toggle span { font-weight: 600; }
 .linked-history-row > small { flex-basis: 100%; margin-top: 0.1rem; }
 /* The invite form stretches every input to the full width of its label; a checkbox in it stays a small square. */
 .invite-form label > input[type="checkbox"] { width: 18px; }
+/* Partners: the agreed monthly contribution (setup fields and the month-by-month grid). */
+.partners-contrib-row { flex-wrap: wrap; max-width: none; gap: 0.75rem 1.25rem; }
+.partners-contrib-row label { display: flex; align-items: center; gap: 0.5rem; font-weight: 700; }
+.partners-contrib-row input { flex: 0 0 auto; width: 9.5rem; }
+.partners-plan-table td { font-size: 0.85rem; }
+.partners-plan-paid { color: var(--green-ink); font-weight: 700; }
+.partners-plan-partial { color: var(--gold-ink); font-weight: 700; }
+.partners-plan-missing { color: var(--coral); font-weight: 700; }
+.partners-plan-pending { color: var(--muted); }

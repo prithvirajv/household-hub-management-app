@@ -2667,11 +2667,13 @@ function partnersAssistantFacts() {
   const monthKey = (offset) => dateKey(new Date(now.getFullYear(), now.getMonth() - offset, 1)).slice(0, 7);
   const all = buildPartnersStatement(config, rows, {});
   const recent = buildPartnersStatement(config, rows, { fromMonth: monthKey(2), toMonth: monthKey(0) });
+  const contributionPlan = partnersContributionPlan(config, rows, monthKey(0));
   const summary = (st) => `income ${money$(st.pool.income)}, costs (loans, HOA, repairs and other) ${money$(st.pool.expenses)}, result ${money$(st.pool.net)} (${st.pool.net < 0 ? "a shortfall" : "a surplus"}), partners sent in ${money$(st.pool.contributions)}, withdrawn by partners ${money$(st.pool.withdrawals)}`;
   const lines = [
     `PARTNERS GROUP "${partnersGroup.name}" - the shared rental properties run by ${data.partners.map((partner) => partner.name).join(", ")} from one shared bank account (you are ${partnersGroup.role === "owner" ? "its owner" : partnersGroup.role === "edit" ? "an editor" : "a viewer"}). This is the data for questions about the rental properties or the partners:`,
     `ALL TIME: ${summary(all)}; ${all.rowCount} transactions, ${all.unclassified.length} not yet sorted into a category.${partnersGroup.poolBalance ? ` The bank reports a balance of ${money$(partnersGroup.poolBalance.amount)} (${partnersGroup.poolBalance.date}).` : ""}`,
     `LAST 3 MONTHS (${monthKey(2)} to ${monthKey(0)}): ${summary(recent)}; average monthly shortfall suggested for next month ${money$(all.averageShortfall)}.`,
+    ...(contributionPlan.enabled ? [`AGREED MONTHLY CONTRIBUTION: each partner sends ${money$(contributionPlan.amount)} a month since ${contributionPlan.startMonth}. ${contributionPlan.partners.map((row) => `${row.name}: sent ${money$(row.sent)} of ${money$(row.expected)}, ${row.status === "behind" ? `behind ${money$(row.behind)} (${row.monthsBehind} month${row.monthsBehind === 1 ? "" : "s"})` : row.status === "due" ? `${money$(row.dueNow)} due this month` : "paid up"}`).join("; ")}.`] : []),
     "PROPERTIES (all time):",
     ...all.properties.map((row) => `- ${row.name}: rent and income in ${money$(row.income)}, loan ${money$(row.loan)}, HOA ${money$(row.hoa)}, repairs and other ${money$(row.repair + row.expense)}, result ${money$(row.net)}`),
     ...(all.pool.depositsHeld || all.properties.some((row) => row.depositIn) ? [`TENANT DEPOSITS HELD (owed back to tenants, not income): ${money$(all.pool.depositsHeld)} in total`, ...all.properties.filter((row) => row.id && (row.depositIn || row.depositHeld)).map((row) => `- ${row.name}${row.tenant ? ` (tenant ${row.tenant})` : ""}: received ${money$(row.depositIn)}, returned ${money$(row.depositOut)}, kept ${money$(row.depositKept)}, still held ${money$(row.depositHeld)}${row.leaseEnd ? `, lease ends ${row.leaseEnd}` : ""}`)] : []),
@@ -6461,6 +6463,25 @@ function renderPartnersGroupPage() {
       <h4>Tenant deposits held</h4>
       <div class="partners-scroll"><table class="partners-table"><thead><tr><th>Property</th><th>Tenant</th><th>Received</th><th>Returned</th><th>Kept</th><th>Still held</th><th>Lease ends</th><th class="partners-payee">Status</th></tr></thead><tbody>${depositProperties.map((row) => `<tr><th>${escapeHtml(row.name)}</th><td>${escapeHtml(row.tenant || "")}</td><td>${exactMoney.format(row.depositIn)}</td><td>${exactMoney.format(row.depositOut)}</td><td>${exactMoney.format(row.depositKept)}</td><td><b>${exactMoney.format(row.depositHeld)}</b></td><td>${row.leaseEnd ? escapeHtml(formatShortDate(row.leaseEnd)) : ""}</td><td class="partners-payee">${escapeHtml(depositStatus(row).text)}</td></tr>`).join("")}</tbody></table></div>
       <p class="muted">An advance or security deposit is not income: it is owed back to the tenant at the end of the lease. Mark the row when it arrives as <b>Tenant deposit / advance received</b>, and when you return it, <b>Tenant deposit returned</b>. If you keep part for damage or unpaid rent, use <b>Add row</b> for <b>Deposit kept</b> (money in, for that property): that part becomes income and nothing is owed on it.</p>` : "";
+  // The agreed monthly contribution: who has sent it, month by month (read from all of the group's rows, whatever period is shown above).
+  const contributionPlan = partnersContributionPlan({ ...data, accountIds: [...data.accountIds, PARTNERS_POOL_ID] }, partnersRows(data), dateKey(new Date()).slice(0, 7));
+  const planCell = (cell) => {
+    if (cell.state === "paid") return `<td class="partners-plan-paid">✓ ${exactMoney.format(cell.sent)}</td>`;
+    if (cell.state === "covered") return `<td class="partners-plan-paid">✓ covered by an earlier extra${cell.sent > 0.005 ? ` (${exactMoney.format(cell.sent)})` : ""}</td>`;
+    if (cell.state === "partial") return `<td class="partners-plan-partial">${exactMoney.format(cell.sent)} (short ${exactMoney.format(cell.short)})</td>`;
+    if (cell.state === "pending") return `<td class="partners-plan-pending">due this month</td>`;
+    return `<td class="partners-plan-missing">not sent</td>`;
+  };
+  const planStatus = (row) => (row.status === "behind"
+    ? `<span class="gain-loss loss">behind ${exactMoney.format(row.behind)} (${row.monthsBehind} month${row.monthsBehind === 1 ? "" : "s"})</span>`
+    : row.status === "due" ? `${exactMoney.format(row.dueNow)} due this month` : row.ahead > 0.005 ? `paid up, ${exactMoney.format(row.ahead)} ahead` : "paid up");
+  const planBehind = contributionPlan.partners.filter((row) => row.status === "behind");
+  const contributionsHtml = contributionPlan.enabled ? `${planBehind.length ? `<div class="empty-inline account-type-suggestion"><span><b>Behind on the monthly ${exactMoney.format(contributionPlan.amount)}:</b> ${planBehind.map((row) => `${escapeHtml(row.name)} ${exactMoney.format(row.behind)} (${row.monthsBehind} month${row.monthsBehind === 1 ? "" : "s"})`).join("; ")}.</span></div>` : ""}
+      <h4>Monthly contribution: ${exactMoney.format(contributionPlan.amount)} each since ${escapeHtml(formatMonth(contributionPlan.startMonth))}</h4>
+      <div class="partners-scroll"><table class="partners-table"><thead><tr><th></th><th>Sent since then</th><th>Should have sent</th><th class="partners-payee">Status</th></tr></thead><tbody>${contributionPlan.partners.map((row) => `<tr><th>${escapeHtml(row.name)}</th><td>${exactMoney.format(row.sent)}</td><td>${exactMoney.format(row.expected)}</td><td class="partners-payee">${planStatus(row)}</td></tr>`).join("")}</tbody></table></div>
+      <div class="partners-scroll"><table class="partners-table partners-plan-table"><thead><tr><th>Month</th>${contributionPlan.partners.map((row) => `<th>${escapeHtml(row.name)}</th>`).join("")}</tr></thead><tbody>${contributionPlan.months.slice().reverse().slice(0, 36).map((row) => `<tr><th>${escapeHtml(formatMonth(row.month))}</th>${contributionPlan.partners.map((partner) => planCell(row.cells[partner.id])).join("")}</tr>`).join("")}</tbody></table></div>
+      <p class="muted">Only money counted as a <b>Partner contribution</b> for that partner counts. Sending more than ${exactMoney.format(contributionPlan.amount)} once covers the next months too, and the current month is not late until it ends.${contributionPlan.months.length > 36 ? ` Showing the latest 36 of ${contributionPlan.months.length} months.` : ""}${contributionPlan.unassigned > 0.005 ? ` ${exactMoney.format(contributionPlan.unassigned)} of contributions name no partner, so they are not counted here.` : ""}</p>`
+    : (canEdit ? `<p class="muted">Did the partners agree to send a fixed amount every month? Set it under Setup, <b>Monthly contribution</b>, and this page will show who has sent it each month.</p>` : "");
   const kindLabel = (kind) => partnersKindList(data).find((item) => item.id === kind)?.label || kind;
   const propertyName = (id) => data.properties.find((property) => property.id === id)?.name || "";
   const partnerName = (id) => data.partners.find((partner) => partner.id === id)?.name || "";
@@ -6501,6 +6522,7 @@ function renderPartnersGroupPage() {
         ${pool.depositsHeld ? tile("Tenant deposits held", exactMoney.format(pool.depositsHeld), "owed back to tenants, not income") : ""}
         ${poolBalance ? tile("Bank balance", exactMoney.format(poolBalance.amount), `as of ${escapeHtml(formatShortDate(poolBalance.date))}`) : ""}
       </div>
+      ${contributionsHtml}
       ${depositsHtml}
       <h4>By property</h4>
       <div class="partners-scroll"><table class="partners-table"><thead><tr><th></th><th>Rent in</th><th>Loan</th><th>HOA</th><th>Repairs and other</th><th>Result</th></tr></thead><tbody>${propertyRows}</tbody></table></div>
@@ -6541,6 +6563,9 @@ function renderPartnersGroupPage() {
       <h4>Ownership (percent)</h4>
       <p class="muted">Leave a row empty for an equal split. Numbers are scaled to add up to 100 for each property. "Shared / not assigned" covers costs that belong to no one property.</p>
       <div class="partners-scroll"><table class="partners-table"><thead><tr><th></th>${data.partners.map((partner) => `<th>${escapeHtml(partner.name)}</th>`).join("")}</tr></thead><tbody>${data.properties.map((property) => shareRow(property.name, property.id)).join("")}${shareRow("Shared / not assigned", "default")}</tbody></table></div>
+      <h4>Monthly contribution</h4>
+      <p class="muted">If the partners agreed that each of you sends the same amount every month, set it here with the month it starts. The statement then shows, for every partner and month, whether it was sent, and who is behind. Set both fields; clear the amount to turn it off.</p>
+      <div class="partners-name-row partners-contrib-row"><label>Each partner sends <input type="number" min="0" step="1" class="money-input" id="partnersContribAmount" value="${data.monthlyContribution?.amount ?? ""}" placeholder="500" aria-label="Monthly amount each partner sends"></label><label>a month, starting <input type="month" id="partnersContribStart" value="${escapeHtml(data.monthlyContribution?.startMonth || "")}" placeholder="2025-01" aria-label="First month"></label></div>
       <h4>Your own categories</h4>
       <p class="muted">Besides rent, loan, HOA, repairs, tax, insurance, utilities, management, other income, contributions and withdrawals, add any category you need (for example Landscaping, or Refunds to tenants). Choose whether it is income or a cost; then use it in rules and on any row.</p>
       ${(data.customKinds || []).map((kind, index) => `<div class="partners-name-row"><input data-partners-kind-label="${index}" value="${escapeHtml(kind.label)}" maxlength="40" aria-label="Category name"><select data-partners-kind-group="${index}" aria-label="Income or cost"><option value="cost" ${kind.group === "cost" ? "selected" : ""}>A cost</option><option value="income" ${kind.group === "income" ? "selected" : ""}>Income</option></select><button type="button" class="icon-button danger-button" data-partners-kind-remove="${index}" aria-label="Remove ${escapeHtml(kind.label)}">×</button></div>`).join("")}
@@ -6718,6 +6743,17 @@ function bindPartnersEvents() {
     const property = data.properties[Number(input.dataset.partnersPropertyLeaseend)];
     if (property) { property.leaseEnd = input.value; void partnersSave(); }
   }));
+  // The agreed monthly amount and its first month are saved together, and only when both make sense (or both are cleared).
+  const saveContribution = () => {
+    const amount = Math.round(Number($("#partnersContribAmount")?.value) * 100) / 100;
+    const startMonth = $("#partnersContribStart")?.value || "";
+    if (!($("#partnersContribAmount")?.value || "").trim()) { delete data.monthlyContribution; void partnersSave(); return; }
+    if (!(amount > 0) || !/^\d{4}-(0[1-9]|1[0-2])$/.test(startMonth)) { showToast("Enter both the monthly amount and the month it starts.", { type: "info" }); return; }
+    data.monthlyContribution = { amount, startMonth };
+    void partnersSave();
+  };
+  $("#partnersContribAmount")?.addEventListener("change", saveContribution);
+  $("#partnersContribStart")?.addEventListener("change", saveContribution);
   $("#partnersAddProperty")?.addEventListener("click", () => { data.properties.push({ id: uniqueId("property"), name: `Property ${data.properties.length + 1}` }); partnersSave(); });
   $("#partnersAddPartner")?.addEventListener("click", () => { data.partners.push({ id: uniqueId("partner"), name: `Partner ${data.partners.length + 1}` }); partnersSave(); });
   document.querySelectorAll("[data-partners-remove-property]").forEach((button) => button.addEventListener("click", () => {

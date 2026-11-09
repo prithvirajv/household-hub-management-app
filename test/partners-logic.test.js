@@ -92,6 +92,52 @@ test("partnersSuggestMatch keeps the stable words of a bank payee", () => {
   assert.equal(partnersSuggestMatch("Maple Court HOA L1234567   260810 O9876543210"), "maple court hoa l1234567");
 });
 
+test("the agreed monthly contribution: who sent it in each month since the start, with extra carrying forward and the current month never late", () => {
+  const { partnersContributionPlan } = require("../lib/partners-logic");
+  const plan = { ...config, monthlyContribution: { amount: 500, startMonth: "2025-01" } };
+  const rows = [
+    // Sam pays 500 in January, February and March; Alex pays 1000 once in January (covers January and February) and nothing in March; Pat pays 300 in
+    // January only. Before the start month and a row with no partner are not counted.
+    t("2024-12-20", "ZELLE FROM SAM", -500), t("2025-01-05", "ZELLE FROM SAM", -500), t("2025-02-05", "ZELLE FROM SAM", -500), t("2025-03-04", "ZELLE FROM SAM", -500),
+    t("2025-01-09", "ZELLE FROM ALEX", -1000),
+    t("2025-01-10", "ZELLE FROM Pat", -300), t("2025-01-11", "PAYMENT RANDOM", -50)
+  ];
+  const withPat = { ...plan, rules: [...plan.rules, { id: "r9", match: "zelle from pat", kind: "contribution", partnerId: "p1" }] };
+  const result = partnersContributionPlan(withPat, rows, "2025-03");
+  assert.equal(result.enabled, true);
+  assert.deepEqual(result.months.map((row) => row.month), ["2025-01", "2025-02", "2025-03"]);
+  const [pat, sam, alex] = ["p1", "p2", "p3"].map((id) => result.partners.find((row) => row.id === id));
+  assert.equal(sam.sent, 1500); assert.equal(sam.behind, 0); assert.equal(sam.status, "paid");
+  // Alex sent 1000 in all: January and February (the complete months) are covered, and March is still pending, so 500 is due this month and nobody is late.
+  assert.equal(alex.sent, 1000); assert.equal(alex.behind, 0); assert.equal(alex.dueNow, 500); assert.equal(alex.status, "due");
+  assert.equal(pat.sent, 300); assert.equal(pat.behind, 700); assert.equal(pat.monthsBehind, 2); assert.equal(pat.status, "behind");
+  const jan = result.months[0].cells; const feb = result.months[1].cells; const mar = result.months[2].cells;
+  assert.equal(jan.p1.state, "partial"); assert.equal(jan.p3.state, "paid"); assert.equal(jan.p1.short, 200); assert.equal(feb.p3.state, "covered"); assert.equal(feb.p1.state, "missing"); assert.equal(mar.p3.state, "pending");
+  assert.equal(partnersContributionPlan(plan, rows, "2025-03").unassigned, 0);
+});
+
+test("the monthly contribution is off without an amount or a start month, and before the start month", () => {
+  const { partnersContributionPlan } = require("../lib/partners-logic");
+  assert.equal(partnersContributionPlan(config, [], "2025-03").enabled, false);
+  assert.equal(partnersContributionPlan({ ...config, monthlyContribution: { amount: 500, startMonth: "" } }, [], "2025-03").enabled, false);
+  assert.equal(partnersContributionPlan({ ...config, monthlyContribution: { amount: 0, startMonth: "2025-01" } }, [], "2025-03").enabled, false);
+  assert.equal(partnersContributionPlan({ ...config, monthlyContribution: { amount: 500, startMonth: "2026-01" } }, [], "2025-03").enabled, false);
+  // A corrected amount on a row counts, and a year change is crossed correctly.
+  const plan = { ...config, monthlyContribution: { amount: 500, startMonth: "2025-11" } };
+  const row = t("2025-12-02", "ZELLE FROM SAM", -400, { externalId: "e1" });
+  const result = partnersContributionPlan({ ...plan, overrides: { "x:e1": { amount: 500 } } }, [row], "2026-01");
+  assert.deepEqual(result.months.map((item) => item.month), ["2025-11", "2025-12", "2026-01"]);
+  assert.equal(result.months[1].cells.p2.state, "paid");
+  assert.equal(result.partners.find((item) => item.id === "p2").sent, 500);
+});
+
+test("partnersSanitizeConfig keeps a sensible monthly contribution and drops a broken one", () => {
+  assert.deepEqual(partnersSanitizeConfig({ monthlyContribution: { amount: "500", startMonth: "2025-01" } }).monthlyContribution, { amount: 500, startMonth: "2025-01" });
+  assert.equal(partnersSanitizeConfig({ monthlyContribution: { amount: 500, startMonth: "2025-13" } }).monthlyContribution, undefined);
+  assert.equal(partnersSanitizeConfig({ monthlyContribution: { amount: -5, startMonth: "2025-01" } }).monthlyContribution, undefined);
+  assert.equal(partnersSanitizeConfig({}).monthlyContribution, undefined);
+});
+
 test("partnersSanitizeConfig keeps only what the page understands", () => {
   const clean = partnersSanitizeConfig({
     properties: [{ id: "a b!", name: "Maple" }], partners: [{ id: "p1", name: "Pat" }],
@@ -228,4 +274,26 @@ test("a tenant's deposit is held, not income: received raises it, returned lower
   assert.equal(midLease.pool.cash, 4000, "the account does hold the money: rent plus the deposit");
   assert.deepEqual(s.byKind.filter((k) => k.group === "deposit").map((k) => [k.id, k.total]), [["deposit_in", 2000], ["deposit_out", 1700], ["deposit_kept", 300]]);
   assert.equal(s.pool.cash, 2300 - 0 + 0, "cash = rent in (2000) + deposits received (2000) - returned (1700) = 2300, the kept 300 moved no money");
+});
+
+test("the shared report and the page show the monthly contribution grid, without e-mail addresses", () => {
+  const fs = require("node:fs");
+  const { renderPartnerReportHtml } = require("../server/partner-report");
+  const setup = { ...config, partners: config.partners.map((p) => ({ ...p, email: `${p.id}@example.test` })), monthlyContribution: { amount: 500, startMonth: "2025-01" } };
+  const rows = [{ date: "2025-01-05", payee: "ZELLE FROM SAM", amount: -500, externalId: "a1" }];
+  const html = renderPartnerReportHtml({ group: { name: "Rentals", setup, rows }, period: "all", showTransactions: false, now: new Date("2025-03-15T12:00:00Z") });
+  assert.match(html, /Monthly contribution: \$500\.00 each since January 2025/);
+  assert.match(html, /behind \$500\.00 \(1 month\)/);
+  assert.match(html, /not sent/);
+  assert.match(html, /due this month/);
+  assert.doesNotMatch(html, /@example\.test/);
+  assert.doesNotMatch(html, /<script/i);
+  const off = renderPartnerReportHtml({ group: { name: "Rentals", setup: { ...setup, monthlyContribution: undefined }, rows }, period: "all", now: new Date("2025-03-15T12:00:00Z") });
+  assert.doesNotMatch(off, /Monthly contribution/);
+  // The page: a card in the statement, two setup fields saved together, and the assistant's facts.
+  const app = fs.readFileSync(require("node:path").join(__dirname, "..", "app.js"), "utf8");
+  assert.match(app, /partnersContributionPlan\(\{ \.\.\.data, accountIds/);
+  assert.match(app, /id="partnersContribAmount"/);
+  assert.match(app, /id="partnersContribStart"/);
+  assert.match(app, /AGREED MONTHLY CONTRIBUTION/);
 });
