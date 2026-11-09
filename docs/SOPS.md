@@ -321,6 +321,14 @@ job failed. The unique constraint on
 prevents duplicate reminders across repeated state saves; if duplicates are
 seen, check whether that constraint was bypassed by a schema change.
 
+### Database data transfer (Neon, or any host that bills egress)
+
+The worker's 30-minute refresh (`refreshAllHouseholdNotificationJobs`) runs for every household, so it reads only what the reminders use
+(`NOTIFICATION_STATE_SQL`: time zone, the calendar, and notes that carry a reminder), about 12% of a household's stored state. Before this it
+downloaded every whole state, 48 times a day. If `notificationCandidates` ever reads another part of the state, add it to that query
+(`test/notification-refresh-query.test.js` fails when they drift apart). Cloud SQL's own `network/sent_bytes_count` metric is dominated by
+the instance's housekeeping traffic (a flat ~141 MB an hour) and is not the figure Neon would bill.
+
 ## Known open risk
 
 ### Household-switch race condition

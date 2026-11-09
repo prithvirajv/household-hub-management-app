@@ -387,6 +387,16 @@ async function addMissingNotificationJobs({ householdId, appState, user }) {
   }
 }
 
+// The scheduled refresh below runs every 30 minutes for every household, so it must not download whole household states (the ledger is by far
+// the largest part, and a database host that bills data transfer, like Neon's free plan, counts every byte). notificationCandidates() reads
+// only the time zone, the calendar and the notes that carry a reminder, so the database hands back just those, in the same shape.
+const NOTIFICATION_STATE_SQL = `SELECT id, jsonb_build_object(
+    'household', jsonb_build_object('timeZone', app_state->'household'->'timeZone'),
+    'calendar', app_state->'calendar',
+    'notes', jsonb_build_object('entries', COALESCE(jsonb_path_query_array(app_state, '$.notes.entries[*] ? (@.reminderAt != null)'), '[]'::jsonb))
+  ) AS app_state
+  FROM households`;
+
 // syncNotificationJobs only ever runs from PUT /api/state, so a recurring
 // chore's due date only advances when a client actually opens the app and
 // re-saves between one occurrence and the next. This backfills any missing
@@ -405,7 +415,7 @@ async function refreshAllHouseholdNotificationJobs() {
   }
   const client = await pool.connect();
   try {
-    const households = await client.query("SELECT id, app_state FROM households");
+    const households = await client.query(NOTIFICATION_STATE_SQL);
     for (const household of households.rows) {
       const ownerId = await databasePrimaryOwnerId(client, household.id);
       if (!ownerId) continue;
