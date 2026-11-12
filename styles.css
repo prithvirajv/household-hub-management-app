@@ -9644,3 +9644,87 @@ label.ai-import-toggle span { font-weight: 600; }
 .partners-plan-partial { color: var(--gold-ink); font-weight: 700; }
 .partners-plan-missing { color: var(--coral); font-weight: 700; }
 .partners-plan-pending { color: var(--muted); }
+
+/* ---- Pending at your banks (Transactions): read-only, muted, apart from every total ---- */
+.pending-banks summary { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px 12px; cursor: pointer; }
+.pending-banks summary .muted { font-weight: 400; }
+.pending-banks-account { margin-top: 12px; }
+.pending-banks-account h4 { margin: 0 0 4px; font-size: 0.95rem; }
+.pending-banks-table { width: 100%; border-collapse: collapse; opacity: 0.8; }
+.pending-banks-table td { padding: 6px 4px; border-top: 1px solid var(--line, rgba(128, 128, 128, 0.25)); vertical-align: top; }
+.pending-banks-table td:first-child { white-space: nowrap; width: 1%; }
+.pending-banks-table td:last-child { text-align: right; white-space: nowrap; font-variant-numeric: tabular-nums; }
+
+/* ---- Recipes: add from a video or photos, tips marked Important, and the full-recipe fold-out ---- */
+.sr-only { position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
+.recipe-import { margin: 12px 0; }
+.recipe-import-photos { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 10px 0; }
+.recipe-import-error { color: var(--coral); margin: 8px 0 0; }
+.recipe-import-draft textarea { width: 100%; min-height: 4.5em; resize: vertical; font: inherit; }
+.recipe-tips-editor { border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; margin: 10px 0; }
+.recipe-tips-editor legend { padding: 0 6px; font-weight: 600; }
+.recipe-tip-row { display: grid; grid-template-columns: auto 1fr auto; gap: 8px; align-items: center; margin-bottom: 8px; }
+.recipe-tip-important { display: flex; align-items: center; gap: 6px; white-space: nowrap; font-size: 0.85rem; }
+@media (max-width: 560px) { .recipe-tip-row { grid-template-columns: 1fr auto; } .recipe-tip-important { grid-column: 1 / -1; } }
+.recipe-card-tips { list-style: none; margin: 8px 0 0; padding: 8px 10px; border-left: 3px solid var(--gold, #c58a00); background: color-mix(in srgb, var(--gold, #c58a00) 12%, transparent); border-radius: 0 8px 8px 0; font-size: 0.9rem; }
+.recipe-card-tips li + li { margin-top: 4px; }
+.recipe-card-tips li > span { color: var(--gold, #c58a00); }
+.recipe-card-more { margin-top: 8px; }
+.recipe-card-more summary { cursor: pointer; font-weight: 600; }
+.recipe-card-more h4 { margin: 10px 0 4px; font-size: 0.9rem; }
+.recipe-card-more ul, .recipe-card-more ol { margin: 0; padding-left: 1.2em; }
+
+/* ---- Investments: the whole portfolio as one picture (big total, owner strip, alerts, target mix, accounts) ---- */
+/* The page is a grid item with auto side margins, which would size it to its content (a wide table) instead of the column: width 100% plus min-width 0 keep it to the screen, so a wide table scrolls inside its own box */
+.inv { width: 100%; max-width: 980px; min-width: 0; margin: 0 auto; font-variant-numeric: tabular-nums; }
+.inv > *, .inv-grid2 > * { min-width: 0; }
+.inv-eyebrow { display: block; color: var(--muted); font-weight: 600; }
+.inv-total { font-size: clamp(40px, 9vw, 68px); font-weight: 800; letter-spacing: -0.035em; line-height: 1.05; margin: 6px 0 4px; }
+.inv-sub { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 12px; color: var(--muted); margin: 0; }
+.inv-refresh { padding: 4px 12px; }
+.inv-strip { display: flex; height: 44px; border-radius: 8px; overflow: hidden; gap: 2px; margin: 18px 0 10px; background: var(--bg); }
+.inv-strip span { display: block; min-width: 3px; }
+.inv-strip span:hover { filter: brightness(1.12); }
+.inv-owners { display: flex; flex-wrap: wrap; gap: 6px 22px; }
+.inv-dot { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 6px; }
+.inv-alerts { margin-top: 22px; }
+.inv-alert { border-left: 3px solid var(--coral); padding: 10px 14px; background: var(--panel); border-radius: 0 8px 8px 0; margin: 10px 0; }
+.inv-section { margin-top: 34px; }
+.inv-section h3 { font-size: 1.2rem; margin: 0 0 4px; letter-spacing: -0.01em; }
+.inv-section > p.muted, .inv-section > .muted:first-of-type { margin: 0 0 12px; }
+.inv-subhead { margin-top: 22px !important; }
+.inv-panel { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 6px 16px; }
+.inv-grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-top: 34px; }
+.inv-grid2 .inv-section { margin-top: 0; }
+@media (max-width: 720px) { .inv-grid2 { grid-template-columns: 1fr; } }
+.inv-row { display: grid; grid-template-columns: 130px 1fr 112px; gap: 12px; align-items: center; padding: 8px 0; }
+.inv-row + .inv-row { border-top: 1px solid var(--line); }
+@media (max-width: 560px) { .inv-row { grid-template-columns: 96px 1fr 84px; gap: 8px; } }
+.inv-bar { position: relative; height: 12px; background: var(--soft-blue); border-radius: 3px; }
+.inv-bar i { position: absolute; left: 0; top: 0; bottom: 0; background: var(--text); border-radius: 3px; }
+.inv-tick { position: absolute; top: -5px; bottom: -5px; width: 2px; background: var(--coral); }
+.inv-num { text-align: right; }
+.inv-gap { font-size: 0.8rem; color: var(--muted); }
+.inv-gap.need { color: var(--coral); }
+.inv-pos-class { font-size: 0.85rem; }
+.inv-target { display: inline-flex; align-items: center; gap: 4px; font-size: 0.8rem; color: var(--muted); }
+.inv-target input { width: 54px; padding: 3px 5px; text-align: right; }
+.inv-acct { background: var(--panel); border: 1px solid var(--line); border-left: 4px solid var(--c, var(--blue)); border-radius: 10px; margin: 8px 0; }
+.inv-acct summary { list-style: none; cursor: pointer; display: grid; grid-template-columns: 1fr auto; gap: 4px 12px; padding: 14px 16px; }
+.inv-acct summary::-webkit-details-marker { display: none; }
+.inv-aname { font-weight: 700; }
+.inv-ameta { grid-column: 1; font-size: 0.82rem; color: var(--muted); }
+.inv-aval { grid-row: 1 / 3; grid-column: 2; align-self: center; font-weight: 700; text-align: right; }
+.inv-aval small { display: block; font-weight: 500; font-size: 0.78rem; }
+.inv-body { padding: 0 16px 16px; }
+.inv-fields { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 12px; }
+@media (max-width: 560px) { .inv-fields { grid-template-columns: 1fr; } }
+.inv-scroll { overflow-x: auto; }
+.inv-table { width: 100%; border-collapse: collapse; font-size: 0.9rem; min-width: 560px; }
+.inv-table th { font-weight: 600; color: var(--muted); text-align: left; font-size: 0.78rem; padding: 6px; border-bottom: 1px solid var(--line); }
+.inv-table td { padding: 6px; border-bottom: 1px solid var(--line); vertical-align: top; }
+.inv-table .r { text-align: right; }
+.inv-name { font-size: 0.78rem; }
+.inv-pos { color: var(--green); }
+.inv-neg { color: var(--coral); }
+.inv-disclaimer { margin-top: 28px; font-size: 0.82rem; }

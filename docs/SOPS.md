@@ -321,6 +321,39 @@ job failed. The unique constraint on
 prevents duplicate reminders across repeated state saves; if duplicates are
 seen, check whether that constraint was bypassed by a schema change.
 
+### Investments page
+
+A page of its own (`renderInvestments` in `app.js`, numbers from `lib/investments-logic.js`, loaded as a third classic script, so its top-level
+names start `investments` / `INVESTMENT`). It reads the holding-class net-worth assets (stock and retirement, one group per account) and
+changes none of them except `price`, `value` and `priceUpdatedAt` when Refresh prices runs (one `/api/stock-quote` per distinct ticker). Its own
+choices are saved in `state.goals.investmentsView` (`{ targets: {us,intl,bond,cash}, groups: {groupId: {owner, tax}}, classes: {TICKER: type} }`,
+cleaned by `investmentsSanitizeMeta`), inside the existing `goals` object so no new top-level state key is needed. A ticker's fund type is the
+household's choice, else a built-in guess (`INVESTMENT_KNOWN`, target-date and money-market names, a 5-letter ticker ending in X as a broad
+index, no ticker as "Other / not sure", otherwise a single stock). Alerts: one non-broad position over 10%, employer stock over 10%, sector funds
+over 8% together. The page is a grid item with auto margins, so `.inv` needs `width: 100%` and `min-width: 0` or a wide table widens the whole
+page. The phone app does not have this page yet.
+
+### Recipe import from a video or photos
+
+`POST /api/recipes/import` (`lib/recipe-import.js`, route in `server/index.js`) sends a public YouTube link (rebuilt from its 11-character
+id, so no other address reaches the AI) and/or up to four photos to Gemini as one request (`geminiGenerate`, the same fallback models as the
+text helper, 150 s per attempt) and returns a cleaned DRAFT: name, ingredients, steps, tips (all `important: true`), calories, protein, source
+link. It saves nothing; the Recipes page shows a review form and only "Add recipe" writes the recipe (`state.meals.recipes[]` now also holds
+`steps`, `tips[{text, important}]` and `sourceUrl`; older recipes without them still render). Each person may start 10 imports an hour
+(in-memory, per instance; Cloud Run runs one). Errors: 400 bad link/photo, 422 no recipe found, 429 hourly limit, 502 the AI failed (its message
+is passed on, for example a private video), 503 no `GEMINI_API_KEY`, 504 timeout. A long video is expensive: one 19-minute video was about 75,000
+prompt tokens and 50 seconds. Ingredient items never contain commas (the recipe form stores ingredients as a comma-separated list).
+
+### A card or bank shows "synced" but its newest charges are missing
+
+Credit cards (Citi, Apple Card) list new purchases as *pending* for a day or more, and a pending row can still change or vanish, so no
+sync imports it. Every sync (overnight, or in the app) now keeps each account's pending rows on the account (`account.pendingRows`, newest
+first, at most 25, replaced on every sync that the bank answered for; `markAccountsPending` in `lib/shared-logic.js`). The Transactions page shows them
+in a read-only "Pending at your banks" card above Bank stream, and the Linked accounts line says how many are waiting. They are never in
+the ledger, budget or balances, and each leaves the list when the bank posts it. The nightly log line now carries `"pending": N` next to
+`"imported"`: `imported 0` with `pending > 0` means the bank sent the rows but they have not posted yet; `imported 0` with `pending 0` means
+the bank sent nothing (check the SimpleFIN Bridge messages for an "Auth required" connection).
+
 ### Database data transfer (Neon, or any host that bills egress)
 
 The worker's 30-minute refresh (`refreshAllHouseholdNotificationJobs`) runs for every household, so it reads only what the reminders use

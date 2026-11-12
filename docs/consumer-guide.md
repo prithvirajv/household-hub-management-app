@@ -15,7 +15,7 @@ more convenient.
 [Notes](#notes) · [Journal](#journal) · [Plan](#plan) ·
 [Documents](#documents) · [Decisions](#decisions) ·
 [Shared Expenses](#shared-expenses) · [Meals and Recipes](#meals-and-recipes) ·
-[Goals](#goals) · [Wealth](#wealth) · [Sharing](#sharing) ·
+[Goals](#goals) · [Wealth](#wealth) · [Investments](#investments) · [Sharing](#sharing) ·
 [Reports and Export](#reports-and-export) ·
 [Invitations](#invitations) · [Password Recovery](#password-recovery) ·
 [FAQ](#faq)
@@ -537,6 +537,28 @@ button on every screen. People with view-only access don't see it.
 4. Post the grocery list straight to a budget line when you're ready to
    shop.
 
+**Add a recipe from a video or photos**
+- On **Recipes**, choose **+ From a video or photos**. Paste a public
+  YouTube link, add up to four screenshots or photos of the ingredient
+  list, or both. The AI reads them and drafts the recipe: a name, the
+  ingredients with quantities, the steps, and the cook's tips.
+- Nothing is saved yet. You get a review form to fix the name, the
+  ingredients and steps (one per line) and the tips, then choose **Add
+  recipe**. Every tip starts ticked **Important**; untick the ones that
+  are not, remove any, or add your own.
+- When both a video and photos are given, the photos win for ingredient
+  names and quantities, and the video supplies the steps and tips. A
+  video in another language (Tamil, for example) is translated into
+  English. Quantities that are only spoken can be missed, so check them.
+- Important tips show on the recipe card in a highlighted box; the full
+  ingredient list, steps, other tips and a link back to the video are
+  under **Full recipe**. You can add or change steps and tips on any
+  recipe with **Edit**.
+- The video must be public (not private or members-only). Reading a
+  long video can take a minute, and each person can read about ten
+  recipes an hour. The photos are sent to the AI only for that reading
+  and are never stored.
+
 **Get the most out of it**
 - Build a small library of go-to recipes once — planning a week becomes
   picking from a list instead of starting from zero.
@@ -701,11 +723,15 @@ entry. It is read-only: FamilyLoop can never move money or place trades.
   imported are skipped), and for an account whose bank connection had stopped
   refreshing, back to where its data stopped (up to 50 days), so a charge the
   bank's feed delivers late is still picked up. Pending rows wait
-  until they post; the **Sync now** result names the accounts they are on, with
-  the newest posted row the bank sent for each, so a charge your bank shows but
-  FamilyLoop doesn't can be told apart: still pending in the data feed (banks'
-  sites often show a charge as posted a day or more before the feed does), or
-  not sent at all.
+  until they post, and the **Transactions** page lists them in a **Pending at
+  your banks** card above Bank stream (every sync, overnight or **Sync now**,
+  refreshes it; a charge leaves it by itself when the bank posts it). They are
+  never in your ledger, budget or balances. The line under each bank on this
+  page says how many are waiting, and the **Sync now** result names the accounts
+  they are on, with the newest posted row the bank sent for each, so a charge
+  your bank shows but FamilyLoop doesn't can be told apart: still pending in the
+  data feed (banks' sites often show a charge as posted a day or more before the
+  feed does), or not sent at all.
 - **Investment accounts through SimpleFIN (401(k), IRA, ESPP…):** SimpleFIN
   only reports a total balance for these, so when choosing where the account
   goes, pick the holdings group under **Investment accounts (match balance)**.
@@ -834,6 +860,42 @@ entry. It is read-only: FamilyLoop can never move money or place trades.
   link that hasn't synced in six hours. If a bank asks you to sign in again,
   the link shows **Needs reconnecting** — unlink it and link again.
 - Unlinking keeps everything already imported.
+
+## Investments
+
+**Investments** (in the sidebar under Wealth) shows every stock and fund you
+hold, across all your brokerage and retirement accounts, as one portfolio. It
+reads the holdings you already keep on the Wealth page; add or edit them
+there, or with **Edit holdings** on an account card here.
+
+1. The top shows the **total**, a coloured strip of your accounts by size and
+   owner, and each owner's share.
+2. A red-edged **alert** appears when one stock is more than 10% of the
+   household (counting every account), when your employer stock is, or when
+   sector funds together pass 8%. Broad funds are never warned about.
+3. **Against your target mix** compares US stocks, International, Bonds and
+   Cash with the targets you type in (the red tick is the target), and says how
+   much to add or trim to reach it at today's total. With no target set it just
+   shows the mix.
+4. **What you own** groups the portfolio by fund type, **Tax buckets** shows
+   pre-tax, Roth, HSA and taxable money, and **Largest positions** adds up a
+   ticker held in several accounts.
+5. **Accounts**: open a card to see its holdings and gain, and set who **owns**
+   it and its **tax bucket** (retirement accounts start as Pre-tax, the rest as
+   Taxable).
+6. **Fund types** lists each ticker with a starting guess (VOO as a broad US
+   index, a bond fund as Bonds, a target-date fund as a blend, a holding with
+   no ticker as "Other / not sure"). Change any that are wrong; the mix and
+   alerts follow.
+7. **Refresh prices** fetches today's price once for each ticker. A ticker with
+   no quote keeps its old price, and the page says which ones it could not
+   price.
+
+**Get the most out of it**
+- Set an owner on each account so the strip and the owner totals show who holds
+  what.
+- Values are the shares and prices you have entered or refreshed; they do not
+  change by themselves. This page is for planning, not financial advice.
 
 ## Sharing
 

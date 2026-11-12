@@ -16,6 +16,7 @@ const views = [
   ["recipes", "Recipes", "📖"],
   ["goals", "Goals", "🎯"],
   ["wealth", "Wealth", "🏦"],
+  ["investments", "Investments", "📊"],
   ["sharing", "Sharing", "🤝"],
   ["reports", "Reports", "📈"],
   ["profile", "Profile", "👤"],
@@ -31,7 +32,7 @@ const views = [
 // this list wasn't updated alongside it.
 const NAV_SECTIONS = [
   ["Overview", ["home"]],
-  ["Money", ["budget", "bills", "transactions", "paychecks", "wealth", "reports", "partners"]],
+  ["Money", ["budget", "bills", "transactions", "paychecks", "wealth", "investments", "reports", "partners"]],
   ["Household", ["calendar", "notes", "meals", "recipes", "documents", "decisions", "ious", "sharing"]],
   ["Personal", ["journal", "plan", "goals"]],
   ["Settings", ["profile", "help", "admin"]]
@@ -296,6 +297,7 @@ const documentsThumbnailCache = new Map();
 let documentsInfoExpandedId = null;
 // The new-transaction form on Transactions is folded away until asked for (it is rarely used and took most of the page).
 let newTransactionOpen = false;
+let pendingBanksOpen = false;
 let wealthDocsExpandedKey = null;
 // Investment accounts whose account fields (name, type, opening balance, close date) are open for editing; they stay folded away otherwise.
 const wealthEditingAccounts = new Set();
@@ -1966,6 +1968,8 @@ function renderShell() {
                       ? "Household decisions"
                       : isIousView
                         ? "Shared expenses & debts"
+                        : currentView === "investments"
+                        ? "Investments"
                         : currentView === "partners"
                         ? "Property partners"
                         : isProfileView
@@ -2008,9 +2012,9 @@ function renderShell() {
   const selectedHousehold = households.find((household) => household.selected);
   $("#defaultHouseholdButton").disabled = Boolean(selectedHousehold?.isDefault);
   $("#defaultHouseholdButton").textContent = selectedHousehold?.isDefault ? "Default household" : "Set as default";
-  $(".month-control").hidden = isAdminView || isNotesView || isHelpView || isRecipesView || isGoalsView || isWealthView || isJournalView || isPlanView || isDocumentsView || isDecisionsView || isIousView || currentView === "partners" || isProfileView || isHomeView;
+  $(".month-control").hidden = isAdminView || isNotesView || isHelpView || isRecipesView || isGoalsView || isWealthView || isJournalView || isPlanView || isDocumentsView || isDecisionsView || isIousView || currentView === "partners" || currentView === "investments" || isProfileView || isHomeView;
   $("#syncButton").hidden = isAdminView || isHelpView;
-  $("#downloadCsvButton").hidden = isAdminView || isNotesView || isHelpView || isJournalView || isPlanView || isDocumentsView || isDecisionsView || isIousView || currentView === "partners" || isProfileView || isHomeView;
+  $("#downloadCsvButton").hidden = isAdminView || isNotesView || isHelpView || isJournalView || isPlanView || isDocumentsView || isDecisionsView || isIousView || currentView === "partners" || currentView === "investments" || isProfileView || isHomeView;
   renderNav();
   renderMobileTabBar();
   renderNotificationBell();
@@ -2095,6 +2099,7 @@ function metricsForView() {
   if (currentView === "wealth") return [["Assets", money.format(netWorth().assets), "tracked"], ["Liabilities", money.format(netWorth().liabilities), "tracked"], ["Net worth", money.format(netWorth().total), "current estimate"], ["Debt accounts", String(state.goals.debts.length), "payoff plan"]];
   if (currentView === "admin") return [];
   // The Partners page has its own figures, and the household budget tiles (Income, Assigned...) are not about the partnership.
+  if (currentView === "investments") return [];
   if (currentView === "partners") return [];
   return [["Income", money.format(state.budget.income), "ready to assign"], ["Assigned", money.format(plannedTotal()), "planned this month"], ["Available", money.format(state.budget.income - plannedTotal()), "left to budget"], ["Overdue", money.format(0), "no urgent items"]];
 }
@@ -2179,6 +2184,7 @@ const renderers = {
   recipes: renderRecipes,
   goals: renderGoals,
   wealth: renderWealth,
+  investments: renderInvestments,
   sharing: renderSharing,
   reports: renderReports,
   profile: renderProfile,
@@ -3505,6 +3511,7 @@ function renderTransactions() {
             ` : ""}
           </section>`;
         })()}
+        ${pendingAtBanksCard()}
         <section class="card">
           <div class="section-head">
             <div><span class="card-label">Bank expense</span><h3>Bank stream</h3></div>
@@ -4393,6 +4400,14 @@ let recipeAddFormOpen = false;
 let recipesSearchQuery = "";
 let recipesSortBy = "name";
 let recipesFilterMode = "all";
+// Add a recipe from a public YouTube video and/or photos of an ingredient list: the AI drafts it, the person reviews it, nothing is saved before that.
+let recipeImportOpen = false;
+let recipeImportUrl = "";
+let recipeImportImages = []; // { name, mimeType, imageBase64 } - held in memory only, never saved
+let recipeImportBusy = false;
+let recipeImportError = "";
+let recipeImportDraft = null; // { name, ingredients[], steps[], tips[{text, important}], calories, protein, sourceUrl }
+const recipeDetailsOpen = new Set(); // recipe ids whose "Full recipe" is unfolded, so it survives a re-render
 
 function ensureJournalData() {
   privateData.journal ||= { entries: [] };
@@ -7124,10 +7139,92 @@ function renderMeals() {
     </section>`;
 }
 
+const RECIPE_LINES = (text) => String(text || "").split(/\r?\n/).map((line) => line.replace(/\s+/g, " ").trim()).filter(Boolean);
+
+// A chosen picture as base64 for the import. Large ones (a phone photo can be 10 MB) are shrunk first; a format the browser cannot draw (some
+// HEIC) is sent as it is.
+async function recipeImportPrepareImage(file) {
+  const readAsDataUrl = (blob) => new Promise((resolve, reject) => { const reader = new FileReader(); reader.onload = () => resolve(reader.result); reader.onerror = () => reject(reader.error); reader.readAsDataURL(blob); });
+  let dataUrl = await readAsDataUrl(file);
+  let mimeType = file.type;
+  if (file.size > 1500000) {
+    try {
+      const bitmap = await createImageBitmap(file);
+      const scale = Math.min(1, 1800 / Math.max(bitmap.width, bitmap.height));
+      const canvas = document.createElement("canvas");
+      canvas.width = Math.round(bitmap.width * scale);
+      canvas.height = Math.round(bitmap.height * scale);
+      canvas.getContext("2d").drawImage(bitmap, 0, 0, canvas.width, canvas.height);
+      dataUrl = canvas.toDataURL("image/jpeg", 0.85);
+      mimeType = "image/jpeg";
+    } catch (_error) { /* keep the original */ }
+  }
+  return { name: file.name || "photo", mimeType, imageBase64: dataUrl.slice(dataUrl.indexOf(",") + 1) };
+}
+
+function recipeTipRowHtml(tip) {
+  return `<div class="recipe-tip-row">
+    <label class="recipe-tip-important" title="Important tips are shown first on the recipe"><input type="checkbox" data-recipe-tip-important ${tip.important ? "checked" : ""}> <span>Important</span></label>
+    <input type="text" data-recipe-tip-text value="${escapeHtml(tip.text || "")}" placeholder="A tip from the cook" maxlength="400" aria-label="Tip">
+    <button type="button" class="icon-button danger-button" data-recipe-tip-remove aria-label="Remove this tip">×</button>
+  </div>`;
+}
+
+// The tips list inside a recipe form: rows with an Important tick, added and removed in place so typing is never lost.
+function recipeTipsEditorHtml(tips) {
+  return `<fieldset class="recipe-tips-editor"><legend>Tips</legend>
+    <div data-recipe-tip-rows>${(tips || []).map(recipeTipRowHtml).join("")}</div>
+    <button type="button" class="ghost" data-recipe-tip-add>+ Add a tip</button>
+  </fieldset>`;
+}
+
+function readRecipeTips(root) {
+  return [...root.querySelectorAll(".recipe-tip-row")]
+    .map((row) => ({ text: row.querySelector("[data-recipe-tip-text]").value.replace(/\s+/g, " ").trim().slice(0, 400), important: row.querySelector("[data-recipe-tip-important]").checked }))
+    .filter((tip) => tip.text);
+}
+
+function renderRecipeImportPanel() {
+  const draft = recipeImportDraft;
+  return `<section class="card recipe-import">
+    <div class="section-head">
+      <div><span class="card-label">From a video or photos</span><h3>${draft ? "Check the recipe" : "Add a recipe from a video"}</h3></div>
+      <button type="button" class="ghost" id="recipeImportCloseButton">Close</button>
+    </div>
+    ${draft ? `
+    <form id="recipeImportForm" class="recipe-builder recipe-import-draft">
+      <p class="muted" role="status">The AI drafted this from your ${draft.sourceUrl ? "video" : "photos"}. Fix anything that is off, then add it. Nothing is saved until you do.</p>
+      <label>Name<input name="name" value="${escapeHtml(draft.name)}" required placeholder="Recipe name"></label>
+      <label>Ingredients (one per line)<textarea name="ingredients" rows="${Math.min(14, Math.max(4, draft.ingredients.length + 1))}">${escapeHtml(draft.ingredients.join("\n"))}</textarea></label>
+      <label>Steps (one per line)<textarea name="steps" rows="${Math.min(12, Math.max(3, draft.steps.length + 1))}">${escapeHtml(draft.steps.join("\n"))}</textarea></label>
+      ${recipeTipsEditorHtml(draft.tips)}
+      <label>Calories<input name="calories" type="number" min="0" value="${Number(draft.calories || 0)}"></label>
+      <label>Protein (g)<input name="protein" type="number" min="0" value="${Number(draft.protein || 0)}"></label>
+      ${draft.sourceUrl ? `<small class="muted">Source: <a href="${escapeHtml(draft.sourceUrl)}" target="_blank" rel="noopener noreferrer">the video</a></small>` : ""}
+      <div class="recipe-form-actions">
+        <button class="ghost" id="recipeImportDiscardButton" type="button">Discard</button>
+        <button type="submit">Add recipe</button>
+      </div>
+    </form>` : `
+    <p class="muted">Paste a public YouTube link, add screenshots of the ingredient list, or both. The AI reads them and drafts the recipe, with the cook's tips marked Important. Spoken quantities can be missed, so check the draft.</p>
+    <label>YouTube link<input type="url" id="recipeImportUrl" value="${escapeHtml(recipeImportUrl)}" placeholder="https://youtu.be/…" autocomplete="off"></label>
+    <div class="recipe-import-photos">
+      <label class="documents-upload-button">+ Add photos of the ingredients<input type="file" id="recipeImportFiles" accept="image/*" multiple></label>
+      ${recipeImportImages.map((image, index) => `<span class="pill">${escapeHtml(image.name)} <button type="button" class="icon-button" data-recipe-import-remove="${index}" aria-label="Remove ${escapeHtml(image.name)}">×</button></span>`).join("")}
+    </div>
+    ${recipeImportError ? `<p class="recipe-import-error" role="alert">${escapeHtml(recipeImportError)}</p>` : ""}
+    <div class="recipe-form-actions">
+      <button type="button" id="recipeImportRunButton" ${recipeImportBusy ? "disabled" : ""}>${recipeImportBusy ? "Reading… a video can take a minute" : "Read the recipe"}</button>
+    </div>`}
+  </section>`;
+}
+
 function renderRecipeCard(recipe, plannedIds) {
   const isPlanned = plannedIds.has(recipe.id);
   const visibleIngredients = recipe.ingredients.slice(0, 4);
   const extraCount = recipe.ingredients.length - visibleIngredients.length;
+  const tips = Array.isArray(recipe.tips) ? recipe.tips : [];
+  const steps = Array.isArray(recipe.steps) ? recipe.steps : [];
   return `<article class="recipe-card-v2 card">
     <div class="recipe-card-thumb" style="background:${recipeThumbColor(recipe.name)}">
       <span>${recipeEmoji(recipe.name)}</span>
@@ -7135,8 +7232,16 @@ function renderRecipeCard(recipe, plannedIds) {
     </div>
     <div class="recipe-card-body">
       <strong>${escapeHtml(recipe.name)}</strong>
-      <small>${recipe.calories} cal · ${recipe.protein}g protein</small>
+      ${recipe.calories || recipe.protein ? `<small>${recipe.calories} cal · ${recipe.protein}g protein</small>` : ""}
       <div class="mini-tags">${visibleIngredients.map((ingredient) => `<span>${escapeHtml(ingredient)}</span>`).join("")}${extraCount > 0 ? `<span>+${extraCount}</span>` : ""}</div>
+      ${tips.some((tip) => tip.important) ? `<ul class="recipe-card-tips">${tips.filter((tip) => tip.important).map((tip) => `<li><span aria-hidden="true">★</span> <b class="sr-only">Important: </b>${escapeHtml(tip.text)}</li>`).join("")}</ul>` : ""}
+      ${steps.length || tips.some((tip) => !tip.important) || recipe.sourceUrl || extraCount > 0 ? `<details class="recipe-card-more" data-recipe-details="${escapeHtml(recipe.id)}" ${recipeDetailsOpen.has(recipe.id) ? "open" : ""}>
+        <summary>Full recipe</summary>
+        <h4>Ingredients</h4><ul>${recipe.ingredients.map((ingredient) => `<li>${escapeHtml(ingredient)}</li>`).join("")}</ul>
+        ${steps.length ? `<h4>Steps</h4><ol>${steps.map((step) => `<li>${escapeHtml(step)}</li>`).join("")}</ol>` : ""}
+        ${tips.some((tip) => !tip.important) ? `<h4>Other tips</h4><ul>${tips.filter((tip) => !tip.important).map((tip) => `<li>${escapeHtml(tip.text)}</li>`).join("")}</ul>` : ""}
+        ${recipe.sourceUrl ? `<p><a href="${escapeHtml(recipe.sourceUrl)}" target="_blank" rel="noopener noreferrer">Watch the video</a></p>` : ""}
+      </details>` : ""}
     </div>
     <div class="recipe-actions">
       <button class="ghost" type="button" data-select-recipe="${recipe.id}">Use in Meals</button>
@@ -7157,8 +7262,9 @@ function renderRecipes() {
       <section class="card">
         <div class="section-head">
           <div><span class="card-label">Recipe setup</span><h3>Saved recipes</h3></div>
-          ${!showForm ? `<button id="openRecipeFormButton" type="button">+ Add recipe</button>` : ""}
+          ${!showForm ? `<div class="button-row"><button class="ghost" id="openRecipeImportButton" type="button">+ From a video or photos</button><button id="openRecipeFormButton" type="button">+ Add recipe</button></div>` : ""}
         </div>
+        ${recipeImportOpen && !showForm ? renderRecipeImportPanel() : ""}
         ${showForm ? `
         <form id="recipeForm" class="recipe-builder">
           <input name="recipeId" type="hidden" value="${editingRecipe?.id || ""}">
@@ -7166,6 +7272,8 @@ function renderRecipes() {
           <label>Ingredients<input name="ingredients" placeholder="onion, tomato, lentils" value="${editingRecipe?.ingredients.join(", ") || ""}" required></label>
           <label>Calories<input name="calories" type="number" min="0" value="${editingRecipe?.calories ?? 400}"></label>
           <label>Protein (g)<input name="protein" type="number" min="0" value="${editingRecipe?.protein ?? 20}"></label>
+          <label>Steps (one per line, optional)<textarea name="steps" rows="3">${escapeHtml((editingRecipe?.steps || []).join("\n"))}</textarea></label>
+          ${recipeTipsEditorHtml(editingRecipe?.tips || [])}
           <div class="recipe-form-actions">
             <button class="ghost" id="cancelRecipeEditButton" type="button">Cancel</button>
             <button type="submit">${editingRecipe ? "Update recipe" : "Add recipe"}</button>
@@ -7238,6 +7346,147 @@ function renderGoals() {
         }).join("") : `<div class="onboarding-empty compact-onboarding"><div class="empty-symbol" aria-hidden="true">◎</div><h3>Create your first goal</h3><p>Give it a target amount and date, then update the saved balance as you make progress.</p><button id="emptyAddGoalButton" type="button">Add a goal</button></div>`}
       </section>
     </section>`;
+}
+
+// ---- Investments page: the whole portfolio (every stock and fund, by account) as one picture. The numbers come from lib/investments-logic.js;
+// the page's own choices (owner and tax bucket per account, a fund type per ticker, the target mix) live in state.goals.investmentsView.
+const INVESTMENT_OWNER_COLORS = ["var(--blue)", "var(--coral)", "var(--green)", "var(--gold)", "#8a63c9", "#2b9aa0"];
+const investmentsOpen = new Set(); // account groups whose card is unfolded, so it survives a re-render
+let investmentsPriceStatus = "";
+let investmentsPriceBusy = false;
+
+const investmentsPct = (share) => `${(share * 100).toFixed(1)}%`;
+
+// Saves a change to the page settings (cleaned), then redraws.
+function investmentsUpdateMeta(change) {
+  const meta = investmentsSanitizeMeta(state.goals.investmentsView);
+  change(meta);
+  state.goals.investmentsView = investmentsSanitizeMeta(meta);
+  autosaveState();
+  render();
+}
+
+function investmentsPricedAtText() {
+  const stamps = state.goals.netWorth.assets.filter((asset) => isHoldingAssetClass(asset.assetClass) && asset.priceUpdatedAt).map((asset) => asset.priceUpdatedAt).sort();
+  return stamps.length ? `Prices refreshed ${new Date(stamps[stamps.length - 1]).toLocaleDateString()}` : "Prices are as last entered";
+}
+
+// Fetches today's price for every ticker held (once per ticker, however many accounts hold it) and stores it on each holding.
+async function investmentsRefreshPrices() {
+  if (investmentsPriceBusy) return;
+  const holdings = state.goals.netWorth.assets.filter((asset) => isHoldingAssetClass(asset.assetClass) && String(asset.symbol || "").trim() && asset.holdingType !== "cash");
+  const symbols = [...new Set(holdings.map((asset) => asset.symbol.trim().toUpperCase()))];
+  if (!symbols.length) { investmentsPriceStatus = "Add a ticker symbol to a holding first."; render(); return; }
+  investmentsPriceBusy = true;
+  let updated = 0;
+  const missed = [];
+  for (const [index, symbol] of symbols.entries()) {
+    investmentsPriceStatus = `Updating prices… ${index + 1} of ${symbols.length}`;
+    const status = $("#investmentsPriceStatus");
+    if (status) status.textContent = investmentsPriceStatus;
+    try {
+      const result = await api(`/api/stock-quote?symbol=${encodeURIComponent(symbol)}`);
+      if (!(Number(result.price) > 0)) throw new Error("no price");
+      holdings.filter((asset) => asset.symbol.trim().toUpperCase() === symbol).forEach((asset) => { asset.price = result.price; asset.value = assetValue(asset); asset.priceUpdatedAt = new Date().toISOString(); });
+      updated += 1;
+    } catch (_error) { missed.push(symbol); }
+  }
+  investmentsPriceBusy = false;
+  investmentsPriceStatus = `${updated} price${updated === 1 ? "" : "s"} updated${missed.length ? `; no quote for ${missed.slice(0, 6).join(", ")}${missed.length > 6 ? "…" : ""}` : ""}.`;
+  autosaveState();
+  render();
+}
+
+function renderInvestments() {
+  const meta = investmentsSanitizeMeta(state.goals.investmentsView);
+  const snap = investmentsSnapshot(state.goals.netWorth.assets, meta);
+  if (!snap.groups.length) {
+    return `<section class="card inv-empty"><div class="onboarding-empty compact-onboarding"><div class="empty-symbol" aria-hidden="true">📊</div><h3>Your investments, in one picture</h3>
+      <p>Add the stocks and funds in each brokerage or retirement account on the Wealth page (or link the account there) and they appear here: total, who holds what, your mix against a target, and warnings when one holding gets too big.</p>
+      <button type="button" id="investmentsGoWealth">Go to Wealth</button></div></section>`;
+  }
+  const T = snap.total || 1;
+  const owners = Object.keys(snap.byOwner).sort((a, b) => snap.byOwner[b] - snap.byOwner[a]);
+  const colorOf = (owner) => INVESTMENT_OWNER_COLORS[Math.max(0, owners.indexOf(owner)) % INVESTMENT_OWNER_COLORS.length];
+  const gaps = investmentsGaps(snap, meta.targets);
+  const alerts = investmentsAlerts(snap);
+  const ownerChoices = [...new Set(["Household", ...calendarAssigneeOptions().map((member) => member.name).filter(Boolean), ...snap.groups.map((group) => group.owner)])];
+  const positionCount = snap.positions.length;
+  const bar = (share, tick) => `<div class="inv-bar"><i style="width:${Math.min(100, share * 100).toFixed(1)}%"></i>${tick === null ? "" : `<span class="inv-tick" style="left:calc(${Math.min(100, tick * 100)}% - 1px)"></span>`}</div>`;
+  const alertHtml = alerts.map((alert) => {
+    if (alert.kind === "employer") return `Employer stock is <b>${investmentsPct(alert.share)}</b> of the household, ${money.format(alert.value)}.`;
+    if (alert.kind === "sector") return `Sector funds together are <b>${investmentsPct(alert.share)}</b> of the household, ${money.format(alert.value)}, on top of the weight those sectors already carry inside your broad funds.`;
+    return `<b>${escapeHtml(alert.label)}</b> is <b>${investmentsPct(alert.share)}</b> of the household across all accounts (${money.format(alert.value)}).`;
+  });
+  const fundTypes = new Map();
+  snap.groups.forEach((group) => group.rows.forEach((row) => { if (row.symbol && !fundTypes.has(row.symbol)) fundTypes.set(row.symbol, { name: row.name, cls: snap.symbolClass[row.label], value: snap.bySymbol[row.label] }); }));
+  return `<div class="inv">
+    <section class="inv-hero">
+      <span class="inv-eyebrow">Household portfolio</span>
+      <div class="inv-total">${money.format(snap.total)}</div>
+      <p class="inv-sub">${snap.groups.length} account${snap.groups.length === 1 ? "" : "s"} · ${positionCount} position${positionCount === 1 ? "" : "s"} · ${escapeHtml(investmentsPricedAtText())}
+        <button type="button" class="ghost inv-refresh" id="investmentsRefreshPrices" ${investmentsPriceBusy ? "disabled" : ""}>${investmentsPriceBusy ? "Updating…" : "Refresh prices"}</button>
+        <span id="investmentsPriceStatus" class="muted" role="status">${escapeHtml(investmentsPriceStatus)}</span></p>
+      <div class="inv-strip" role="img" aria-label="Accounts by size, coloured by owner">${snap.groups.map((group) => `<span style="flex:${Math.max(group.value, 1)};background:${colorOf(group.owner)}" title="${escapeHtml(group.owner)} · ${escapeHtml(group.name)}: ${money.format(group.value)}"></span>`).join("")}</div>
+      <div class="inv-owners">${owners.map((owner) => `<span><i class="inv-dot" style="background:${colorOf(owner)}"></i>${escapeHtml(owner)} <b>${money.format(snap.byOwner[owner])}</b> <small class="muted">${investmentsPct(snap.byOwner[owner] / T)}</small></span>`).join("")}</div>
+    </section>
+    ${alertHtml.length ? `<section class="inv-alerts">${alertHtml.map((html) => `<div class="inv-alert">${html}</div>`).join("")}</section>` : ""}
+    <section class="inv-section">
+      <h3>Against your target mix</h3>
+      <p class="muted">The tick is your target. The gap is what it would take to reach it at today's total.${gaps.hasTarget ? ` Your targets add up to ${gaps.targetSum}%${gaps.targetSum === 100 ? "" : " (aim for 100)"}.` : " Set a target for each bucket to see the gap."}</p>
+      <div class="inv-panel">${gaps.buckets.map((bucket) => `<div class="inv-row">
+        <div>${escapeHtml(bucket.label)}<div class="inv-gap ${gaps.hasTarget && Math.abs(bucket.gap) > snap.total * 0.02 ? "need" : ""}">${gaps.hasTarget ? `${bucket.gap >= 0 ? "Add " : "Trim "}${money.format(Math.abs(bucket.gap))}` : "no target set"}</div></div>
+        ${bar(bucket.share, gaps.hasTarget ? bucket.target / 100 : null)}
+        <div class="inv-num">${investmentsPct(bucket.share)} <span class="inv-target">target <input type="number" min="0" max="100" step="1" value="${bucket.target}" data-inv-target="${bucket.key}" aria-label="Target percent for ${escapeHtml(bucket.label)}">%</span></div>
+      </div>`).join("")}</div>
+    </section>
+    <section class="inv-grid2">
+      <div class="inv-section"><h3>What you own</h3><p class="muted">Grouped by fund type across every account.</p>
+        <div class="inv-panel">${Object.entries(snap.byClass).sort((a, b) => b[1] - a[1]).map(([cls, value]) => `<div class="inv-row"><div>${escapeHtml(cls)}</div>${bar(value / T, null)}<div class="inv-num">${investmentsPct(value / T)}<div class="inv-gap">${money.format(value)}</div></div></div>`).join("")}</div></div>
+      <div class="inv-section"><h3>Tax buckets</h3><p class="muted">Where a new bond or international fund can go without a tax bill.</p>
+        <div class="inv-panel">${INVESTMENT_TAX_TYPES.map((tax) => `<div class="inv-row"><div>${tax}</div>${bar((snap.byTax[tax] || 0) / T, null)}<div class="inv-num">${investmentsPct((snap.byTax[tax] || 0) / T)}<div class="inv-gap">${money.format(snap.byTax[tax] || 0)}</div></div></div>`).join("")}</div>
+        <h3 class="inv-subhead">Largest positions</h3>
+        <div class="inv-panel">${snap.positions.slice(0, 8).map((position) => `<div class="inv-row"><div><b>${escapeHtml(position.label)}</b></div><div class="inv-pos-class muted">${escapeHtml(position.cls)}</div><div class="inv-num">${investmentsPct(position.share)}<div class="inv-gap">${money.format(position.value)}</div></div></div>`).join("")}</div></div>
+    </section>
+    <section class="inv-section">
+      <h3>Accounts</h3><p class="muted">Open an account to see its holdings. Set who owns it and its tax bucket; use Edit holdings to change shares, prices or tickers.</p>
+      ${snap.groups.map((group) => `<details class="inv-acct" style="--c:${colorOf(group.owner)}" data-inv-group="${escapeHtml(group.groupId)}" ${investmentsOpen.has(group.groupId) ? "open" : ""}>
+        <summary><span class="inv-aname">${escapeHtml(group.name)}</span>
+          <span class="inv-aval">${money.format(group.value)}${group.gain ? `<small class="${group.gain.amount >= 0 ? "inv-pos" : "inv-neg"}">${group.gain.amount >= 0 ? "+" : "−"}${money.format(Math.abs(group.gain.amount))}</small>` : ""}</span>
+          <span class="inv-ameta">${escapeHtml(group.owner)} · ${escapeHtml(group.tax)} · ${group.rows.length} holding${group.rows.length === 1 ? "" : "s"} · ${investmentsPct(group.value / T)} of the household</span></summary>
+        <div class="inv-body">
+          <div class="inv-fields">
+            <label>Owner<select data-inv-owner="${escapeHtml(group.groupId)}">${ownerChoices.map((owner) => `<option ${owner === group.owner ? "selected" : ""}>${escapeHtml(owner)}</option>`).join("")}</select></label>
+            <label>Tax bucket<select data-inv-tax="${escapeHtml(group.groupId)}">${INVESTMENT_TAX_TYPES.map((tax) => `<option ${tax === group.tax ? "selected" : ""}>${tax}</option>`).join("")}</select></label>
+          </div>
+          <div class="inv-scroll"><table class="inv-table"><thead><tr><th>Holding</th><th class="r">Shares</th><th class="r">Price</th><th class="r">Value</th><th class="r">Share</th><th class="r">Gain</th></tr></thead><tbody>
+            ${group.rows.map((row) => { const gain = row.hasCostBasis ? holdingGainLoss(row.item) : null; return `<tr><td><b>${escapeHtml(row.label)}</b>${row.symbol && row.name && row.name !== row.symbol ? `<div class="muted inv-name">${escapeHtml(row.name)}</div>` : ""}</td><td class="r">${row.shares ? row.shares.toLocaleString(undefined, { maximumFractionDigits: 4 }) : "—"}</td><td class="r">${row.price ? `$${row.price.toFixed(2)}` : "—"}</td><td class="r">${money.format(row.value)}</td><td class="r">${investmentsPct(row.value / T)}</td><td class="r ${gain ? (gain.amount >= 0 ? "inv-pos" : "inv-neg") : ""}">${gain ? `${gain.amount >= 0 ? "+" : "−"}${money.format(Math.abs(gain.amount))}` : "—"}</td></tr>`; }).join("")}
+          </tbody></table></div>
+          <div class="button-row"><button type="button" class="ghost" data-inv-edit="${escapeHtml(group.groupId)}">Edit holdings</button></div>
+        </div></details>`).join("")}
+    </section>
+    <section class="inv-section">
+      <h3>Fund types</h3><p class="muted">Each ticker's type decides which mix bucket it counts toward and whether it is warned about. These are starting guesses; change any that are wrong.</p>
+      <div class="inv-panel inv-scroll"><table class="inv-table"><thead><tr><th>Ticker</th><th>Name</th><th>Type</th><th class="r">Household total</th></tr></thead><tbody>
+        ${[...fundTypes.entries()].sort((a, b) => b[1].value - a[1].value).map(([symbol, info]) => `<tr><td><b>${escapeHtml(symbol)}</b></td><td class="muted">${escapeHtml(info.name && info.name !== symbol ? info.name : "")}</td><td><select data-inv-class="${escapeHtml(symbol)}" aria-label="Fund type for ${escapeHtml(symbol)}">${Object.keys(INVESTMENT_CLASSES).map((cls) => `<option ${cls === info.cls ? "selected" : ""}>${escapeHtml(cls)}</option>`).join("")}</select></td><td class="r">${money.format(info.value)}</td></tr>`).join("")}
+      </tbody></table></div>
+    </section>
+    <p class="muted inv-disclaimer">For planning only, not financial advice. Values are the shares and prices you have entered or refreshed; they do not update by themselves.</p>
+  </div>`;
+}
+
+function bindInvestmentsEvents() {
+  if (currentView !== "investments") return;
+  $("#investmentsGoWealth")?.addEventListener("click", () => { void goToViewAndRun("wealth", () => {}); });
+  $("#investmentsRefreshPrices")?.addEventListener("click", () => { void investmentsRefreshPrices(); });
+  document.querySelectorAll("[data-inv-group]").forEach((details) => details.addEventListener("toggle", () => {
+    if (details.open) investmentsOpen.add(details.dataset.invGroup); else investmentsOpen.delete(details.dataset.invGroup);
+  }));
+  document.querySelectorAll("[data-inv-target]").forEach((input) => input.addEventListener("change", () => investmentsUpdateMeta((meta) => { meta.targets[input.dataset.invTarget] = Number(input.value) || 0; })));
+  document.querySelectorAll("[data-inv-owner]").forEach((select) => select.addEventListener("change", () => investmentsUpdateMeta((meta) => { meta.groups[select.dataset.invOwner] = { ...(meta.groups[select.dataset.invOwner] || {}), owner: select.value }; })));
+  document.querySelectorAll("[data-inv-tax]").forEach((select) => select.addEventListener("change", () => investmentsUpdateMeta((meta) => { meta.groups[select.dataset.invTax] = { ...(meta.groups[select.dataset.invTax] || {}), tax: select.value }; })));
+  document.querySelectorAll("[data-inv-class]").forEach((select) => select.addEventListener("change", () => investmentsUpdateMeta((meta) => { meta.classes[select.dataset.invClass] = select.value; })));
+  document.querySelectorAll("[data-inv-edit]").forEach((button) => button.addEventListener("click", () => openHoldingsModal(button.dataset.invEdit)));
 }
 
 // Buckets every net-worth asset (not liabilities) into the four classes
@@ -9737,6 +9986,7 @@ function transactionInboxItems() {
 
 function bindViewEvents() {
   bindPartnersEvents();
+  bindInvestmentsEvents();
   if (googleMapsApiKey) attachLocationAutocomplete();
   updateLocationDirectionsPreview();
   $("#calendarQuickAdd [name='location']")?.addEventListener("input", updateLocationDirectionsPreview);
@@ -11224,6 +11474,7 @@ function bindViewEvents() {
   });
 
   $("#newTransactionDetails")?.addEventListener("toggle", (event) => { newTransactionOpen = event.currentTarget.open; });
+  $("#pendingBanksDetails")?.addEventListener("toggle", (event) => { pendingBanksOpen = event.currentTarget.open; });
 
   $("#transactionForm")?.addEventListener("submit", async (event) => {
     event.preventDefault();
@@ -12749,6 +13000,8 @@ function bindViewEvents() {
       editingRecipe.ingredients = String(data.ingredients || "").split(",").map((item) => item.trim()).filter(Boolean);
       editingRecipe.calories = Number(data.calories || 0);
       editingRecipe.protein = Number(data.protein || 0);
+      editingRecipe.steps = RECIPE_LINES(data.steps);
+      editingRecipe.tips = readRecipeTips(event.currentTarget);
       state.meals.plannedWeek.forEach((planned) => {
         if (planned.recipeId === editingRecipe.id) planned.meal = editingRecipe.name;
       });
@@ -12759,13 +13012,97 @@ function bindViewEvents() {
         name,
         ingredients: String(data.ingredients || "").split(",").map((item) => item.trim()).filter(Boolean),
         calories: Number(data.calories || 0),
-        protein: Number(data.protein || 0)
+        protein: Number(data.protein || 0),
+        steps: RECIPE_LINES(data.steps),
+        tips: readRecipeTips(event.currentTarget)
       });
     }
     recipeAddFormOpen = false;
     autosaveState();
     render();
   });
+
+  // Add a recipe from a video and/or photos: the AI drafts it, the person reviews it here, and only "Add recipe" saves anything.
+  const syncRecipeImportDraft = () => {
+    const form = $("#recipeImportForm");
+    if (!form || !recipeImportDraft) return;
+    const data = Object.fromEntries(new FormData(form));
+    recipeImportDraft = { ...recipeImportDraft, name: String(data.name || ""), ingredients: RECIPE_LINES(data.ingredients), steps: RECIPE_LINES(data.steps), tips: readRecipeTips(form), calories: Number(data.calories || 0), protein: Number(data.protein || 0) };
+  };
+  $("#openRecipeImportButton")?.addEventListener("click", () => { recipeImportOpen = true; recipeImportError = ""; render(); $("#recipeImportUrl")?.focus(); });
+  $("#recipeImportCloseButton")?.addEventListener("click", () => {
+    recipeImportOpen = false; recipeImportDraft = null; recipeImportError = ""; recipeImportImages = []; recipeImportUrl = "";
+    render();
+  });
+  $("#recipeImportUrl")?.addEventListener("input", (event) => { recipeImportUrl = event.target.value; });
+  $("#recipeImportFiles")?.addEventListener("change", async (event) => {
+    const files = [...(event.target.files || [])];
+    event.target.value = "";
+    for (const file of files) {
+      if (recipeImportImages.length >= 4) { showToast("You can add up to 4 photos."); break; }
+      if (!file.type.startsWith("image/")) { showToast(`${file.name} is not a picture.`); continue; }
+      try { recipeImportImages.push(await recipeImportPrepareImage(file)); } catch (_error) { showToast(`Couldn't read ${file.name} - try again.`); }
+    }
+    render();
+  });
+  document.querySelectorAll("[data-recipe-import-remove]").forEach((button) => button.addEventListener("click", () => {
+    recipeImportImages.splice(Number(button.dataset.recipeImportRemove), 1);
+    render();
+  }));
+  $("#recipeImportRunButton")?.addEventListener("click", async () => {
+    if (recipeImportBusy) return;
+    const url = recipeImportUrl.trim();
+    if (!url && !recipeImportImages.length) { recipeImportError = "Paste a YouTube link, add photos of the ingredients, or both."; render(); return; }
+    recipeImportBusy = true;
+    recipeImportError = "";
+    render();
+    try {
+      const draft = await api("/api/recipes/import", { method: "POST", body: JSON.stringify({ videoUrl: url, images: recipeImportImages.map(({ mimeType, imageBase64 }) => ({ mimeType, imageBase64 })) }) });
+      recipeImportDraft = { name: draft.name || "", ingredients: draft.ingredients || [], steps: draft.steps || [], tips: draft.tips || [], calories: draft.calories || 0, protein: draft.protein || 0, sourceUrl: draft.sourceUrl || "" };
+    } catch (error) {
+      recipeImportError = error.message || "Couldn't read that recipe.";
+    }
+    recipeImportBusy = false;
+    render();
+  });
+  $("#recipeImportForm")?.addEventListener("input", syncRecipeImportDraft);
+  $("#recipeImportForm")?.addEventListener("change", syncRecipeImportDraft);
+  $("#recipeImportDiscardButton")?.addEventListener("click", () => { recipeImportDraft = null; render(); });
+  $("#recipeImportForm")?.addEventListener("submit", (event) => {
+    event.preventDefault();
+    syncRecipeImportDraft();
+    const draft = recipeImportDraft;
+    let name = String(draft?.name || "").trim();
+    if (!draft || !name) return;
+    const taken = (candidate) => state.meals.recipes.some((recipe) => recipe.name.toLowerCase() === candidate.toLowerCase());
+    if (taken(name)) { let n = 2; while (taken(`${name} (${n})`)) n += 1; name = `${name} (${n})`; }
+    state.meals.recipes.push({
+      id: uniqueId(name), name,
+      ingredients: draft.ingredients.map((item) => item.replace(/\s*,\s*/g, " - ")).filter(Boolean),
+      calories: Number(draft.calories || 0), protein: Number(draft.protein || 0),
+      steps: draft.steps, tips: draft.tips,
+      ...(draft.sourceUrl ? { sourceUrl: draft.sourceUrl } : {})
+    });
+    recipeImportDraft = null; recipeImportOpen = false; recipeImportUrl = ""; recipeImportImages = [];
+    showToast(`Added "${name}" to your recipes.`, { type: "info" });
+    autosaveState();
+    render();
+  });
+  document.querySelectorAll("[data-recipe-tip-add]").forEach((button) => button.addEventListener("click", () => {
+    const rows = button.closest(".recipe-tips-editor")?.querySelector("[data-recipe-tip-rows]");
+    if (!rows) return;
+    rows.insertAdjacentHTML("beforeend", recipeTipRowHtml({ text: "", important: true }));
+    rows.lastElementChild?.querySelector("[data-recipe-tip-text]")?.focus();
+  }));
+  document.querySelectorAll(".recipe-tips-editor").forEach((editor) => editor.addEventListener("click", (event) => {
+    const remove = event.target.closest("[data-recipe-tip-remove]");
+    if (!remove) return;
+    remove.closest(".recipe-tip-row")?.remove();
+    editor.closest("form")?.dispatchEvent(new Event("input", { bubbles: true }));
+  }));
+  document.querySelectorAll("[data-recipe-details]").forEach((details) => details.addEventListener("toggle", () => {
+    if (details.open) recipeDetailsOpen.add(details.dataset.recipeDetails); else recipeDetailsOpen.delete(details.dataset.recipeDetails);
+  }));
 
   $("#cancelRecipeEditButton")?.addEventListener("click", () => {
     state.meals.editingRecipeId = "";
@@ -15672,12 +16009,40 @@ function linkedRunSummary(link) {
   return `Overnight sync ${time}: fetched${run.newRows ? ` ${run.newRows} new` : ""} - not loaded yet.`;
 }
 
+// Charges a bank lists as pending are kept on the account (account.pendingRows) by every sync. They are not imported or counted until the bank posts them.
+function linkedPendingCount(link) {
+  const ids = new Set(Object.values(link.mappings || {}).map((mapping) => mapping?.accountId).filter(Boolean));
+  return (state.accounts || []).filter((account) => ids.has(account.id)).reduce((sum, account) => sum + (Array.isArray(account.pendingRows) ? account.pendingRows.length : 0), 0);
+}
+
+function pendingAtBanksAccounts() {
+  return (state.accounts || []).filter((account) => !account.closedAt && Array.isArray(account.pendingRows) && account.pendingRows.length);
+}
+
+// Transactions page: what the banks list as pending, read-only and apart from every total. It shrinks by itself as the banks post the charges.
+function pendingAtBanksCard() {
+  const accounts = pendingAtBanksAccounts();
+  if (!accounts.length) return "";
+  const rows = accounts.flatMap((account) => account.pendingRows);
+  const charged = rows.reduce((sum, row) => sum + Math.max(0, Number(row.amount || 0)), 0);
+  return `<details class="card pending-banks" id="pendingBanksDetails" ${pendingBanksOpen ? "open" : ""}>
+    <summary><span class="card-label">Not counted yet</span><b>Pending at your banks</b><span class="muted">${rows.length} item${rows.length === 1 ? "" : "s"}${charged ? ` · ${money.format(charged)} in charges` : ""}</span></summary>
+    <p class="muted">Your bank lists these but has not posted them yet. They are not in your ledger, budget or balances; each one comes in by itself once the bank posts it.</p>
+    ${accounts.map((account) => `<div class="pending-banks-account">
+      <h4>${escapeHtml(account.name)}${account.lastSyncedAt ? ` <small class="muted">as of ${escapeHtml(new Date(account.lastSyncedAt).toLocaleDateString())}</small>` : ""}</h4>
+      <table class="pending-banks-table"><tbody>${account.pendingRows.map((row) => `<tr><td>${escapeHtml(formatShortDate(row.date))}</td><td>${escapeHtml(row.payee)}</td><td>${money.format(row.amount)}</td></tr>`).join("")}</tbody></table>
+    </div>`).join("")}
+  </details>`;
+}
+
 function linkedStatusText(link) {
   if (link.status === "needs_reconnect") return "Needs reconnecting - remove it and link again";
   const when = link.lastSyncAt ? `Last synced ${new Date(link.lastSyncAt).toLocaleString()}` : "Not synced yet";
   const base = link.lastError ? `${when} - ${link.lastError}` : when;
   const run = linkedRunSummary(link);
-  return run ? `${base} · ${run}` : base;
+  const pending = linkedPendingCount(link);
+  const pendingNote = pending ? ` · ${pending} pending item${pending === 1 ? "" : "s"} at the bank, not counted until posted (see Transactions)` : "";
+  return `${run ? `${base} · ${run}` : base}${pendingNote}`;
 }
 
 // Home: what needs attention about the bank sync - a connection that needs signing in, an overnight run that did not finish or is waiting for
@@ -15892,6 +16257,8 @@ function applySimplefinSync(link, payload, addRows, { ignoreRemembered = false }
   });
   updateAccountsSyncedFrom(state.accounts, link.mappings, payload.coverage, [...state.transactions, ...(state.transactionInboxDrafts || [])], dateKey(new Date()));
   markAccountsSynced(state.accounts, link.mappings, payload.accounts, dateKey(new Date()), new Date().toISOString());
+  // The charges still pending at the bank are kept on their accounts for the Transactions page (never imported, never counted).
+  markAccountsPending(state.accounts, link.mappings, payload.accounts, payload.transactions, [...state.linkedImportedIds, ...state.transactions.map((t) => t.externalId).filter(Boolean), ...(state.transactionInboxDrafts || []).map((d) => d.externalId).filter(Boolean)]);
   // Bring balances in line with the bank. The ledger alone is matched to the bank's figure (so the balance shown is the bank's), and a
   // row posted from Bank stream later hands its amount back through the opening balance (postDraftToLedger), keeping it there.
   let balancesUpdated = 0;

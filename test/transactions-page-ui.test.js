@@ -88,7 +88,7 @@ test("the Partners page is in the Money navigation and loads its own logic file"
   const html = fs.readFileSync(path.join(__dirname, "..", "index.html"), "utf8");
   assert.match(html, /<script src="\/lib\/partners-logic\.js\?v=[^"]+"><\/script>/);
   assert.match(app, /\["partners", "Partners", "🏘️"\]/);
-  assert.match(app, /\["Money", \["budget", "bills", "transactions", "paychecks", "wealth", "reports", "partners"\]\]/);
+  assert.match(app, /\["Money", \["budget", "bills", "transactions", "paychecks", "wealth", "investments", "reports", "partners"\]\]/);
   assert.match(app, /partners: renderPartners,/);
   assert.match(app, /buildPartnersStatement\(\{ \.\.\.data, accountIds: \[\.\.\.data\.accountIds, PARTNERS_POOL_ID\] \}, partnersRows\(data\), partnersRange\(\)\)/);
 });
@@ -176,4 +176,13 @@ test("checkboxes are always small squares, and the Linked accounts rows share on
   assert.match(tail, /\.invite-form label > input\[type="checkbox"\] \{ width: 18px; \}/);
   assert.match(tail, /\.linked-history-row > button \{ min-height: 38px; height: 38px;/);
   assert.match(tail, /\.linked-account-row \.button-row button \{ min-height: 38px;/);
+});
+
+test("Transactions shows what the banks list as pending, read-only and apart from every total, and the Linked accounts line counts them", () => {
+  assert.match(app, /\$\{pendingAtBanksCard\(\)\}\s*<section class="card">\s*<div class="section-head">\s*<div><span class="card-label">Bank expense<\/span><h3>Bank stream<\/h3>/, "the card sits just above Bank stream");
+  assert.match(app, /<details class="card pending-banks" id="pendingBanksDetails" \$\{pendingBanksOpen \? "open" : ""\}>/);
+  assert.match(app, /\$\("#pendingBanksDetails"\)\?\.addEventListener\("toggle", \(event\) => \{ pendingBanksOpen = event\.currentTarget\.open; \}\)/, "its open state survives a re-render");
+  assert.match(app, /not in your ledger, budget or balances; each one comes in by itself once the bank posts it/);
+  assert.match(app, /markAccountsPending\(state\.accounts, link\.mappings, payload\.accounts, payload\.transactions,/, "the in-app sync keeps the list too");
+  assert.match(app, /pending item\$\{pending === 1 \? "" : "s"\} at the bank, not counted until posted \(see Transactions\)/, "Linked accounts says how many are waiting");
 });

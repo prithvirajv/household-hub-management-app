@@ -734,7 +734,7 @@ function registerLinkedAccountRoutes({ forwardPartnerRows = null, app, requireSe
         const fresh = await store.get(householdId, link.id);
         if (fresh?.stagedAt && link.stagedAt && new Date(fresh.stagedAt).getTime() <= new Date(link.stagedAt).getTime()) await store.update(householdId, link.id, { staged: {}, stagedAt: null });
       }
-      const total = applied.reduce((sum, { result }) => ({ applied: sum.applied + 1, imported: sum.imported + result.imported, added: sum.added + result.added, left: sum.left + result.left, uncategorized: sum.uncategorized + result.uncategorized }), { applied: 0, imported: 0, added: 0, left: 0, uncategorized: 0 });
+      const total = applied.reduce((sum, { result }) => ({ applied: sum.applied + 1, imported: sum.imported + result.imported, added: sum.added + result.added, left: sum.left + result.left, uncategorized: sum.uncategorized + result.uncategorized, pending: sum.pending + (result.pending || 0) }), { applied: 0, imported: 0, added: 0, left: 0, uncategorized: 0, pending: 0 });
       // Counts only (no names or amounts): the record of what each night did, for when a morning looks wrong.
       console.log(`Overnight linked apply: household ${householdId} ${JSON.stringify({ ...total, reasons: Object.fromEntries(applied.flatMap(({ result }) => Object.entries(result.reasons))), aiNote: applied.map(({ result }) => result.aiNote).filter(Boolean)[0] || "" })}`);
       return { ...total, perLink };

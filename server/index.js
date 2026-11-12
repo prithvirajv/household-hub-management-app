@@ -18,6 +18,7 @@ const { defaultState } = require("./default-state");
 const { registerLinkedAccountRoutes } = require("./linked-accounts");
 const { registerPartnerGroupRoutes, forwardHouseholdPartnerRows } = require("./partner-groups");
 const { partnersParseAiSuggestions, partnersSanitizeConfig, PARTNER_KINDS } = require("../lib/partners-logic");
+const { RECIPE_IMPORT_SYSTEM, canonicalYoutubeUrl, buildRecipeImportParts, validateRecipeImportRequest, parseRecipeDraft, createImportLimiter } = require("../lib/recipe-import");
 const { validateJournalPayload, buildDocumentObjectPath, sanitizeFilename, wouldCreateFolderCycle, collectDescendantFolderIds, SMS_CARRIERS, smsGatewayAddress, rollAnnualNotifyAtForward, choreNotifyAt, parseBankStatementPdfText, extractAccountActivityLabel, isValidEmail, parseImageReminderDraft, parseBatchSuggestions, parseHomeBriefing, parseAssistantPlan, pgDumpArgs } = require("../lib/shared-logic");
 const pdfParse = require("pdf-parse");
 const ExcelJS = require("exceljs");
@@ -148,6 +149,7 @@ app.use("/api/private-data/journal", express.json({ limit: "10mb" }));
 app.use("/api/bank-statement", express.json({ limit: "15mb" }));
 app.use("/api/reports", express.json({ limit: "20mb" }));
 app.use("/api/calendar/reminder-from-image", express.json({ limit: "10mb" }));
+app.use("/api/recipes/import", express.json({ limit: "24mb" }));
 app.use(express.json({ limit: "1mb" }));
 app.use(cookieParser(SESSION_SECRET));
 app.use(express.static(path.join(__dirname, ".."), {
@@ -1559,12 +1561,14 @@ function learnedExamplesText(examples) {
 }
 
 // One JSON-answering Gemini call with the same busy-model handling as geminiBatchSuggest (next model in the list, one more pass after a pause).
-async function geminiGenerateText({ prompt, system, maxOutputTokens = 6000 }) {
+// Any mix of parts (text, inline photos, a YouTube link) with the same fallback models as the text-only helper; timeoutMs bounds one attempt (a video read is slow).
+async function geminiGenerate({ parts, system, maxOutputTokens = 6000, timeoutMs = 0 }) {
   if (!GEMINI_API_KEY) { const failure = new Error("AI suggestions are not configured for this deployment"); failure.statusCode = 503; throw failure; }
   const request = (model) => fetch(`${GEMINI_API_BASE_URL}/v1beta/models/${encodeURIComponent(model)}:generateContent?key=${encodeURIComponent(GEMINI_API_KEY)}`, {
     method: "POST",
+    ...(timeoutMs ? { signal: AbortSignal.timeout(timeoutMs) } : {}),
     headers: { "content-type": "application/json" },
-    body: JSON.stringify({ contents: [{ role: "user", parts: [{ text: prompt }] }], systemInstruction: { parts: [{ text: system }] }, generationConfig: { maxOutputTokens, responseMimeType: "application/json" } })
+    body: JSON.stringify({ contents: [{ role: "user", parts }], systemInstruction: { parts: [{ text: system }] }, generationConfig: { maxOutputTokens, responseMimeType: "application/json" } })
   });
   const models = [GEMINI_MODEL, ...GEMINI_FALLBACK_MODELS];
   let response;
@@ -1579,6 +1583,10 @@ async function geminiGenerateText({ prompt, system, maxOutputTokens = 6000 }) {
   }
   if (!response.ok) { const failure = new Error(body?.error?.message || "The AI suggestion service is unavailable right now"); failure.statusCode = 502; throw failure; }
   return body.candidates?.[0]?.content?.parts?.[0]?.text || "";
+}
+
+async function geminiGenerateText({ prompt, system, maxOutputTokens = 6000 }) {
+  return geminiGenerate({ parts: [{ text: prompt }], system, maxOutputTokens });
 }
 
 async function geminiBatchSuggest({ cleanRows, lines, accounts, knownTags, examples = [] }) {
@@ -1797,6 +1805,31 @@ app.post("/api/calendar/reminder-from-image", requireSession, async (req, res, n
     const text = body.candidates?.[0]?.content?.parts?.[0]?.text || "";
     res.json(parseImageReminderDraft(text));
   } catch (error) {
+    next(error);
+  }
+});
+
+// A public YouTube video and/or screenshots of an ingredient list become a DRAFT recipe (name, ingredients, steps, tips) handed back for the person
+// to review and edit; nothing is saved here and the photos are never stored. Same pattern as the Calendar photo import, plus a per-person hourly
+// limit because reading a video costs far more than reading a photo (the AI key is shared by every household).
+const recipeImportLimiter = createImportLimiter({ max: 10, windowMs: 60 * 60 * 1000 });
+app.post("/api/recipes/import", requireSession, requireEditAccess, async (req, res, next) => {
+  try {
+    if (!GEMINI_API_KEY) return res.status(503).json({ error: "AI recipe reading is not configured for this deployment" });
+    const request = validateRecipeImportRequest(req.body);
+    if (request.error) return res.status(400).json({ error: request.error });
+    if (!recipeImportLimiter.take(req.sessionUser.id)) return res.status(429).json({ error: "You have read several recipes in the last hour - try again a little later" });
+    let text;
+    try {
+      text = await geminiGenerate({ parts: buildRecipeImportParts(request), system: RECIPE_IMPORT_SYSTEM, maxOutputTokens: 8000, timeoutMs: 150000 });
+    } catch (error) {
+      if (error?.name === "TimeoutError" || error?.name === "AbortError") return res.status(504).json({ error: "Reading that took too long. A shorter video, or just the ingredient photos, will be quicker." });
+      throw error;
+    }
+    const draft = parseRecipeDraft(text);
+    res.json({ ...draft, sourceUrl: request.videoId ? canonicalYoutubeUrl(request.videoId) : "" });
+  } catch (error) {
+    if (error?.statusCode) return res.status(error.statusCode).json({ error: error.message });
     next(error);
   }
 });

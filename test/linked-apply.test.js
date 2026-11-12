@@ -182,3 +182,40 @@ test("the overnight import leaves out a bank row already covered by a recorded t
   assert.ok(state.linkedImportedIds.includes("sf:A1:1") && state.linkedImportedIds.includes("sf:A1:2"), "their ids are remembered so they are not fetched again");
   assert.ok(result.imported >= 1);
 });
+
+test("charges the bank still lists as pending are kept on their account, never imported or counted, and leave the list when the bank posts them", async () => {
+  const state = baseState();
+  const night1 = { provider: "simplefin", accounts: [{ remoteId: "A1", balance: 900 }, { remoteId: "A2", balance: -150 }], transactions: [
+    row("1", "POSTED CAFE", 12, "2026-10-21"),
+    row("2", "PENDING DINNER", 41.25, "2026-10-25", "A2", { pending: true }),
+    row("3", "PENDING GAS", 30, "2026-10-26", "A2", { pending: true })
+  ] };
+  const first = await applyLinkedPayload(state, link, night1, { suggest: null, createId: ids(), todayKey: TODAY });
+  assert.equal(first.imported, 1, "only the posted row is imported");
+  assert.equal(first.pending, 2, "the night's result says how many were pending, so '0 imported' can be told apart from 'nothing sent'");
+  const card = state.accounts.find((a) => a.id === "card");
+  assert.deepEqual(card.pendingRows.map((r) => [r.payee, r.amount, r.date]), [["PENDING GAS", 30, "2026-10-26"], ["PENDING DINNER", 41.25, "2026-10-25"]], "newest first");
+  assert.equal(state.accounts.find((a) => a.id === "chk").pendingRows, undefined, "an account with none pending has no list");
+  assert.equal(state.transactions.some((t) => /PENDING/.test(t.payee)), false, "not in the ledger");
+  assert.equal(Math.round(balance(state, "card") * 100) / 100, 150, "not in the balance either");
+  assert.equal((state.linkedImportedIds || []).some((id) => /:[23]$/.test(id)), false, "not remembered as imported, so they can still come in when posted");
+  // The bank posts the dinner (new id) and drops the gas one: the next sync replaces the list and imports the posted row.
+  const night2 = { provider: "simplefin", accounts: [{ remoteId: "A1", balance: 900 }, { remoteId: "A2", balance: -191.25 }], transactions: [row("9", "PENDING DINNER", 41.25, "2026-10-25", "A2"), row("3", "PENDING GAS", 30, "2026-10-26", "A2", { pending: true })] };
+  const second = await applyLinkedPayload(state, link, night2, { suggest: null, createId: ids(), todayKey: TODAY });
+  assert.equal(second.imported, 1, "the posted dinner comes in");
+  assert.deepEqual(card.pendingRows.map((r) => r.payee), ["PENDING GAS"], "only what is still pending remains");
+  const night3 = { provider: "simplefin", accounts: [{ remoteId: "A1", balance: 900 }, { remoteId: "A2", balance: -191.25 }], transactions: [] };
+  await applyLinkedPayload(state, link, night3, { suggest: null, createId: ids(), todayKey: TODAY });
+  assert.equal(card.pendingRows, undefined, "an account the bank answered for with nothing pending is cleared");
+});
+
+test("an account the bank did not answer for keeps its pending list, and a failed fetch window leaves every list alone", async () => {
+  const state = baseState();
+  state.accounts.find((a) => a.id === "card").pendingRows = [{ id: "sf:A2:7", date: "2026-10-24", payee: "OLD PENDING", amount: 10 }];
+  const onlyChecking = { provider: "simplefin", accounts: [{ remoteId: "A1", balance: 900 }], transactions: [] };
+  await applyLinkedPayload(state, link, onlyChecking, { suggest: null, createId: ids(), todayKey: TODAY });
+  assert.equal(state.accounts.find((a) => a.id === "card").pendingRows.length, 1, "no answer for the card means no change to its list");
+  const partial = { provider: "simplefin", accounts: [{ remoteId: "A2", balance: -150 }], transactions: [], failedWindows: ["2026-10-01..2026-10-10"] };
+  await applyLinkedPayload(state, link, partial, { suggest: null, createId: ids(), todayKey: TODAY });
+  assert.equal(state.accounts.find((a) => a.id === "card").pendingRows.length, 1, "a window that failed to fetch proves nothing, so the list stays");
+});

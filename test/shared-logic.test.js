@@ -2471,3 +2471,17 @@ test("rankPaychecksForDeposit offers first the paycheck that matches both the pa
   assert.equal(paydayNear(paychecks[0], "2026-11-04"), null, "no payday of the monthly one within two weeks");
   assert.equal(paydayNear(paychecks[1], "2026-11-04").days, 2);
 });
+
+test("markAccountsPending keeps newest pending rows per mapped account, skips known ids, caps the list and clears an account with none", () => {
+  const { markAccountsPending } = require("../lib/shared-logic");
+  const accounts = [{ id: "card", name: "Card" }, { id: "chk", name: "Checking", pendingRows: [{ id: "old", date: "2026-01-01", payee: "STALE", amount: 1 }] }];
+  const mappings = { A1: { accountId: "chk" }, A2: { accountId: "card" }, A3: { groupId: "holdings" } };
+  const tx = (id, date, amount, extra = {}) => ({ externalId: `sf:A2:${id}`, remoteAccountId: "A2", payee: `P${id}`, amount, date, pending: true, ...extra });
+  const rows = [tx("1", "2026-10-20", 5), tx("2", "2026-10-22", 7.456), tx("3", "2026-10-21", 9, { pending: false }), tx("4", "2026-10-23", 3), tx("bad", "2026-10-24", "x")];
+  markAccountsPending(accounts, mappings, [{ remoteId: "A1" }, { remoteId: "A2" }, { remoteId: "A3" }, { remoteId: "ZZ" }], rows, ["sf:A2:4"]);
+  assert.deepEqual(accounts[0].pendingRows.map((r) => [r.id, r.amount]), [["sf:A2:2", 7.46], ["sf:A2:1", 5]], "newest first, posted/known/non-numeric rows left out, amounts rounded to cents");
+  assert.equal(accounts[1].pendingRows, undefined, "answered with nothing pending: cleared");
+  const many = Array.from({ length: 40 }, (_, i) => tx(`m${i}`, `2026-10-${String(1 + (i % 28)).padStart(2, "0")}`, 1 + i));
+  markAccountsPending(accounts, mappings, [{ remoteId: "A2" }], many, []);
+  assert.equal(accounts[0].pendingRows.length, 25, "capped per account so the saved state stays small");
+});
