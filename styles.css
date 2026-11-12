@@ -3804,6 +3804,8 @@ html[data-theme="dark"] .compact-row.overdue {
 
 .recipe-card-v2 {
   display: grid;
+  /* Cards in a row are as tall as the tallest one; the body takes the spare height (its content stays at the top) and the buttons stay at the bottom */
+  grid-template-rows: auto 1fr auto;
   gap: 0;
   padding: 0;
   overflow: hidden;
@@ -3831,6 +3833,7 @@ html[data-theme="dark"] .compact-row.overdue {
 
 .recipe-card-body {
   display: grid;
+  align-content: start;
   gap: 0.3rem;
   padding: 0.65rem 0.7rem;
 }

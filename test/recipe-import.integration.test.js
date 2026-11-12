@@ -10,7 +10,7 @@ async function startGeminiStub(reply) {
     req.on("data", (chunk) => { body += chunk; });
     req.on("end", () => {
       try { requests.push(JSON.parse(body)); } catch (_error) { requests.push(null); }
-      res.writeHead(reply.status || 200, { "Content-Type": "application/json" });
+      res.writeHead((typeof reply.status === "function" ? reply.status(requests.length) : reply.status) || 200, { "Content-Type": "application/json" });
       res.end(JSON.stringify(typeof reply.body === "function" ? reply.body(requests.length) : reply.body));
     });
   });
@@ -101,4 +101,30 @@ test("POST /api/recipes/import says so when the AI finds no recipe or fails, and
     assert.equal(response.status, 502);
     assert.match(response.body.error, /Video is private/);
   } finally { await server2.stop(); await failing.stop(); }
+});
+
+test("POST /api/recipes/import waits out an overloaded AI by going round the models again, and says plainly when it is still busy", async () => {
+  const BUSY = { error: { message: "This model is currently experiencing high demand. Spikes in demand are usually temporary. Please try again later." } };
+  // Busy for the first four requests, then fine: two models x three rounds is seven tries, so the fifth succeeds.
+  const recovering = await startGeminiStub({ status: (n) => (n <= 4 ? 503 : 200), body: (n) => (n <= 4 ? BUSY : answer(RECIPE)) });
+  const env = { GEMINI_API_KEY: "test-key", GEMINI_MODEL: "model-one", GEMINI_FALLBACK_MODELS: "model-two", GEMINI_RETRY_PAUSE_MS: "5" };
+  const server = await startTestServer({ ...env, GEMINI_API_BASE_URL: recovering.url });
+  try {
+    const cookie = await signedIn(server, "recipe-busy-recovers");
+    const response = await server.request("/api/recipes/import", { method: "POST", headers: { cookie }, body: JSON.stringify({ videoUrl: `https://youtu.be/${ID}` }) });
+    assert.equal(response.status, 200, "it kept trying until the AI answered");
+    assert.equal(response.body.name, "Idli Podi");
+    assert.equal(recovering.requests.length, 5);
+  } finally { await server.stop(); await recovering.stop(); }
+
+  const alwaysBusy = await startGeminiStub({ status: 503, body: BUSY });
+  const server2 = await startTestServer({ ...env, GEMINI_API_BASE_URL: alwaysBusy.url });
+  try {
+    const cookie = await signedIn(server2, "recipe-busy-always");
+    const response = await server2.request("/api/recipes/import", { method: "POST", headers: { cookie }, body: JSON.stringify({ videoUrl: `https://youtu.be/${ID}` }) });
+    assert.equal(response.status, 503);
+    assert.match(response.body.error, /very busy right now/, "plain words, not the AI service's own message");
+    assert.doesNotMatch(response.body.error, /Spikes in demand/);
+    assert.equal(alwaysBusy.requests.length, 7, "two models, three rounds, plus one last try of the first");
+  } finally { await server2.stop(); await alwaysBusy.stop(); }
 });

@@ -25,7 +25,11 @@ test("what the person types in the review form survives a re-render, and tips ar
   assert.match(app, /editingRecipe\.tips = readRecipeTips\(event\.currentTarget\)/);
 });
 
-test("a recipe card shows its Important tips first, folds the rest into Full recipe, and hides calories it does not know", () => {
+test("a recipe card shows every ingredient, its Important tips first, folds steps and other tips into Full recipe, and hides calories it does not know", () => {
+  assert.match(app, /<div class="mini-tags">\$\{recipe\.ingredients\.map\(\(ingredient\) => `<span>\$\{escapeHtml\(ingredient\)\}<\/span>`\)\.join\(""\)\}<\/div>/, "all ingredients, none hidden behind a +N");
+  assert.doesNotMatch(app, /extraCount/, "no truncated ingredient list");
+  assert.match(css, /\.recipe-card-v2 \{[^}]*grid-template-rows: auto 1fr auto;/, "spare height goes to the body, not spread between the card's rows");
+  assert.match(css, /\.recipe-card-body \{[^}]*align-content: start;/, "the text stays at the top of the card");
   assert.match(app, /<ul class="recipe-card-tips">\$\{tips\.filter\(\(tip\) => tip\.important\)/);
   assert.match(app, /<details class="recipe-card-more" data-recipe-details="\$\{escapeHtml\(recipe\.id\)\}" \$\{recipeDetailsOpen\.has\(recipe\.id\) \? "open" : ""\}>/, "the fold-out keeps its open state");
   assert.match(app, /\$\{recipe\.calories \|\| recipe\.protein \? `<small>\$\{recipe\.calories\} cal/);

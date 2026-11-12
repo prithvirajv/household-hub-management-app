@@ -88,8 +88,10 @@ const GEMINI_API_BASE_URL = String(process.env.GEMINI_API_BASE_URL || "").trim()
 // key - confirmed against the real API, not assumed. gemini-3.1-flash-lite
 // is the cheapest tier that's actually reachable.
 const GEMINI_MODEL = String(process.env.GEMINI_MODEL || "").trim() || "gemini-3.1-flash-lite";
-// When the main model answers "high demand" (503) or is rate limited, categorization asks these next instead of giving up on the rows.
-const GEMINI_FALLBACK_MODELS = String(process.env.GEMINI_FALLBACK_MODELS || "gemini-2.5-flash,gemini-2.5-flash-lite").split(",").map((model) => model.trim()).filter((model) => model && model !== GEMINI_MODEL);
+// When the main model answers "high demand" (503) or is rate limited, the AI calls ask these next instead of giving up. The 2.5 models this list
+// used to hold now answer 404 "no longer available to new users" (seen in the logs on 2026-11-12, when a busy main model left nothing to fall back
+// to); the 3.5 and 3.8 names are the replacements the API's own 404 message points to, and answer 503 (exist, busy) when overloaded.
+const GEMINI_FALLBACK_MODELS = String(process.env.GEMINI_FALLBACK_MODELS || "gemini-3.8-flash,gemini-3.5-flash-lite").split(",").map((model) => model.trim()).filter((model) => model && model !== GEMINI_MODEL);
 const SESSION_IDLE_MS = Math.max(
   1000,
   Number(process.env.SESSION_IDLE_MS || "") || Number(process.env.SESSION_IDLE_MINUTES || 30) * 60 * 1000
@@ -1562,7 +1564,10 @@ function learnedExamplesText(examples) {
 
 // One JSON-answering Gemini call with the same busy-model handling as geminiBatchSuggest (next model in the list, one more pass after a pause).
 // Any mix of parts (text, inline photos, a YouTube link) with the same fallback models as the text-only helper; timeoutMs bounds one attempt (a video read is slow).
-async function geminiGenerate({ parts, system, maxOutputTokens = 6000, timeoutMs = 0 }) {
+// `rounds` is how many times the whole model list is tried when they answer busy (default one, with one extra try of the first model after a
+// pause); a long video read is worth waiting out a demand spike for, so the recipe import asks for more.
+const GEMINI_RETRY_PAUSE_MS = Math.max(0, Number(process.env.GEMINI_RETRY_PAUSE_MS) || 3000);
+async function geminiGenerate({ parts, system, maxOutputTokens = 6000, timeoutMs = 0, rounds = 1 }) {
   if (!GEMINI_API_KEY) { const failure = new Error("AI suggestions are not configured for this deployment"); failure.statusCode = 503; throw failure; }
   const request = (model) => fetch(`${GEMINI_API_BASE_URL}/v1beta/models/${encodeURIComponent(model)}:generateContent?key=${encodeURIComponent(GEMINI_API_KEY)}`, {
     method: "POST",
@@ -1573,13 +1578,14 @@ async function geminiGenerate({ parts, system, maxOutputTokens = 6000, timeoutMs
   const models = [GEMINI_MODEL, ...GEMINI_FALLBACK_MODELS];
   let response;
   let body;
-  for (let attempt = 0; attempt < models.length + 1; attempt += 1) {
+  const attempts = models.length * Math.max(1, rounds) + 1;
+  for (let attempt = 0; attempt < attempts; attempt += 1) {
     const model = models[attempt % models.length];
     response = await request(model);
     body = await response.json().catch(() => ({}));
     if (response.ok || ![404, 429, 500, 502, 503, 504].includes(response.status)) break;
     console.warn(`Gemini ${model} attempt ${attempt + 1} failed: HTTP ${response.status} ${String(body?.error?.message || "").slice(0, 200)}`);
-    if (attempt + 1 === models.length) await new Promise((resolve) => setTimeout(resolve, 3000));
+    if ((attempt + 1) % models.length === 0 && attempt + 1 < attempts) await new Promise((resolve) => setTimeout(resolve, GEMINI_RETRY_PAUSE_MS));
   }
   if (!response.ok) { const failure = new Error(body?.error?.message || "The AI suggestion service is unavailable right now"); failure.statusCode = 502; throw failure; }
   return body.candidates?.[0]?.content?.parts?.[0]?.text || "";
@@ -1821,9 +1827,11 @@ app.post("/api/recipes/import", requireSession, requireEditAccess, async (req, r
     if (!recipeImportLimiter.take(req.sessionUser.id)) return res.status(429).json({ error: "You have read several recipes in the last hour - try again a little later" });
     let text;
     try {
-      text = await geminiGenerate({ parts: buildRecipeImportParts(request), system: RECIPE_IMPORT_SYSTEM, maxOutputTokens: 8000, timeoutMs: 150000 });
+      text = await geminiGenerate({ parts: buildRecipeImportParts(request), system: RECIPE_IMPORT_SYSTEM, maxOutputTokens: 8000, timeoutMs: 150000, rounds: 3 });
     } catch (error) {
       if (error?.name === "TimeoutError" || error?.name === "AbortError") return res.status(504).json({ error: "Reading that took too long. A shorter video, or just the ingredient photos, will be quicker." });
+      // Google's own wording for an overloaded model ("experiencing high demand...") says nothing the person can act on; say what to do.
+      if (error?.statusCode === 502 && /high demand|overloaded|try again later|quota|resource.?exhausted/i.test(String(error.message))) return res.status(503).json({ error: "The AI service is very busy right now. I tried several times; please try again in a minute or two." });
       throw error;
     }
     const draft = parseRecipeDraft(text);

@@ -7221,8 +7221,6 @@ function renderRecipeImportPanel() {
 
 function renderRecipeCard(recipe, plannedIds) {
   const isPlanned = plannedIds.has(recipe.id);
-  const visibleIngredients = recipe.ingredients.slice(0, 4);
-  const extraCount = recipe.ingredients.length - visibleIngredients.length;
   const tips = Array.isArray(recipe.tips) ? recipe.tips : [];
   const steps = Array.isArray(recipe.steps) ? recipe.steps : [];
   return `<article class="recipe-card-v2 card">
@@ -7233,11 +7231,10 @@ function renderRecipeCard(recipe, plannedIds) {
     <div class="recipe-card-body">
       <strong>${escapeHtml(recipe.name)}</strong>
       ${recipe.calories || recipe.protein ? `<small>${recipe.calories} cal · ${recipe.protein}g protein</small>` : ""}
-      <div class="mini-tags">${visibleIngredients.map((ingredient) => `<span>${escapeHtml(ingredient)}</span>`).join("")}${extraCount > 0 ? `<span>+${extraCount}</span>` : ""}</div>
+      <div class="mini-tags">${recipe.ingredients.map((ingredient) => `<span>${escapeHtml(ingredient)}</span>`).join("")}</div>
       ${tips.some((tip) => tip.important) ? `<ul class="recipe-card-tips">${tips.filter((tip) => tip.important).map((tip) => `<li><span aria-hidden="true">★</span> <b class="sr-only">Important: </b>${escapeHtml(tip.text)}</li>`).join("")}</ul>` : ""}
-      ${steps.length || tips.some((tip) => !tip.important) || recipe.sourceUrl || extraCount > 0 ? `<details class="recipe-card-more" data-recipe-details="${escapeHtml(recipe.id)}" ${recipeDetailsOpen.has(recipe.id) ? "open" : ""}>
+      ${steps.length || tips.some((tip) => !tip.important) || recipe.sourceUrl ? `<details class="recipe-card-more" data-recipe-details="${escapeHtml(recipe.id)}" ${recipeDetailsOpen.has(recipe.id) ? "open" : ""}>
         <summary>Full recipe</summary>
-        <h4>Ingredients</h4><ul>${recipe.ingredients.map((ingredient) => `<li>${escapeHtml(ingredient)}</li>`).join("")}</ul>
         ${steps.length ? `<h4>Steps</h4><ol>${steps.map((step) => `<li>${escapeHtml(step)}</li>`).join("")}</ol>` : ""}
         ${tips.some((tip) => !tip.important) ? `<h4>Other tips</h4><ul>${tips.filter((tip) => !tip.important).map((tip) => `<li>${escapeHtml(tip.text)}</li>`).join("")}</ul>` : ""}
         ${recipe.sourceUrl ? `<p><a href="${escapeHtml(recipe.sourceUrl)}" target="_blank" rel="noopener noreferrer">Watch the video</a></p>` : ""}

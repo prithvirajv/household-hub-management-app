@@ -226,7 +226,7 @@ user secret) are AES-256-GCM encrypted with `LINK_ENCRYPTION_KEY` and never retu
   household before an import keeps autosaving its older copy (the live-price refresh saves every 5 minutes) and each save replaced the imported
   ledger - visible in the logs as `PUT /api/state` request sizes dropping back to the pre-import size at :x3:35 every five minutes. Old mobile
   builds do not send the Clean up header, so Clean up from an old build is refused until updated.
-- **AI categorization limits:** `geminiBatchSuggest` goes to the next model (`GEMINI_FALLBACK_MODELS`, default `gemini-2.5-flash,gemini-2.5-flash-lite`)
+- **AI categorization limits:** `geminiBatchSuggest` goes to the next model (`GEMINI_FALLBACK_MODELS`, default `gemini-3.8-flash,gemini-3.5-flash-lite`; the 2.5 models it used to hold were retired and answer 404, which on 2026-11-12 left nothing to fall back to when the main model was overloaded. `GEMINI_RETRY_PAUSE_MS`, default 3000, is the pause between passes)
   on a 429/5xx/404, then once more round the list after a pause, and logs each failed attempt (`Gemini batch suggest <model> attempt N failed:
   HTTP ...`). "This model is currently experiencing high demand" 503s from the main model are common and last minutes. Rows the AI could not
   categorize still go into the ledger as "Needs a category"; after each night's apply, `fillUncategorizedLedgerRows` asks the AI again for those
@@ -342,7 +342,7 @@ link. It saves nothing; the Recipes page shows a review form and only "Add recip
 `steps`, `tips[{text, important}]` and `sourceUrl`; older recipes without them still render). Each person may start 10 imports an hour
 (in-memory, per instance; Cloud Run runs one). Errors: 400 bad link/photo, 422 no recipe found, 429 hourly limit, 502 the AI failed (its message
 is passed on, for example a private video), 503 no `GEMINI_API_KEY`, 504 timeout. A long video is expensive: one 19-minute video was about 75,000
-prompt tokens and 50 seconds. Ingredient items never contain commas (the recipe form stores ingredients as a comma-separated list).
+prompt tokens and 50 seconds. The import goes round the whole model list three times before giving up (a demand spike is common and a video read is worth waiting for), and an overloaded AI is reported as a 503 "very busy, try again in a minute or two" instead of Google's wording. Ingredient items never contain commas (the recipe form stores ingredients as a comma-separated list).
 
 ### A card or bank shows "synced" but its newest charges are missing
 
