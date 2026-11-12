@@ -25,13 +25,25 @@ test("what the person types in the review form survives a re-render, and tips ar
   assert.match(app, /editingRecipe\.tips = readRecipeTips\(event\.currentTarget\)/);
 });
 
-test("a recipe card shows every ingredient, its Important tips first, folds steps and other tips into Full recipe, and hides calories it does not know", () => {
+test("a recipe card is compact (name, calories, every ingredient) and opens the full recipe in a pop-up", () => {
   assert.match(app, /<div class="mini-tags">\$\{recipe\.ingredients\.map\(\(ingredient\) => `<span>\$\{escapeHtml\(ingredient\)\}<\/span>`\)\.join\(""\)\}<\/div>/, "all ingredients, none hidden behind a +N");
   assert.doesNotMatch(app, /extraCount/, "no truncated ingredient list");
+  assert.doesNotMatch(app, /recipe-card-tips|recipe-card-more|recipeDetailsOpen/, "no tips box or fold-out on the card itself");
+  assert.match(app, /<div class="recipe-card-body" data-open-recipe="\$\{escapeHtml\(recipe\.id\)\}" role="button" tabindex="0"/, "the card opens the recipe, by mouse or keyboard");
+  assert.match(app, /recipe-meta-pill important">★ \$\{importantCount\} important tip/, "a small pill says there are important tips");
   assert.match(css, /\.recipe-card-v2 \{[^}]*grid-template-rows: auto 1fr auto;/, "spare height goes to the body, not spread between the card's rows");
   assert.match(css, /\.recipe-card-body \{[^}]*align-content: start;/, "the text stays at the top of the card");
-  assert.match(app, /<ul class="recipe-card-tips">\$\{tips\.filter\(\(tip\) => tip\.important\)/);
-  assert.match(app, /<details class="recipe-card-more" data-recipe-details="\$\{escapeHtml\(recipe\.id\)\}" \$\{recipeDetailsOpen\.has\(recipe\.id\) \? "open" : ""\}>/, "the fold-out keeps its open state");
-  assert.match(app, /\$\{recipe\.calories \|\| recipe\.protein \? `<small>\$\{recipe\.calories\} cal/);
-  assert.match(css, /\.recipe-card-tips \{[^}]*border-left: 3px solid/, "important tips are visibly highlighted");
+  assert.match(app, /\$\{recipeDetailId && recipeById\(recipeDetailId\) \? renderRecipeDetailDialog\(recipeById\(recipeDetailId\)\) : ""\}/, "the pop-up is drawn with the page while a recipe is open");
+});
+
+test("the recipe pop-up shows Important tips first, then ingredients (a checklist) beside numbered steps, more tips and the video link", () => {
+  const dialog = app.slice(app.indexOf("function renderRecipeDetailDialog("), app.indexOf("function renderRecipes() {"));
+  const order = ["recipe-detail-important", "recipe-checklist", "recipe-steps", "recipe-other-tips", "recipe-detail-source", "recipe-detail-actions"].map((marker) => dialog.indexOf(marker));
+  assert.ok(order.every((position, index) => position > 0 && (index === 0 || position > order[index - 1])), "sections are in reading order");
+  assert.match(dialog, /data-select-recipe="\$\{escapeHtml\(recipe\.id\)\}">Use in Meals<\/button>\s*<button type="button" class="ghost" data-edit-recipe=/, "Use in Meals and Edit are in the pop-up too");
+  assert.match(app, /const closeRecipeDetail = \(\) => \{ recipeDetailId = ""; recipeDetailDialog\.close\(\); \};/, "closing forgets the recipe at once, not in the delayed close event");
+  assert.match(app, /if \(event\.target\.closest\("\[data-select-recipe\], \[data-edit-recipe\]"\)\) recipeDetailId = "";\s*\}, true\);/, "Use in Meals and Edit do not leave the pop-up to reopen over the next screen");
+  assert.match(css, /\.recipe-detail-dialog\[open\] \{ display: grid;/, "only an open dialog is displayed");
+  assert.match(css, /@media \(max-width: 640px\) \{ \.recipe-detail-cols \{ grid-template-columns: minmax\(0, 1fr\)/, "one column on a phone");
+  assert.match(css, /\.recipe-checklist input:checked \+ span \{ text-decoration: line-through;/, "ticked ingredients are struck through");
 });

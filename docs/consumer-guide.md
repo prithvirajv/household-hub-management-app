@@ -550,10 +550,13 @@ button on every screen. People with view-only access don't see it.
   names and quantities, and the video supplies the steps and tips. A
   video in another language (Tamil, for example) is translated into
   English. Quantities that are only spoken can be missed, so check them.
-- Important tips show on the recipe card in a highlighted box; the full
-  ingredient list, steps, other tips and a link back to the video are
-  under **Full recipe**. You can add or change steps and tips on any
-  recipe with **Edit**.
+- A recipe card stays compact: the name, calories and every ingredient,
+  with small "6 steps" and "★ 3 important tips" tags. **Click the card** to
+  open the full recipe in a pop-up: the Important tips first, then the
+  ingredients as a checklist (tick them off as you gather them) beside the
+  numbered steps, any other tips, and a link back to the video. **Use in
+  Meals** and **Edit** are in the pop-up too, and you can add or change steps
+  and tips on any recipe with **Edit**.
 - The video must be public (not private or members-only). Reading a
   long video can take a minute, and each person can read about ten
   recipes an hour. The photos are sent to the AI only for that reading

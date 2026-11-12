@@ -9669,13 +9669,6 @@ label.ai-import-toggle span { font-weight: 600; }
 .recipe-tip-row { display: grid; grid-template-columns: auto 1fr auto; gap: 8px; align-items: center; margin-bottom: 8px; }
 .recipe-tip-important { display: flex; align-items: center; gap: 6px; white-space: nowrap; font-size: 0.85rem; }
 @media (max-width: 560px) { .recipe-tip-row { grid-template-columns: 1fr auto; } .recipe-tip-important { grid-column: 1 / -1; } }
-.recipe-card-tips { list-style: none; margin: 8px 0 0; padding: 8px 10px; border-left: 3px solid var(--gold, #c58a00); background: color-mix(in srgb, var(--gold, #c58a00) 12%, transparent); border-radius: 0 8px 8px 0; font-size: 0.9rem; }
-.recipe-card-tips li + li { margin-top: 4px; }
-.recipe-card-tips li > span { color: var(--gold, #c58a00); }
-.recipe-card-more { margin-top: 8px; }
-.recipe-card-more summary { cursor: pointer; font-weight: 600; }
-.recipe-card-more h4 { margin: 10px 0 4px; font-size: 0.9rem; }
-.recipe-card-more ul, .recipe-card-more ol { margin: 0; padding-left: 1.2em; }
 
 /* ---- Investments: the whole portfolio as one picture (big total, owner strip, alerts, target mix, accounts) ---- */
 /* The page is a grid item with auto side margins, which would size it to its content (a wide table) instead of the column: width 100% plus min-width 0 keep it to the screen, so a wide table scrolls inside its own box */
@@ -9731,3 +9724,40 @@ label.ai-import-toggle span { font-weight: 600; }
 .inv-pos { color: var(--green); }
 .inv-neg { color: var(--coral); }
 .inv-disclaimer { margin-top: 28px; font-size: 0.82rem; }
+
+/* ---- Recipe cards: compact (name, calories, every ingredient), the full recipe in a pop-up ---- */
+.recipe-card-thumb[data-open-recipe], .recipe-card-body[data-open-recipe] { cursor: pointer; }
+.recipe-card-v2 { transition: box-shadow 0.15s ease, transform 0.15s ease; }
+.recipe-card-v2:hover { box-shadow: var(--shadow); transform: translateY(-1px); }
+.recipe-card-body:focus-visible { outline: 2px solid var(--green); outline-offset: -2px; }
+.recipe-meta-pills { display: flex; flex-wrap: wrap; gap: 0.35rem; margin-top: 0.1rem; }
+.recipe-meta-pill { font-size: 0.72rem; color: var(--muted); border: 1px solid var(--line); border-radius: 999px; padding: 0.1rem 0.55rem; }
+.recipe-meta-pill.important { color: var(--gold-ink); border-color: color-mix(in srgb, var(--gold) 50%, var(--line)); background: color-mix(in srgb, var(--gold) 10%, transparent); }
+
+.recipe-detail-dialog { width: min(820px, calc(100vw - 1.5rem)); max-height: min(92vh, 920px); overflow: hidden; border-radius: 14px; }
+.recipe-detail-dialog[open] { display: grid; grid-template-rows: auto minmax(0, 1fr) auto; }
+.recipe-detail-head { display: flex; align-items: center; gap: 0.9rem; padding: 1rem 1.25rem; color: white; }
+.recipe-detail-emoji { font-size: 2.4rem; line-height: 1; }
+.recipe-detail-head > div { flex: 1; min-width: 0; }
+.recipe-detail-head h2 { margin: 0; font-size: 1.4rem; line-height: 1.2; overflow-wrap: anywhere; }
+.recipe-detail-head p { margin: 0.15rem 0 0; opacity: 0.9; font-size: 0.9rem; }
+.recipe-detail-close { background: rgba(255, 255, 255, 0.2); border: 0; color: white; width: 2.1rem; height: 2.1rem; border-radius: 999px; font-size: 1.3rem; line-height: 1; cursor: pointer; padding: 0; }
+.recipe-detail-close:hover { background: rgba(255, 255, 255, 0.34); }
+.recipe-detail-body { overflow-y: auto; padding: 1.1rem 1.25rem; display: grid; gap: 1.1rem; align-content: start; }
+.recipe-detail-body h3 { margin: 0 0 0.5rem; font-size: 0.78rem; letter-spacing: 0.07em; text-transform: uppercase; color: var(--muted); }
+.recipe-detail-important { border-left: 4px solid var(--gold); background: color-mix(in srgb, var(--gold) 13%, transparent); border-radius: 0 10px 10px 0; padding: 0.7rem 0.95rem; }
+.recipe-detail-important h3 { color: var(--gold-ink); }
+.recipe-detail-important ul, .recipe-other-tips { margin: 0; padding-left: 1.15rem; display: grid; gap: 0.35rem; }
+.recipe-detail-cols { display: grid; grid-template-columns: minmax(0, 5fr) minmax(0, 7fr); gap: 1.6rem; }
+.recipe-detail-cols.single { grid-template-columns: minmax(0, 1fr); }
+@media (max-width: 640px) { .recipe-detail-cols { grid-template-columns: minmax(0, 1fr); gap: 1.1rem; } .recipe-detail-head { padding: 0.85rem 1rem; } .recipe-detail-body { padding: 1rem; } }
+.recipe-checklist { list-style: none; margin: 0 0 0.4rem; padding: 0; display: grid; gap: 0.1rem; }
+.recipe-checklist label { display: flex; align-items: flex-start; gap: 0.55rem; padding: 0.3rem 0; cursor: pointer; font-weight: 500; color: var(--text); }
+.recipe-checklist input { margin-top: 0.15rem; flex: none; }
+.recipe-checklist input:checked + span { text-decoration: line-through; color: var(--muted); }
+.recipe-steps { list-style: none; margin: 0; padding: 0; display: grid; gap: 0.8rem; counter-reset: recipe-step; }
+.recipe-steps li { counter-increment: recipe-step; display: grid; grid-template-columns: 1.8rem minmax(0, 1fr); gap: 0.65rem; align-items: start; }
+.recipe-steps li::before { content: counter(recipe-step); display: grid; place-items: center; width: 1.8rem; height: 1.8rem; border-radius: 999px; background: var(--green-soft); color: var(--green-ink); font-weight: 800; font-size: 0.85rem; }
+.recipe-steps li > span { padding-top: 0.15rem; }
+.recipe-detail-source a { font-weight: 700; }
+.recipe-detail-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 0.5rem; padding: 0.8rem 1.25rem; border-top: 1px solid var(--line); background: var(--panel); }

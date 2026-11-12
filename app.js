@@ -4407,7 +4407,8 @@ let recipeImportImages = []; // { name, mimeType, imageBase64 } - held in memory
 let recipeImportBusy = false;
 let recipeImportError = "";
 let recipeImportDraft = null; // { name, ingredients[], steps[], tips[{text, important}], calories, protein, sourceUrl }
-const recipeDetailsOpen = new Set(); // recipe ids whose "Full recipe" is unfolded, so it survives a re-render
+let recipeDetailId = ""; // the recipe whose full-recipe pop-up is open
+const recipeChecked = new Set(); // ingredient ticks in the pop-up ("recipeId:index"), kept for the session
 
 function ensureJournalData() {
   privateData.journal ||= { entries: [] };
@@ -7223,22 +7224,18 @@ function renderRecipeCard(recipe, plannedIds) {
   const isPlanned = plannedIds.has(recipe.id);
   const tips = Array.isArray(recipe.tips) ? recipe.tips : [];
   const steps = Array.isArray(recipe.steps) ? recipe.steps : [];
+  const importantCount = tips.filter((tip) => tip.important).length;
+  // The whole top of the card opens the full recipe in a pop-up; only the buttons at the bottom do something else.
   return `<article class="recipe-card-v2 card">
-    <div class="recipe-card-thumb" style="background:${recipeThumbColor(recipe.name)}">
+    <div class="recipe-card-thumb" data-open-recipe="${escapeHtml(recipe.id)}" style="background:${recipeThumbColor(recipe.name)}">
       <span>${recipeEmoji(recipe.name)}</span>
       ${isPlanned ? `<span class="recipe-card-planned-badge" title="Planned this week">📅</span>` : ""}
     </div>
-    <div class="recipe-card-body">
+    <div class="recipe-card-body" data-open-recipe="${escapeHtml(recipe.id)}" role="button" tabindex="0" aria-label="Open the full recipe for ${escapeHtml(recipe.name)}">
       <strong>${escapeHtml(recipe.name)}</strong>
       ${recipe.calories || recipe.protein ? `<small>${recipe.calories} cal · ${recipe.protein}g protein</small>` : ""}
       <div class="mini-tags">${recipe.ingredients.map((ingredient) => `<span>${escapeHtml(ingredient)}</span>`).join("")}</div>
-      ${tips.some((tip) => tip.important) ? `<ul class="recipe-card-tips">${tips.filter((tip) => tip.important).map((tip) => `<li><span aria-hidden="true">★</span> <b class="sr-only">Important: </b>${escapeHtml(tip.text)}</li>`).join("")}</ul>` : ""}
-      ${steps.length || tips.some((tip) => !tip.important) || recipe.sourceUrl ? `<details class="recipe-card-more" data-recipe-details="${escapeHtml(recipe.id)}" ${recipeDetailsOpen.has(recipe.id) ? "open" : ""}>
-        <summary>Full recipe</summary>
-        ${steps.length ? `<h4>Steps</h4><ol>${steps.map((step) => `<li>${escapeHtml(step)}</li>`).join("")}</ol>` : ""}
-        ${tips.some((tip) => !tip.important) ? `<h4>Other tips</h4><ul>${tips.filter((tip) => !tip.important).map((tip) => `<li>${escapeHtml(tip.text)}</li>`).join("")}</ul>` : ""}
-        ${recipe.sourceUrl ? `<p><a href="${escapeHtml(recipe.sourceUrl)}" target="_blank" rel="noopener noreferrer">Watch the video</a></p>` : ""}
-      </details>` : ""}
+      ${steps.length || tips.length ? `<div class="recipe-meta-pills">${steps.length ? `<span class="recipe-meta-pill">${steps.length} step${steps.length === 1 ? "" : "s"}</span>` : ""}${importantCount ? `<span class="recipe-meta-pill important">★ ${importantCount} important tip${importantCount === 1 ? "" : "s"}</span>` : ""}</div>` : ""}
     </div>
     <div class="recipe-actions">
       <button class="ghost" type="button" data-select-recipe="${recipe.id}">Use in Meals</button>
@@ -7246,6 +7243,48 @@ function renderRecipeCard(recipe, plannedIds) {
       <button class="icon-button danger-button" data-delete-recipe="${recipe.id}" type="button" aria-label="Delete ${escapeHtml(recipe.name)}">×</button>
     </div>
   </article>`;
+}
+
+// The full recipe in a pop-up: Important tips first, then the ingredients (a checklist to tick off as you gather them) beside the numbered
+// steps, then the other tips and the link back to the video.
+function renderRecipeDetailDialog(recipe) {
+  const tips = Array.isArray(recipe.tips) ? recipe.tips : [];
+  const steps = Array.isArray(recipe.steps) ? recipe.steps : [];
+  const important = tips.filter((tip) => tip.important);
+  const other = tips.filter((tip) => !tip.important);
+  const facts = [
+    recipe.calories || recipe.protein ? `${recipe.calories} cal · ${recipe.protein}g protein` : "",
+    `${recipe.ingredients.length} ingredient${recipe.ingredients.length === 1 ? "" : "s"}`,
+    steps.length ? `${steps.length} step${steps.length === 1 ? "" : "s"}` : ""
+  ].filter(Boolean).join(" · ");
+  return `<dialog id="recipeDetailDialog" class="app-dialog recipe-detail-dialog" aria-labelledby="recipeDetailTitle">
+    <header class="recipe-detail-head" style="background:${recipeThumbColor(recipe.name)}">
+      <span class="recipe-detail-emoji" aria-hidden="true">${recipeEmoji(recipe.name)}</span>
+      <div><h2 id="recipeDetailTitle">${escapeHtml(recipe.name)}</h2><p>${escapeHtml(facts)}</p></div>
+      <button type="button" class="recipe-detail-close" data-close-recipe-detail aria-label="Close">×</button>
+    </header>
+    <div class="recipe-detail-body">
+      ${important.length ? `<aside class="recipe-detail-important"><h3>★ Important</h3><ul>${important.map((tip) => `<li>${escapeHtml(tip.text)}</li>`).join("")}</ul></aside>` : ""}
+      <div class="recipe-detail-cols ${steps.length ? "" : "single"}">
+        <section>
+          <h3>Ingredients</h3>
+          <ul class="recipe-checklist">${recipe.ingredients.map((ingredient, index) => {
+            const key = `${recipe.id}:${index}`;
+            return `<li><label><input type="checkbox" data-recipe-check="${escapeHtml(key)}" ${recipeChecked.has(key) ? "checked" : ""}><span>${escapeHtml(ingredient)}</span></label></li>`;
+          }).join("")}</ul>
+          <small class="muted">Tick things off as you gather them.</small>
+        </section>
+        ${steps.length ? `<section><h3>Steps</h3><ol class="recipe-steps">${steps.map((step) => `<li><span>${escapeHtml(step)}</span></li>`).join("")}</ol></section>` : ""}
+      </div>
+      ${other.length ? `<section><h3>More tips</h3><ul class="recipe-other-tips">${other.map((tip) => `<li>${escapeHtml(tip.text)}</li>`).join("")}</ul></section>` : ""}
+      ${recipe.sourceUrl ? `<p class="recipe-detail-source"><a href="${escapeHtml(recipe.sourceUrl)}" target="_blank" rel="noopener noreferrer">▶ Watch the video</a></p>` : ""}
+    </div>
+    <footer class="recipe-detail-actions">
+      <button type="button" class="ghost" data-select-recipe="${escapeHtml(recipe.id)}">Use in Meals</button>
+      <button type="button" class="ghost" data-edit-recipe="${escapeHtml(recipe.id)}">Edit</button>
+      <button type="button" data-close-recipe-detail>Close</button>
+    </footer>
+  </dialog>`;
 }
 
 function renderRecipes() {
@@ -7296,6 +7335,7 @@ function renderRecipes() {
             ? `<div class="recipe-card-grid">${filtered.map((recipe) => renderRecipeCard(recipe, plannedIds)).join("")}</div>`
             : `<div class="empty-inline">No recipes match. <button class="ghost" type="button" id="clearRecipeFiltersButton">Clear filters</button></div>`}
       </section>
+      ${recipeDetailId && recipeById(recipeDetailId) ? renderRecipeDetailDialog(recipeById(recipeDetailId)) : ""}
     </section>`;
 }
 
@@ -13097,9 +13137,37 @@ function bindViewEvents() {
     remove.closest(".recipe-tip-row")?.remove();
     editor.closest("form")?.dispatchEvent(new Event("input", { bubbles: true }));
   }));
-  document.querySelectorAll("[data-recipe-details]").forEach((details) => details.addEventListener("toggle", () => {
-    if (details.open) recipeDetailsOpen.add(details.dataset.recipeDetails); else recipeDetailsOpen.delete(details.dataset.recipeDetails);
-  }));
+  // A recipe card opens its full recipe in a pop-up; what is ticked in the ingredient checklist is kept for the session.
+  const openRecipeDetail = (recipeId) => {
+    const scrollY = window.scrollY;
+    recipeDetailId = recipeId;
+    render();
+    window.scrollTo(0, scrollY);
+  };
+  document.querySelectorAll("[data-open-recipe]").forEach((element) => {
+    element.addEventListener("click", () => openRecipeDetail(element.dataset.openRecipe));
+    if (element.getAttribute("role") === "button") {
+      element.addEventListener("keydown", (event) => {
+        if (event.key === "Enter" || event.key === " ") { event.preventDefault(); openRecipeDetail(element.dataset.openRecipe); }
+      });
+    }
+  });
+  const recipeDetailDialog = $("#recipeDetailDialog");
+  if (recipeDetailDialog) {
+    if (!recipeDetailDialog.open) recipeDetailDialog.showModal();
+    // Forgetting the recipe happens at the moment of closing, not in the dialog's own (delayed) close event, so a redraw right after can never reopen it;
+    // that event stays only for Escape, which closes the dialog without going through us.
+    const closeRecipeDetail = () => { recipeDetailId = ""; recipeDetailDialog.close(); };
+    recipeDetailDialog.addEventListener("close", () => { recipeDetailId = ""; });
+    // A click on the dimmed area (the dialog element itself, outside its panel) closes it.
+    recipeDetailDialog.addEventListener("click", (event) => { if (event.target === recipeDetailDialog) closeRecipeDetail(); });
+    // Use in Meals and Edit act on the recipe: forget the pop-up first (capture phase, before their own handlers redraw) so it does not reopen over the next screen.
+    recipeDetailDialog.addEventListener("click", (event) => { if (event.target.closest("[data-select-recipe], [data-edit-recipe]")) recipeDetailId = ""; }, true);
+    recipeDetailDialog.querySelectorAll("[data-close-recipe-detail]").forEach((button) => button.addEventListener("click", closeRecipeDetail));
+    recipeDetailDialog.querySelectorAll("[data-recipe-check]").forEach((box) => box.addEventListener("change", () => {
+      if (box.checked) recipeChecked.add(box.dataset.recipeCheck); else recipeChecked.delete(box.dataset.recipeCheck);
+    }));
+  }
 
   $("#cancelRecipeEditButton")?.addEventListener("click", () => {
     state.meals.editingRecipeId = "";
