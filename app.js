@@ -2153,6 +2153,8 @@ function render() {
   if (currentView === "admin" && !adminData) loadAdminData();
   if (["documents", "wealth", "notes"].includes(currentView) && !documentsData) loadDocumentsData();
   if (["wealth", "transactions", "home"].includes(currentView) && !linkedAccounts) loadLinkedAccounts();
+  // The receipts waiting for a transaction: loaded when the Transactions page opens and every couple of minutes after (new bank rows may now match them).
+  if (currentView === "transactions" && !receiptInboxLoading && (receiptInbox === null || Date.now() - receiptInboxLoadedAt > 120000)) void receiptRefreshInbox();
   if (currentView === "partners" && partnerGroupsInfo === null) void loadPartnerGroups();
   if (currentView === "notes" && sharedWithMeNotes === null) loadSharedWithMeNotes();
   if (["sharing", "calendar"].includes(currentView) && !sharingAccess) loadSharingAccess();
@@ -3143,6 +3145,10 @@ let receiptFiles = []; // files chosen to attach: { name, mimeType, imageBase64,
 let receiptBusy = ""; // what is happening right now ("Uploading…", "Reading the receipt…", "Saving…"), "" when idle
 let receiptError = "";
 const receiptPreviews = {}; // documentId -> signed image address, for the thumbnails
+let receiptDialogOpen = false; // the pop-up is open: for a transaction (receiptDialogTxId), or on its own before the receipt has one (receiptDialogTxId "")
+let receiptInbox = null; // every receipt of the household as the server lists it (summaries), null until loaded
+let receiptInboxLoading = false;
+let receiptInboxLoadedAt = 0;
 
 const receiptFormatMoney = (value) => (value === null || value === undefined || value === "" || !Number.isFinite(Number(value)) ? "" : Number(value).toFixed(2));
 const receiptNumberOrNull = (value) => (String(value).trim() === "" || !Number.isFinite(Number(value)) ? null : Math.round(Number(value) * 100) / 100);
@@ -3191,16 +3197,136 @@ function refreshReceiptNotes() {
   if (check && receiptDraft) { check.className = `receipt-note ${checkNote.kind}`; check.textContent = checkNote.text; }
 }
 
+// Which transaction is this receipt? Offered when the pop-up is open on a receipt that has none: the rows with the same total (to confirm with a tap),
+// or a note that the charge is still pending, and a way to create the transaction from the receipt when there will be no bank charge (cash).
+function receiptLinkHtml() {
+  if (!receiptData || receiptTransaction()) return "";
+  const summary = { id: receiptData.id, merchant: receiptData.merchant, date: receiptData.date, total: receiptData.total };
+  const suggestions = receiptMatchPlan([summary], state.transactions).suggestions[summary.id] || [];
+  const pending = suggestions.length ? null : receiptMatchPending(summary, state.accounts);
+  const hasTotal = receiptData.total !== null && receiptData.total !== undefined && Number(receiptData.total) > 0;
+  return `<div class="receipt-link">
+    <h3>Which transaction is this?</h3>
+    ${suggestions.length ? suggestions.map((candidate) => {
+      const row = state.transactions[candidate.index];
+      return `<div class="receipt-link-row"><span>${escapeHtml(row.payee)} · ${exactMoney.format(Math.abs(Number(row.amount)))} · ${escapeHtml(formatShortDate(row.date))}${candidate.merchantMatch ? "" : ` <small class="muted">(a different name, the same total)</small>`}</span><button type="button" data-receipt-link="${candidate.index}">Attach to this</button></div>`;
+    }).join("") : `<p class="muted">${pending ? `Its charge is still pending at ${escapeHtml(pending.accountName)}. The receipt links by itself once the bank posts it.` : (hasTotal ? "No matching transaction yet. When the charge arrives with the same total the receipt links by itself, or you can add the transaction now." : (receiptData.status === "read" ? "The receipt has no readable total, so it cannot be matched. Enter the total below to match it." : "Read the items first so the total can be matched."))}</p>`}
+    ${hasTotal ? `<div class="receipt-row-actions"><button type="button" class="ghost" id="receiptCreateTransaction">Create a transaction from this receipt</button></div>` : ""}
+  </div>`;
+}
+
+// ---- The receipts inbox: a receipt can be uploaded as soon as you spend, before the bank charge exists. It waits here (a receipt is "waiting" when no
+// transaction points at it), and is linked when a row with the same total arrives: automatically only when certain (lib/receipt-match.js), otherwise
+// as a suggestion to confirm. Removing a transaction that had a receipt simply puts the receipt back in the inbox.
+function receiptsWaiting() {
+  if (!receiptInbox) return [];
+  const linked = new Set(state.transactions.flatMap((transaction) => transaction.receiptIds || []));
+  return receiptInbox.filter((receipt) => !linked.has(receipt.id));
+}
+
+// Links every waiting receipt whose transaction is certain; returns what it linked.
+function receiptsAutoLink() {
+  const certain = receiptMatchPlan(receiptsWaiting(), state.transactions).certain;
+  certain.forEach(({ receiptId, index }) => {
+    const transaction = state.transactions[index];
+    transaction.id ||= uniqueId("tx");
+    transaction.receiptIds = [...(transaction.receiptIds || []), receiptId];
+  });
+  return certain;
+}
+
+// Reloads the list of receipts, then links the certain ones (saving, and telling the person), and follows a receipt that was open on its own.
+async function receiptRefreshInbox() {
+  if (receiptInboxLoading) return;
+  receiptInboxLoading = true;
+  try { receiptInbox = (await api("/api/receipts")).receipts; } catch (_error) { receiptInbox ||= []; }
+  receiptInboxLoading = false;
+  receiptInboxLoadedAt = Date.now();
+  const linked = receiptsAutoLink();
+  if (linked.length) {
+    autosaveState();
+    if (receiptDialogOpen && receiptData && !receiptTransaction()) {
+      const mine = linked.find((entry) => entry.receiptId === receiptData.id);
+      if (mine) receiptDialogTxId = state.transactions[mine.index].id;
+    }
+    showToast(`${linked.length === 1 ? "A receipt was" : `${linked.length} receipts were`} linked to ${linked.length === 1 ? "its transaction" : "their transactions"}.`, { type: "info" });
+  }
+  if (currentView === "transactions") render();
+}
+
+function receiptInboxHtml() {
+  const waiting = receiptsWaiting();
+  const plan = receiptMatchPlan(waiting, state.transactions);
+  return `<div class="receipt-inbox">
+    <div class="receipt-inbox-head"><button type="button" class="ghost" id="addReceiptButton">🧾 Add a receipt</button><small class="muted">Upload it as soon as you spend. It links to its transaction when the charge arrives.</small></div>
+    ${waiting.length ? `<div class="receipt-waiting"><h4>Receipts waiting for a transaction (${waiting.length})</h4>
+      ${waiting.map((receipt) => {
+        const suggestion = (plan.suggestions[receipt.id] || [])[0];
+        const row = suggestion ? state.transactions[suggestion.index] : null;
+        const pending = suggestion ? null : receiptMatchPending(receipt, state.accounts);
+        const total = receipt.total !== null && receipt.total !== undefined ? exactMoney.format(Number(receipt.total)) : (receipt.status === "attached" ? "not read yet" : "no total");
+        return `<div class="receipt-waiting-row">
+          <button type="button" class="receipt-waiting-open" data-open-waiting-receipt="${escapeHtml(receipt.id)}"><span>🧾 ${escapeHtml(receipt.merchant || "Receipt")}</span><small class="muted">${receipt.date ? `${escapeHtml(formatShortDate(receipt.date))} · ` : ""}${total}</small></button>
+          ${row ? `<span class="receipt-waiting-hint">Looks like ${escapeHtml(row.payee)} · ${exactMoney.format(Math.abs(Number(row.amount)))} · ${escapeHtml(formatShortDate(row.date))}</span><button type="button" class="ghost" data-inbox-link="${escapeHtml(receipt.id)}|${suggestion.index}">Attach</button>`
+            : pending ? `<span class="receipt-waiting-hint">Its charge is still pending at ${escapeHtml(pending.accountName)}.</span>`
+            : `<span class="receipt-waiting-hint muted">Waiting for its charge.</span>`}
+        </div>`;
+      }).join("")}
+    </div>` : ""}
+  </div>`;
+}
+
+// Attach a waiting receipt to a transaction, or take it off again.
+function receiptLink(receiptId, index) {
+  const transaction = state.transactions[index];
+  if (!transaction || !receiptId) return;
+  transaction.id ||= uniqueId("tx");
+  transaction.receiptIds = [...new Set([...(transaction.receiptIds || []), receiptId])];
+  autosaveState();
+  if (receiptDialogOpen && receiptData && receiptData.id === receiptId) receiptDialogTxId = transaction.id;
+  showToast(`Receipt linked to ${transaction.payee}.`, { type: "info" });
+  render();
+}
+
+function receiptDetach() {
+  const transaction = receiptTransaction();
+  if (!transaction || !receiptData) return;
+  transaction.receiptIds = (transaction.receiptIds || []).filter((id) => id !== receiptData.id);
+  if (!transaction.receiptIds.length) delete transaction.receiptIds;
+  // Remember that this was undone on purpose, so the matcher never links the two again by itself (it may still suggest it).
+  transaction.receiptsDeclined = [...new Set([...(transaction.receiptsDeclined || []), receiptData.id])];
+  autosaveState();
+  receiptDialogTxId = "";
+  showToast("Receipt detached. It is back in your waiting receipts.", { type: "info" });
+  render();
+}
+
+// For spending with no bank charge (cash): a ledger row from the receipt's shop, total and date, categorized the way the household usually does.
+function receiptCreateTransaction() {
+  if (!receiptData || receiptTransaction() || !(Number(receiptData.total) > 0)) return;
+  const payee = receiptData.merchant || "Receipt";
+  const lineId = categorizationRuleForPayee(payee) || suggestSubcategoryFromHistory(payee, state.transactions) || "";
+  const transaction = { ...makeTransaction({ date: receiptData.date || dateKey(new Date()), payee, amount: Number(receiptData.total), lineId, memo: "From a receipt", accountId: "", tags: [] }), id: uniqueId("tx"), receiptIds: [receiptData.id] };
+  state.transactions.unshift(transaction);
+  autosaveState();
+  receiptDialogTxId = transaction.id;
+  showToast(`Added ${payee} for ${exactMoney.format(Number(receiptData.total))} from the receipt.`, { type: "info" });
+  render();
+}
+
 // The receipt pop-up: choose the photos, or see the receipt that is attached (its files, whether it matches the transaction, and the items to correct).
 function receiptDialogHtml() {
-  const transaction = receiptTransaction();
-  if (!receiptDialogTxId || !transaction) return "";
-  const amount = Math.abs(Number(transaction.amount || 0));
-  const head = `<header class="receipt-head"><div><h2>Receipt</h2><p class="muted">${escapeHtml(transaction.payee)} · ${exactMoney.format(amount)} · ${escapeHtml(formatShortDate(transaction.date))}</p></div><button type="button" class="icon-button ghost" data-close-receipt aria-label="Close">×</button></header>`;
+  if (!receiptDialogOpen) return "";
+  const transaction = receiptTransaction(); // null while the receipt is open on its own, before it has a transaction
+  const amount = transaction ? Math.abs(Number(transaction.amount || 0)) : 0;
+  const headline = transaction
+    ? `${escapeHtml(transaction.payee)} · ${exactMoney.format(amount)} · ${escapeHtml(formatShortDate(transaction.date))}`
+    : (receiptData ? "Not linked to a transaction yet" : "Upload it as soon as you spend; it links to its transaction when the charge arrives");
+  const head = `<header class="receipt-head"><div><h2>${transaction || receiptData ? "Receipt" : "Add a receipt"}</h2><p class="muted">${headline}</p></div><button type="button" class="icon-button ghost" data-close-receipt aria-label="Close">×</button></header>`;
   const busy = receiptBusy ? `<p class="receipt-busy" role="status">${escapeHtml(receiptBusy)}</p>` : "";
   const error = receiptError ? `<p class="receipt-error" role="alert">${escapeHtml(receiptError)}</p>` : "";
   if (!receiptData) {
-    const hasReceiptId = (transaction.receiptIds || []).length > 0; // attached, but not (yet) loaded: loading, or it could not be
+    const hasReceiptId = Boolean(transaction) && (transaction.receiptIds || []).length > 0; // attached, but not (yet) loaded: loading, or it could not be
     return `<dialog id="receiptDialog" class="app-dialog receipt-dialog" aria-labelledby="receiptDialogTitle">${head}
       <div class="receipt-body">
         ${hasReceiptId ? "" : `<p class="muted">Attach a photo (or PDF) of the receipt. The AI reads the items, so later you can see what things cost and compare shops. You review and correct what it read.</p>
@@ -3220,6 +3346,7 @@ function receiptDialogHtml() {
     <div class="receipt-body">
       <div class="receipt-files">${receiptData.documents.map((doc) => `<button type="button" class="receipt-file" data-open-receipt-file="${escapeHtml(doc.documentId)}" title="Open ${escapeHtml(doc.name)}">${receiptPreviews[doc.documentId] ? `<img src="${escapeHtml(receiptPreviews[doc.documentId])}" alt="">` : (/pdf/i.test(doc.contentType) ? "📄" : "🧾")}<span>${escapeHtml(doc.name)}</span></button>`).join("")}</div>
       ${busy}${error}
+      ${transaction ? "" : receiptLinkHtml()}
       ${receiptData.status === "attached" && !receiptBusy ? `<p class="muted">The receipt is attached. Its items have not been read yet.</p><div class="receipt-row-actions"><button type="button" id="receiptReadNow">Read the items</button></div>` : ""}
       ${receiptData.status === "read" || draft.items.length ? `
       <div class="receipt-fields">
@@ -3243,6 +3370,7 @@ function receiptDialogHtml() {
     </div>
     <footer class="receipt-actions">
       <button type="button" class="danger-button ghost" id="receiptRemove" ${receiptBusy ? "disabled" : ""}>Remove receipt</button>
+      ${transaction ? `<button type="button" class="ghost" id="receiptDetach" ${receiptBusy ? "disabled" : ""} title="Keep the receipt, but unlink it from this transaction">Detach</button>` : ""}
       <span class="receipt-actions-spacer"></span>
       ${receiptData.status === "read" ? `<button type="button" class="ghost" id="receiptReadAgain" ${receiptBusy ? "disabled" : ""}>Read again</button>` : ""}
       <button type="button" class="ghost" data-close-receipt>Close</button>
@@ -3254,10 +3382,24 @@ async function openReceiptDialog(index) {
   const transaction = state.transactions[index];
   if (!transaction) return;
   transaction.id ||= uniqueId("tx");
+  receiptDialogOpen = true;
   receiptDialogTxId = transaction.id;
   receiptData = null; receiptDraft = null; receiptFiles = []; receiptBusy = ""; receiptError = "";
   const receiptId = (transaction.receiptIds || [])[0];
   if (receiptId) receiptBusy = "Loading the receipt…";
+  render();
+  if (!receiptId) return;
+  try { setReceipt((await api(`/api/receipts/${receiptId}`)).receipt); } catch (error) { receiptError = error.message || "Couldn't load the receipt"; }
+  receiptBusy = "";
+  render();
+  void loadReceiptPreviews();
+}
+
+// Opens a receipt on its own (from the waiting list), or a blank pop-up to add one before there is any transaction for it.
+async function openReceiptStandalone(receiptId) {
+  receiptDialogOpen = true;
+  receiptDialogTxId = "";
+  receiptData = null; receiptDraft = null; receiptFiles = []; receiptBusy = receiptId ? "Loading the receipt…" : ""; receiptError = "";
   render();
   if (!receiptId) return;
   try { setReceipt((await api(`/api/receipts/${receiptId}`)).receipt); } catch (error) { receiptError = error.message || "Couldn't load the receipt"; }
@@ -3274,7 +3416,7 @@ async function loadReceiptPreviews() {
       const { url } = await api(`/api/documents/${doc.documentId}/download-url`);
       if (!/^https?:\/\//.test(url)) continue;
       receiptPreviews[doc.documentId] = url;
-      if (receiptDialogTxId) render();
+      if (receiptDialogOpen) render();
     } catch (_error) { /* no thumbnail: the file name still opens it */ }
   }
 }
@@ -3298,8 +3440,8 @@ async function receiptPrepareFile(file) {
 }
 
 async function receiptAttach(readNow) {
-  const transaction = receiptTransaction();
-  if (!transaction || !receiptFiles.length || receiptBusy) return;
+  const transaction = receiptTransaction(); // null when the receipt is added on its own, before its transaction exists
+  if (!receiptFiles.length || receiptBusy) return;
   receiptError = "";
   receiptBusy = "Uploading…";
   render();
@@ -3307,7 +3449,7 @@ async function receiptAttach(readNow) {
   for (const entry of receiptFiles) {
     try {
       const documentId = await uploadDocumentFile(entry.file, null);
-      try { await api(`/api/documents/${documentId}`, { method: "PATCH", body: JSON.stringify({ description: `Receipt for ${transaction.payee} on ${transaction.date}` }) }); } catch (_error) { /* the label is a nicety */ }
+      try { await api(`/api/documents/${documentId}`, { method: "PATCH", body: JSON.stringify({ description: transaction ? `Receipt for ${transaction.payee} on ${transaction.date}` : "Receipt (waiting for its transaction)" }) }); } catch (_error) { /* the label is a nicety */ }
       documents.push({ documentId, name: entry.name, contentType: entry.mimeType });
     } catch (error) { showToast(`Couldn't upload ${entry.name}: ${error.message || "upload failed"}`); }
   }
@@ -3315,8 +3457,7 @@ async function receiptAttach(readNow) {
   const inline = receiptFiles.filter((entry) => entry.imageBase64).map(({ mimeType, imageBase64 }) => ({ mimeType, imageBase64 }));
   try {
     const { receipt } = await api("/api/receipts", { method: "POST", body: JSON.stringify({ documents }) });
-    transaction.receiptIds = [receipt.id];
-    autosaveState();
+    if (transaction) { transaction.receiptIds = [receipt.id]; autosaveState(); }
     setReceipt(receipt);
     receiptFiles.forEach((entry) => { if (entry.previewUrl) URL.revokeObjectURL(entry.previewUrl); });
     receiptFiles = [];
@@ -3325,6 +3466,7 @@ async function receiptAttach(readNow) {
   receiptBusy = "";
   render();
   void loadReceiptPreviews();
+  void receiptRefreshInbox();
 }
 
 async function receiptRead(images) {
@@ -3339,6 +3481,7 @@ async function receiptRead(images) {
   receiptBusy = "";
   render();
   void loadReceiptPreviews();
+  void receiptRefreshInbox(); // its total may now match a transaction
 }
 
 async function receiptSave() {
@@ -3353,12 +3496,13 @@ async function receiptSave() {
   } catch (error) { receiptError = error.message || "Couldn't save the receipt"; }
   receiptBusy = "";
   render();
+  void receiptRefreshInbox(); // a corrected total may now match a transaction
 }
 
 async function receiptRemove() {
   const transaction = receiptTransaction();
-  if (!transaction || !receiptData) return;
-  if (!await showConfirm("This removes the receipt, the items read from it and its attached files. The transaction stays.", { title: "Remove receipt?", confirmLabel: "Remove" })) return;
+  if (!receiptData) return;
+  if (!await showConfirm(`This removes the receipt, the items read from it and its attached files.${transaction ? " The transaction stays." : ""}`, { title: "Remove receipt?", confirmLabel: "Remove" })) return;
   receiptBusy = "Removing…";
   render();
   try {
@@ -3366,22 +3510,34 @@ async function receiptRemove() {
     for (const documentId of result.documents || []) {
       try { await api(`/api/documents/${documentId}`, { method: "DELETE" }); } catch (error) { if (!/not found/i.test(error.message || "")) console.warn("Could not delete receipt file", error); }
     }
-    transaction.receiptIds = (transaction.receiptIds || []).filter((id) => id !== receiptData.id);
-    if (!transaction.receiptIds.length) delete transaction.receiptIds;
-    autosaveState();
-    receiptDialogTxId = ""; receiptData = null; receiptDraft = null;
+    if (transaction) {
+      transaction.receiptIds = (transaction.receiptIds || []).filter((id) => id !== receiptData.id);
+      if (!transaction.receiptIds.length) delete transaction.receiptIds;
+      autosaveState();
+    }
+    receiptDialogOpen = false; receiptDialogTxId = ""; receiptData = null; receiptDraft = null;
   } catch (error) { receiptError = error.message || "Couldn't remove the receipt"; }
   receiptBusy = "";
   render();
+  void receiptRefreshInbox();
 }
 
 function bindReceiptEvents() {
   document.querySelectorAll("[data-receipt-ledger]").forEach((button) => button.addEventListener("click", () => { void openReceiptDialog(Number(button.dataset.receiptLedger)); }));
+  $("#addReceiptButton")?.addEventListener("click", () => { void openReceiptStandalone(null); });
+  document.querySelectorAll("[data-open-waiting-receipt]").forEach((button) => button.addEventListener("click", () => { void openReceiptStandalone(button.dataset.openWaitingReceipt); }));
+  document.querySelectorAll("[data-inbox-link]").forEach((button) => button.addEventListener("click", () => {
+    const [receiptId, index] = button.dataset.inboxLink.split("|");
+    receiptLink(receiptId, Number(index));
+  }));
   const dialog = $("#receiptDialog");
   if (!dialog) return;
   if (!dialog.open) dialog.showModal();
-  const closeReceiptDialog = () => { receiptDialogTxId = ""; receiptData = null; receiptDraft = null; receiptFiles = []; receiptError = ""; dialog.close(); };
-  dialog.addEventListener("close", () => { receiptDialogTxId = ""; });
+  const closeReceiptDialog = () => { receiptDialogOpen = false; receiptDialogTxId = ""; receiptData = null; receiptDraft = null; receiptFiles = []; receiptError = ""; dialog.close(); };
+  dialog.addEventListener("close", () => { receiptDialogOpen = false; receiptDialogTxId = ""; });
+  dialog.querySelectorAll("[data-receipt-link]").forEach((button) => button.addEventListener("click", () => { if (receiptData) receiptLink(receiptData.id, Number(button.dataset.receiptLink)); }));
+  $("#receiptCreateTransaction")?.addEventListener("click", receiptCreateTransaction);
+  $("#receiptDetach")?.addEventListener("click", receiptDetach);
   dialog.addEventListener("click", (event) => { if (event.target === dialog) closeReceiptDialog(); });
   dialog.querySelectorAll("[data-close-receipt]").forEach((button) => button.addEventListener("click", closeReceiptDialog));
   $("#receiptFilesInput")?.addEventListener("change", async (event) => {
@@ -3698,6 +3854,7 @@ function renderTransactions() {
             const twins = findCrossConnectionDuplicates(state.transactions);
             return twins.length ? `<div class="empty-inline account-type-suggestion"><span>${twins.length} bank row${twins.length === 1 ? " appears" : "s appear"} twice in the ledger (the same transaction came in through two connections of the same bank, so it is counted twice): ${twins.slice(0, 3).map((row) => `${escapeHtml(String(row.payee || "").slice(0, 28))} ${formatShortDate(row.date)}`).join("; ")}${twins.length > 3 ? "…" : ""}.</span> <button type="button" class="ghost" data-remove-twin-rows>Remove the extra ${twins.length === 1 ? "copy" : "copies"}</button></div>` : "";
           })()}
+          ${receiptInboxHtml()}
           <details class="new-transaction" id="newTransactionDetails" ${newTransactionOpen ? "open" : ""}>
           <summary>+ New transaction</summary>
           <form id="transactionForm" class="mini-form transaction-entry-form">

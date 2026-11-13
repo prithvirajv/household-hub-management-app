@@ -51,3 +51,36 @@ test("receipts are kept in their own table, scoped to the household, and the rou
   assert.match(server, /registerReceiptRoutes\(\{/);
   assert.match(server, /if \(MEMORY_DB\) return null; \/\/ the demo has no storage to read back from/);
 });
+
+test("a receipt can be added on its own, waits in an inbox, and is linked when its transaction arrives", () => {
+  const html = read("index.html");
+  assert.match(app, /\$\{receiptInboxHtml\(\)\}\s*<details class="new-transaction" id="newTransactionDetails"/, "the inbox and its Add a receipt button sit above New transaction");
+  assert.match(app, /id="addReceiptButton">🧾 Add a receipt<\/button>/);
+  assert.match(app, /Receipts waiting for a transaction \(\$\{waiting\.length\}\)/);
+  assert.ok(html.indexOf("/lib/receipt-match.js") > html.indexOf("/lib/shared-logic.js") && html.indexOf("/lib/receipt-match.js") < html.indexOf("/app.js?v="), "the matcher loads before the page code");
+  // Waiting means no transaction points at the receipt, so deleting a transaction simply returns its receipt to the inbox.
+  assert.match(app, /const linked = new Set\(state\.transactions\.flatMap\(\(transaction\) => transaction\.receiptIds \|\| \[\]\)\);\s*return receiptInbox\.filter\(\(receipt\) => !linked\.has\(receipt\.id\)\);/);
+  // Only the certain matches are linked without asking; the rest are offered.
+  assert.match(app, /const certain = receiptMatchPlan\(receiptsWaiting\(\), state\.transactions\)\.certain;/);
+  assert.match(app, /data-inbox-link="\$\{escapeHtml\(receipt\.id\)\}\|\$\{suggestion\.index\}">Attach<\/button>/, "a suggestion is one tap");
+  assert.match(app, /Its charge is still pending at \$\{escapeHtml\(pending\.accountName\)\}/, "a pending charge is noticed");
+});
+
+test("the list of receipts is loaded when Transactions opens and every couple of minutes, and a failure can never loop", () => {
+  assert.match(app, /if \(currentView === "transactions" && !receiptInboxLoading && \(receiptInbox === null \|\| Date\.now\(\) - receiptInboxLoadedAt > 120000\)\) void receiptRefreshInbox\(\);/);
+  const refresh = app.slice(app.indexOf("async function receiptRefreshInbox("), app.indexOf("function receiptInboxHtml("));
+  assert.match(refresh, /catch \(_error\) \{ receiptInbox \|\|= \[\]; \}\s*receiptInboxLoading = false;\s*receiptInboxLoadedAt = Date\.now\(\);/, "the time is stamped even when the load fails, so a failure is not retried on every redraw");
+  assert.match(refresh, /showToast\(`\$\{linked\.length === 1 \? "A receipt was" : /, "the person is told when receipts were linked for them");
+  assert.match(app, /void receiptRefreshInbox\(\); \/\/ its total may now match a transaction/, "reading a receipt looks for its transaction");
+});
+
+test("the pop-up works before a receipt has a transaction: attach to a suggestion, create a transaction for cash, or detach and keep it", () => {
+  assert.match(app, /<h3>Which transaction is this\?<\/h3>/);
+  assert.match(app, /data-receipt-link="\$\{candidate\.index\}">Attach to this<\/button>/);
+  assert.match(app, /id="receiptCreateTransaction">Create a transaction from this receipt<\/button>/);
+  assert.match(app, /const lineId = categorizationRuleForPayee\(payee\) \|\| suggestSubcategoryFromHistory\(payee, state\.transactions\) \|\| "";/, "the new row is categorized the way the household usually does");
+  assert.match(app, /memo: "From a receipt"/);
+  assert.match(app, /transaction\.receiptsDeclined = \[\.\.\.new Set\(\[\.\.\.\(transaction\.receiptsDeclined \|\| \[\]\), receiptData\.id\]\)\];/, "detaching remembers the undone match");
+  assert.match(app, /if \(transaction\) \{ transaction\.receiptIds = \[receipt\.id\]; autosaveState\(\); \}/, "attaching with no transaction only records the receipt");
+  assert.match(css, /\.receipt-waiting-row \{/);
+});

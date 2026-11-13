@@ -99,6 +99,8 @@ test("a receipt is attached, read into items, corrected, listed and removed", as
     assert.equal(fetched.body.receipt.items.length, 2, "what was saved is what comes back");
     const listed = await server.request("/api/receipts", { headers: { cookie } });
     assert.deepEqual(listed.body.receipts.map((entry) => [entry.id, entry.merchant, entry.itemCount, entry.status]), [[id, "Corner Market", 2, "read"]]);
+    assert.deepEqual(listed.body.receipts[0].documents.map((doc) => doc.documentId), [documentId], "the list carries each receipt's files, so the inbox can show them");
+    assert.deepEqual([listed.body.receipts[0].date, listed.body.receipts[0].total], ["2026-11-12", 26.07], "and the date and total the inbox matches on");
 
     const removed = await server.request(`/api/receipts/${id}`, { method: "DELETE", headers: { cookie } });
     assert.deepEqual([removed.status, removed.body.documents], [200, [documentId]], "the page is told which files to delete");

@@ -189,8 +189,22 @@ button on every screen. People with view-only access don't see it.
    the transaction and whether the items add up to the receipt's own
    subtotal (a red note means a line or a discount was missed). The 🧾 icon
    turns green once a receipt is attached; select it again to see the photos
-   and items, **Read again**, or **Remove receipt**. The photos are also kept
-   under Documents.
+   and items, **Read again**, **Detach** (keep the receipt but unlink it) or
+   **Remove receipt**. The photos are also kept under Documents.
+8. Spent money and want to keep the receipt now, before the bank charge shows
+   up? Select **🧾 Add a receipt** above New transaction (no transaction needed),
+   choose the photos and **Attach and read items**. The receipt waits under
+   **Receipts waiting for a transaction**. When a charge arrives with the same
+   total (to the cent) within a few days, the receipt links to it: by itself
+   when it is certain (the shop name matches, only one charge fits, and nothing
+   else is waiting for it; you get a message), otherwise it shows "Looks like …"
+   with an **Attach** button to confirm. If the charge is still pending at your
+   bank it says so. Paid cash, or no bank charge will ever come? Open the
+   waiting receipt and select **Create a transaction from this receipt**. A
+   receipt you detach is never linked to that transaction again by itself.
+   Deleting a transaction puts its receipt back in the waiting list. A charge
+   that differs from the receipt total (a tip added on a restaurant bill, for
+   example) is not matched by itself: open the receipt and attach it by hand.
 
 **Get the most out of it**
 - Check off a batch of rows using the checkbox in the Ledger's left column

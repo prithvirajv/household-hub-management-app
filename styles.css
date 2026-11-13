@@ -9794,3 +9794,18 @@ label.ai-import-toggle span { font-weight: 600; }
 .receipt-row-actions { display: flex; gap: 0.5rem; }
 .receipt-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 0.5rem; padding: 0.8rem 1.2rem; border-top: 1px solid var(--line); background: var(--panel); }
 .receipt-actions-spacer { flex: 1; }
+
+/* ---- Receipts inbox: add a receipt any time; the ones still waiting for their transaction; the link section in the pop-up ---- */
+.receipt-inbox { margin: 0 0 0.8rem; }
+.receipt-inbox-head { display: flex; flex-wrap: wrap; align-items: center; gap: 0.5rem 0.8rem; }
+.receipt-waiting { margin-top: 0.6rem; border: 1px solid var(--line); border-radius: 10px; padding: 0.6rem 0.8rem; background: var(--panel); }
+.receipt-waiting h4 { margin: 0 0 0.4rem; font-size: 0.85rem; }
+.receipt-waiting-row { display: flex; flex-wrap: wrap; align-items: center; gap: 0.3rem 0.8rem; padding: 0.35rem 0; }
+.receipt-waiting-row + .receipt-waiting-row { border-top: 1px solid var(--line); }
+.receipt-waiting-open { display: flex; flex-direction: column; align-items: flex-start; gap: 0.05rem; border: 0; background: none; padding: 0; cursor: pointer; font: inherit; color: var(--text); text-align: left; min-width: 9rem; }
+.receipt-waiting-open:hover span { text-decoration: underline; }
+.receipt-waiting-hint { font-size: 0.85rem; flex: 1; min-width: 12rem; }
+.receipt-link { border: 1px solid var(--line); border-radius: 10px; padding: 0.7rem 0.9rem; background: var(--soft); display: grid; gap: 0.5rem; }
+.receipt-link h3 { margin: 0; font-size: 0.78rem; letter-spacing: 0.07em; text-transform: uppercase; color: var(--muted); }
+.receipt-link p { margin: 0; }
+.receipt-link-row { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 0.4rem 0.8rem; }
