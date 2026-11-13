@@ -1005,6 +1005,31 @@ A starting amount plus a monthly saving, a yearly return and a number of years: 
 end balance, how much of it you put in and how much it earned, and a year-by-year
 table. Add inflation to also see the result in today's dollars.
 
+### Car affordability
+
+How much car fits, by the **20/3/8 rule**: put 20% down, pay the loan off in 3 years,
+and keep *all* car payments within 8% of your income before tax. Enter your yearly
+income and the loan's interest rate; add what you already pay a month on other cars
+(it uses up part of the 8%) and, if you like, the down payment you have saved. You
+get the most car you can afford, the monthly payment, the interest over the loan, and
+whether your savings cover the 20% (and what they would buy if not). "Change the rule"
+lets you use other numbers. It is the outer limit, not a target; tax, fees, insurance
+and fuel are extra.
+
+### House affordability
+
+How much home fits, by the **3/5/25 guide**: at least 3% down on a first home (20% on
+later ones), plan to stay 5 years or more, and keep the whole monthly housing cost,
+meaning the loan payment, property tax, insurance, mortgage insurance and any HOA
+dues, within 25% of your income before tax. Enter your household income, the down
+payment you have, the mortgage rate and the loan length. You get the most home you
+can afford, a monthly breakdown that adds up to your limit, and a note on your down
+payment: under 3% (with what you could buy at 3%), a first-home level, or 20% and
+above (no mortgage insurance). Property tax (1%), insurance (0.5%) and mortgage
+insurance (0.5% of the loan, when under 20% down) are set for you; change them under
+"Taxes, insurance and the rule" for your area. Maintenance, repairs and moving costs
+are extra.
+
 ## Sharing
 
 1. Select **Invite**, choose a preset role (co-owner, adult, viewer, or

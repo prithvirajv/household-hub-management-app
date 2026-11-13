@@ -8216,10 +8216,10 @@ function bindPricesEvents() {
   bindPriceDetails();
 }
 
-// ---- Calculators: "Know your number" (how much you need to retire, and whether you are on track) and compound interest. The arithmetic is in
+// ---- Calculators: "Know your number" (how much you need to retire, and whether you are on track), compound interest, and car and house affordability. The arithmetic is in
 // lib/calculators.js; what was typed is kept in state.goals.calculators so it is there next time. Estimates, not advice: every result shows the assumptions
 // behind it.
-let calcTool = "kyn"; // which calculator is open: kyn | compound
+let calcTool = "kyn"; // which calculator is open: kyn | compound | car | house
 
 const calcInputs = () => calcSanitize(state.goals.calculators);
 
@@ -8338,10 +8338,100 @@ function calcCompoundFormHtml(values) {
   </form>`;
 }
 
+const calcPct = (value) => `${calcOneDecimal(value)}%`;
+
+function carResultsHtml(values) {
+  const result = calcCar(values);
+  const empty = values.income === null && values.rate === null;
+  if (!result.ok) return `<p class="muted calc-prompt">${empty ? "Enter your income and the loan's interest rate to see how much car fits." : escapeHtml(result.error)}</p>`;
+  const a = result.assumptions;
+  if (result.blocked) return `<div class="calc-verdict behind"><b>No room for another car payment.</b> The rule keeps all car payments within ${calcPct(a.incomePercent)} of your pre-tax income (${money.format(Math.round(result.totalBudget))} a month), and you already pay ${money.format(Math.round(result.existing))} a month on other cars.</div>`;
+  const s = result.savings;
+  const savingsHtml = s === null ? "" : s.enough
+    ? `<div class="calc-verdict on_track"><b>Your ${money.format(Math.round(values.saved))} down payment is enough.</b> It covers the ${money.format(Math.round(result.downNeeded))} the rule asks for. Putting all of it down lets you buy up to ${money.format(Math.round(s.price))} for the same monthly payment (${calcPct(s.downShare)} down).</div>`
+    : `<div class="calc-verdict ${s.price >= result.price * 0.8 ? "close" : "behind"}"><b>You are ${money.format(Math.round(s.shortfall))} short of the ${calcPct(a.downPercent)} down payment.</b> With ${money.format(Math.round(values.saved))} saved, keeping to the rule means a car up to about ${money.format(Math.round(s.price))} (a payment of about ${money.format(Math.round(s.payment))} a month), or save the difference first.</div>`;
+  return `<div class="calc-number-label">The most car you can afford</div>
+    <div class="calc-number">${money.format(Math.round(result.price))}</div>
+    <p class="muted calc-number-note">${money.format(Math.round(result.loan))} borrowed plus ${money.format(Math.round(result.downNeeded))} down (${calcPct(a.downPercent)}).</p>
+    ${savingsHtml}
+    <div class="calc-two">
+      <div><h4>Monthly payment</h4><p class="calc-figure">${money.format(Math.round(result.payment))}</p><small class="muted">${calcPct(a.incomePercent)} of ${money.format(Math.round(result.monthlyIncome))} a month before tax${result.existing > 0 ? `, less the ${money.format(Math.round(result.existing))} you already pay` : ""}</small></div>
+      <div><h4>Interest over the loan</h4><p class="calc-figure">${money.format(Math.round(result.interest))}</p><small class="muted">${a.years * 12} payments at ${calcOneDecimal(a.rate)}%</small></div>
+    </div>
+    <p class="muted calc-assumptions">The 20/3/8 rule: put ${calcPct(a.downPercent)} down, pay the loan off in ${a.years} year${a.years === 1 ? "" : "s"}, and keep all car payments within ${calcPct(a.incomePercent)} of your pre-tax income. It is the outer limit, not a target: cars lose value fast, so a cheaper or older car, a better rate or a bigger down payment all make you safer. Tax, fees, insurance and fuel are extra.</p>`;
+}
+
+function houseResultsHtml(values) {
+  const result = calcHouse(values);
+  const empty = values.income === null && values.rate === null;
+  if (!result.ok) return `<p class="muted calc-prompt">${empty ? "Enter your income and the mortgage rate to see how much home fits." : escapeHtml(result.error)}</p>`;
+  const a = result.assumptions;
+  if (result.blocked) return `<div class="calc-verdict behind"><b>No room for a mortgage.</b> The guide keeps the whole housing cost within ${calcPct(a.incomePercent)} of your pre-tax income (${money.format(Math.round(result.totalBudget))} a month), and the HOA dues of ${money.format(Math.round(a.hoa))} already use all of it.</div>`;
+  const p = result.parts;
+  const downHtml = result.downShort
+    ? `<div class="calc-verdict behind"><b>Your down payment is under ${CALC_HOUSE_MIN_DOWN}%.</b> For a ${money.format(Math.round(result.price))} home you would want at least ${money.format(Math.round(result.minDownNeeded))} down. With ${money.format(Math.round(result.down))} saved, look at homes up to about ${money.format(Math.round(result.priceAtSavedDown))}, or save more first.</div>`
+    : result.downShare >= CALC_HOUSE_NO_INSURANCE_DOWN
+      ? `<div class="calc-verdict on_track"><b>${calcPct(result.downShare)} down.</b> That is ${CALC_HOUSE_NO_INSURANCE_DOWN}% or more, so there is no mortgage insurance, the usual target for a later home.</div>`
+      : `<div class="calc-verdict close"><b>${calcPct(result.downShare)} down.</b> Fine for a first home, which can start from ${CALC_HOUSE_MIN_DOWN}%. For a later home aim for ${CALC_HOUSE_NO_INSURANCE_DOWN}% (${money.format(Math.round(result.fullDownNeeded))} on this home), which also removes mortgage insurance.</div>`;
+  const rows = [["Loan payment (principal and interest)", p.loan], ["Property tax", p.tax], ["Home insurance", p.insurance], ...(p.mortgageInsurance > 0 ? [["Mortgage insurance", p.mortgageInsurance]] : []), ...(p.hoa > 0 ? [["HOA dues", p.hoa]] : [])];
+  return `<div class="calc-number-label">The most home you can afford</div>
+    <div class="calc-number">${money.format(Math.round(result.price))}</div>
+    <p class="muted calc-number-note">${money.format(Math.round(result.loan))} borrowed over ${a.years} years at ${calcOneDecimal(a.rate)}%, plus ${money.format(Math.round(result.down))} down.</p>
+    ${downHtml}
+    <div class="calc-number-label">Monthly housing cost</div>
+    <p class="calc-figure">${money.format(Math.round(result.monthly))} <small class="muted">of ${money.format(Math.round(result.totalBudget))} (${calcPct(a.incomePercent)} of ${money.format(Math.round(result.monthlyIncome))} a month before tax)</small></p>
+    <div class="calc-scroll"><table class="calc-table"><tbody>
+      ${rows.map(([label, amount]) => `<tr><td>${label}</td><td class="r">${money.format(Math.round(amount))}</td></tr>`).join("")}
+    </tbody></table></div>
+    <p class="muted calc-assumptions">The 3/5/25 guide: at least ${CALC_HOUSE_MIN_DOWN}% down on a first home (${CALC_HOUSE_NO_INSURANCE_DOWN}% on later ones), plan to stay at least 5 years, and keep the whole housing cost within ${calcPct(a.incomePercent)} of your pre-tax income. Assumes property tax of ${calcOneDecimal(a.propertyTax)}% and insurance of ${calcOneDecimal(a.insurance)}% of the price a year${result.withMortgageInsurance ? `, and mortgage insurance of ${calcOneDecimal(a.mortgageInsurance)}% of the loan a year while less than ${CALC_HOUSE_NO_INSURANCE_DOWN}% is down` : ""}. Maintenance, repairs and moving costs are extra.</p>`;
+}
+
+function calcCarFormHtml(values) {
+  return `<form class="calc-form" id="calcCarForm" autocomplete="off">
+    <h3>Your numbers</h3>
+    ${calcField("income", "Yearly income before tax", values.income)}
+    ${calcField("rate", "Interest rate on the car loan (%)", values.rate, { step: "0.01" })}
+    ${calcField("existing", "What you already pay a month on cars", values.existing, { hint: `<small class="muted calc-hint">Loans and leases on cars you keep. They use up part of the limit.</small>` })}
+    ${calcField("saved", "Down payment you have saved (optional)", values.saved, { hint: `<small class="muted calc-hint">Shows whether it is enough, and what it would buy.</small>` })}
+    <details id="calcAdvanced" data-keep-open ${values.advanced ? "open" : ""}><summary>Change the rule</summary>
+      <p class="muted">Leave a box empty to use the 20/3/8 rule.</p>
+      ${calcField("downPercent", "Down payment (% of the price)", values.downPercent, { step: "1", placeholder: `rule: ${CALC_CAR_DEFAULTS.downPercent}` })}
+      ${calcField("years", "Years to pay the loan off", values.years, { step: "1", min: "1", placeholder: `rule: ${CALC_CAR_DEFAULTS.years}` })}
+      ${calcField("incomePercent", "Most of your pre-tax income for all car payments (%)", values.incomePercent, { step: "0.5", min: "1", placeholder: `rule: ${CALC_CAR_DEFAULTS.incomePercent}` })}
+    </details>
+  </form>`;
+}
+
+function calcHouseFormHtml(values) {
+  return `<form class="calc-form" id="calcHouseForm" autocomplete="off">
+    <h3>Your numbers</h3>
+    ${calcField("income", "Yearly household income before tax", values.income)}
+    ${calcField("down", "Down payment you have", values.down)}
+    ${calcField("rate", "Mortgage interest rate (%)", values.rate, { step: "0.01" })}
+    ${calcField("years", "Loan length in years", values.years, { min: "5", placeholder: `automatic: ${CALC_HOUSE_DEFAULTS.years}` })}
+    <details id="calcAdvanced" data-keep-open ${values.advanced ? "open" : ""}><summary>Taxes, insurance and the rule</summary>
+      <p class="muted">Leave a box empty to use the automatic value.</p>
+      ${calcField("propertyTax", "Property tax a year (% of the price)", values.propertyTax, { step: "0.05", placeholder: `automatic: ${CALC_HOUSE_DEFAULTS.propertyTax}` })}
+      ${calcField("insurance", "Home insurance a year (% of the price)", values.insurance, { step: "0.05", placeholder: `automatic: ${CALC_HOUSE_DEFAULTS.insurance}` })}
+      ${calcField("hoa", "HOA dues a month", values.hoa, { placeholder: "automatic: 0" })}
+      ${calcField("mortgageInsurance", "Mortgage insurance a year (% of the loan, when under 20% down)", values.mortgageInsurance, { step: "0.05", placeholder: `automatic: ${CALC_HOUSE_DEFAULTS.mortgageInsurance}` })}
+      ${calcField("incomePercent", "Most of your pre-tax income for housing (%)", values.incomePercent, { step: "1", min: "5", placeholder: `automatic: ${CALC_HOUSE_DEFAULTS.incomePercent}` })}
+    </details>
+  </form>`;
+}
+
 function renderCalculators() {
   const values = calcInputs();
-  const tools = [["kyn", "Know your number"], ["compound", "Compound interest"]];
-  const tool = calcTool === "compound" ? "compound" : "kyn";
+  const tools = [["kyn", "Know your number"], ["compound", "Compound interest"], ["car", "Car affordability"], ["house", "House affordability"]];
+  const tool = tools.some(([key]) => key === calcTool) ? calcTool : "kyn";
+  const intros = {
+    kyn: "How much do you need in your retirement accounts to fund the life you want, and are you on track? Only the first five numbers are needed; the advanced assumptions are optional.",
+    compound: "See what a starting amount and regular saving grow into, and how much of it is growth rather than your own money.",
+    car: "How much car can you afford without wrecking your budget? The 20/3/8 rule: 20% down, a loan of 3 years or less, and all car payments within 8% of your income before tax.",
+    house: "How much home can you afford? The 3/5/25 guide: at least 3% down on a first home, plan to stay 5 years or more, and a total housing cost within 25% of your income before tax."
+  };
+  const forms = { kyn: calcKynFormHtml, compound: calcCompoundFormHtml, car: calcCarFormHtml, house: calcHouseFormHtml };
+  const results = { kyn: kynResultsHtml, compound: compoundResultsHtml, car: carResultsHtml, house: houseResultsHtml };
   return `<div class="calcs">
     <section class="calcs-hero">
       <span class="inv-eyebrow">Calculators</span>
@@ -8350,10 +8440,10 @@ function renderCalculators() {
       <div class="calcs-tabs" role="tablist">${tools.map(([key, label]) => `<button type="button" role="tab" aria-selected="${key === tool}" class="calcs-tab ${key === tool ? "active" : ""}" data-calc-tool="${key}">${label}</button>`).join("")}</div>
     </section>
     <section class="calc-card">
-      <div class="calc-intro muted">${tool === "kyn" ? "How much do you need in your retirement accounts to fund the life you want, and are you on track? Only the first five numbers are needed; the advanced assumptions are optional." : "See what a starting amount and regular saving grow into, and how much of it is growth rather than your own money."}</div>
+      <div class="calc-intro muted">${intros[tool]}</div>
       <div class="calc-grid">
-        ${tool === "kyn" ? calcKynFormHtml(values.kyn) : calcCompoundFormHtml(values.compound)}
-        <div class="calc-results" id="calcResults">${tool === "kyn" ? kynResultsHtml(values.kyn) : compoundResultsHtml(values.compound)}</div>
+        ${forms[tool](values[tool])}
+        <div class="calc-results" id="calcResults">${results[tool](values[tool])}</div>
       </div>
     </section>
   </div>`;
@@ -8362,14 +8452,15 @@ function renderCalculators() {
 function bindCalculatorEvents() {
   if (currentView !== "calculators") return;
   document.querySelectorAll("[data-calc-tool]").forEach((button) => button.addEventListener("click", () => { calcTool = button.dataset.calcTool; render(); }));
-  const form = $("#calcKynForm") || $("#calcCompoundForm");
+  const form = $("#calcKynForm") || $("#calcCompoundForm") || $("#calcCarForm") || $("#calcHouseForm");
   if (!form) return;
-  const tool = form.id === "calcKynForm" ? "kyn" : "compound";
+  const tool = { calcKynForm: "kyn", calcCompoundForm: "compound", calcCarForm: "car", calcHouseForm: "house" }[form.id];
+  const resultsFor = { kyn: kynResultsHtml, compound: compoundResultsHtml, car: carResultsHtml, house: houseResultsHtml }[tool];
   // The results follow every keystroke (from what is typed, so a half-typed age is never changed under the cursor); what is typed is saved when a box is left.
   const refresh = () => {
     const raw = calcReadForm(form);
     const results = $("#calcResults");
-    if (results) results.innerHTML = tool === "kyn" ? kynResultsHtml(raw) : compoundResultsHtml(raw);
+    if (results) results.innerHTML = resultsFor(raw);
     if (tool === "kyn") {
       const shown = calcRetirement(raw);
       const age = raw.age;
@@ -8385,7 +8476,7 @@ function bindCalculatorEvents() {
     refresh();
     calcSave(tool, calcReadForm(form));
   }));
-  $("#calcAdvanced")?.addEventListener("toggle", (event) => calcSave("kyn", calcReadForm(form), { advanced: event.currentTarget.open }));
+  $("#calcAdvanced")?.addEventListener("toggle", (event) => calcSave(tool, calcReadForm(form), { advanced: event.currentTarget.open }));
 }
 
 // Buckets every net-worth asset (not liabilities) into the four classes

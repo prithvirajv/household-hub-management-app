@@ -383,7 +383,14 @@ contributions that grow with `savingsGrowth`, default = inflation). Number = spe
 automatic values: return `calcDefaultReturn(age)` (10% to 20, -0.1pt a year, floor 5.5%), inflation 3, life expectancy 95, withdrawal rate
 `calcDefaultSwr(retirementYears)` interpolated from 20y 5%, 25y 4.5%, 30y 4%, 35y 3.6%, 40y 3.3%, 45y 3.1%, 50y 3%. Verdict: on track at 100% funded, close
 from 90%, else behind; reach age searched to 80; extra monthly solved from the annuity factor. Compound interest: monthly compounding, `calcCompound`.
-Inputs are saved in `state.goals.calculators` (cleaned by `calcSanitize`, blanks stay null) inside the existing `goals` object, so no new top-level state
+Car affordability (`calcCar`): the 20/3/8 rule (down 20%, 3 years, 8% of gross monthly income for ALL car payments, existing payments subtracted),
+loan = payment / `calcPaymentFactor(rate, months)`, price = loan / (1 - down%); a saved down payment above the rule's need buys `loan + saved`, below it
+buys `saved / down%`. Checked against Money Guy's worked example ($5,000 a month, 5%, $400 payment -> $13,346 loan, $16,683 price). House affordability
+(`calcHouse`): the 3/5/25 guide (3% minimum down on a first home, 20% to avoid mortgage insurance, whole housing cost within 25% of gross monthly income,
+HOA taken off first). Cost is linear in the price, so the price is solved directly: without mortgage insurance P = (budget + down*k)/(k + carry); over the
+20%-down price (5 x down) it is P = (budget + down*(k + pmi))/(k + pmi + carry), and if that falls under the 20% line the answer is the 20% price itself
+(the dearest home with no insurance). Defaults: tax 1%, insurance 0.5% of price a year, mortgage insurance 0.5% of the loan a year
+(`CALC_HOUSE_DEFAULTS`); they are US averages, so tell users to change them. Inputs are saved in `state.goals.calculators` (cleaned by `calcSanitize`, blanks stay null) inside the existing `goals` object, so no new top-level state
 key. The advanced `<details>` carries `data-keep-open`: the global outside-click closer in `app.js` skips any `<details>` with that attribute (also used by
 Investments' account cards and Prices' products). The phone app does not have this page yet.
 

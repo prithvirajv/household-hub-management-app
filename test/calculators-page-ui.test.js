@@ -34,7 +34,7 @@ test("what is typed is saved inside the existing goals object, and the results f
 test("the advanced assumptions stay open until the person closes them: the outside-click closer leaves them alone", () => {
   assert.match(app, /<details id="calcAdvanced" data-keep-open /);
   assert.match(app, /if \(details\.hasAttribute\("data-keep-open"\)\) return;/);
-  assert.match(app, /\$\("#calcAdvanced"\)\?\.addEventListener\("toggle", \(event\) => calcSave\("kyn", calcReadForm\(form\), \{ advanced: event\.currentTarget\.open \}\)\);/);
+  assert.match(app, /\$\("#calcAdvanced"\)\?\.addEventListener\("toggle", \(event\) => calcSave\(tool, calcReadForm\(form\), \{ advanced: event\.currentTarget\.open \}\)\);/);
 });
 
 test("the page can never be wider than the screen, and stacks to one column on a phone", () => {
@@ -46,4 +46,20 @@ test("the page can never be wider than the screen, and stacks to one column on a
 test("the page says its results are estimates, not advice, and shows the assumptions behind them", () => {
   assert.ok(app.includes("they are for planning, not financial advice"));
   assert.ok(app.includes("calc-assumptions"));
+});
+
+test("the page offers four calculators, each with its own form, results and saved values", () => {
+  assert.match(app, /\["car", "Car affordability"\], \["house", "House affordability"\]/);
+  assert.match(app, /const forms = \{ kyn: calcKynFormHtml, compound: calcCompoundFormHtml, car: calcCarFormHtml, house: calcHouseFormHtml \};/);
+  assert.match(app, /const results = \{ kyn: kynResultsHtml, compound: compoundResultsHtml, car: carResultsHtml, house: houseResultsHtml \};/);
+  assert.match(app, /calcCarForm: "car", calcHouseForm: "house"/, "every form is recognised when its events are bound");
+  assert.match(app, /addEventListener\("toggle", \(event\) => calcSave\(tool, calcReadForm\(form\), \{ advanced: event\.currentTarget\.open \}\)\);/, "each calculator remembers its own advanced section");
+  assert.match(app, /const tool = tools\.some\(\(\[key\]\) => key === calcTool\) \? calcTool : "kyn";/, "an unknown tool falls back to the first");
+});
+
+test("the car and house results name the rule they use and what is not included", () => {
+  assert.ok(app.includes("The 20/3/8 rule: put "));
+  assert.ok(app.includes("The 3/5/25 guide: at least "));
+  assert.ok(app.includes("Tax, fees, insurance and fuel are extra."));
+  assert.ok(app.includes("Maintenance, repairs and moving costs are extra."));
 });

@@ -1,6 +1,6 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
-const { calcDefaultSwr, calcDefaultReturn, calcSanitize, calcBalanceAfter, calcRetirement, calcCompound } = require("../lib/calculators");
+const { calcDefaultSwr, calcDefaultReturn, calcSanitize, calcBalanceAfter, calcRetirement, calcCompound, calcCar, calcHouse } = require("../lib/calculators");
 
 const near = (actual, expected, tolerance = 0.5) => assert.ok(Math.abs(actual - expected) <= tolerance, `${actual} is not within ${tolerance} of ${expected}`);
 
@@ -121,4 +121,124 @@ test("compound interest grows a start and a monthly saving, month by month, and 
   near(calcCompound({ start: 1000, monthly: 0, rate: 10, years: 10, inflation: 3 }).finalToday, calcCompound({ start: 1000, monthly: 0, rate: 10, years: 10 }).final / 1.03 ** 10, 0.001);
   assert.match(calcCompound({ rate: 7, years: 10 }).error, /starting amount or a monthly amount/);
   assert.match(calcCompound({ start: 1000 }).error, /yearly return and the number of years/);
+});
+
+test("the car limit is the 20/3/8 rule: the payment is 8% of monthly income, paid off in 3 years, with 20% of the price down (Money Guy's own worked example)", () => {
+  // $5,000 a month before tax, 5%: $400 a month borrows $13,346, and with 20% down the car costs $16,683.
+  const result = calcCar({ income: 60000, rate: 5 });
+  assert.equal(result.ok, true);
+  near(result.payment, 400, 0.001);
+  near(result.loan, 13346, 1);
+  near(result.price, 16683, 1);
+  near(result.downNeeded, result.price * 0.2, 0.001);
+  near(result.interest, 400 * 36 - result.loan, 0.001);
+  // The payment really does pay the loan off in 36 months.
+  let balance = result.loan;
+  for (let month = 0; month < 36; month += 1) balance = balance * (1 + 0.05 / 12) - result.payment;
+  near(balance, 0, 0.01);
+  near(calcCar({ income: 60000, rate: 0 }).loan, 400 * 36, 0.001, "no interest: the payments are the loan");
+});
+
+test("payments on other cars use up part of the 8%, and a car that already takes all of it leaves no room", () => {
+  const some = calcCar({ income: 60000, rate: 5, existing: 150 });
+  near(some.payment, 250, 0.001);
+  assert.ok(some.price < calcCar({ income: 60000, rate: 5 }).price);
+  const none = calcCar({ income: 60000, rate: 5, existing: 400 });
+  assert.deepEqual([none.blocked, none.price, none.payment], [true, 0, 0]);
+  assert.equal(calcCar({ income: 60000, rate: 5, existing: 900 }).blocked, true, "more than the limit already");
+});
+
+test("the car down payment saved is compared with what the rule asks: enough lets you stretch, too little shrinks the car", () => {
+  const base = calcCar({ income: 60000, rate: 5 });
+  const enough = calcCar({ income: 60000, rate: 5, saved: 5000 });
+  assert.equal(enough.savings.enough, true);
+  near(enough.savings.price, base.loan + 5000, 0.001, "the loan stays and the savings go on top");
+  assert.ok(enough.savings.price > base.price);
+  const short = calcCar({ income: 60000, rate: 5, saved: 2000 });
+  assert.equal(short.savings.enough, false);
+  near(short.savings.shortfall, base.downNeeded - 2000, 0.001);
+  near(short.savings.price, 10000, 0.001, "$2,000 is 20% of $10,000");
+  assert.ok(short.savings.payment < base.payment, "a smaller loan, a smaller payment");
+});
+
+test("the rule can be changed, and bad car inputs give a plain message", () => {
+  const custom = calcCar({ income: 120000, rate: 6, downPercent: 10, years: 4, incomePercent: 10 });
+  near(custom.payment, 1000, 0.001);
+  near(custom.price, custom.loan / 0.9, 0.001);
+  assert.equal(custom.assumptions.years, 4);
+  assert.match(calcCar({ rate: 5 }).error, /yearly income/);
+  assert.match(calcCar({ income: 50000 }).error, /interest rate/);
+  assert.match(calcCar({ income: 50000, rate: 5, years: 20 }).error, /1 to 10 years/);
+  assert.match(calcCar({ income: 50000, rate: 5, downPercent: 100 }).error, /down payment share/);
+});
+
+test("the house limit puts the whole monthly cost (loan, tax, insurance, mortgage insurance, HOA) at 25% of monthly income", () => {
+  const result = calcHouse({ income: 120000, down: 30000, rate: 6.5 });
+  assert.equal(result.ok, true);
+  near(result.totalBudget, 2500, 0.001);
+  near(result.monthly, 2500, 0.01, "the pieces add up to exactly the budget");
+  const p = result.parts;
+  near(p.loan + p.tax + p.insurance + p.mortgageInsurance + p.hoa, 2500, 0.01);
+  // The loan payment really is the standard 30-year payment on the loan, and the tax and insurance are a share of the price.
+  const r = 0.065 / 12;
+  near(p.loan, (result.loan * r) / (1 - (1 + r) ** -360), 0.01);
+  near(p.tax, (result.price * 0.01) / 12, 0.01);
+  near(p.insurance, (result.price * 0.005) / 12, 0.01);
+  near(result.price, result.loan + 30000, 0.001);
+  assert.equal(result.withMortgageInsurance, true, "under 20% down");
+  near(p.mortgageInsurance, (result.loan * 0.005) / 12, 0.01);
+});
+
+test("with 20% down or more there is no mortgage insurance, and at the 20% line the price is the dearest home that needs none", () => {
+  const big = calcHouse({ income: 120000, down: 150000, rate: 6.5 });
+  assert.equal(big.withMortgageInsurance, false);
+  assert.equal(big.parts.mortgageInsurance, 0);
+  assert.ok(big.downShare >= 20);
+  near(big.monthly, 2500, 0.01);
+  // A down payment whose 20% line falls where insured homes cost too much and uninsured ones fit: the answer is exactly the 20% price (5 x the down payment).
+  const edge = calcHouse({ income: 120000, down: 77000, rate: 6.5 });
+  near(edge.price, 385000, 0.001);
+  near(edge.downShare, 20, 0.0001);
+  assert.equal(edge.withMortgageInsurance, false);
+  assert.ok(edge.monthly < 2500, "a little under the budget: one dollar more of price would add mortgage insurance and go over it");
+  const over = calcHouse({ income: 120000, down: 77000, rate: 6.5 }).price + 1;
+  const r = 0.065 / 12;
+  const k = r / (1 - (1 + r) ** -360);
+  assert.ok((over - 77000) * (k + 0.005 / 12) + (over * 0.015) / 12 > 2500, "the next dollar really would go over");
+});
+
+test("HOA dues come out of the budget first, and a smaller or bigger set of assumptions moves the price the right way", () => {
+  const base = calcHouse({ income: 120000, down: 30000, rate: 6.5 });
+  const hoa = calcHouse({ income: 120000, down: 30000, rate: 6.5, hoa: 400 });
+  assert.ok(hoa.price < base.price);
+  near(hoa.monthly, 2500, 0.01);
+  assert.equal(calcHouse({ income: 120000, down: 30000, rate: 6.5, hoa: 2600 }).blocked, true);
+  assert.ok(calcHouse({ income: 120000, down: 30000, rate: 5 }).price > base.price, "a lower rate buys more");
+  assert.ok(calcHouse({ income: 120000, down: 30000, rate: 6.5, years: 15 }).price < base.price, "a shorter loan has a bigger payment, so buys less");
+  assert.ok(calcHouse({ income: 120000, down: 30000, rate: 6.5, propertyTax: 2 }).price < base.price);
+  assert.ok(calcHouse({ income: 120000, down: 30000, rate: 6.5, mortgageInsurance: 0 }).price > base.price);
+});
+
+test("a down payment under 3% is flagged with what it would buy at 3%, and a very big down payment borrows nothing", () => {
+  const thin = calcHouse({ income: 120000, down: 5000, rate: 6.5 });
+  assert.equal(thin.downShort, true);
+  near(thin.minDownNeeded, thin.price * 0.03, 0.001);
+  near(thin.priceAtSavedDown, 5000 / 0.03, 0.001);
+  assert.ok(thin.priceAtSavedDown < thin.price);
+  const none = calcHouse({ income: 120000, rate: 6.5 });
+  assert.equal(none.down, 0);
+  assert.equal(none.downShort, true);
+  const cash = calcHouse({ income: 120000, down: 2000000, rate: 6.5 });
+  assert.deepEqual([cash.loan, cash.price], [0, 2000000]);
+  assert.match(calcHouse({ rate: 6 }).error, /household income/);
+  assert.match(calcHouse({ income: 90000 }).error, /mortgage interest rate/);
+  assert.match(calcHouse({ income: 90000, rate: 6, years: 2 }).error, /5 to 40 years/);
+});
+
+test("the car and house forms are kept safe and bounded like the others", () => {
+  const clean = calcSanitize({ car: { income: "60000", rate: "99", downPercent: "", advanced: 1 }, house: { income: "-5", years: 1, hoa: "abc", mortgageInsurance: "0" } });
+  assert.deepEqual([clean.car.income, clean.car.rate, clean.car.downPercent, clean.car.advanced], [60000, 40, null, true]);
+  assert.deepEqual([clean.house.income, clean.house.years, clean.house.hoa, clean.house.mortgageInsurance], [0, 5, null, 0], "0 stays 0 (insurance switched off), a blank stays blank");
+  assert.equal(calcSanitize({}).car.income, null);
+  assert.equal(calcSanitize(undefined).house.rate, null);
 });
