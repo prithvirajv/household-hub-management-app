@@ -47,3 +47,13 @@ test("the recipe pop-up shows Important tips first, then ingredients (a checklis
   assert.match(css, /@media \(max-width: 640px\) \{ \.recipe-detail-cols \{ grid-template-columns: minmax\(0, 1fr\)/, "one column on a phone");
   assert.match(css, /\.recipe-checklist input:checked \+ span \{ text-decoration: line-through;/, "ticked ingredients are struck through");
 });
+
+test("the recipe form gives the wide fields rows of their own, takes ingredients one per line, and still accepts the old comma style", () => {
+  assert.match(app, /<label class="recipe-field-wide">Ingredients \(one per line\)<textarea name="ingredients"/, "a roomy box, not a single line");
+  assert.match(app, /<label class="recipe-field-wide">Steps \(one per line, optional\)<textarea name="steps"/);
+  assert.match(app, /function recipeIngredientList\(text\) \{[\s\S]*?raw\.includes\("\\n"\) \? raw\.split\(\/\\r\?\\n\/\) : raw\.split\(","\)/, "a line each, or commas on a single line");
+  assert.equal((app.match(/recipeIngredientList\(data\.ingredients\)/g) || []).length, 2, "adding and editing both use it");
+  assert.match(css, /\.recipe-builder \{[^}]*grid-template-columns: repeat\(2, minmax\(0, 1fr\)\);/, "two columns, so calories and protein sit side by side");
+  assert.match(css, /\.recipe-builder > \.recipe-field-wide,\s*\.recipe-builder > \.recipe-tips-editor,/, "name, ingredients, steps and tips each take a full row");
+  assert.match(css, /\.recipe-form-actions \{[^}]*justify-content: flex-end;/);
+});

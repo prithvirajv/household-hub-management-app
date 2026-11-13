@@ -375,6 +375,18 @@ index, no ticker as "Other / not sure", otherwise a single stock). Alerts: one n
 over 8% together. The page is a grid item with auto margins, so `.inv` needs `width: 100%` and `min-width: 0` or a wide table widens the whole
 page. The phone app does not have this page yet.
 
+### Calculators page
+
+A page of its own (`renderCalculators` in `app.js`, maths in `lib/calculators.js`, a classic script, so its top-level names start `calc` / `CALC`; `CALC_MAX_REACH_AGE`
+lives only there). Know your number: `calcRetirement` takes age, retire age, monthly spend (today's dollars), balance, yearly saving (end-of-year
+contributions that grow with `savingsGrowth`, default = inflation). Number = spend x (1+inflation)^years / withdrawal rate. Blank advanced fields use the
+automatic values: return `calcDefaultReturn(age)` (10% to 20, -0.1pt a year, floor 5.5%), inflation 3, life expectancy 95, withdrawal rate
+`calcDefaultSwr(retirementYears)` interpolated from 20y 5%, 25y 4.5%, 30y 4%, 35y 3.6%, 40y 3.3%, 45y 3.1%, 50y 3%. Verdict: on track at 100% funded, close
+from 90%, else behind; reach age searched to 80; extra monthly solved from the annuity factor. Compound interest: monthly compounding, `calcCompound`.
+Inputs are saved in `state.goals.calculators` (cleaned by `calcSanitize`, blanks stay null) inside the existing `goals` object, so no new top-level state
+key. The advanced `<details>` carries `data-keep-open`: the global outside-click closer in `app.js` skips any `<details>` with that attribute (also used by
+Investments' account cards and Prices' products). The phone app does not have this page yet.
+
 ### Recipe import from a video or photos
 
 `POST /api/recipes/import` (`lib/recipe-import.js`, route in `server/index.js`) sends a public YouTube link (rebuilt from its 11-character

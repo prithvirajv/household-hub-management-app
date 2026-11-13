@@ -15,6 +15,7 @@ const views = [
   ["meals", "Meals", "🍲"],
   ["recipes", "Recipes", "📖"],
   ["goals", "Goals", "🎯"],
+  ["calculators", "Calculators", "🧮"],
   ["wealth", "Wealth", "🏦"],
   ["investments", "Investments", "📊"],
   ["prices", "Prices", "🏷️"],
@@ -35,7 +36,7 @@ const NAV_SECTIONS = [
   ["Overview", ["home"]],
   ["Money", ["budget", "bills", "transactions", "paychecks", "wealth", "investments", "prices", "reports", "partners"]],
   ["Household", ["calendar", "notes", "meals", "recipes", "documents", "decisions", "ious", "sharing"]],
-  ["Personal", ["journal", "plan", "goals"]],
+  ["Personal", ["journal", "plan", "goals", "calculators"]],
   ["Settings", ["profile", "help", "admin"]]
 ];
 
@@ -1969,6 +1970,8 @@ function renderShell() {
                       ? "Household decisions"
                       : isIousView
                         ? "Shared expenses & debts"
+                        : currentView === "calculators"
+                        ? "Calculators"
                         : currentView === "prices"
                         ? "Item prices"
                         : currentView === "investments"
@@ -2015,9 +2018,9 @@ function renderShell() {
   const selectedHousehold = households.find((household) => household.selected);
   $("#defaultHouseholdButton").disabled = Boolean(selectedHousehold?.isDefault);
   $("#defaultHouseholdButton").textContent = selectedHousehold?.isDefault ? "Default household" : "Set as default";
-  $(".month-control").hidden = isAdminView || isNotesView || isHelpView || isRecipesView || isGoalsView || isWealthView || isJournalView || isPlanView || isDocumentsView || isDecisionsView || isIousView || currentView === "partners" || currentView === "investments" || currentView === "prices" || isProfileView || isHomeView;
+  $(".month-control").hidden = isAdminView || isNotesView || isHelpView || isRecipesView || isGoalsView || isWealthView || isJournalView || isPlanView || isDocumentsView || isDecisionsView || isIousView || currentView === "partners" || currentView === "investments" || currentView === "prices" || isProfileView || isHomeView || currentView === "calculators";
   $("#syncButton").hidden = isAdminView || isHelpView;
-  $("#downloadCsvButton").hidden = isAdminView || isNotesView || isHelpView || isJournalView || isPlanView || isDocumentsView || isDecisionsView || isIousView || currentView === "partners" || currentView === "investments" || currentView === "prices" || isProfileView || isHomeView;
+  $("#downloadCsvButton").hidden = isAdminView || isNotesView || isHelpView || isJournalView || isPlanView || isDocumentsView || isDecisionsView || isIousView || currentView === "partners" || currentView === "investments" || currentView === "prices" || isProfileView || isHomeView || currentView === "calculators";
   renderNav();
   renderMobileTabBar();
   renderNotificationBell();
@@ -2102,6 +2105,7 @@ function metricsForView() {
   if (currentView === "wealth") return [["Assets", money.format(netWorth().assets), "tracked"], ["Liabilities", money.format(netWorth().liabilities), "tracked"], ["Net worth", money.format(netWorth().total), "current estimate"], ["Debt accounts", String(state.goals.debts.length), "payoff plan"]];
   if (currentView === "admin") return [];
   // The Partners page has its own figures, and the household budget tiles (Income, Assigned...) are not about the partnership.
+  if (currentView === "calculators") return [];
   if (currentView === "prices") return [];
   if (currentView === "investments") return [];
   if (currentView === "partners") return [];
@@ -2196,6 +2200,7 @@ const renderers = {
   wealth: renderWealth,
   investments: renderInvestments,
   prices: renderPrices,
+  calculators: renderCalculators,
   sharing: renderSharing,
   reports: renderReports,
   profile: renderProfile,
@@ -7696,6 +7701,12 @@ async function recipeImportPrepareImage(file, maxDimension = 1800) {
   return { name: file.name || "photo", mimeType, imageBase64: dataUrl.slice(dataUrl.indexOf(",") + 1) };
 }
 
+// The ingredients typed in the form: one per line, or (a single line) separated by commas, which is how the old one-line box was filled in.
+function recipeIngredientList(text) {
+  const raw = String(text || "");
+  return (raw.includes("\n") ? raw.split(/\r?\n/) : raw.split(",")).map((item) => item.replace(/\s+/g, " ").trim()).filter(Boolean);
+}
+
 function recipeTipRowHtml(tip) {
   return `<div class="recipe-tip-row">
     <label class="recipe-tip-important" title="Important tips are shown first on the recipe"><input type="checkbox" data-recipe-tip-important ${tip.important ? "checked" : ""}> <span>Important</span></label>
@@ -7728,9 +7739,9 @@ function renderRecipeImportPanel() {
     ${draft ? `
     <form id="recipeImportForm" class="recipe-builder recipe-import-draft">
       <p class="muted" role="status">The AI drafted this from your ${draft.sourceUrl ? "video" : "photos"}. Fix anything that is off, then add it. Nothing is saved until you do.</p>
-      <label>Name<input name="name" value="${escapeHtml(draft.name)}" required placeholder="Recipe name"></label>
-      <label>Ingredients (one per line)<textarea name="ingredients" rows="${Math.min(14, Math.max(4, draft.ingredients.length + 1))}">${escapeHtml(draft.ingredients.join("\n"))}</textarea></label>
-      <label>Steps (one per line)<textarea name="steps" rows="${Math.min(12, Math.max(3, draft.steps.length + 1))}">${escapeHtml(draft.steps.join("\n"))}</textarea></label>
+      <label class="recipe-field-wide">Name<input name="name" value="${escapeHtml(draft.name)}" required placeholder="Recipe name"></label>
+      <label class="recipe-field-wide">Ingredients (one per line)<textarea name="ingredients" rows="${Math.min(14, Math.max(4, draft.ingredients.length + 1))}">${escapeHtml(draft.ingredients.join("\n"))}</textarea></label>
+      <label class="recipe-field-wide">Steps (one per line)<textarea name="steps" rows="${Math.min(12, Math.max(4, draft.steps.length + 1))}">${escapeHtml(draft.steps.join("\n"))}</textarea></label>
       ${recipeTipsEditorHtml(draft.tips)}
       <label>Calories<input name="calories" type="number" min="0" value="${Number(draft.calories || 0)}"></label>
       <label>Protein (g)<input name="protein" type="number" min="0" value="${Number(draft.protein || 0)}"></label>
@@ -7837,11 +7848,11 @@ function renderRecipes() {
         ${showForm ? `
         <form id="recipeForm" class="recipe-builder">
           <input name="recipeId" type="hidden" value="${editingRecipe?.id || ""}">
-          <label>Name<input name="name" placeholder="Vegetable curry" value="${editingRecipe?.name || ""}" required></label>
-          <label>Ingredients<input name="ingredients" placeholder="onion, tomato, lentils" value="${editingRecipe?.ingredients.join(", ") || ""}" required></label>
+          <label class="recipe-field-wide">Name<input name="name" placeholder="Vegetable curry" value="${escapeHtml(editingRecipe?.name || "")}" required></label>
+          <label class="recipe-field-wide">Ingredients (one per line)<textarea name="ingredients" rows="${Math.min(14, Math.max(4, (editingRecipe?.ingredients.length || 0) + 1))}" placeholder="onion&#10;tomato&#10;lentils" required>${escapeHtml((editingRecipe?.ingredients || []).join("\n"))}</textarea></label>
           <label>Calories<input name="calories" type="number" min="0" value="${editingRecipe?.calories ?? 400}"></label>
           <label>Protein (g)<input name="protein" type="number" min="0" value="${editingRecipe?.protein ?? 20}"></label>
-          <label>Steps (one per line, optional)<textarea name="steps" rows="3">${escapeHtml((editingRecipe?.steps || []).join("\n"))}</textarea></label>
+          <label class="recipe-field-wide">Steps (one per line, optional)<textarea name="steps" rows="${Math.min(12, Math.max(4, (editingRecipe?.steps || []).length + 1))}">${escapeHtml((editingRecipe?.steps || []).join("\n"))}</textarea></label>
           ${recipeTipsEditorHtml(editingRecipe?.tips || [])}
           <div class="recipe-form-actions">
             <button class="ghost" id="cancelRecipeEditButton" type="button">Cancel</button>
@@ -8020,7 +8031,7 @@ function renderInvestments() {
     </section>
     <section class="inv-section">
       <h3>Accounts</h3><p class="muted">Open an account to see its holdings. Set who owns it and its tax bucket; use Edit holdings to change shares, prices or tickers.</p>
-      ${snap.groups.map((group) => `<details class="inv-acct" style="--c:${colorOf(group.owner)}" data-inv-group="${escapeHtml(group.groupId)}" ${investmentsOpen.has(group.groupId) ? "open" : ""}>
+      ${snap.groups.map((group) => `<details class="inv-acct" data-keep-open style="--c:${colorOf(group.owner)}" data-inv-group="${escapeHtml(group.groupId)}" ${investmentsOpen.has(group.groupId) ? "open" : ""}>
         <summary><span class="inv-aname">${escapeHtml(group.name)}</span>
           <span class="inv-aval">${money.format(group.value)}${group.gain ? `<small class="${group.gain.amount >= 0 ? "inv-pos" : "inv-neg"}">${group.gain.amount >= 0 ? "+" : "−"}${money.format(Math.abs(group.gain.amount))}</small>` : ""}</span>
           <span class="inv-ameta">${escapeHtml(group.owner)} · ${escapeHtml(group.tax)} · ${group.rows.length} holding${group.rows.length === 1 ? "" : "s"} · ${investmentsPct(group.value / T)} of the household</span></summary>
@@ -8102,7 +8113,7 @@ function priceGroupHtml(group) {
   const money = (value) => exactMoney.format(value);
   const verdict = group.verdict;
   const newest = [...group.purchases].reverse().slice(0, 12);
-  return `<details class="price-item" data-price-key="${escapeHtml(group.key)}" ${priceOpen.has(group.key) ? "open" : ""}>
+  return `<details class="price-item" data-keep-open data-price-key="${escapeHtml(group.key)}" ${priceOpen.has(group.key) ? "open" : ""}>
     <summary>
       <span class="price-name">${escapeHtml(group.label)}</span>
       <span class="price-last">${money(group.last.price)} <small class="muted">${group.unitLabel}</small></span>
@@ -8203,6 +8214,178 @@ function bindPricesEvents() {
   $("#pricesShop")?.addEventListener("change", (event) => { priceShopFilter = event.target.value; refreshPricesList(); });
   $("#pricesSort")?.addEventListener("change", (event) => { priceSort = event.target.value; refreshPricesList(); });
   bindPriceDetails();
+}
+
+// ---- Calculators: "Know your number" (how much you need to retire, and whether you are on track) and compound interest. The arithmetic is in
+// lib/calculators.js; what was typed is kept in state.goals.calculators so it is there next time. Estimates, not advice: every result shows the assumptions
+// behind it.
+let calcTool = "kyn"; // which calculator is open: kyn | compound
+
+const calcInputs = () => calcSanitize(state.goals.calculators);
+
+// Everything typed in a calculator's form, as numbers (a blank is null).
+function calcReadForm(form) {
+  const values = {};
+  new FormData(form).forEach((value, key) => { values[key] = String(value).trim() === "" ? null : Number(value); });
+  return values;
+}
+
+// Saves what is in a form (cleaned and bounded) with the household; kept apart from the live results so typing is never interrupted.
+function calcSave(tool, values, extra = {}) {
+  const current = calcInputs();
+  current[tool] = { ...current[tool], ...values, ...extra };
+  state.goals.calculators = calcSanitize(current);
+  autosaveState();
+}
+
+// All the money in stocks, funds and retirement accounts (the Investments page's total), for "use my investments".
+function calcInvestedTotal() {
+  return Math.round(state.goals.netWorth.assets.filter((asset) => isHoldingAssetClass(asset.assetClass)).reduce((sum, asset) => sum + assetValue(asset), 0));
+}
+
+// What the household has spent a month lately (the three whole months before this one that had any spending), for "plan on about 80% of it".
+function calcRecentMonthlySpending() {
+  const thisMonth = dateKeyToMonthKey(dateKey(new Date()));
+  const totals = computeTrailingMonthKeys(thisMonth, 4).slice(0, 3).map((month) => monthSpendingSummary(state.transactions, state.budget.categories, month).total).filter((total) => total > 0);
+  return totals.length ? Math.round(totals.reduce((sum, total) => sum + total, 0) / totals.length) : 0;
+}
+
+function calcField(name, label, value, { step = "1", min = "0", hint = "", placeholder = "" } = {}) {
+  return `<label>${label}<input name="${name}" type="number" inputmode="decimal" step="${step}" min="${min}" value="${value === null ? "" : value}" placeholder="${escapeHtml(placeholder)}">${hint}</label>`;
+}
+
+function calcUseButton(field, amount, label) {
+  return `<button type="button" class="ghost calc-use" data-calc-use="${field}" data-calc-value="${amount}">${escapeHtml(label)}</button>`;
+}
+
+function kynResultsHtml(values) {
+  const result = calcRetirement(values);
+  const empty = values.age === null && values.retireAge === null && values.monthlySpend === null;
+  if (!result.ok) return `<p class="muted calc-prompt">${empty ? "Enter your details to see your retirement number." : escapeHtml(result.error)}</p>`;
+  const a = result.assumptions;
+  const age = values.retireAge;
+  const spent = money.format(Math.round(result.monthlySpendThen));
+  const verdictTitle = { on_track: "You are on track", close: "So close", behind: "Not there yet" }[result.verdict];
+  const verdictText = result.verdict === "on_track"
+    ? `If you change nothing you will have ${money.format(Math.round(result.projectedToday))} in today's dollars by ${age}, which covers your number.`
+    : result.verdict === "close"
+      ? `You are about ${money.format(Math.round(result.gapToday))} short in today's dollars. Small changes close it: save ${money.format(Math.round(result.extraMonthly))} more a month, work a little longer, or plan to spend a bit less.`
+      : `You need ${money.format(Math.round(result.gapToday))} more in today's dollars by ${age}. To get there, save ${money.format(Math.round(result.extraMonthly))} more a month (${money.format(Math.round(result.extraYearly))} a year), or retire later, or plan to spend less.`;
+  return `<div class="calc-number-label">Your retirement number</div>
+    <div class="calc-number">${money.format(Math.round(result.numberToday))}</div>
+    <p class="muted calc-number-note">In today's dollars. By the time you retire at ${age} that is ${money.format(Math.round(result.number))}, because ${money.format(Math.round(values.monthlySpend))} a month today will cost about ${spent} a month then (${a.inflation}% inflation).</p>
+    <div class="calc-bar" role="img" aria-label="${result.fundedPercent}% of the number is covered on your current path"><i style="width:${result.fundedPercent}%"></i></div>
+    <p class="muted calc-bar-note">${result.fundedPercent}% of your number is covered if you change nothing.</p>
+    <div class="calc-verdict ${result.verdict}"><b>${verdictTitle}.</b> ${escapeHtml(verdictText)}</div>
+    <div class="calc-two">
+      <div><h4>If you change nothing</h4><p class="calc-figure">${money.format(Math.round(result.projectedToday))}</p><small class="muted">in today's dollars at ${age} (${money.format(Math.round(result.projected))} after ${a.returnRate}% a year of growth)</small></div>
+      <div><h4>To hit your goal</h4><p class="calc-figure">${result.gap > 0 ? `${money.format(Math.round(result.extraMonthly))} more a month` : "Nothing more"}</p><small class="muted">${result.gap > 0 ? `${money.format(Math.round(result.gapToday))} more needed by ${age}, in today's dollars` : "your current saving already gets there"}</small></div>
+    </div>
+    <p class="calc-reach">${result.reach ? `On your current path you would reach your number at age <b>${result.reach.age}</b> (about ${money.format(Math.round(result.reach.balanceToday))} in today's dollars).` : `On your current path you would not reach your number before age ${CALC_MAX_REACH_AGE}.`}</p>
+    ${result.warnWithdrawal ? `<div class="calc-warn">The withdrawal rate (${a.swr}%) is higher than the return after inflation (${calcOneDecimal(a.returnRate - a.inflation)}%), so the money could run out before the end of retirement. Lower the withdrawal rate, plan on a higher return, or plan to spend less.</div>` : ""}
+    <p class="muted calc-assumptions">Assumes ${a.returnRate}% a year growth, ${a.inflation}% inflation, spending ${a.swr}% of the savings a year over ${a.retirementYears} years of retirement (to age ${a.lifeExpectancy}), and saving that grows ${a.savingsGrowth}% a year. An estimate for planning, not advice: real returns and inflation will differ.</p>`;
+}
+
+const calcOneDecimal = (value) => (Math.round(value * 10) / 10).toString();
+
+function compoundResultsHtml(values) {
+  const result = calcCompound(values);
+  const empty = values.start === null && values.monthly === null && values.rate === null && values.years === null;
+  if (!result.ok) return `<p class="muted calc-prompt">${empty ? "Enter an amount, a yearly return and the number of years to see how it grows." : escapeHtml(result.error)}</p>`;
+  const share = result.final > 0 ? Math.round((result.contributed / result.final) * 100) : 100;
+  return `<div class="calc-number-label">After ${values.years} year${values.years === 1 ? "" : "s"} you would have</div>
+    <div class="calc-number">${money.format(Math.round(result.final))}</div>
+    ${result.finalToday !== null ? `<p class="muted calc-number-note">${money.format(Math.round(result.finalToday))} in today's dollars, taking out ${values.inflation}% inflation a year.</p>` : ""}
+    <div class="calc-bar split" role="img" aria-label="${share}% is money you put in, ${100 - share}% is what it earned"><i style="width:${share}%"></i></div>
+    <p class="muted calc-bar-note"><b>${money.format(Math.round(result.contributed))}</b> is what you put in; <b>${money.format(Math.round(Math.max(0, result.interest)))}</b> is what it earned (${100 - share}%).</p>
+    <div class="calc-scroll"><table class="calc-table"><thead><tr><th>Year</th><th class="r">Balance</th><th class="r">You put in</th><th class="r">Earned</th></tr></thead><tbody>
+      ${result.rows.map((row) => `<tr><td>${row.year}</td><td class="r">${money.format(Math.round(row.balance))}</td><td class="r">${money.format(Math.round(row.contributed))}</td><td class="r">${money.format(Math.round(row.interest))}</td></tr>`).join("")}
+    </tbody></table></div>
+    <p class="muted calc-assumptions">Compounded monthly at ${values.rate}% a year, adding ${money.format(Math.round(values.monthly || 0))} at the end of each month. A steady return is an assumption: real markets go up and down.</p>`;
+}
+
+function calcKynFormHtml(values) {
+  const invested = calcInvestedTotal();
+  const spending = calcRecentMonthlySpending();
+  const preview = calcRetirement(values);
+  const assumed = preview.ok ? preview.assumptions : { returnRate: values.age === null ? "" : calcDefaultReturn(values.age), inflation: CALC_DEFAULT_INFLATION, swr: "", savingsGrowth: values.inflation ?? CALC_DEFAULT_INFLATION };
+  return `<form class="calc-form" id="calcKynForm" autocomplete="off">
+    <h3>Your numbers</h3>
+    ${calcField("age", "How old are you?", values.age, { min: "16" })}
+    ${calcField("retireAge", "What age do you want to retire?", values.retireAge, { min: "16" })}
+    ${calcField("monthlySpend", "Spending each month in retirement, in today's dollars", values.monthlySpend, { hint: `<small class="muted calc-hint">${spending ? `You have spent about ${money.format(spending)} a month lately; people often plan on about 80% of that, less any Social Security or pension. ${calcUseButton("monthlySpend", Math.round(spending * 0.8 / 10) * 10, `Use ${money.format(Math.round(spending * 0.8 / 10) * 10)}`)}` : "Often about 80% of what you spend now, less any Social Security or pension you expect."}</small>` })}
+    ${calcField("balance", "Total in retirement and investment accounts now", values.balance, { hint: `<small class="muted calc-hint">401(k), IRA, HSA if invested, brokerage and similar. ${invested > 0 ? calcUseButton("balance", invested, `Use my investments (${money.format(invested)})`) : ""}</small>` })}
+    ${calcField("annualSaving", "How much you invest each year (you and your employer)", values.annualSaving, { hint: `<small class="muted calc-hint">Include employer contributions to a 401(k) and what you put in IRAs, HSAs and brokerage accounts.</small>` })}
+    <details id="calcAdvanced" data-keep-open ${values.advanced ? "open" : ""}><summary>Advanced assumptions</summary>
+      <p class="muted">Leave a box empty to use the automatic value.</p>
+      ${calcField("inflation", "Inflation a year (%)", values.inflation, { step: "0.1", min: "-5", placeholder: `automatic: ${CALC_DEFAULT_INFLATION}` })}
+      ${calcField("lifeExpectancy", "Plan to age", values.lifeExpectancy, { min: "50", placeholder: `automatic: ${CALC_DEFAULT_LIFE_EXPECTANCY}` })}
+      ${calcField("returnRate", "Yearly return on your investments (%)", values.returnRate, { step: "0.1", min: "-10", placeholder: assumed.returnRate === "" ? "automatic, from your age" : `automatic: ${assumed.returnRate}` })}
+      ${calcField("swr", "Withdrawal rate in retirement (%)", values.swr, { step: "0.1", min: "0.5", placeholder: assumed.swr === "" ? "automatic, from how long you retire" : `automatic: ${assumed.swr}` })}
+      ${calcField("savingsGrowth", "Your saving grows a year (%)", values.savingsGrowth, { step: "0.1", min: "-10", placeholder: `automatic: same as inflation` })}
+    </details>
+  </form>`;
+}
+
+function calcCompoundFormHtml(values) {
+  return `<form class="calc-form" id="calcCompoundForm" autocomplete="off">
+    <h3>Your numbers</h3>
+    ${calcField("start", "Starting amount", values.start)}
+    ${calcField("monthly", "Added each month", values.monthly)}
+    ${calcField("rate", "Yearly return (%)", values.rate, { step: "0.1", min: "-10" })}
+    ${calcField("years", "Number of years", values.years, { min: "1" })}
+    ${calcField("inflation", "Inflation a year (%), to also see today's dollars (optional)", values.inflation, { step: "0.1", min: "-5", placeholder: "leave empty to skip" })}
+  </form>`;
+}
+
+function renderCalculators() {
+  const values = calcInputs();
+  const tools = [["kyn", "Know your number"], ["compound", "Compound interest"]];
+  const tool = calcTool === "compound" ? "compound" : "kyn";
+  return `<div class="calcs">
+    <section class="calcs-hero">
+      <span class="inv-eyebrow">Calculators</span>
+      <div class="calcs-headline">Plan with your own numbers</div>
+      <p class="muted">Pick a calculator. What you type is kept for next time. Results are estimates that depend on the assumptions shown with them: they are for planning, not financial advice.</p>
+      <div class="calcs-tabs" role="tablist">${tools.map(([key, label]) => `<button type="button" role="tab" aria-selected="${key === tool}" class="calcs-tab ${key === tool ? "active" : ""}" data-calc-tool="${key}">${label}</button>`).join("")}</div>
+    </section>
+    <section class="calc-card">
+      <div class="calc-intro muted">${tool === "kyn" ? "How much do you need in your retirement accounts to fund the life you want, and are you on track? Only the first five numbers are needed; the advanced assumptions are optional." : "See what a starting amount and regular saving grow into, and how much of it is growth rather than your own money."}</div>
+      <div class="calc-grid">
+        ${tool === "kyn" ? calcKynFormHtml(values.kyn) : calcCompoundFormHtml(values.compound)}
+        <div class="calc-results" id="calcResults">${tool === "kyn" ? kynResultsHtml(values.kyn) : compoundResultsHtml(values.compound)}</div>
+      </div>
+    </section>
+  </div>`;
+}
+
+function bindCalculatorEvents() {
+  if (currentView !== "calculators") return;
+  document.querySelectorAll("[data-calc-tool]").forEach((button) => button.addEventListener("click", () => { calcTool = button.dataset.calcTool; render(); }));
+  const form = $("#calcKynForm") || $("#calcCompoundForm");
+  if (!form) return;
+  const tool = form.id === "calcKynForm" ? "kyn" : "compound";
+  // The results follow every keystroke (from what is typed, so a half-typed age is never changed under the cursor); what is typed is saved when a box is left.
+  const refresh = () => {
+    const raw = calcReadForm(form);
+    const results = $("#calcResults");
+    if (results) results.innerHTML = tool === "kyn" ? kynResultsHtml(raw) : compoundResultsHtml(raw);
+    if (tool === "kyn") {
+      const shown = calcRetirement(raw);
+      const age = raw.age;
+      const autoReturn = shown.ok ? shown.assumptions.returnRate : (age === null ? null : calcDefaultReturn(age));
+      if (form.returnRate) form.returnRate.placeholder = autoReturn === null ? "automatic, from your age" : `automatic: ${autoReturn}`;
+      if (form.swr) form.swr.placeholder = shown.ok ? `automatic: ${shown.assumptions.swr}` : "automatic, from how long you retire";
+    }
+  };
+  form.addEventListener("input", refresh);
+  form.addEventListener("change", () => calcSave(tool, calcReadForm(form)));
+  form.querySelectorAll("[data-calc-use]").forEach((button) => button.addEventListener("click", () => {
+    form[button.dataset.calcUse].value = button.dataset.calcValue;
+    refresh();
+    calcSave(tool, calcReadForm(form));
+  }));
+  $("#calcAdvanced")?.addEventListener("toggle", (event) => calcSave("kyn", calcReadForm(form), { advanced: event.currentTarget.open }));
 }
 
 // Buckets every net-worth asset (not liabilities) into the four classes
@@ -10705,6 +10888,7 @@ function bindViewEvents() {
   bindReceiptEvents();
   bindInvestmentsEvents();
   bindPricesEvents();
+  bindCalculatorEvents();
   if (googleMapsApiKey) attachLocationAutocomplete();
   updateLocationDirectionsPreview();
   $("#calendarQuickAdd [name='location']")?.addEventListener("input", updateLocationDirectionsPreview);
@@ -13715,7 +13899,7 @@ function bindViewEvents() {
     const editingRecipe = recipeById(data.recipeId);
     if (editingRecipe) {
       editingRecipe.name = name;
-      editingRecipe.ingredients = String(data.ingredients || "").split(",").map((item) => item.trim()).filter(Boolean);
+      editingRecipe.ingredients = recipeIngredientList(data.ingredients);
       editingRecipe.calories = Number(data.calories || 0);
       editingRecipe.protein = Number(data.protein || 0);
       editingRecipe.steps = RECIPE_LINES(data.steps);
@@ -13728,7 +13912,7 @@ function bindViewEvents() {
       state.meals.recipes.push({
         id: uniqueId(name),
         name,
-        ingredients: String(data.ingredients || "").split(",").map((item) => item.trim()).filter(Boolean),
+        ingredients: recipeIngredientList(data.ingredients),
         calories: Number(data.calories || 0),
         protein: Number(data.protein || 0),
         steps: RECIPE_LINES(data.steps),
@@ -17730,6 +17914,9 @@ document.addEventListener("click", (event) => {
     // unrelated part of the page was clicked (including the very click
     // that first rendered it open, which is "outside" it at this point).
     if (details.classList.contains("account-type-group")) return;
+    // Any other persistent collapsible section opts out with data-keep-open (Investments' account cards, Prices' product details, the calculators'
+    // advanced assumptions): they open and close only from their own summary, and are not popovers that an outside click should dismiss.
+    if (details.hasAttribute("data-keep-open")) return;
     if (!details.contains(event.target)) details.removeAttribute("open");
   });
 });

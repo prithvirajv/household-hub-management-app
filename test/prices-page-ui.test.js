@@ -30,7 +30,7 @@ test("the page shows what is dear lately, where shops differ, and each product's
   ["Dearer than usual lately", "Shops differ most on", "Your average", "Spent in total", "By shop", "Purchases", "First time recorded", "About your usual price"].forEach((text) => assert.ok(app.includes(text), `has "${text}"`));
   assert.match(app, /group\.verdict\.kind === "dearer" && recentDays\(group\.last\.date\) <= 45/, "only recent purchases are called out");
   assert.match(app, /group\.cheapestShop && group\.shopGapPercent >= 20/, "a shop gap is only worth saying at 20% or more");
-  assert.match(app, /<details class="price-item" data-price-key="\$\{escapeHtml\(group\.key\)\}" \$\{priceOpen\.has\(group\.key\) \? "open" : ""\}>/, "a product keeps its open state");
+  assert.match(app, /<details class="price-item" data-keep-open data-price-key="\$\{escapeHtml\(group\.key\)\}" \$\{priceOpen\.has\(group\.key\) \? "open" : ""\}>/, "a product keeps its open state");
 });
 
 test("search, shop and order redraw only the list, so typing keeps the cursor in the search box", () => {

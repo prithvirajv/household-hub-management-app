@@ -15,7 +15,7 @@ more convenient.
 [Notes](#notes) · [Journal](#journal) · [Plan](#plan) ·
 [Documents](#documents) · [Decisions](#decisions) ·
 [Shared Expenses](#shared-expenses) · [Meals and Recipes](#meals-and-recipes) ·
-[Goals](#goals) · [Wealth](#wealth) · [Investments](#investments) · [Item prices](#item-prices) · [Sharing](#sharing) ·
+[Goals](#goals) · [Wealth](#wealth) · [Investments](#investments) · [Item prices](#item-prices) · [Calculators](#calculators) · [Sharing](#sharing) ·
 [Reports and Export](#reports-and-export) ·
 [Invitations](#invitations) · [Password Recovery](#password-recovery) ·
 [FAQ](#faq)
@@ -972,6 +972,38 @@ Transactions).
   own name instead; **Read again** on such a receipt adds the generic name.
 - A misread price or name shows up here too. Correct it on the receipt and this
   page follows.
+
+## Calculators
+
+**Calculators** (sidebar, under Personal) holds planning calculators. What you type is
+kept for next time, and the results update as you type. They are estimates for
+planning, not financial advice: every result shows the assumptions behind it.
+
+### Know your number
+
+How much do you need in your retirement accounts, and are you on track? Fill in
+your age, the age you want to retire, what you spend each month in retirement (in
+today's money), what you have saved, and what you add each year. The page shows:
+
+- **Your number** in today's dollars (and the larger figure in future dollars).
+- How much of it your savings are on course to cover, and whether you are
+  **on track**, **close** (within 10%) or **not there yet**.
+- If you are short: the **extra monthly saving** that would close the gap, and the
+  **age you would reach your number** at your current pace (up to 80).
+
+The one-tap buttons under the spending and savings boxes ("Use my investments" and
+a suggested spending figure from your last few months) fill them from your own
+FamilyLoop data. **Advanced assumptions** are optional; left blank
+they are set for you: return from your age (10% when young, falling to 5.5% by 65),
+inflation 3%, life expectancy 95, and a withdrawal rate that falls the longer you
+will be retired (4% for about 30 years). A warning appears when the withdrawal rate
+is higher than the return after inflation.
+
+### Compound interest
+
+A starting amount plus a monthly saving, a yearly return and a number of years: the
+end balance, how much of it you put in and how much it earned, and a year-by-year
+table. Add inflation to also see the result in today's dollars.
 
 ## Sharing
 
