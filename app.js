@@ -2148,6 +2148,9 @@ function render() {
     : [];
   // The Partners page is edited in place row by row; keep the page where it was instead of letting each save pull it back up.
   const pageScroll = currentView === "partners" && innerScrollKey === lastInnerScrollKey ? window.scrollY : null;
+  // A transaction may have just arrived by any route (typed in, imported, accepted from Bank stream, synced, or brought in overnight): they all end
+  // up in state.transactions and redraw this page, so a waiting receipt that now certainly matches one is linked before the page is drawn.
+  if (currentView === "transactions" && receiptInbox) receiptsLinkWaiting();
   view.innerHTML = (renderers[currentView] || renderers.budget)();
   if (pageScroll !== null) window.scrollTo(0, pageScroll);
   innerScroll.forEach(([selector, top]) => { const el = top ? view.querySelector(selector) : null; if (el) el.scrollTop = top; });
@@ -3151,6 +3154,7 @@ let receiptFiles = []; // files chosen to attach: { name, mimeType, imageBase64,
 let receiptBusy = ""; // what is happening right now ("Uploading…", "Reading the receipt…", "Saving…"), "" when idle
 let receiptError = "";
 const receiptPreviews = {}; // documentId -> signed image address, for the thumbnails
+let receiptFileMode = "separate"; // several photos added on their own: "separate" (one receipt each) or "one" (parts of one long receipt)
 let receiptDialogOpen = false; // the pop-up is open: for a transaction (receiptDialogTxId), or on its own before the receipt has one (receiptDialogTxId "")
 let receiptInbox = null; // every receipt of the household as the server lists it (summaries), null until loaded
 let receiptInboxLoading = false;
@@ -3241,7 +3245,21 @@ function receiptsAutoLink() {
   return certain;
 }
 
-// Reloads the list of receipts, then links the certain ones (saving, and telling the person), and follows a receipt that was open on its own.
+// Links the waiting receipts whose transaction is certain, saves, tells the person, and follows a receipt that was open on its own. It does not
+// redraw (it runs both before the Transactions page is drawn and after the list of receipts is reloaded), so it is safe to call from render().
+function receiptsLinkWaiting() {
+  const linked = receiptsAutoLink();
+  if (!linked.length) return linked;
+  autosaveState();
+  if (receiptDialogOpen && receiptData && !receiptTransaction()) {
+    const mine = linked.find((entry) => entry.receiptId === receiptData.id);
+    if (mine) receiptDialogTxId = state.transactions[mine.index].id;
+  }
+  showToast(`${linked.length === 1 ? "A receipt was" : `${linked.length} receipts were`} linked to ${linked.length === 1 ? "its transaction" : "their transactions"}.`, { type: "info" });
+  return linked;
+}
+
+// Reloads the list of receipts, then links the certain ones.
 async function receiptRefreshInbox() {
   if (receiptInboxLoading) return;
   receiptInboxLoading = true;
@@ -3249,15 +3267,7 @@ async function receiptRefreshInbox() {
   receiptInboxLoading = false;
   receiptInboxLoadedAt = Date.now();
   priceReceiptsLoadedAt = 0; // a receipt was read, corrected or removed: the price analysis reloads next time it is needed
-  const linked = receiptsAutoLink();
-  if (linked.length) {
-    autosaveState();
-    if (receiptDialogOpen && receiptData && !receiptTransaction()) {
-      const mine = linked.find((entry) => entry.receiptId === receiptData.id);
-      if (mine) receiptDialogTxId = state.transactions[mine.index].id;
-    }
-    showToast(`${linked.length === 1 ? "A receipt was" : `${linked.length} receipts were`} linked to ${linked.length === 1 ? "its transaction" : "their transactions"}.`, { type: "info" });
-  }
+  receiptsLinkWaiting();
   if (currentView === "transactions") render();
 }
 
@@ -3338,12 +3348,17 @@ function receiptDialogHtml() {
       <div class="receipt-body">
         ${hasReceiptId ? "" : `<p class="muted">Attach a photo (or PDF) of the receipt. The AI reads the items, so later you can see what things cost and compare shops. You review and correct what it read.</p>
         <label class="documents-upload-button">+ Choose receipt photos<input type="file" id="receiptFilesInput" accept="image/*,application/pdf" multiple></label>
-        <div class="receipt-chosen">${receiptFiles.map((entry, index) => `<span class="receipt-chip">${entry.previewUrl ? `<img src="${entry.previewUrl}" alt="">` : "📄"}<span>${escapeHtml(entry.name)}</span><button type="button" class="icon-button" data-remove-receipt-file="${index}" aria-label="Remove ${escapeHtml(entry.name)}">×</button></span>`).join("")}</div>`}
+        <div class="receipt-chosen">${receiptFiles.map((entry, index) => `<span class="receipt-chip">${entry.previewUrl ? `<img src="${entry.previewUrl}" alt="">` : "📄"}<span>${escapeHtml(entry.name)}</span><button type="button" class="icon-button" data-remove-receipt-file="${index}" aria-label="Remove ${escapeHtml(entry.name)}">×</button></span>`).join("")}</div>
+        ${!transaction && receiptFiles.length > 1 ? `<fieldset class="receipt-mode"><legend>These ${receiptFiles.length} photos are</legend>
+          <label><input type="radio" name="receiptMode" value="separate" ${receiptFileMode === "separate" ? "checked" : ""}> <span>different receipts: one receipt for each photo</span></label>
+          <label><input type="radio" name="receiptMode" value="one" ${receiptFileMode === "one" ? "checked" : ""}> <span>parts of one receipt (a long receipt photographed in pieces)</span></label>
+        </fieldset>` : ""}`}
         ${busy}${error}
       </div>
       <footer class="receipt-actions">
         <button type="button" class="ghost" data-close-receipt>Close</button>
-        ${hasReceiptId ? "" : `<button type="button" class="ghost" id="receiptAttachOnly" ${receiptFiles.length && !receiptBusy ? "" : "disabled"}>Attach only</button><button type="button" id="receiptAttachRead" ${receiptFiles.length && !receiptBusy ? "" : "disabled"}>Attach and read items</button>`}
+        <span class="receipt-actions-spacer"></span>
+        ${hasReceiptId ? "" : `<button type="button" class="receipt-quiet" id="receiptAttachOnly" ${receiptFiles.length && !receiptBusy ? "" : "disabled"} title="Keep the photo without reading it; read it later from the receipt">Attach only</button><button type="button" id="receiptAttachRead" ${receiptFiles.length && !receiptBusy ? "" : "disabled"}>Attach and read items</button>`}
       </footer></dialog>`;
   }
   const draft = receiptDraft;
@@ -3390,6 +3405,7 @@ async function openReceiptDialog(index) {
   if (!transaction) return;
   transaction.id ||= uniqueId("tx");
   receiptDialogOpen = true;
+  receiptFileMode = "separate";
   receiptDialogTxId = transaction.id;
   receiptData = null; receiptDraft = null; receiptFiles = []; receiptBusy = ""; receiptError = "";
   const receiptId = (transaction.receiptIds || [])[0];
@@ -3406,6 +3422,7 @@ async function openReceiptDialog(index) {
 // Opens a receipt on its own (from the waiting list), or a blank pop-up to add one before there is any transaction for it.
 async function openReceiptStandalone(receiptId) {
   receiptDialogOpen = true;
+  receiptFileMode = "separate";
   receiptDialogTxId = "";
   receiptData = null; receiptDraft = null; receiptFiles = []; receiptBusy = receiptId ? "Loading the receipt…" : ""; receiptError = "";
   render();
@@ -3459,6 +3476,8 @@ async function receiptPrepareFile(file) {
 async function receiptAttach(readNow) {
   const transaction = receiptTransaction(); // null when the receipt is added on its own, before its transaction exists
   if (!receiptFiles.length || receiptBusy) return;
+  // Several photos added on their own are usually different receipts (a shop at each of a few places): one receipt each, unless told they are parts of one.
+  if (!transaction && receiptFiles.length > 1 && receiptFileMode === "separate") { await receiptAttachSeparately(readNow); return; }
   receiptError = "";
   receiptBusy = "Uploading…";
   render();
@@ -3484,6 +3503,42 @@ async function receiptAttach(readNow) {
   render();
   void loadReceiptPreviews();
   void receiptRefreshInbox();
+}
+
+// One receipt per photo: each is uploaded, recorded and (if asked) read in turn; one that fails never stops the others. The receipts then wait in the inbox,
+// and the certain ones link to their transactions at once.
+async function receiptAttachSeparately(readNow) {
+  const entries = [...receiptFiles];
+  receiptError = "";
+  let added = 0;
+  let unread = 0;
+  let failed = 0;
+  for (const [index, entry] of entries.entries()) {
+    receiptBusy = `Receipt ${index + 1} of ${entries.length}: uploading…`;
+    render();
+    let documentId = "";
+    try {
+      documentId = await uploadDocumentFile(entry.file, null);
+      try { await api(`/api/documents/${documentId}`, { method: "PATCH", body: JSON.stringify({ description: "Receipt (waiting for its transaction)" }) }); } catch (_error) { /* the label is a nicety */ }
+    } catch (error) { failed += 1; showToast(`Couldn't upload ${entry.name}: ${error.message || "upload failed"}`); continue; }
+    let receipt;
+    try {
+      ({ receipt } = await api("/api/receipts", { method: "POST", body: JSON.stringify({ documents: [{ documentId, name: entry.name, contentType: entry.mimeType }] }) }));
+    } catch (error) { failed += 1; showToast(`Couldn't add ${entry.name}: ${error.message || "failed"}`); continue; }
+    added += 1;
+    if (!readNow) continue;
+    receiptBusy = `Receipt ${index + 1} of ${entries.length}: reading…`;
+    render();
+    try { await api(`/api/receipts/${receipt.id}/read`, { method: "POST", body: JSON.stringify(entry.imageBase64 ? { images: [{ mimeType: entry.mimeType, imageBase64: entry.imageBase64 }] } : {}) }); } catch (_error) { unread += 1; }
+  }
+  entries.forEach((entry) => { if (entry.previewUrl) URL.revokeObjectURL(entry.previewUrl); });
+  receiptFiles = []; receiptBusy = ""; receiptDialogOpen = false; receiptDialogTxId = ""; receiptData = null; receiptDraft = null;
+  const notes = [];
+  if (unread) notes.push(`${unread} could not be read yet: open ${unread === 1 ? "it" : "them"} from the waiting list and press Read`);
+  if (failed) notes.push(`${failed} could not be added`);
+  showToast(`${added} receipt${added === 1 ? "" : "s"} added${notes.length ? `; ${notes.join("; ")}` : ""}.`, { type: notes.length ? "error" : "info" });
+  render();
+  await receiptRefreshInbox();
 }
 
 async function receiptRead(images) {
@@ -3550,6 +3605,8 @@ function bindReceiptEvents() {
   const dialog = $("#receiptDialog");
   if (!dialog) return;
   if (!dialog.open) dialog.showModal();
+  // Reading is the default: once photos are chosen the main button has the focus, so Enter reads them.
+  if (receiptFiles.length && !receiptBusy) $("#receiptAttachRead")?.focus();
   const closeReceiptDialog = () => { receiptDialogOpen = false; receiptDialogTxId = ""; receiptData = null; receiptDraft = null; receiptFiles = []; receiptError = ""; dialog.close(); };
   dialog.addEventListener("close", () => { receiptDialogOpen = false; receiptDialogTxId = ""; });
   dialog.querySelectorAll("[data-receipt-link]").forEach((button) => button.addEventListener("click", () => { if (receiptData) receiptLink(receiptData.id, Number(button.dataset.receiptLink)); }));
@@ -3561,12 +3618,14 @@ function bindReceiptEvents() {
     const picked = [...(event.target.files || [])];
     event.target.value = "";
     for (const file of picked) {
-      if (receiptFiles.length >= 6) { showToast("You can add up to 6 files to one receipt."); break; }
+      const limit = receiptTransaction() ? 6 : 12;
+      if (receiptFiles.length >= limit) { showToast(`You can add up to ${limit} photos at a time.`); break; }
       if (!(file.type.startsWith("image/") || file.type === "application/pdf")) { showToast(`${file.name} is not a photo or PDF.`); continue; }
       try { receiptFiles.push(await receiptPrepareFile(file)); } catch (_error) { showToast(`Couldn't read ${file.name} - try again.`); }
     }
     render();
   });
+  dialog.querySelectorAll('input[name="receiptMode"]').forEach((radio) => radio.addEventListener("change", () => { receiptFileMode = radio.value; }));
   dialog.querySelectorAll("[data-remove-receipt-file]").forEach((button) => button.addEventListener("click", () => { receiptFiles.splice(Number(button.dataset.removeReceiptFile), 1); render(); }));
   $("#receiptAttachRead")?.addEventListener("click", () => { void receiptAttach(true); });
   $("#receiptAttachOnly")?.addEventListener("click", () => { void receiptAttach(false); });

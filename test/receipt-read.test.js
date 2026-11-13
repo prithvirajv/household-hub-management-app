@@ -47,6 +47,10 @@ test("parseReceiptDraft copes with chatter, bad dates and fails clearly when the
   assert.throws(() => parseReceiptDraft("sorry, no"), /did not return a receipt/);
   assert.throws(() => parseReceiptDraft(JSON.stringify({ merchant: "X", items: [] })), /could not find any items/);
   assert.throws(() => parseReceiptDraft("[1]"), /did not return a receipt/);
+  // Photos of different receipts sent as one come back as a list: a plain message, and a list of one is just that receipt.
+  const two = JSON.stringify([{ merchant: "A", items: [{ name: "Milk", amount: 2 }] }, { merchant: "B", items: [{ name: "Eggs", amount: 3 }] }]);
+  assert.throws(() => parseReceiptDraft(two), (error) => /2 different receipts/.test(error.message) && error.statusCode === 422);
+  assert.equal(parseReceiptDraft(JSON.stringify([{ merchant: "Only", items: [{ name: "Milk", amount: 2 }] }])).merchant, "Only");
   const many = parseReceiptDraft(JSON.stringify({ items: Array.from({ length: 300 }, (_, i) => ({ name: `item ${i}`, amount: 1 })) }));
   assert.equal(many.items.length, 200, "bounded");
   assert.deepEqual(cleanReceiptFields({ items: [] }).items, [], "edits may remove every item");

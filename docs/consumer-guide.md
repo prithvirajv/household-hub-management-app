@@ -193,8 +193,15 @@ button on every screen. People with view-only access don't see it.
    **Remove receipt**. The photos are also kept under Documents.
 8. Spent money and want to keep the receipt now, before the bank charge shows
    up? Select **🧾 Add a receipt** above New transaction (no transaction needed),
-   choose the photos and **Attach and read items**. The receipt waits under
-   **Receipts waiting for a transaction**. When a charge arrives with the same
+   choose the photos and **Attach and read items** (the main button, and the one
+   with the focus once photos are chosen; **Attach only** is the quiet link beside
+   it, for keeping a photo without reading it yet). Choosing **several photos at
+   once** asks what they are: **different receipts** (the default: one receipt for
+   each photo, read one after another, so you can add a day's shopping in one go;
+   up to 12 at a time) or **parts of one receipt** (a long receipt photographed in
+   pieces: one receipt with all the photos). A photo that cannot be read yet (the AI
+   is busy) is still added, and you read it later from the waiting list. The
+   receipt waits under **Receipts waiting for a transaction**. When a charge arrives with the same
    total (to the cent) within a few days, the receipt links to it: by itself
    when it is certain (the shop name matches, only one charge fits, and nothing
    else is waiting for it; you get a message), otherwise it shows "Looks like …"
@@ -202,6 +209,9 @@ button on every screen. People with view-only access don't see it.
    bank it says so. Paid cash, or no bank charge will ever come? Open the
    waiting receipt and select **Create a transaction from this receipt**. A
    receipt you detach is never linked to that transaction again by itself.
+   This happens the moment the transaction is on the page, however it got there:
+   typed in, imported, accepted from Bank stream, synced in the app, or brought in
+   by the overnight sync (that one is linked the next time you open Transactions).
    Deleting a transaction puts its receipt back in the waiting list. A charge
    that differs from the receipt total (a tip added on a restaurant bill, for
    example) is not matched by itself: open the receipt and attach it by hand.

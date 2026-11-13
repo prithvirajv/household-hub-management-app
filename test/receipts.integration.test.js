@@ -172,6 +172,30 @@ test("the receipt stays attached when the AI is busy or not configured, and says
   } finally { await server3.stop(); await empty.stop(); }
 });
 
+test("photos of different receipts read as one say so plainly, and a one-item list is accepted", async () => {
+  const many = await startGeminiStub({ body: answer([RECEIPT, { ...RECEIPT, merchant: "Another Shop" }, { ...RECEIPT, merchant: "Third Shop" }]) });
+  const server = await startTestServer({ GEMINI_API_KEY: "test-key", GEMINI_API_BASE_URL: many.url });
+  try {
+    const cookie = await signedIn(server, "receipt-several");
+    const documentId = await uploadDocument(server, cookie);
+    const id = (await server.request("/api/receipts", { method: "POST", headers: { cookie }, body: JSON.stringify({ documents: [{ documentId }] }) })).body.receipt.id;
+    const read = await server.request(`/api/receipts/${id}/read`, { method: "POST", headers: { cookie }, body: JSON.stringify({ images: [{ mimeType: "image/jpeg", imageBase64: JPEG }] }) });
+    assert.equal(read.status, 422);
+    assert.match(read.body.error, /3 different receipts\. Add each photo as its own receipt/);
+    assert.equal((await server.request(`/api/receipts/${id}`, { headers: { cookie } })).body.receipt.status, "attached", "still attached, unread");
+  } finally { await server.stop(); await many.stop(); }
+
+  const one = await startGeminiStub({ body: answer([RECEIPT]) });
+  const server2 = await startTestServer({ GEMINI_API_KEY: "test-key", GEMINI_API_BASE_URL: one.url });
+  try {
+    const cookie = await signedIn(server2, "receipt-listofone");
+    const documentId = await uploadDocument(server2, cookie);
+    const id = (await server2.request("/api/receipts", { method: "POST", headers: { cookie }, body: JSON.stringify({ documents: [{ documentId }] }) })).body.receipt.id;
+    const read = await server2.request(`/api/receipts/${id}/read`, { method: "POST", headers: { cookie }, body: JSON.stringify({ images: [{ mimeType: "image/jpeg", imageBase64: JPEG }] }) });
+    assert.deepEqual([read.status, read.body.receipt.merchant, read.body.receipt.items.length], [200, "Corner Market", 3]);
+  } finally { await server2.stop(); await one.stop(); }
+});
+
 test("when the items do not add up to the receipt's own subtotal it is read again, the closest reading is kept, and a receipt with no subtotal is read once", async () => {
   const missingDiscount = { ...RECEIPT, items: [RECEIPT.items[0], RECEIPT.items[1], { ...RECEIPT.items[2], amount: 14.99, discount: 0 }] }; // 3.50 too high
   const slightlyOff = { ...RECEIPT, items: [RECEIPT.items[0], RECEIPT.items[1], { ...RECEIPT.items[2], amount: 11.99 }] }; // 0.50 too high

@@ -75,7 +75,7 @@ test("a receipt can be added on its own, waits in an inbox, and is linked when i
 
 test("the list of receipts is loaded when Transactions opens and every couple of minutes, and a failure can never loop", () => {
   assert.match(app, /if \(currentView === "transactions" && !receiptInboxLoading && \(receiptInbox === null \|\| Date\.now\(\) - receiptInboxLoadedAt > 120000\)\) void receiptRefreshInbox\(\);/);
-  const refresh = app.slice(app.indexOf("async function receiptRefreshInbox("), app.indexOf("function receiptInboxHtml("));
+  const refresh = app.slice(app.indexOf("function receiptsLinkWaiting("), app.indexOf("function receiptInboxHtml("));
   assert.match(refresh, /catch \(_error\) \{ receiptInbox \|\|= \[\]; \}\s*receiptInboxLoading = false;\s*receiptInboxLoadedAt = Date\.now\(\);/, "the time is stamped even when the load fails, so a failure is not retried on every redraw");
   assert.match(refresh, /showToast\(`\$\{linked\.length === 1 \? "A receipt was" : /, "the person is told when receipts were linked for them");
   assert.match(app, /void receiptRefreshInbox\(\); \/\/ its total may now match a transaction/, "reading a receipt looks for its transaction");
@@ -90,4 +90,28 @@ test("the pop-up works before a receipt has a transaction: attach to a suggestio
   assert.match(app, /transaction\.receiptsDeclined = \[\.\.\.new Set\(\[\.\.\.\(transaction\.receiptsDeclined \|\| \[\]\), receiptData\.id\]\)\];/, "detaching remembers the undone match");
   assert.match(app, /if \(transaction\) \{ transaction\.receiptIds = \[receipt\.id\]; autosaveState\(\); \}/, "attaching with no transaction only records the receipt");
   assert.match(css, /\.receipt-waiting-row \{/);
+});
+
+test("a receipt is linked the moment a matching transaction is on the page, whichever way it arrived, and reading is the default", () => {
+  assert.match(app, /if \(currentView === "transactions" && receiptInbox\) receiptsLinkWaiting\(\);\s*view\.innerHTML = \(renderers\[currentView\] \|\| renderers\.budget\)\(\);/, "linked before the page is drawn, on every redraw of Transactions");
+  const link = app.slice(app.indexOf("function receiptsLinkWaiting("), app.indexOf("async function receiptRefreshInbox("));
+  assert.doesNotMatch(link, /\brender\(\)/, "the shared linker never redraws, so it is safe inside render()");
+  assert.match(app, /receiptsLinkWaiting\(\);\s*if \(currentView === "transactions"\) render\(\);/, "the reload of the list uses the same linker");
+  assert.match(app, /if \(receiptFiles\.length && !receiptBusy\) \$\("#receiptAttachRead"\)\?\.focus\(\);/, "Attach and read items has the focus once photos are chosen");
+  assert.match(app, /class="receipt-quiet" id="receiptAttachOnly"/, "Attach only is the quiet choice");
+  assert.match(css, /\.receipt-quiet \{ background: none; border: 0;/);
+});
+
+test("several photos added together become one receipt each unless they are said to be parts of one, and one failure never stops the rest", () => {
+  assert.match(app, /let receiptFileMode = "separate";/, "different receipts is the default");
+  assert.match(app, /\$\{!transaction && receiptFiles\.length > 1 \? `<fieldset class="receipt-mode"><legend>These \$\{receiptFiles\.length\} photos are<\/legend>/, "the choice appears only for several photos added on their own");
+  assert.match(app, /different receipts: one receipt for each photo/);
+  assert.match(app, /parts of one receipt \(a long receipt photographed in pieces\)/);
+  assert.match(app, /if \(!transaction && receiptFiles\.length > 1 && receiptFileMode === "separate"\) \{ await receiptAttachSeparately\(readNow\); return; \}/);
+  const separate = app.slice(app.indexOf("async function receiptAttachSeparately("), app.indexOf("async function receiptRead("));
+  assert.equal((separate.match(/\bcontinue;/g) || []).length, 3, "an upload, a record or (when not reading) a read step that fails or is skipped moves on to the next photo");
+  assert.match(separate, /documents: \[\{ documentId, name: entry\.name, contentType: entry\.mimeType \}\]/, "each receipt gets only its own photo");
+  assert.match(separate, /could not be read yet: open \$\{unread === 1 \? "it" : "them"\} from the waiting list and press Read/, "an unread one is still attached and says how to read it");
+  assert.match(separate, /await receiptRefreshInbox\(\);\s*\}\s*$/, "afterwards the certain ones link at once");
+  assert.match(app, /const limit = receiptTransaction\(\) \? 6 : 12;/, "more photos at a time when each is its own receipt");
 });

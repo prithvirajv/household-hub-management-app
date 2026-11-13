@@ -9794,6 +9794,14 @@ label.ai-import-toggle span { font-weight: 600; }
 .receipt-row-actions { display: flex; gap: 0.5rem; }
 .receipt-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 0.5rem; padding: 0.8rem 1.2rem; border-top: 1px solid var(--line); background: var(--panel); }
 .receipt-actions-spacer { flex: 1; }
+.receipt-mode { border: 1px solid var(--line); border-radius: 10px; padding: 0.5rem 0.8rem 0.6rem; margin: 0; display: grid; gap: 0.35rem; }
+.receipt-mode legend { padding: 0 0.4rem; font-weight: 600; font-size: 0.88rem; }
+.receipt-mode label { display: flex; align-items: flex-start; gap: 0.5rem; font-weight: 500; color: var(--text); cursor: pointer; }
+.receipt-mode input[type="radio"] { width: 1.1rem; height: 1.1rem; padding: 0; margin: 0.15rem 0 0; flex: none; accent-color: var(--green); }
+.receipt-mode label > span { min-width: 0; }
+.receipt-quiet { background: none; border: 0; color: var(--muted); text-decoration: underline; padding: 0.4rem 0.6rem; font: inherit; cursor: pointer; }
+.receipt-quiet:hover:not(:disabled) { color: var(--text); }
+.receipt-quiet:disabled { opacity: 0.5; cursor: default; }
 
 /* ---- Receipts inbox: add a receipt any time; the ones still waiting for their transaction; the link section in the pop-up ---- */
 .receipt-inbox { margin: 0 0 0.8rem; }
