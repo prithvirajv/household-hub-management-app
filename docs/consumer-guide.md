@@ -179,6 +179,18 @@ button on every screen. People with view-only access don't see it.
    amounts add up to the full charge. Each share counts toward its own
    category's Spent total. Select **Remove split** to undo it back to one
    category.
+7. Have the shop receipt? Select the 🧾 icon on that ledger row, choose one or
+   more photos (or a PDF) of the receipt, and select **Attach and read items**
+   (or **Attach only** to keep the picture for now). The AI reads what was
+   bought: each item with its quantity, unit (each, lb, kg…), the price of one
+   and what was charged after any discount. Sideways, crumpled and cropped
+   photos are fine. Check the items against the photo, correct anything, and
+   select **Save changes**. The pop-up says whether the receipt total matches
+   the transaction and whether the items add up to the receipt's own
+   subtotal (a red note means a line or a discount was missed). The 🧾 icon
+   turns green once a receipt is attached; select it again to see the photos
+   and items, **Read again**, or **Remove receipt**. The photos are also kept
+   under Documents.
 
 **Get the most out of it**
 - Check off a batch of rows using the checkbox in the Ledger's left column

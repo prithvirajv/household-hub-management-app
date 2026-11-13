@@ -3133,6 +3133,304 @@ function ledgerRefundPill(pair) {
     : `<span class="pill pill-info ledger-refund-pill" title="Refunded by the ${amount} return on ${when}">Refunded ${amount} · ${when}</span>`;
 }
 
+// ---- Receipts: a photo (or PDF) of a shop receipt attached to a ledger transaction, and the items read from it. The files are ordinary Documents; the
+// transaction keeps only transaction.receiptIds, and the items live on the server (server/receipts.js), so they never count toward the household-state
+// size limit. Attaching keeps the file even when the AI is busy; "Read again" retries.
+let receiptDialogTxId = ""; // the ledger transaction whose receipt pop-up is open
+let receiptData = null; // that transaction's receipt as the server has it (null until loaded, or when it has none)
+let receiptDraft = null; // the editable copy of the receipt's details and items
+let receiptFiles = []; // files chosen to attach: { name, mimeType, imageBase64, previewUrl, file }
+let receiptBusy = ""; // what is happening right now ("Uploading…", "Reading the receipt…", "Saving…"), "" when idle
+let receiptError = "";
+const receiptPreviews = {}; // documentId -> signed image address, for the thumbnails
+
+const receiptFormatMoney = (value) => (value === null || value === undefined || value === "" || !Number.isFinite(Number(value)) ? "" : Number(value).toFixed(2));
+const receiptNumberOrNull = (value) => (String(value).trim() === "" || !Number.isFinite(Number(value)) ? null : Math.round(Number(value) * 100) / 100);
+const RECEIPT_UNITS = ["each", "lb", "kg", "oz", "g", "gal", "l", "ml", "ct", "pack", "dozen"];
+
+function receiptTransaction() { return state.transactions.find((transaction) => transaction.id === receiptDialogTxId) || null; }
+
+function setReceipt(receipt) {
+  receiptData = receipt;
+  receiptDraft = { merchant: receipt.merchant || "", date: receipt.date || "", subtotal: receipt.subtotal, tax: receipt.tax, total: receipt.total, savings: receipt.savings, items: (receipt.items || []).map((item) => ({ ...item })) };
+}
+
+function receiptDraftItemsTotal() {
+  return Math.round((receiptDraft?.items || []).reduce((sum, item) => sum + (Number(item.amount) || 0), 0) * 100) / 100;
+}
+
+// Whether the receipt's total is this transaction's amount, and whether the items add up to what the receipt printed. Both are shown as notes and
+// refreshed in place while the person edits (a full redraw on every keystroke would lose their place in the table).
+function receiptMatchNote() {
+  const transaction = receiptTransaction();
+  const total = receiptDraft?.total;
+  if (!transaction || total === null || total === undefined) return { kind: "", text: "" };
+  const amount = Math.abs(Number(transaction.amount || 0));
+  return Math.abs(Number(total) - amount) < 0.02
+    ? { kind: "ok", text: "✓ The receipt total matches this transaction." }
+    : { kind: "warn", text: `⚠ The receipt total (${exactMoney.format(Number(total))}) differs from this transaction (${exactMoney.format(amount)}).` };
+}
+
+function receiptCheckNote() {
+  const draft = receiptDraft;
+  const itemsTotal = receiptDraftItemsTotal();
+  const count = `${draft.items.length} item${draft.items.length === 1 ? "" : "s"} add up to ${exactMoney.format(itemsTotal)}`;
+  const printed = draft.subtotal !== null && draft.subtotal !== undefined ? Number(draft.subtotal) : (draft.total !== null && draft.total !== undefined ? Math.round((Number(draft.total) - Number(draft.tax || 0)) * 100) / 100 : null);
+  if (printed === null) return { kind: "", text: `${count}.` };
+  const difference = Math.round((itemsTotal - printed) * 100) / 100;
+  if (Math.abs(difference) < 0.02) return { kind: "ok", text: `${count}, matching the receipt's subtotal ✓` };
+  return { kind: "warn", text: `${count}; the receipt's subtotal is ${exactMoney.format(printed)}. That is ${exactMoney.format(Math.abs(difference))} ${difference > 0 ? "too much: a discount may be missing" : "too little: a line may be missing"}, so check it against the photo.` };
+}
+
+function refreshReceiptNotes() {
+  const match = $("#receiptMatchNote");
+  const check = $("#receiptCheckNote");
+  const matchNote = receiptMatchNote();
+  if (match) { match.className = `receipt-note ${matchNote.kind}`; match.textContent = matchNote.text; match.hidden = !matchNote.text; }
+  const checkNote = receiptCheckNote();
+  if (check && receiptDraft) { check.className = `receipt-note ${checkNote.kind}`; check.textContent = checkNote.text; }
+}
+
+// The receipt pop-up: choose the photos, or see the receipt that is attached (its files, whether it matches the transaction, and the items to correct).
+function receiptDialogHtml() {
+  const transaction = receiptTransaction();
+  if (!receiptDialogTxId || !transaction) return "";
+  const amount = Math.abs(Number(transaction.amount || 0));
+  const head = `<header class="receipt-head"><div><h2>Receipt</h2><p class="muted">${escapeHtml(transaction.payee)} · ${exactMoney.format(amount)} · ${escapeHtml(formatShortDate(transaction.date))}</p></div><button type="button" class="icon-button ghost" data-close-receipt aria-label="Close">×</button></header>`;
+  const busy = receiptBusy ? `<p class="receipt-busy" role="status">${escapeHtml(receiptBusy)}</p>` : "";
+  const error = receiptError ? `<p class="receipt-error" role="alert">${escapeHtml(receiptError)}</p>` : "";
+  if (!receiptData) {
+    const hasReceiptId = (transaction.receiptIds || []).length > 0; // attached, but not (yet) loaded: loading, or it could not be
+    return `<dialog id="receiptDialog" class="app-dialog receipt-dialog" aria-labelledby="receiptDialogTitle">${head}
+      <div class="receipt-body">
+        ${hasReceiptId ? "" : `<p class="muted">Attach a photo (or PDF) of the receipt. The AI reads the items, so later you can see what things cost and compare shops. You review and correct what it read.</p>
+        <label class="documents-upload-button">+ Choose receipt photos<input type="file" id="receiptFilesInput" accept="image/*,application/pdf" multiple></label>
+        <div class="receipt-chosen">${receiptFiles.map((entry, index) => `<span class="receipt-chip">${entry.previewUrl ? `<img src="${entry.previewUrl}" alt="">` : "📄"}<span>${escapeHtml(entry.name)}</span><button type="button" class="icon-button" data-remove-receipt-file="${index}" aria-label="Remove ${escapeHtml(entry.name)}">×</button></span>`).join("")}</div>`}
+        ${busy}${error}
+      </div>
+      <footer class="receipt-actions">
+        <button type="button" class="ghost" data-close-receipt>Close</button>
+        ${hasReceiptId ? "" : `<button type="button" class="ghost" id="receiptAttachOnly" ${receiptFiles.length && !receiptBusy ? "" : "disabled"}>Attach only</button><button type="button" id="receiptAttachRead" ${receiptFiles.length && !receiptBusy ? "" : "disabled"}>Attach and read items</button>`}
+      </footer></dialog>`;
+  }
+  const draft = receiptDraft;
+  const matchNote = receiptMatchNote();
+  const checkNote = receiptCheckNote();
+  return `<dialog id="receiptDialog" class="app-dialog receipt-dialog" aria-labelledby="receiptDialogTitle">${head}
+    <div class="receipt-body">
+      <div class="receipt-files">${receiptData.documents.map((doc) => `<button type="button" class="receipt-file" data-open-receipt-file="${escapeHtml(doc.documentId)}" title="Open ${escapeHtml(doc.name)}">${receiptPreviews[doc.documentId] ? `<img src="${escapeHtml(receiptPreviews[doc.documentId])}" alt="">` : (/pdf/i.test(doc.contentType) ? "📄" : "🧾")}<span>${escapeHtml(doc.name)}</span></button>`).join("")}</div>
+      ${busy}${error}
+      ${receiptData.status === "attached" && !receiptBusy ? `<p class="muted">The receipt is attached. Its items have not been read yet.</p><div class="receipt-row-actions"><button type="button" id="receiptReadNow">Read the items</button></div>` : ""}
+      ${receiptData.status === "read" || draft.items.length ? `
+      <div class="receipt-fields">
+        <label>Shop<input data-receipt-field="merchant" value="${escapeHtml(draft.merchant)}" maxlength="80"></label>
+        <label>Date<input type="date" data-receipt-field="date" value="${escapeHtml(draft.date)}"></label>
+        <label>Receipt total<input type="number" step="0.01" data-receipt-field="total" value="${receiptFormatMoney(draft.total)}"></label>
+      </div>
+      <p id="receiptMatchNote" class="receipt-note ${matchNote.kind}" ${matchNote.text ? "" : "hidden"}>${escapeHtml(matchNote.text)}</p>
+      <div class="receipt-scroll"><table class="receipt-table"><thead><tr><th>Item</th><th class="r">Qty</th><th class="receipt-opt">Unit</th><th class="r receipt-opt">Unit price</th><th class="r">Amount</th><th></th></tr></thead><tbody>
+        ${draft.items.map((item, index) => `<tr>
+          <td><input data-receipt-item="${index}" data-key="name" value="${escapeHtml(item.name)}" aria-label="Item name" maxlength="120">${item.discount ? `<small class="muted">saved ${exactMoney.format(item.discount)}</small>` : ""}</td>
+          <td class="r"><input class="num" type="number" step="any" min="0" data-receipt-item="${index}" data-key="qty" value="${item.qty}" aria-label="Quantity"></td>
+          <td class="receipt-opt"><select data-receipt-item="${index}" data-key="unit" aria-label="Unit">${RECEIPT_UNITS.map((unit) => `<option ${unit === item.unit ? "selected" : ""}>${unit}</option>`).join("")}</select></td>
+          <td class="r receipt-opt"><input class="num" type="number" step="0.01" min="0" data-receipt-item="${index}" data-key="unitPrice" value="${receiptFormatMoney(item.unitPrice)}" aria-label="Price of one"></td>
+          <td class="r"><input class="num" type="number" step="0.01" data-receipt-item="${index}" data-key="amount" value="${receiptFormatMoney(item.amount)}" aria-label="Amount charged"></td>
+          <td><button type="button" class="icon-button danger-button" data-remove-receipt-item="${index}" aria-label="Remove ${escapeHtml(item.name)}">×</button></td>
+        </tr>`).join("")}
+      </tbody></table></div>
+      <div class="receipt-row-actions"><button type="button" class="ghost" id="receiptAddItem">+ Add an item</button></div>
+      <p id="receiptCheckNote" class="receipt-note ${checkNote.kind}">${escapeHtml(checkNote.text)}</p>` : ""}
+    </div>
+    <footer class="receipt-actions">
+      <button type="button" class="danger-button ghost" id="receiptRemove" ${receiptBusy ? "disabled" : ""}>Remove receipt</button>
+      <span class="receipt-actions-spacer"></span>
+      ${receiptData.status === "read" ? `<button type="button" class="ghost" id="receiptReadAgain" ${receiptBusy ? "disabled" : ""}>Read again</button>` : ""}
+      <button type="button" class="ghost" data-close-receipt>Close</button>
+      ${draft.items.length || receiptData.status === "read" ? `<button type="button" id="receiptSave" ${receiptBusy ? "disabled" : ""}>Save changes</button>` : ""}
+    </footer></dialog>`;
+}
+
+async function openReceiptDialog(index) {
+  const transaction = state.transactions[index];
+  if (!transaction) return;
+  transaction.id ||= uniqueId("tx");
+  receiptDialogTxId = transaction.id;
+  receiptData = null; receiptDraft = null; receiptFiles = []; receiptBusy = ""; receiptError = "";
+  const receiptId = (transaction.receiptIds || [])[0];
+  if (receiptId) receiptBusy = "Loading the receipt…";
+  render();
+  if (!receiptId) return;
+  try { setReceipt((await api(`/api/receipts/${receiptId}`)).receipt); } catch (error) { receiptError = error.message || "Couldn't load the receipt"; }
+  receiptBusy = "";
+  render();
+  void loadReceiptPreviews();
+}
+
+// Thumbnails come from short-lived signed addresses; only images that the browser can show are tried.
+async function loadReceiptPreviews() {
+  for (const doc of receiptData?.documents || []) {
+    if (receiptPreviews[doc.documentId] || !/^image\/(jpe?g|png|webp)/i.test(doc.contentType || "")) continue;
+    try {
+      const { url } = await api(`/api/documents/${doc.documentId}/download-url`);
+      if (!/^https?:\/\//.test(url)) continue;
+      receiptPreviews[doc.documentId] = url;
+      if (receiptDialogTxId) render();
+    } catch (_error) { /* no thumbnail: the file name still opens it */ }
+  }
+}
+
+async function receiptOpenFile(documentId) {
+  try {
+    const { url } = await api(`/api/documents/${documentId}/download-url`);
+    if (!/^https?:\/\//.test(url)) { showToast("The file can only be opened on the live site, not in this demo.", { type: "info" }); return; }
+    window.open(url, "_blank", "noopener");
+  } catch (error) { showToast(error.message || "Couldn't open the file"); }
+}
+
+// A chosen file as base64 for the AI (images shrunk if large, PDFs as they are). The original file is what gets stored.
+async function receiptPrepareFile(file) {
+  if (file.type === "application/pdf") {
+    const dataUrl = await new Promise((resolve, reject) => { const reader = new FileReader(); reader.onload = () => resolve(reader.result); reader.onerror = () => reject(reader.error); reader.readAsDataURL(file); });
+    return { name: file.name, mimeType: file.type, imageBase64: file.size <= 4000000 ? dataUrl.slice(dataUrl.indexOf(",") + 1) : "", previewUrl: "", file };
+  }
+  const prepared = await recipeImportPrepareImage(file, 2600);
+  return { ...prepared, previewUrl: URL.createObjectURL(file), file };
+}
+
+async function receiptAttach(readNow) {
+  const transaction = receiptTransaction();
+  if (!transaction || !receiptFiles.length || receiptBusy) return;
+  receiptError = "";
+  receiptBusy = "Uploading…";
+  render();
+  const documents = [];
+  for (const entry of receiptFiles) {
+    try {
+      const documentId = await uploadDocumentFile(entry.file, null);
+      try { await api(`/api/documents/${documentId}`, { method: "PATCH", body: JSON.stringify({ description: `Receipt for ${transaction.payee} on ${transaction.date}` }) }); } catch (_error) { /* the label is a nicety */ }
+      documents.push({ documentId, name: entry.name, contentType: entry.mimeType });
+    } catch (error) { showToast(`Couldn't upload ${entry.name}: ${error.message || "upload failed"}`); }
+  }
+  if (!documents.length) { receiptBusy = ""; receiptError = "None of the files could be uploaded. Try again."; render(); return; }
+  const inline = receiptFiles.filter((entry) => entry.imageBase64).map(({ mimeType, imageBase64 }) => ({ mimeType, imageBase64 }));
+  try {
+    const { receipt } = await api("/api/receipts", { method: "POST", body: JSON.stringify({ documents }) });
+    transaction.receiptIds = [receipt.id];
+    autosaveState();
+    setReceipt(receipt);
+    receiptFiles.forEach((entry) => { if (entry.previewUrl) URL.revokeObjectURL(entry.previewUrl); });
+    receiptFiles = [];
+    if (readNow) { await receiptRead(inline.length === documents.length ? inline : null); return; }
+  } catch (error) { receiptError = error.message || "Couldn't attach the receipt"; }
+  receiptBusy = "";
+  render();
+  void loadReceiptPreviews();
+}
+
+async function receiptRead(images) {
+  if (!receiptData) return;
+  receiptError = "";
+  receiptBusy = "Reading the receipt… this takes a few seconds";
+  render();
+  try {
+    const { receipt } = await api(`/api/receipts/${receiptData.id}/read`, { method: "POST", body: JSON.stringify(images && images.length ? { images } : {}) });
+    setReceipt(receipt);
+  } catch (error) { receiptError = error.message || "Couldn't read the receipt"; }
+  receiptBusy = "";
+  render();
+  void loadReceiptPreviews();
+}
+
+async function receiptSave() {
+  if (!receiptData || !receiptDraft || receiptBusy) return;
+  receiptBusy = "Saving…";
+  receiptError = "";
+  render();
+  try {
+    const { receipt } = await api(`/api/receipts/${receiptData.id}`, { method: "PATCH", body: JSON.stringify(receiptDraft) });
+    setReceipt(receipt);
+    showToast("Receipt saved.", { type: "info" });
+  } catch (error) { receiptError = error.message || "Couldn't save the receipt"; }
+  receiptBusy = "";
+  render();
+}
+
+async function receiptRemove() {
+  const transaction = receiptTransaction();
+  if (!transaction || !receiptData) return;
+  if (!await showConfirm("This removes the receipt, the items read from it and its attached files. The transaction stays.", { title: "Remove receipt?", confirmLabel: "Remove" })) return;
+  receiptBusy = "Removing…";
+  render();
+  try {
+    const result = await api(`/api/receipts/${receiptData.id}`, { method: "DELETE" });
+    for (const documentId of result.documents || []) {
+      try { await api(`/api/documents/${documentId}`, { method: "DELETE" }); } catch (error) { if (!/not found/i.test(error.message || "")) console.warn("Could not delete receipt file", error); }
+    }
+    transaction.receiptIds = (transaction.receiptIds || []).filter((id) => id !== receiptData.id);
+    if (!transaction.receiptIds.length) delete transaction.receiptIds;
+    autosaveState();
+    receiptDialogTxId = ""; receiptData = null; receiptDraft = null;
+  } catch (error) { receiptError = error.message || "Couldn't remove the receipt"; }
+  receiptBusy = "";
+  render();
+}
+
+function bindReceiptEvents() {
+  document.querySelectorAll("[data-receipt-ledger]").forEach((button) => button.addEventListener("click", () => { void openReceiptDialog(Number(button.dataset.receiptLedger)); }));
+  const dialog = $("#receiptDialog");
+  if (!dialog) return;
+  if (!dialog.open) dialog.showModal();
+  const closeReceiptDialog = () => { receiptDialogTxId = ""; receiptData = null; receiptDraft = null; receiptFiles = []; receiptError = ""; dialog.close(); };
+  dialog.addEventListener("close", () => { receiptDialogTxId = ""; });
+  dialog.addEventListener("click", (event) => { if (event.target === dialog) closeReceiptDialog(); });
+  dialog.querySelectorAll("[data-close-receipt]").forEach((button) => button.addEventListener("click", closeReceiptDialog));
+  $("#receiptFilesInput")?.addEventListener("change", async (event) => {
+    const picked = [...(event.target.files || [])];
+    event.target.value = "";
+    for (const file of picked) {
+      if (receiptFiles.length >= 6) { showToast("You can add up to 6 files to one receipt."); break; }
+      if (!(file.type.startsWith("image/") || file.type === "application/pdf")) { showToast(`${file.name} is not a photo or PDF.`); continue; }
+      try { receiptFiles.push(await receiptPrepareFile(file)); } catch (_error) { showToast(`Couldn't read ${file.name} - try again.`); }
+    }
+    render();
+  });
+  dialog.querySelectorAll("[data-remove-receipt-file]").forEach((button) => button.addEventListener("click", () => { receiptFiles.splice(Number(button.dataset.removeReceiptFile), 1); render(); }));
+  $("#receiptAttachRead")?.addEventListener("click", () => { void receiptAttach(true); });
+  $("#receiptAttachOnly")?.addEventListener("click", () => { void receiptAttach(false); });
+  $("#receiptReadNow")?.addEventListener("click", () => { void receiptRead(null); });
+  $("#receiptReadAgain")?.addEventListener("click", async () => {
+    if (await showConfirm("Read the photos again? Items you corrected by hand are replaced by what the AI reads.", { title: "Read again?", confirmLabel: "Read again", danger: false })) void receiptRead(null);
+  });
+  $("#receiptSave")?.addEventListener("click", () => { void receiptSave(); });
+  $("#receiptRemove")?.addEventListener("click", () => { void receiptRemove(); });
+  dialog.querySelectorAll("[data-open-receipt-file]").forEach((button) => button.addEventListener("click", () => { void receiptOpenFile(button.dataset.openReceiptFile); }));
+  // What is typed is kept in the draft at once, so a redraw never loses it; only Save sends it.
+  dialog.querySelectorAll("[data-receipt-field]").forEach((input) => input.addEventListener("input", () => {
+    const key = input.dataset.receiptField;
+    receiptDraft[key] = key === "total" ? receiptNumberOrNull(input.value) : input.value;
+    refreshReceiptNotes();
+  }));
+  dialog.querySelectorAll("[data-receipt-item]").forEach((input) => {
+    const update = () => {
+      const item = receiptDraft.items[Number(input.dataset.receiptItem)];
+      if (!item) return;
+      const key = input.dataset.key;
+      item[key] = key === "name" || key === "unit" ? input.value : (receiptNumberOrNull(input.value) ?? 0);
+      // The price of one follows the quantity and amount you correct, unless you typed a price of one yourself (then it is left alone).
+      if (key === "unitPrice") item.unitPriceTyped = true;
+      if ((key === "amount" || key === "qty") && !item.unitPriceTyped && Number(item.qty) > 0) {
+        item.unitPrice = Math.round(((Number(item.amount) || 0) + (Number(item.discount) || 0)) / Number(item.qty) * 100) / 100;
+        const priceBox = document.querySelector(`[data-receipt-item="${input.dataset.receiptItem}"][data-key="unitPrice"]`);
+        if (priceBox) priceBox.value = receiptFormatMoney(item.unitPrice);
+      }
+    };
+    input.addEventListener("input", () => { update(); refreshReceiptNotes(); });
+    input.addEventListener("change", () => { update(); refreshReceiptNotes(); });
+  });
+  dialog.querySelectorAll("[data-remove-receipt-item]").forEach((button) => button.addEventListener("click", () => { receiptDraft.items.splice(Number(button.dataset.removeReceiptItem), 1); render(); }));
+  $("#receiptAddItem")?.addEventListener("click", () => { receiptDraft.items.push({ name: "", qty: 1, unit: "each", unitPrice: 0, amount: 0, discount: 0 }); render(); });
+}
+
 function ledgerEntryRow(transaction, index, transferMatch, refundPair = null) {
   // Same placeholder as Bank Stream's own lineOptions - without it, a
   // genuinely-unassigned transaction (lineId: "") has no matching "selected"
@@ -3160,6 +3458,7 @@ function ledgerEntryRow(transaction, index, transferMatch, refundPair = null) {
       <button class="icon-button ${isSplit ? "has-transfer-match" : ""}" data-split-transaction-edit="${index}" type="button" aria-label="Split ${escapeHtml(transaction.payee)} across categories" title="Split across categories">✂</button>
       <button class="icon-button" data-assign-iou-ledger="${index}" type="button" aria-label="Split with a friend ${escapeHtml(transaction.payee)}" title="Split with a friend (they owe you)">👥</button>
       <button class="icon-button ${transferMatch ? "has-transfer-match" : ""}" data-move-to-transfer-ledger="${index}" type="button" aria-label="Move ${escapeHtml(transaction.payee)} to Transfers" title="${transferMatch ? `Matches ${escapeHtml(accountName(transferMatch.accountId))}'s ${exactMoney.format(Math.abs(transferMatch.amount))} on ${formatShortDate(transferMatch.date)}` : "Move to Transfers (account-to-account movement)"}">⇄</button>
+      <button class="icon-button ${(transaction.receiptIds || []).length ? "has-receipt" : ""}" data-receipt-ledger="${index}" type="button" aria-label="${(transaction.receiptIds || []).length ? "View the receipt for" : "Attach a receipt to"} ${escapeHtml(transaction.payee)}" title="${(transaction.receiptIds || []).length ? "View the receipt and its items" : "Attach a receipt (photo or PDF)"}">🧾</button>
       <button class="icon-button danger-button" data-delete-transaction="${index}" type="button" aria-label="Delete ${escapeHtml(transaction.payee)}">×</button>
       ${ledgerRefundPill(refundPair)}
       ${!transaction.lineId && !isSplit ? `<span class="pill pill-warning ledger-needs-category" title="No subcategory yet - this counts toward your balance but not toward any budget line. Choose one on this row.">Needs a category</span>` : ""}
@@ -3607,6 +3906,7 @@ function renderTransactions() {
           <button type="button" class="danger-button" id="cleanupButton">Review and remove…</button>
         </section>
       </aside>
+      ${receiptDialogHtml()}
     </section>`;
 }
 
@@ -7144,14 +7444,14 @@ const RECIPE_LINES = (text) => String(text || "").split(/\r?\n/).map((line) => l
 
 // A chosen picture as base64 for the import. Large ones (a phone photo can be 10 MB) are shrunk first; a format the browser cannot draw (some
 // HEIC) is sent as it is.
-async function recipeImportPrepareImage(file) {
+async function recipeImportPrepareImage(file, maxDimension = 1800) {
   const readAsDataUrl = (blob) => new Promise((resolve, reject) => { const reader = new FileReader(); reader.onload = () => resolve(reader.result); reader.onerror = () => reject(reader.error); reader.readAsDataURL(blob); });
   let dataUrl = await readAsDataUrl(file);
   let mimeType = file.type;
   if (file.size > 1500000) {
     try {
       const bitmap = await createImageBitmap(file);
-      const scale = Math.min(1, 1800 / Math.max(bitmap.width, bitmap.height));
+      const scale = Math.min(1, maxDimension / Math.max(bitmap.width, bitmap.height));
       const canvas = document.createElement("canvas");
       canvas.width = Math.round(bitmap.width * scale);
       canvas.height = Math.round(bitmap.height * scale);
@@ -10023,6 +10323,7 @@ function transactionInboxItems() {
 
 function bindViewEvents() {
   bindPartnersEvents();
+  bindReceiptEvents();
   bindInvestmentsEvents();
   if (googleMapsApiKey) attachLocationAutocomplete();
   updateLocationDirectionsPreview();

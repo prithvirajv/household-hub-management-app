@@ -321,6 +321,21 @@ job failed. The unique constraint on
 prevents duplicate reminders across repeated state saves; if duplicates are
 seen, check whether that constraint was bypassed by a schema change.
 
+### Receipts on transactions
+
+The 🧾 button on a ledger row (`receiptDialogHtml` and friends in `app.js`, routes in `server/receipts.js`, reading logic in `lib/receipt-read.js`).
+The photos are uploaded as ordinary Documents (`uploadDocumentFile`); the transaction keeps only `transaction.receiptIds`, and the items live in the
+`receipts` table (`household_id`, `documents` JSONB, `merchant`, `receipt_date`, `subtotal/tax/total/savings`, `items` JSONB of
+`{name, qty, unit, unitPrice, amount, discount}`, `status` attached|read). Items are NOT in the household state on purpose: a year of grocery
+receipts would pass its ~1 MB limit. Routes: `POST /api/receipts` (attach files already uploaded), `GET /api/receipts` (summaries) and `/:id`,
+`POST /api/receipts/:id/read` (the AI reads the photos the page sends, or reads them back from storage; 3 rounds over the models; an overloaded AI is
+a plain 503 and the receipt stays attached), `PATCH /:id` (the person's corrections), `DELETE /:id` (the page then deletes the files). Every query is
+scoped to the household. The check note compares the sum of the items with the printed subtotal (or total less tax); a missed warehouse-club-style
+instant-savings line shows up as the items being too high. The prompt tells the model to attach such a line to the item whose number follows the
+slash. Reading is not perfectly repeatable, so `readReceiptWithAi` reads up to three times (the first at temperature 0, the rest at 0.4) when the items do not add up to the receipt's printed subtotal, and keeps the closest; a receipt that prints no subtotal is read once. On the four test receipts (rotated, crumpled photos) this brought three of four to an exact match on the first reading every time and the fourth (a small discount line) to an exact match or about 15 cents off. About 40 reads an hour per person. The demo has no storage to read files back from, so there "Read again" answers 409. Later: price history per
+normalised item (what things cost, what is dear) can read the `items` of every receipt; `unitPrice` and `unit` exist for that. The ledger grid has five
+40px icon columns (split, friend, transfer, receipt, delete); at a ~1280px window the ledger column is narrow and its rows already scroll sideways.
+
 ### Investments page
 
 A page of its own (`renderInvestments` in `app.js`, numbers from `lib/investments-logic.js`, loaded as a third classic script, so its top-level

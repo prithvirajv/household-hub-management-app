@@ -2706,7 +2706,7 @@ html[data-theme="dark"] .compact-row.overdue {
    repeating Payee/Amount/Date/etc. labels on every row — is safe here. */
 .ledger-entry-head {
   display: grid;
-  grid-template-columns: 24px minmax(120px, 1fr) minmax(80px, 100px) minmax(120px, 130px) minmax(140px, 1fr) 48px 48px 48px;
+  grid-template-columns: 24px minmax(120px, 1fr) minmax(80px, 100px) minmax(120px, 130px) minmax(140px, 1fr) 40px 40px 40px 40px;
   gap: 0.5rem;
   padding: 0.3rem 0.6rem 0.15rem;
   color: var(--muted);
@@ -2717,7 +2717,7 @@ html[data-theme="dark"] .compact-row.overdue {
 }
 
 .ledger-entry-head.has-accounts {
-  grid-template-columns: 24px minmax(120px, 1fr) minmax(80px, 100px) minmax(120px, 130px) minmax(140px, 1fr) minmax(120px, 140px) 48px 48px 48px;
+  grid-template-columns: 24px minmax(120px, 1fr) minmax(80px, 100px) minmax(120px, 130px) minmax(140px, 1fr) minmax(120px, 140px) 40px 40px 40px 40px;
 }
 
 .ledger-entry-head button {
@@ -2739,10 +2739,10 @@ html[data-theme="dark"] .compact-row.overdue {
 
 .ledger-entry-row {
   display: grid;
-  /* One 48px column per icon button: split, assign-IOU, move-to-transfer,
-     delete - four buttons, four columns (a prior 3-column version let the
-     4th, delete, spill onto its own row). */
-  grid-template-columns: 24px minmax(120px, 1fr) minmax(80px, 100px) minmax(120px, 130px) minmax(140px, 1fr) 48px 48px 48px 48px;
+  /* One 40px column per icon button: split, assign-IOU, move-to-transfer,
+     receipt, delete - five buttons, five columns (a prior 3-column version let
+     the 4th, delete, spill onto its own row). */
+  grid-template-columns: 24px minmax(120px, 1fr) minmax(80px, 100px) minmax(120px, 130px) minmax(140px, 1fr) 40px 40px 40px 40px 40px;
   gap: 0.5rem;
   align-items: center;
   padding: 0.4rem 0.6rem;
@@ -2750,7 +2750,7 @@ html[data-theme="dark"] .compact-row.overdue {
 }
 
 .ledger-entry-row.has-accounts {
-  grid-template-columns: 24px minmax(120px, 1fr) minmax(80px, 100px) minmax(120px, 130px) minmax(140px, 1fr) minmax(120px, 140px) 48px 48px 48px 48px;
+  grid-template-columns: 24px minmax(120px, 1fr) minmax(80px, 100px) minmax(120px, 130px) minmax(140px, 1fr) minmax(120px, 140px) 40px 40px 40px 40px 40px;
 }
 
 .ledger-bulk-bar {
@@ -9761,3 +9761,36 @@ label.ai-import-toggle span { font-weight: 600; }
 .recipe-steps li > span { padding-top: 0.15rem; }
 .recipe-detail-source a { font-weight: 700; }
 .recipe-detail-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 0.5rem; padding: 0.8rem 1.25rem; border-top: 1px solid var(--line); background: var(--panel); }
+
+/* ---- Receipts: a button on each ledger row, and the pop-up to attach a receipt and correct the items read from it ---- */
+.icon-button.has-receipt { background: var(--green-soft); color: var(--green-ink); }
+.receipt-dialog { width: min(760px, calc(100vw - 1.5rem)); max-height: min(92vh, 900px); overflow: hidden; border-radius: 14px; }
+.receipt-dialog[open] { display: grid; grid-template-rows: auto minmax(0, 1fr) auto; }
+.receipt-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 0.8rem; padding: 1rem 1.2rem 0.6rem; }
+.receipt-head h2 { margin: 0; }
+.receipt-head p { margin: 0.15rem 0 0; }
+.receipt-body { overflow-y: auto; padding: 0.4rem 1.2rem 1rem; display: grid; gap: 0.8rem; align-content: start; }
+.receipt-chosen, .receipt-files { display: flex; flex-wrap: wrap; gap: 0.5rem; }
+.receipt-chip, .receipt-file { display: inline-flex; align-items: center; gap: 0.45rem; border: 1px solid var(--line); border-radius: 10px; padding: 0.25rem 0.5rem; background: var(--panel); max-width: 100%; }
+.receipt-chip img, .receipt-file img { width: 44px; height: 44px; object-fit: cover; border-radius: 6px; }
+.receipt-chip > span, .receipt-file > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 14rem; font-size: 0.85rem; }
+.receipt-file { cursor: pointer; font: inherit; color: var(--text); }
+.receipt-file:hover { border-color: var(--green); }
+.receipt-busy { color: var(--muted); margin: 0; }
+.receipt-error { color: var(--coral); margin: 0; }
+.receipt-fields { display: grid; grid-template-columns: minmax(0, 2fr) minmax(0, 1fr) minmax(0, 1fr); gap: 0.6rem; }
+@media (max-width: 560px) { .receipt-fields { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); } .receipt-fields label:first-child { grid-column: 1 / -1; } }
+.receipt-note { margin: 0; font-size: 0.88rem; color: var(--muted); }
+.receipt-note.ok { color: var(--green-ink); }
+.receipt-note.warn { color: var(--coral); }
+.receipt-scroll { overflow-x: auto; }
+.receipt-table { width: 100%; border-collapse: collapse; font-size: 0.88rem; min-width: 560px; }
+.receipt-table th { text-align: left; color: var(--muted); font-size: 0.74rem; font-weight: 700; padding: 4px 4px 6px; border-bottom: 1px solid var(--line); }
+.receipt-table td { padding: 4px; vertical-align: top; border-bottom: 1px solid var(--line); }
+.receipt-table .r { text-align: right; }
+.receipt-table input, .receipt-table select { width: 100%; min-width: 0; padding: 0.3rem 0.4rem; font-size: 0.88rem; }
+.receipt-table input.num { text-align: right; max-width: 5.6rem; }
+@media (max-width: 560px) { .receipt-table { min-width: 0; } .receipt-table .receipt-opt { display: none; } }
+.receipt-row-actions { display: flex; gap: 0.5rem; }
+.receipt-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 0.5rem; padding: 0.8rem 1.2rem; border-top: 1px solid var(--line); background: var(--panel); }
+.receipt-actions-spacer { flex: 1; }

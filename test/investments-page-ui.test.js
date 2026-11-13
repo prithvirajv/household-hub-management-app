@@ -14,7 +14,7 @@ test("Investments is a page of its own in the Money section, loaded after the lo
   assert.match(app, /currentView === "investments"\s*\? "Investments"/, "has its own title");
   assert.equal((app.match(/currentView === "partners" \|\| currentView === "investments"/g) || []).length, 2, "no month picker or CSV button on this page");
   assert.match(app, /if \(currentView === "investments"\) return \[\];/, "no household budget tiles on this page");
-  assert.match(app, /bindPartnersEvents\(\);\s*bindInvestmentsEvents\(\);/);
+  assert.match(app, /function bindViewEvents\(\) \{[^}]*bindInvestmentsEvents\(\);/);
   assert.ok(html.indexOf("/lib/investments-logic.js") > html.indexOf("/lib/shared-logic.js") && html.indexOf("/lib/investments-logic.js") < html.indexOf("/app.js?v="), "after shared-logic, before app.js");
 });
 

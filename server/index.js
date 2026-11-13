@@ -18,6 +18,8 @@ const { defaultState } = require("./default-state");
 const { registerLinkedAccountRoutes } = require("./linked-accounts");
 const { registerPartnerGroupRoutes, forwardHouseholdPartnerRows } = require("./partner-groups");
 const { partnersParseAiSuggestions, partnersSanitizeConfig, PARTNER_KINDS } = require("../lib/partners-logic");
+const { registerReceiptRoutes, createReceiptStore } = require("./receipts");
+const { RECEIPT_READ_SYSTEM, RECEIPT_IMAGE_TYPES, buildReceiptReadParts, parseReceiptDraft, receiptCheck } = require("../lib/receipt-read");
 const { RECIPE_IMPORT_SYSTEM, canonicalYoutubeUrl, buildRecipeImportParts, validateRecipeImportRequest, parseRecipeDraft, createImportLimiter } = require("../lib/recipe-import");
 const { validateJournalPayload, buildDocumentObjectPath, sanitizeFilename, wouldCreateFolderCycle, collectDescendantFolderIds, SMS_CARRIERS, smsGatewayAddress, rollAnnualNotifyAtForward, choreNotifyAt, parseBankStatementPdfText, extractAccountActivityLabel, isValidEmail, parseImageReminderDraft, parseBatchSuggestions, parseHomeBriefing, parseAssistantPlan, pgDumpArgs } = require("../lib/shared-logic");
 const pdfParse = require("pdf-parse");
@@ -152,6 +154,7 @@ app.use("/api/bank-statement", express.json({ limit: "15mb" }));
 app.use("/api/reports", express.json({ limit: "20mb" }));
 app.use("/api/calendar/reminder-from-image", express.json({ limit: "10mb" }));
 app.use("/api/recipes/import", express.json({ limit: "24mb" }));
+app.use("/api/receipts", express.json({ limit: "40mb" }));
 app.use(express.json({ limit: "1mb" }));
 app.use(cookieParser(SESSION_SECRET));
 app.use(express.static(path.join(__dirname, ".."), {
@@ -1567,13 +1570,13 @@ function learnedExamplesText(examples) {
 // `rounds` is how many times the whole model list is tried when they answer busy (default one, with one extra try of the first model after a
 // pause); a long video read is worth waiting out a demand spike for, so the recipe import asks for more.
 const GEMINI_RETRY_PAUSE_MS = Math.max(0, Number(process.env.GEMINI_RETRY_PAUSE_MS) || 3000);
-async function geminiGenerate({ parts, system, maxOutputTokens = 6000, timeoutMs = 0, rounds = 1 }) {
+async function geminiGenerate({ parts, system, maxOutputTokens = 6000, timeoutMs = 0, rounds = 1, temperature }) {
   if (!GEMINI_API_KEY) { const failure = new Error("AI suggestions are not configured for this deployment"); failure.statusCode = 503; throw failure; }
   const request = (model) => fetch(`${GEMINI_API_BASE_URL}/v1beta/models/${encodeURIComponent(model)}:generateContent?key=${encodeURIComponent(GEMINI_API_KEY)}`, {
     method: "POST",
     ...(timeoutMs ? { signal: AbortSignal.timeout(timeoutMs) } : {}),
     headers: { "content-type": "application/json" },
-    body: JSON.stringify({ contents: [{ role: "user", parts }], systemInstruction: { parts: [{ text: system }] }, generationConfig: { maxOutputTokens, responseMimeType: "application/json" } })
+    body: JSON.stringify({ contents: [{ role: "user", parts }], systemInstruction: { parts: [{ text: system }] }, generationConfig: { maxOutputTokens, responseMimeType: "application/json", ...(temperature === undefined ? {} : { temperature }) } })
   });
   const models = [GEMINI_MODEL, ...GEMINI_FALLBACK_MODELS];
   let response;
@@ -1840,6 +1843,61 @@ app.post("/api/recipes/import", requireSession, requireEditAccess, async (req, r
     if (error?.statusCode) return res.status(error.statusCode).json({ error: error.message });
     next(error);
   }
+});
+
+// Receipts attached to transactions, and the items read from them (see server/receipts.js). The files are Documents; reading them goes through
+// the same AI helper (with the same fallback models and an overloaded AI reported plainly) as the recipe import.
+async function findReceiptDocuments(req, ids) {
+  const documents = await loadOwnerDocuments(await resolveOwnerId(req));
+  return ids.map((id) => documents.find((item) => item.id === id)).filter(Boolean);
+}
+async function loadReceiptDocumentFiles(documents) {
+  if (MEMORY_DB) return null; // the demo has no storage to read back from
+  const files = [];
+  for (const document of documents.slice(0, 6)) {
+    const mimeType = String(document.content_type || "").toLowerCase().replace("image/jpg", "image/jpeg");
+    if (!RECEIPT_IMAGE_TYPES.has(mimeType)) continue;
+    const chunks = [];
+    let size = 0;
+    for await (const chunk of getObjectStream(document.storage_object)) {
+      size += chunk.length;
+      if (size > 12 * 1024 * 1024) { chunks.length = 0; break; }
+      chunks.push(chunk);
+    }
+    if (chunks.length) files.push({ mimeType, imageBase64: Buffer.concat(chunks).toString("base64") });
+  }
+  return files;
+}
+// One reading. A busy or slow AI becomes a plain message for the person (userMessage), never the AI service's own wording.
+async function askReceiptAi(files, temperature) {
+  let text;
+  try {
+    text = await geminiGenerate({ parts: buildReceiptReadParts(files), system: RECEIPT_READ_SYSTEM, maxOutputTokens: 8000, timeoutMs: 120000, rounds: 3, temperature });
+  } catch (error) {
+    if (error?.name === "TimeoutError" || error?.name === "AbortError") throw Object.assign(new Error("timeout"), { statusCode: 504, userMessage: "Reading that took too long. Try a smaller or clearer photo." });
+    if (error?.statusCode === 502 && /high demand|overloaded|try again later|quota|resource.?exhausted/i.test(String(error.message))) throw Object.assign(new Error("busy"), { statusCode: 503, userMessage: "The AI service is very busy right now. The receipt is saved; try Read again in a minute or two." });
+    throw error;
+  }
+  return parseReceiptDraft(text);
+}
+// Reading a photo is not perfectly repeatable: one run may miss a discount line or a few items. So when the items do not add up to the receipt's own
+// printed subtotal, it is read again (up to three readings, the first at temperature 0 for the steadiest result) and the closest one is kept. A receipt
+// that prints no subtotal has nothing to check against and is read once. The page still shows whether the final items add up.
+async function readReceiptWithAi(files) {
+  let best = null;
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    let draft;
+    try { draft = await askReceiptAi(files, attempt === 0 ? 0 : 0.4); } catch (error) { if (best) break; throw error; }
+    const check = receiptCheck(draft);
+    const distance = check.difference === null ? 0 : Math.abs(check.difference);
+    if (!best || distance < best.distance) best = { draft, distance };
+    if (check.difference === null || check.adds_up) break;
+  }
+  return best.draft;
+}
+registerReceiptRoutes({
+  app, store: createReceiptStore({ pool: MEMORY_DB ? null : pool, memory: MEMORY_DB }), requireSession, requireEditAccess,
+  findDocuments: findReceiptDocuments, loadDocumentFiles: loadReceiptDocumentFiles, readReceipt: readReceiptWithAi, aiConfigured: Boolean(GEMINI_API_KEY)
 });
 
 app.get("/api/stock-quote", requireSession, async (req, res, next) => {

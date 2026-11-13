@@ -216,6 +216,29 @@ ALTER TABLE documents
 
 CREATE INDEX IF NOT EXISTS idx_documents_wealth_item_id ON documents(wealth_item_id);
 
+-- Receipts: photos attached to a transaction (the files are ordinary documents) and the items read from them. The items live here, not in the
+-- household state, because a year of grocery receipts would soon pass the ~1 MB that state can hold.
+CREATE TABLE IF NOT EXISTS receipts (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  household_id UUID NOT NULL REFERENCES households(id) ON DELETE CASCADE,
+  created_by UUID REFERENCES users(id) ON DELETE SET NULL,
+  documents JSONB NOT NULL DEFAULT '[]',
+  merchant TEXT NOT NULL DEFAULT '',
+  location TEXT NOT NULL DEFAULT '',
+  receipt_date DATE,
+  subtotal NUMERIC(12,2),
+  tax NUMERIC(12,2),
+  total NUMERIC(12,2),
+  savings NUMERIC(12,2),
+  items JSONB NOT NULL DEFAULT '[]',
+  status TEXT NOT NULL DEFAULT 'attached',
+  read_at TIMESTAMPTZ,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS idx_receipts_household_date ON receipts(household_id, receipt_date DESC);
+
 ALTER TABLE document_folders
   ADD COLUMN IF NOT EXISTS wealth_item_type TEXT,
   ADD COLUMN IF NOT EXISTS wealth_item_id TEXT;
