@@ -132,7 +132,9 @@ function registerReceiptRoutes({ app, store, requireSession, requireEditAccess, 
   app.get("/api/receipts", requireSession, async (req, res, next) => {
     try {
       const rows = await store.list(householdOf(req), 500);
-      res.json({ receipts: rows.map((row) => { const receipt = toClient(row); return { id: receipt.id, merchant: receipt.merchant, date: receipt.date, total: receipt.total, itemCount: receipt.items.length, status: receipt.status, documents: receipt.documents }; }) });
+      // ?items=1 adds the items (the price analysis reads every receipt's items); the plain list stays small for the inbox.
+      const withItems = req.query.items === "1";
+      res.json({ receipts: rows.map((row) => { const receipt = toClient(row); return { id: receipt.id, merchant: receipt.merchant, date: receipt.date, total: receipt.total, itemCount: receipt.items.length, status: receipt.status, documents: receipt.documents, ...(withItems ? { items: receipt.items, createdAt: receipt.createdAt } : {}) }; }) });
     } catch (error) { next(error); }
   });
 

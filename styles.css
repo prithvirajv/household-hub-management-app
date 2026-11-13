@@ -9809,3 +9809,44 @@ label.ai-import-toggle span { font-weight: 600; }
 .receipt-link h3 { margin: 0; font-size: 0.78rem; letter-spacing: 0.07em; text-transform: uppercase; color: var(--muted); }
 .receipt-link p { margin: 0; }
 .receipt-link-row { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 0.4rem 0.8rem; }
+
+/* ---- Prices: what the items on your receipts cost, dear or cheap against your usual, and the cheapest shop ---- */
+/* A grid item with auto side margins would size itself to its widest table: explicit width and min-width keep it to the screen. */
+.prices { width: 100%; max-width: 980px; min-width: 0; margin: 0 auto; font-variant-numeric: tabular-nums; }
+.prices > * { min-width: 0; }
+.prices-headline { font-size: clamp(1.6rem, 5vw, 2.4rem); font-weight: 800; letter-spacing: -0.02em; line-height: 1.15; margin: 0.2rem 0; }
+.prices-hero p { margin: 0.2rem 0 0; }
+.price-lookup { display: grid; gap: 0.7rem; margin-top: 1rem; }
+.price-look { border-left: 3px solid var(--gold); background: var(--panel); border-radius: 0 10px 10px 0; padding: 0.6rem 0.9rem; }
+.price-look h3 { margin: 0 0 0.3rem; font-size: 0.78rem; letter-spacing: 0.07em; text-transform: uppercase; color: var(--muted); }
+.price-look-row { padding: 0.15rem 0; font-size: 0.92rem; }
+.price-controls { display: grid; grid-template-columns: minmax(0, 2fr) minmax(0, 1fr) minmax(0, 1fr); gap: 0.6rem; margin: 1.2rem 0 0.8rem; }
+@media (max-width: 640px) { .price-controls { grid-template-columns: minmax(0, 1fr); } }
+.price-list { display: grid; gap: 0.5rem; }
+.price-item { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; }
+.price-item summary { list-style: none; cursor: pointer; display: grid; grid-template-columns: minmax(0, 1fr) auto auto; gap: 0.2rem 0.8rem; align-items: center; padding: 0.7rem 0.9rem; }
+.price-item summary::-webkit-details-marker { display: none; }
+.price-name { font-weight: 700; overflow-wrap: anywhere; }
+.price-last { font-weight: 700; text-align: right; white-space: nowrap; }
+.price-meta { grid-column: 1 / -1; }
+@media (max-width: 560px) { .price-item summary { grid-template-columns: minmax(0, 1fr) auto; } .price-pill { grid-column: 1 / -1; justify-self: start; } }
+.price-pill { font-size: 0.78rem; border-radius: 999px; padding: 0.1rem 0.6rem; border: 1px solid var(--line); color: var(--muted); white-space: nowrap; }
+.price-pill.dearer { color: var(--coral); border-color: color-mix(in srgb, var(--coral) 45%, var(--line)); background: color-mix(in srgb, var(--coral) 8%, transparent); }
+.price-pill.cheaper { color: var(--green-ink); border-color: color-mix(in srgb, var(--green) 45%, var(--line)); background: var(--green-soft); }
+.price-body { padding: 0 0.9rem 0.9rem; display: grid; gap: 0.6rem; }
+.price-body h4 { margin: 0.4rem 0 0; font-size: 0.78rem; letter-spacing: 0.07em; text-transform: uppercase; color: var(--muted); }
+.price-body p { margin: 0; }
+.price-stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(7.5rem, 1fr)); gap: 0.6rem; }
+.price-stats > div { display: grid; gap: 0.05rem; }
+.price-stats span { font-size: 0.74rem; color: var(--muted); }
+.price-stats b { font-size: 1.05rem; }
+.price-scroll { overflow-x: auto; }
+.price-table { width: 100%; border-collapse: collapse; font-size: 0.88rem; }
+.price-table th { text-align: left; color: var(--muted); font-size: 0.74rem; font-weight: 700; padding: 4px 6px; border-bottom: 1px solid var(--line); }
+.price-table td { padding: 5px 6px; border-bottom: 1px solid var(--line); }
+.price-table .r { text-align: right; }
+.price-best { color: var(--green-ink); font-weight: 700; }
+.prices-note { margin-top: 1rem; font-size: 0.82rem; }
+.price-hint { display: block; margin-top: 0.15rem; font-size: 0.74rem; color: var(--muted); }
+.price-hint.dearer { color: var(--coral); }
+.price-hint.cheaper { color: var(--green-ink); }

@@ -24,7 +24,7 @@ test("parseReceiptDraft cleans the model's answer: numbers, units, discounts, un
   const reply = "```json\n" + JSON.stringify({
     merchant: "  Corner   Market ", location: "Springfield", date: "2026-11-12",
     items: [
-      { name: " Roma tomatoes ", qty: 1.31, unit: "lb", unit_price: 2.59, amount: "3.39", discount: 0 },
+      { name: " Roma tomatoes ", product: "  Roma   Tomato ", qty: 1.31, unit: "lb", unit_price: 2.59, amount: "3.39", discount: 0 },
       { name: "Eggs 5 dozen", qty: 1, unit: "each", unit_price: 10.39, amount: 10.39 },
       { name: "Chocolates 48 count", qty: 2, unit: "each", amount: 26.98, discount: 9 },
       { name: "Soup", qty: 0, unit: "bag", amount: 9.99 },
@@ -36,7 +36,8 @@ test("parseReceiptDraft cleans the model's answer: numbers, units, discounts, un
   const draft = parseReceiptDraft(reply);
   assert.deepEqual([draft.merchant, draft.location, draft.date, draft.subtotal, draft.tax, draft.total, draft.savings], ["Corner Market", "Springfield", "2026-11-12", 40.76, 1.2, 41.96, null]);
   assert.deepEqual(draft.items.map((item) => item.name), ["Roma tomatoes", "Eggs 5 dozen", "Chocolates 48 count", "Soup"], "unnamed and unpriced lines are dropped");
-  assert.deepEqual(draft.items[0], { name: "Roma tomatoes", qty: 1.31, unit: "lb", unitPrice: 2.59, amount: 3.39, discount: 0 });
+  assert.deepEqual(draft.items[0], { name: "Roma tomatoes", product: "roma tomato", qty: 1.31, unit: "lb", unitPrice: 2.59, amount: 3.39, discount: 0 }, "the generic product name is tidied and lowercased");
+  assert.equal(draft.items[1].product, "", "no product name given: empty, and the analysis falls back to the item name");
   assert.equal(draft.items[2].unitPrice, 17.99, "(26.98 charged + 9 saved) / 2: the price of one before the discount");
   assert.deepEqual([draft.items[3].qty, draft.items[3].unit], [1, "each"], "a zero quantity becomes 1 and an unknown unit becomes each");
 });

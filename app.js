@@ -17,6 +17,7 @@ const views = [
   ["goals", "Goals", "🎯"],
   ["wealth", "Wealth", "🏦"],
   ["investments", "Investments", "📊"],
+  ["prices", "Prices", "🏷️"],
   ["sharing", "Sharing", "🤝"],
   ["reports", "Reports", "📈"],
   ["profile", "Profile", "👤"],
@@ -32,7 +33,7 @@ const views = [
 // this list wasn't updated alongside it.
 const NAV_SECTIONS = [
   ["Overview", ["home"]],
-  ["Money", ["budget", "bills", "transactions", "paychecks", "wealth", "investments", "reports", "partners"]],
+  ["Money", ["budget", "bills", "transactions", "paychecks", "wealth", "investments", "prices", "reports", "partners"]],
   ["Household", ["calendar", "notes", "meals", "recipes", "documents", "decisions", "ious", "sharing"]],
   ["Personal", ["journal", "plan", "goals"]],
   ["Settings", ["profile", "help", "admin"]]
@@ -1968,6 +1969,8 @@ function renderShell() {
                       ? "Household decisions"
                       : isIousView
                         ? "Shared expenses & debts"
+                        : currentView === "prices"
+                        ? "Item prices"
                         : currentView === "investments"
                         ? "Investments"
                         : currentView === "partners"
@@ -2012,9 +2015,9 @@ function renderShell() {
   const selectedHousehold = households.find((household) => household.selected);
   $("#defaultHouseholdButton").disabled = Boolean(selectedHousehold?.isDefault);
   $("#defaultHouseholdButton").textContent = selectedHousehold?.isDefault ? "Default household" : "Set as default";
-  $(".month-control").hidden = isAdminView || isNotesView || isHelpView || isRecipesView || isGoalsView || isWealthView || isJournalView || isPlanView || isDocumentsView || isDecisionsView || isIousView || currentView === "partners" || currentView === "investments" || isProfileView || isHomeView;
+  $(".month-control").hidden = isAdminView || isNotesView || isHelpView || isRecipesView || isGoalsView || isWealthView || isJournalView || isPlanView || isDocumentsView || isDecisionsView || isIousView || currentView === "partners" || currentView === "investments" || currentView === "prices" || isProfileView || isHomeView;
   $("#syncButton").hidden = isAdminView || isHelpView;
-  $("#downloadCsvButton").hidden = isAdminView || isNotesView || isHelpView || isJournalView || isPlanView || isDocumentsView || isDecisionsView || isIousView || currentView === "partners" || currentView === "investments" || isProfileView || isHomeView;
+  $("#downloadCsvButton").hidden = isAdminView || isNotesView || isHelpView || isJournalView || isPlanView || isDocumentsView || isDecisionsView || isIousView || currentView === "partners" || currentView === "investments" || currentView === "prices" || isProfileView || isHomeView;
   renderNav();
   renderMobileTabBar();
   renderNotificationBell();
@@ -2099,6 +2102,7 @@ function metricsForView() {
   if (currentView === "wealth") return [["Assets", money.format(netWorth().assets), "tracked"], ["Liabilities", money.format(netWorth().liabilities), "tracked"], ["Net worth", money.format(netWorth().total), "current estimate"], ["Debt accounts", String(state.goals.debts.length), "payoff plan"]];
   if (currentView === "admin") return [];
   // The Partners page has its own figures, and the household budget tiles (Income, Assigned...) are not about the partnership.
+  if (currentView === "prices") return [];
   if (currentView === "investments") return [];
   if (currentView === "partners") return [];
   return [["Income", money.format(state.budget.income), "ready to assign"], ["Assigned", money.format(plannedTotal()), "planned this month"], ["Available", money.format(state.budget.income - plannedTotal()), "left to budget"], ["Overdue", money.format(0), "no urgent items"]];
@@ -2155,6 +2159,7 @@ function render() {
   if (["wealth", "transactions", "home"].includes(currentView) && !linkedAccounts) loadLinkedAccounts();
   // The receipts waiting for a transaction: loaded when the Transactions page opens and every couple of minutes after (new bank rows may now match them).
   if (currentView === "transactions" && !receiptInboxLoading && (receiptInbox === null || Date.now() - receiptInboxLoadedAt > 120000)) void receiptRefreshInbox();
+  if (currentView === "prices" && !priceReceiptsLoading && priceStale()) void loadPriceReceipts();
   if (currentView === "partners" && partnerGroupsInfo === null) void loadPartnerGroups();
   if (currentView === "notes" && sharedWithMeNotes === null) loadSharedWithMeNotes();
   if (["sharing", "calendar"].includes(currentView) && !sharingAccess) loadSharingAccess();
@@ -2187,6 +2192,7 @@ const renderers = {
   goals: renderGoals,
   wealth: renderWealth,
   investments: renderInvestments,
+  prices: renderPrices,
   sharing: renderSharing,
   reports: renderReports,
   profile: renderProfile,
@@ -3242,6 +3248,7 @@ async function receiptRefreshInbox() {
   try { receiptInbox = (await api("/api/receipts")).receipts; } catch (_error) { receiptInbox ||= []; }
   receiptInboxLoading = false;
   receiptInboxLoadedAt = Date.now();
+  priceReceiptsLoadedAt = 0; // a receipt was read, corrected or removed: the price analysis reloads next time it is needed
   const linked = receiptsAutoLink();
   if (linked.length) {
     autosaveState();
@@ -3357,7 +3364,7 @@ function receiptDialogHtml() {
       <p id="receiptMatchNote" class="receipt-note ${matchNote.kind}" ${matchNote.text ? "" : "hidden"}>${escapeHtml(matchNote.text)}</p>
       <div class="receipt-scroll"><table class="receipt-table"><thead><tr><th>Item</th><th class="r">Qty</th><th class="receipt-opt">Unit</th><th class="r receipt-opt">Unit price</th><th class="r">Amount</th><th></th></tr></thead><tbody>
         ${draft.items.map((item, index) => `<tr>
-          <td><input data-receipt-item="${index}" data-key="name" value="${escapeHtml(item.name)}" aria-label="Item name" maxlength="120">${item.discount ? `<small class="muted">saved ${exactMoney.format(item.discount)}</small>` : ""}</td>
+          <td><input data-receipt-item="${index}" data-key="name" value="${escapeHtml(item.name)}" aria-label="Item name" maxlength="120">${receiptPriceHintHtml(item)}${item.discount ? `<small class="muted">saved ${exactMoney.format(item.discount)}</small>` : ""}</td>
           <td class="r"><input class="num" type="number" step="any" min="0" data-receipt-item="${index}" data-key="qty" value="${item.qty}" aria-label="Quantity"></td>
           <td class="receipt-opt"><select data-receipt-item="${index}" data-key="unit" aria-label="Unit">${RECEIPT_UNITS.map((unit) => `<option ${unit === item.unit ? "selected" : ""}>${unit}</option>`).join("")}</select></td>
           <td class="r receipt-opt"><input class="num" type="number" step="0.01" min="0" data-receipt-item="${index}" data-key="unitPrice" value="${receiptFormatMoney(item.unitPrice)}" aria-label="Price of one"></td>
@@ -3388,6 +3395,7 @@ async function openReceiptDialog(index) {
   const receiptId = (transaction.receiptIds || [])[0];
   if (receiptId) receiptBusy = "Loading the receipt…";
   render();
+  if (priceStale()) void loadPriceReceipts(); // for the price notes under the items
   if (!receiptId) return;
   try { setReceipt((await api(`/api/receipts/${receiptId}`)).receipt); } catch (error) { receiptError = error.message || "Couldn't load the receipt"; }
   receiptBusy = "";
@@ -3401,6 +3409,7 @@ async function openReceiptStandalone(receiptId) {
   receiptDialogTxId = "";
   receiptData = null; receiptDraft = null; receiptFiles = []; receiptBusy = receiptId ? "Loading the receipt…" : ""; receiptError = "";
   render();
+  if (priceStale()) void loadPriceReceipts();
   if (!receiptId) return;
   try { setReceipt((await api(`/api/receipts/${receiptId}`)).receipt); } catch (error) { receiptError = error.message || "Couldn't load the receipt"; }
   receiptBusy = "";
@@ -3436,7 +3445,15 @@ async function receiptPrepareFile(file) {
     return { name: file.name, mimeType: file.type, imageBase64: file.size <= 4000000 ? dataUrl.slice(dataUrl.indexOf(",") + 1) : "", previewUrl: "", file };
   }
   const prepared = await recipeImportPrepareImage(file, 2600);
-  return { ...prepared, previewUrl: URL.createObjectURL(file), file };
+  // What is stored is the same shrunk copy the AI reads (a receipt stays perfectly legible at this size), not the original phone photo, which is often
+  // 3-8 MB: that is several times less to store and to load back into the pop-up. A file that was small already, or that the browser could not redraw
+  // (some HEIC), is stored as it is, and a copy is only used when it really is smaller.
+  let uploadFile = file;
+  if (prepared.mimeType !== file.type) {
+    const bytes = Uint8Array.from(atob(prepared.imageBase64), (character) => character.charCodeAt(0));
+    if (bytes.length < file.size) uploadFile = new File([bytes], `${file.name.replace(/\.[^.]+$/, "") || "receipt"}.jpg`, { type: prepared.mimeType });
+  }
+  return { ...prepared, previewUrl: URL.createObjectURL(file), file: uploadFile };
 }
 
 async function receiptAttach(readNow) {
@@ -7983,6 +8000,152 @@ function bindInvestmentsEvents() {
   document.querySelectorAll("[data-inv-edit]").forEach((button) => button.addEventListener("click", () => openHoldingsModal(button.dataset.invEdit)));
 }
 
+// ---- Prices: what the items on your receipts cost you, whether the latest price is dear or cheap against what you usually pay, and which shop is
+// cheapest. The numbers come from lib/price-analysis.js; the items come from the receipts (GET /api/receipts?items=1). Nothing is stored here.
+let priceReceipts = null; // every receipt of the household with its items, null until loaded
+let priceReceiptsLoading = false;
+let priceReceiptsLoadedAt = 0;
+let priceSearch = "";
+let priceShopFilter = "";
+let priceSort = "recent"; // recent | bought | dearer | gap | name
+const priceOpen = new Set(); // product keys whose details are unfolded, so they survive a redraw
+
+async function loadPriceReceipts() {
+  if (priceReceiptsLoading) return;
+  priceReceiptsLoading = true;
+  try { priceReceipts = (await api("/api/receipts?items=1")).receipts.filter((receipt) => (receipt.items || []).length); } catch (_error) { priceReceipts ||= []; }
+  priceReceiptsLoading = false;
+  priceReceiptsLoadedAt = Date.now();
+  if (currentView === "prices" || receiptDialogOpen) render();
+}
+
+const priceStale = () => priceReceipts === null || Date.now() - priceReceiptsLoadedAt > 120000;
+const priceSigned = (percent) => `${percent > 0 ? "+" : percent < 0 ? "−" : ""}${Math.abs(percent)}%`;
+
+function priceVerdictText(verdict) {
+  if (verdict.kind === "dearer") return `Dearer than usual (${priceSigned(verdict.percent)})`;
+  if (verdict.kind === "cheaper") return `Cheaper than usual (${priceSigned(verdict.percent)})`;
+  if (verdict.kind === "usual") return "About your usual price";
+  return "First time recorded";
+}
+
+// A small note under an item in the receipt pop-up: how this price compares with what was paid for the same thing on your other receipts.
+function receiptPriceHintHtml(item) {
+  if (!priceReceipts || !receiptData) return "";
+  const hint = priceHintFor(priceReceipts, receiptData.id, item);
+  if (!hint) return "";
+  const average = `${exactMoney.format(hint.average)} ${hint.unitLabel}`;
+  const text = hint.kind === "usual" ? `About your usual price (${average})` : `${priceSigned(hint.percent)} ${hint.kind === "dearer" ? "dearer" : "cheaper"} than your usual ${average}`;
+  return `<small class="price-hint ${hint.kind}" title="Against the average of ${hint.count} earlier purchase${hint.count === 1 ? "" : "s"} of this item">${escapeHtml(text)}</small>`;
+}
+
+function priceGroupHtml(group) {
+  const money = (value) => exactMoney.format(value);
+  const verdict = group.verdict;
+  const newest = [...group.purchases].reverse().slice(0, 12);
+  return `<details class="price-item" data-price-key="${escapeHtml(group.key)}" ${priceOpen.has(group.key) ? "open" : ""}>
+    <summary>
+      <span class="price-name">${escapeHtml(group.label)}</span>
+      <span class="price-last">${money(group.last.price)} <small class="muted">${group.unitLabel}</small></span>
+      <span class="price-pill ${verdict.kind}">${escapeHtml(priceVerdictText(verdict))}</span>
+      <small class="price-meta muted">bought ${group.count} time${group.count === 1 ? "" : "s"}${group.cheapestShop ? ` · cheapest at ${escapeHtml(group.cheapestShop.shopName)}` : ""}</small>
+    </summary>
+    <div class="price-body">
+      <div class="price-stats">
+        <div><span>Last paid</span><b>${money(group.last.price)}</b><small class="muted">${escapeHtml(formatShortDate(group.last.date))}</small></div>
+        <div><span>Your average</span><b>${money(group.average)}</b><small class="muted">${group.unitLabel}</small></div>
+        <div><span>Lowest</span><b>${money(group.min)}</b></div>
+        <div><span>Highest</span><b>${money(group.max)}</b></div>
+        <div><span>Spent in total</span><b>${money(group.spent)}</b></div>
+      </div>
+      ${group.byShop.length > 1 ? `<h4>By shop</h4><div class="price-scroll"><table class="price-table"><thead><tr><th>Shop</th><th class="r">Times</th><th class="r">Average ${group.unitLabel}</th></tr></thead><tbody>
+        ${group.byShop.map((shop, index) => `<tr><td>${escapeHtml(shop.shopName)}${index === 0 ? ` <small class="price-best">cheapest</small>` : ""}</td><td class="r">${shop.count}</td><td class="r">${money(shop.average)}</td></tr>`).join("")}
+      </tbody></table></div><p class="muted">The dearest shop averages ${group.shopGapPercent}% more than the cheapest.</p>` : ""}
+      <h4>Purchases</h4>
+      <div class="price-scroll"><table class="price-table"><thead><tr><th>Date</th><th>Shop</th><th class="r">Bought</th><th class="r">Price ${group.unitLabel}</th><th class="r">Paid</th></tr></thead><tbody>
+        ${newest.map((purchase) => `<tr><td>${escapeHtml(formatShortDate(purchase.date))}</td><td>${escapeHtml(purchase.shopName)}</td><td class="r">${purchase.qty} ${escapeHtml(purchase.unit)}</td><td class="r">${money(purchase.price)}</td><td class="r">${money(purchase.amount)}${purchase.discount ? ` <small class="muted">(saved ${money(purchase.discount)})</small>` : ""}</td></tr>`).join("")}
+      </tbody></table></div>
+    </div>
+  </details>`;
+}
+
+// The products shown: filtered by the search and the shop, in the chosen order.
+function pricesListHtml(groups) {
+  const query = priceSearch.trim().toLowerCase();
+  let shown = groups.filter((group) => (!query || group.label.toLowerCase().includes(query) || group.purchases.some((purchase) => purchase.name.toLowerCase().includes(query))) && (!priceShopFilter || group.purchases.some((purchase) => purchase.shop === priceShopFilter)));
+  const byRecent = (a, b) => (a.last.date < b.last.date ? 1 : a.last.date > b.last.date ? -1 : 0);
+  const sorters = {
+    recent: byRecent,
+    bought: (a, b) => b.count - a.count || byRecent(a, b),
+    dearer: (a, b) => (b.verdict.kind === "dearer" ? b.verdict.percent : -999) - (a.verdict.kind === "dearer" ? a.verdict.percent : -999) || b.count - a.count,
+    gap: (a, b) => b.shopGapPercent - a.shopGapPercent || b.count - a.count,
+    name: (a, b) => a.label.localeCompare(b.label)
+  };
+  shown = [...shown].sort(sorters[priceSort] || sorters.recent);
+  if (!shown.length) return `<div class="empty-inline">No products match.</div>`;
+  return shown.map(priceGroupHtml).join("");
+}
+
+function renderPrices() {
+  if (priceReceipts === null) return `<section class="card"><p class="muted">Loading your receipts…</p></section>`;
+  const groups = priceAnalyze(priceReceipts);
+  if (!groups.length) {
+    return `<section class="card prices-empty"><div class="onboarding-empty compact-onboarding"><div class="empty-symbol" aria-hidden="true">🏷️</div><h3>What do things cost you?</h3>
+      <p>Add receipts on the Transactions page (the 🧾 button) and the AI reads what you bought. Here you will see each item's price per unit, what you usually pay, when something is dearer than usual, and which shop is cheapest.</p>
+      <button type="button" id="pricesGoTransactions">Go to Transactions</button></div></section>`;
+  }
+  const money = (value) => exactMoney.format(value);
+  const today = dateKey(new Date());
+  const recentDays = (date) => Math.round((Date.parse(`${today}T00:00:00`) - Date.parse(`${date}T00:00:00`)) / 86400000);
+  const dearer = groups.filter((group) => group.verdict.kind === "dearer" && recentDays(group.last.date) <= 45).sort((a, b) => b.verdict.percent - a.verdict.percent).slice(0, 5);
+  const gaps = groups.filter((group) => group.cheapestShop && group.shopGapPercent >= 20).sort((a, b) => b.shopGapPercent - a.shopGapPercent).slice(0, 4);
+  const shops = new Map();
+  groups.forEach((group) => group.purchases.forEach((purchase) => shops.set(purchase.shop, purchase.shopName)));
+  const dates = priceReceipts.map((receipt) => receipt.date || String(receipt.createdAt || "").slice(0, 10)).filter(Boolean).sort();
+  const itemCount = priceReceipts.reduce((sum, receipt) => sum + receipt.items.length, 0);
+  return `<div class="prices">
+    <section class="prices-hero">
+      <span class="inv-eyebrow">Item prices</span>
+      <div class="prices-headline">${groups.length} product${groups.length === 1 ? "" : "s"} from ${priceReceipts.length} receipt${priceReceipts.length === 1 ? "" : "s"}</div>
+      <p class="muted">${itemCount} item${itemCount === 1 ? "" : "s"}${dates.length ? `, ${escapeHtml(formatShortDate(dates[0]))} to ${escapeHtml(formatShortDate(dates[dates.length - 1]))}` : ""}. Prices are what you paid per unit after discounts; a product is compared only with the same product in the same unit (per lb, each, per dozen…).</p>
+    </section>
+    ${dearer.length || gaps.length ? `<section class="price-lookup">
+      ${dearer.length ? `<div class="price-look"><h3>Dearer than usual lately</h3>${dearer.map((group) => `<div class="price-look-row"><b>${escapeHtml(group.label)}</b> ${money(group.last.price)} ${group.unitLabel} at ${escapeHtml(group.last.shopName)}, ${priceSigned(group.verdict.percent)} against your usual ${money(group.verdict.average)}</div>`).join("")}</div>` : ""}
+      ${gaps.length ? `<div class="price-look"><h3>Shops differ most on</h3>${gaps.map((group) => `<div class="price-look-row"><b>${escapeHtml(group.label)}</b> ${group.unitLabel}: ${escapeHtml(group.cheapestShop.shopName)} ${money(group.cheapestShop.average)} against ${escapeHtml(group.dearestShop.shopName)} ${money(group.dearestShop.average)} (${group.shopGapPercent}% more)</div>`).join("")}</div>` : ""}
+    </section>` : ""}
+    <section class="price-controls">
+      <label>Search<input type="search" id="pricesSearch" value="${escapeHtml(priceSearch)}" placeholder="banana, milk…" autocomplete="off"></label>
+      <label>Shop<select id="pricesShop"><option value="">All shops</option>${[...shops.entries()].sort((a, b) => a[1].localeCompare(b[1])).map(([key, name]) => `<option value="${escapeHtml(key)}" ${key === priceShopFilter ? "selected" : ""}>${escapeHtml(name)}</option>`).join("")}</select></label>
+      <label>Order<select id="pricesSort">${[["recent", "Bought most recently"], ["bought", "Bought most often"], ["dearer", "Dearer than usual first"], ["gap", "Biggest gap between shops"], ["name", "A to Z"]].map(([value, label]) => `<option value="${value}" ${value === priceSort ? "selected" : ""}>${label}</option>`).join("")}</select></label>
+    </section>
+    <div id="pricesList" class="price-list">${pricesListHtml(groups)}</div>
+    <p class="muted prices-note">Read from your receipts by the AI, so a misread price or name shows up here too: correct it on the receipt (🧾 on its transaction) and this page follows.</p>
+  </div>`;
+}
+
+function bindPriceDetails() {
+  document.querySelectorAll("[data-price-key]").forEach((details) => details.addEventListener("toggle", () => {
+    if (details.open) priceOpen.add(details.dataset.priceKey); else priceOpen.delete(details.dataset.priceKey);
+  }));
+}
+
+// Typing in the search, or picking a shop or an order, redraws only the list (a full redraw would take the cursor out of the search box).
+function refreshPricesList() {
+  const list = $("#pricesList");
+  if (!list || !priceReceipts) return;
+  list.innerHTML = pricesListHtml(priceAnalyze(priceReceipts));
+  bindPriceDetails();
+}
+
+function bindPricesEvents() {
+  if (currentView !== "prices") return;
+  $("#pricesGoTransactions")?.addEventListener("click", () => { void goToViewAndRun("transactions", () => {}); });
+  $("#pricesSearch")?.addEventListener("input", (event) => { priceSearch = event.target.value; refreshPricesList(); });
+  $("#pricesShop")?.addEventListener("change", (event) => { priceShopFilter = event.target.value; refreshPricesList(); });
+  $("#pricesSort")?.addEventListener("change", (event) => { priceSort = event.target.value; refreshPricesList(); });
+  bindPriceDetails();
+}
+
 // Buckets every net-worth asset (not liabilities) into the four classes
 // the design calls out - retirement accounts are folded into "Stocks &
 // funds" rather than getting a fifth bucket, since they're already
@@ -10482,6 +10645,7 @@ function bindViewEvents() {
   bindPartnersEvents();
   bindReceiptEvents();
   bindInvestmentsEvents();
+  bindPricesEvents();
   if (googleMapsApiKey) attachLocationAutocomplete();
   updateLocationDirectionsPreview();
   $("#calendarQuickAdd [name='location']")?.addEventListener("input", updateLocationDirectionsPreview);

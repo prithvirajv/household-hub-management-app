@@ -25,6 +25,13 @@ test("the ledger grid has one column for each of its five icon buttons, in rows 
   heads.forEach((rule) => assert.match(rule, /(?:40px ){3}40px;$/, "the header keeps its one-column difference from the rows"));
 });
 
+test("what is stored for a receipt is the shrunk copy, not the original phone photo, and only when it really is smaller", () => {
+  assert.match(app, /const prepared = await recipeImportPrepareImage\(file, 2600\);/);
+  assert.match(app, /if \(prepared\.mimeType !== file\.type\) \{\s*const bytes = Uint8Array\.from\(atob\(prepared\.imageBase64\)/);
+  assert.match(app, /if \(bytes\.length < file\.size\) uploadFile = new File\(\[bytes\]/, "the copy replaces the original only if it is smaller");
+  assert.match(app, /return \{ \.\.\.prepared, previewUrl: URL\.createObjectURL\(file\), file: uploadFile \};/, "the file that is uploaded is the chosen copy");
+});
+
 test("attaching stores the files as Documents first, then records the receipt; reading is a separate step so a busy AI never loses the file", () => {
   const attach = app.slice(app.indexOf("async function receiptAttach("), app.indexOf("async function receiptRead("));
   const order = ["uploadDocumentFile(entry.file, null)", 'api("/api/receipts", { method: "POST"', "transaction.receiptIds = [receipt.id]", "autosaveState()", "if (readNow)"].map((marker) => attach.indexOf(marker));

@@ -343,6 +343,26 @@ differs from the receipt total (restaurant tips). Receipts are not matched to Ba
 normalised item (what things cost, what is dear) can read the `items` of every receipt; `unitPrice` and `unit` exist for that. The ledger grid has five
 40px icon columns (split, friend, transfer, receipt, delete); at a ~1280px window the ledger column is narrow and its rows already scroll sideways.
 
+### Item price analysis (Prices page)
+
+`lib/price-analysis.js` (a classic script, names `price*`) and `renderPrices` in `app.js`; data from `GET /api/receipts?items=1` (every receipt of the
+household with its items and `createdAt`, up to 500; the plain list stays small). Nothing is stored for the analysis: it is recomputed from the receipts
+whenever the page opens or a receipt changes (`priceReceiptsLoadedAt = 0` in `receiptRefreshInbox`). Fair comparison rules: the group key is the AI's
+generic `product` name (older receipts fall back to the item name minus brand and filler words, singularised, sorted) plus the unit family (weight /
+volume / count / dozen) plus, for packaged items, the pack sizes in the name; the price is `amount / (qty * factor)` (the amount is already after the
+line's discount) in one base unit (lb, gal, each, dozen); a verdict is the latest price against the mean of the EARLIER purchases of the same key
+(dearer or cheaper at 10% and at least 5 cents). Shops are grouped by their distinctive words (`priceShopKey`). `priceHintFor` gives the note under an
+item in the receipt pop-up (against the OTHER receipts only). The `product` field is asked for in `RECEIPT_READ_SYSTEM` and cleaned in
+`cleanReceiptFields`; on the four test receipts it came back consistent across shops ("roma tomato" at two shops, "banana" at two), with the odd generic
+miss ("soup" for a broccoli cheddar soup). Limitation: a product bought in different units (per lb at one shop, by the bunch at another) is never compared.
+
+Receipt photo storage and cost: the files are Documents in the documents bucket (`documents/<household>/<document>/<file>`, Standard class in
+us-central1, the same region as Cloud Run, no lifecycle rules, 7-day soft delete) and the database holds only the path; the items are a few KB of JSONB per
+receipt. What is uploaded is the same shrunk copy the AI reads (longest side 2600 px, JPEG 0.85) whenever that is smaller than the original, so a 3-8 MB
+phone photo is stored as a few hundred KB; PDFs and files the browser cannot redraw are stored as they are. At Standard prices (about $0.02 per GB-month) a
+thousand receipts is a few cents a month, so a lifecycle rule to Nearline was judged not worth its retrieval fees; revisit only if the bucket grows into
+tens of GB.
+
 ### Investments page
 
 A page of its own (`renderInvestments` in `app.js`, numbers from `lib/investments-logic.js`, loaded as a third classic script, so its top-level

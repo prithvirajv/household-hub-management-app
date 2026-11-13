@@ -88,7 +88,7 @@ test("the Partners page is in the Money navigation and loads its own logic file"
   const html = fs.readFileSync(path.join(__dirname, "..", "index.html"), "utf8");
   assert.match(html, /<script src="\/lib\/partners-logic\.js\?v=[^"]+"><\/script>/);
   assert.match(app, /\["partners", "Partners", "🏘️"\]/);
-  assert.match(app, /\["Money", \["budget", "bills", "transactions", "paychecks", "wealth", "investments", "reports", "partners"\]\]/);
+  assert.match(app, /\["Money", \["budget", "bills", "transactions", "paychecks", "wealth", "investments", "prices", "reports", "partners"\]\]/);
   assert.match(app, /partners: renderPartners,/);
   assert.match(app, /buildPartnersStatement\(\{ \.\.\.data, accountIds: \[\.\.\.data\.accountIds, PARTNERS_POOL_ID\] \}, partnersRows\(data\), partnersRange\(\)\)/);
 });

@@ -15,7 +15,7 @@ more convenient.
 [Notes](#notes) · [Journal](#journal) · [Plan](#plan) ·
 [Documents](#documents) · [Decisions](#decisions) ·
 [Shared Expenses](#shared-expenses) · [Meals and Recipes](#meals-and-recipes) ·
-[Goals](#goals) · [Wealth](#wealth) · [Investments](#investments) · [Sharing](#sharing) ·
+[Goals](#goals) · [Wealth](#wealth) · [Investments](#investments) · [Item prices](#item-prices) · [Sharing](#sharing) ·
 [Reports and Export](#reports-and-export) ·
 [Invitations](#invitations) · [Password Recovery](#password-recovery) ·
 [FAQ](#faq)
@@ -925,6 +925,43 @@ there, or with **Edit holdings** on an account card here.
   what.
 - Values are the shares and prices you have entered or refreshed; they do not
   change by themselves. This page is for planning, not financial advice.
+
+## Item prices
+
+**Prices** (in the sidebar under Investments) turns the items on your receipts into
+a price check: what each thing costs you, what you usually pay, whether the latest
+price is dear or cheap, and which shop is cheapest. It only has something to show
+once you have attached receipts and let the AI read their items (the 🧾 button on
+Transactions).
+
+1. The top says how many products and receipts it is working from.
+2. **Dearer than usual lately** lists things you bought in the last 45 days that
+   cost clearly more than you usually pay, and **Shops differ most on** lists
+   products where one shop averages at least 20% more than another.
+3. Each product below shows the price you last paid, with a tag: **Dearer than
+   usual** or **Cheaper than usual** (at least 10% and 5 cents against the average
+   of your *earlier* purchases of the same product, never against itself),
+   **About your usual price**, or **First time recorded**. Open a product for the
+   last price, your average, the lowest and highest, what you spent in total, the
+   average by shop (with the cheapest marked), and your recent purchases.
+4. Use **Search**, **Shop** and **Order** (most recent, most often, dearer than
+   usual first, biggest gap between shops, A to Z) to find things.
+5. When you open a receipt (🧾), each item that you have bought before carries a
+   small note, for example "+29% dearer than your usual $3.03 each".
+
+**How prices are compared (so a comparison is fair)**
+- The price is what you *paid* per unit: the line's amount after any discount,
+  divided by the quantity. Ounces and kilograms are converted to pounds, and
+  millilitres and litres to gallons.
+- A product is only compared with the same product in the same kind of unit: a
+  price per lb is never compared with a price per package. Items sold by the
+  package are separated by pack size, so "Eggs (5 dozen)" and "Eggs (1 dozen)"
+  are different rows.
+- The AI gives each item a short generic name ("roma tomato"), so the same product
+  at different shops lines up. Receipts read before this feature use the item's
+  own name instead; **Read again** on such a receipt adds the generic name.
+- A misread price or name shows up here too. Correct it on the receipt and this
+  page follows.
 
 ## Sharing
 

@@ -23,7 +23,7 @@ const answer = (object) => ({ candidates: [{ content: { parts: [{ text: JSON.str
 const RECEIPT = {
   merchant: "Corner Market", location: "Springfield", date: "2026-11-12",
   items: [
-    { name: "Roma tomatoes", qty: 1.31, unit: "lb", unit_price: 2.59, amount: 3.39, discount: 0 },
+    { name: "Roma tomatoes", product: "roma tomato", qty: 1.31, unit: "lb", unit_price: 2.59, amount: 3.39, discount: 0 },
     { name: "Eggs 5 dozen", qty: 1, unit: "each", unit_price: 10.39, amount: 10.39, discount: 0 },
     { name: "Parchment paper", qty: 1, unit: "each", unit_price: 14.99, amount: 11.49, discount: 3.5 }
   ],
@@ -83,7 +83,8 @@ test("a receipt is attached, read into items, corrected, listed and removed", as
     assert.equal(read.status, 200);
     const receipt = read.body.receipt;
     assert.deepEqual([receipt.status, receipt.merchant, receipt.date, receipt.items.length, receipt.total], ["read", "Corner Market", "2026-11-12", 3, 26.07]);
-    assert.deepEqual(receipt.items[2], { name: "Parchment paper", qty: 1, unit: "each", unitPrice: 14.99, amount: 11.49, discount: 3.5 });
+    assert.deepEqual(receipt.items[2], { name: "Parchment paper", product: "", qty: 1, unit: "each", unitPrice: 14.99, amount: 11.49, discount: 3.5 });
+    assert.equal(receipt.items[0].product, "roma tomato");
     assert.deepEqual([receipt.check.itemsTotal, receipt.check.adds_up], [25.27, true], "the items add up to the printed subtotal");
     assert.deepEqual(stub.requests[0].contents[0].parts[0], { inlineData: { mimeType: "image/jpeg", data: JPEG } });
     assert.match(stub.requests[0].systemInstruction.parts[0].text, /ONE shop receipt/);
@@ -100,6 +101,10 @@ test("a receipt is attached, read into items, corrected, listed and removed", as
     const listed = await server.request("/api/receipts", { headers: { cookie } });
     assert.deepEqual(listed.body.receipts.map((entry) => [entry.id, entry.merchant, entry.itemCount, entry.status]), [[id, "Corner Market", 2, "read"]]);
     assert.deepEqual(listed.body.receipts[0].documents.map((doc) => doc.documentId), [documentId], "the list carries each receipt's files, so the inbox can show them");
+    assert.equal(listed.body.receipts[0].items, undefined, "the plain list stays small: no items");
+    const withItems = await server.request("/api/receipts?items=1", { headers: { cookie } });
+    assert.deepEqual(withItems.body.receipts[0].items.map((entry) => entry.name), ["Roma tomatoes", "Bag"], "?items=1 carries them, for the price analysis");
+    assert.match(withItems.body.receipts[0].createdAt, /^\d{4}-\d{2}-\d{2}T/, "and when the receipt was added, for dating a receipt that has no date");
     assert.deepEqual([listed.body.receipts[0].date, listed.body.receipts[0].total], ["2026-11-12", 26.07], "and the date and total the inbox matches on");
 
     const removed = await server.request(`/api/receipts/${id}`, { method: "DELETE", headers: { cookie } });

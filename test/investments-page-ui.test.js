@@ -9,7 +9,7 @@ const html = fs.readFileSync(path.join(__dirname, "..", "index.html"), "utf8");
 
 test("Investments is a page of its own in the Money section, loaded after the logic it renders", () => {
   assert.match(app, /\["wealth", "Wealth", "🏦"\],\s*\["investments", "Investments", "📊"\]/, "listed right after Wealth");
-  assert.match(app, /"wealth", "investments", "reports", "partners"\]/, "in the Money group of the sidebar");
+  assert.match(app, /"wealth", "investments", "prices", "reports", "partners"\]/, "in the Money group of the sidebar");
   assert.match(app, /investments: renderInvestments,/, "registered as a page");
   assert.match(app, /currentView === "investments"\s*\? "Investments"/, "has its own title");
   assert.equal((app.match(/currentView === "partners" \|\| currentView === "investments"/g) || []).length, 2, "no month picker or CSV button on this page");
