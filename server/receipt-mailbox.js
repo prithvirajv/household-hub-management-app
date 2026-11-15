@@ -2,7 +2,7 @@
 // ingestReceiptEmail. Run by a scheduler through POST /api/internal/receipt-mail/poll. An email is marked read once it has been dealt with; one that could
 // not be read because the AI was busy is left unread, so the next run tries it again.
 
-const MAX_PER_RUN = 40; // keeps one run short; the rest wait for the next
+const MAX_PER_RUN = 15; // keeps one run inside the scheduler's time limit (each order email can take the AI up to a minute); the rest wait for the next run
 
 function headerValues(headers, name) {
   const value = headers && typeof headers.get === "function" ? headers.get(name) : undefined;
