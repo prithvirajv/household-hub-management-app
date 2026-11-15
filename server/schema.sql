@@ -239,6 +239,22 @@ CREATE TABLE IF NOT EXISTS receipts (
 
 CREATE INDEX IF NOT EXISTS idx_receipts_household_date ON receipts(household_id, receipt_date DESC);
 
+-- Receipts by email: where a receipt came from, and the forwarded email's message id (so the same email is never added twice).
+ALTER TABLE receipts ADD COLUMN IF NOT EXISTS source TEXT NOT NULL DEFAULT 'upload';
+ALTER TABLE receipts ADD COLUMN IF NOT EXISTS source_message_id TEXT;
+ALTER TABLE receipts ADD COLUMN IF NOT EXISTS source_info JSONB;
+CREATE UNIQUE INDEX IF NOT EXISTS idx_receipts_source_message ON receipts(household_id, source_message_id) WHERE source_message_id IS NOT NULL;
+
+-- Each household's private receipts address: the shared mailbox with this token after a plus. pending_forwarding holds the Gmail forwarding
+-- confirmation (code and link) that arrived in the shared mailbox and still has to be shown to the person.
+CREATE TABLE IF NOT EXISTS receipt_mailboxes (
+  household_id UUID PRIMARY KEY REFERENCES households(id) ON DELETE CASCADE,
+  token TEXT NOT NULL UNIQUE,
+  pending_forwarding JSONB,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
 ALTER TABLE document_folders
   ADD COLUMN IF NOT EXISTS wealth_item_type TEXT,
   ADD COLUMN IF NOT EXISTS wealth_item_id TEXT;

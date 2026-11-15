@@ -48,11 +48,11 @@ test("the page says its results are estimates, not advice, and shows the assumpt
   assert.ok(app.includes("calc-assumptions"));
 });
 
-test("the page offers five calculators, each with its own form, results and saved values", () => {
+test("the page offers six calculators, each with its own form, results and saved values", () => {
   assert.match(app, /\["car", "Car affordability"\], \["house", "House affordability"\]/);
-  assert.match(app, /const forms = \{ kyn: calcKynFormHtml, compound: calcCompoundFormHtml, car: calcCarFormHtml, house: calcHouseFormHtml, wm: calcWealthFormHtml \};/);
-  assert.match(app, /const results = \{ kyn: kynResultsHtml, compound: compoundResultsHtml, car: carResultsHtml, house: houseResultsHtml, wm: wealthMultiplierResultsHtml \};/);
-  assert.match(app, /calcCarForm: "car", calcHouseForm: "house", calcWealthForm: "wm"/, "every form is recognised when its events are bound");
+  assert.match(app, /const forms = \{ kyn: calcKynFormHtml, compound: calcCompoundFormHtml, car: calcCarFormHtml, house: calcHouseFormHtml, wm: calcWealthFormHtml, paw: calcPawFormHtml \};/);
+  assert.match(app, /const results = \{ kyn: kynResultsHtml, compound: compoundResultsHtml, car: carResultsHtml, house: houseResultsHtml, wm: wealthMultiplierResultsHtml, paw: pawResultsHtml \};/);
+  assert.match(app, /calcCarForm: "car", calcHouseForm: "house", calcWealthForm: "wm", calcPawForm: "paw"/, "every form is recognised when its events are bound");
   assert.match(app, /addEventListener\("toggle", \(event\) => calcSave\(tool, calcReadForm\(form\), \{ advanced: event\.currentTarget\.open \}\)\);/, "each calculator remembers its own advanced section");
   assert.match(app, /const tool = tools\.some\(\(\[key\]\) => key === calcTool\) \? calcTool : "kyn";/, "an unknown tool falls back to the first");
 });
@@ -65,12 +65,29 @@ test("the car and house results name the rule they use and what is not included"
 });
 
 test("the wealth multiplier is the fifth calculator, with its own form, results and saved values", () => {
-  assert.match(app, /\["house", "House affordability"\], \["wm", "Wealth multiplier"\]\]/);
-  assert.match(app, /wm: calcWealthFormHtml \};/);
-  assert.match(app, /wm: wealthMultiplierResultsHtml \};\s*return `<div class="calcs">/);
-  assert.match(app, /calcWealthForm: "wm" \}\[form\.id\]/, "recognised when its events are bound");
-  assert.match(app, /\$\("#calcHouseForm"\) \|\| \$\("#calcWealthForm"\);/);
+  assert.match(app, /\["house", "House affordability"\], \["wm", "Wealth multiplier"\], \["paw", "Prodigious accumulator"\]\]/);
+  assert.match(app, /wm: calcWealthFormHtml, paw: calcPawFormHtml \};/);
+  assert.match(app, /wm: wealthMultiplierResultsHtml, paw: pawResultsHtml \};\s*return `<div class="calcs">/);
+  assert.match(app, /calcWealthForm: "wm", calcPawForm: "paw" \}\[form\.id\]/, "recognised when its events are bound");
+  assert.match(app, /\$\("#calcHouseForm"\) \|\| \$\("#calcWealthForm"\) \|\| \$\("#calcPawForm"\);/);
   assert.match(css, /\.calc-table tr\.me td \{ font-weight: 700;/, "the person's own age row stands out");
   assert.ok(app.includes("it is not a forecast"));
   assert.ok(app.includes("What a dollar spent now really costs"));
+});
+
+test("the prodigious accumulator calculator is the sixth tab, with its own form, results and saved values", () => {
+  assert.match(app, /\["wm", "Wealth multiplier"\], \["paw", "Prodigious accumulator"\]\]/);
+  assert.match(app, /paw: calcPawFormHtml \};/);
+  assert.match(app, /paw: pawResultsHtml \};\s*return `<div class="calcs">/);
+  assert.match(app, /calcPawForm: "paw" \}\[form\.id\]/, "recognised when its events are bound");
+  assert.match(app, /\$\("#calcPawForm"\);/);
+  assert.match(app, /calcUseButton\("netWorth", total, `Use my net worth/, "a button fills the net worth from the household's own");
+  assert.ok(app.includes("Expected net worth = age x income / (10 + years until 40)"), "the formula is shown with the result");
+  assert.ok(app.includes("A rule of thumb from one book, not a verdict on your finances."));
+  assert.match(app, /data-calc-tool="wm"[^>]*>What a dollar invested today becomes[\s\S]*?data-calc-tool="kyn"/, "points on to the related calculators");
+});
+
+test("the shortcut buttons inside redrawn results work: one click listener on the page, not one per button", () => {
+  assert.match(app, /\$\("\.calcs"\)\?\.addEventListener\("click", \(event\) => \{\s*const button = event\.target\.closest\("\[data-calc-tool\]"\);\s*if \(button\) \{ calcTool = button\.dataset\.calcTool; render\(\); \}/);
+  assert.doesNotMatch(app, /document\.querySelectorAll\("\[data-calc-tool\]"\)\.forEach/, "the old per-button binding missed buttons drawn after it");
 });

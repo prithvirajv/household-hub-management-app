@@ -9940,3 +9940,20 @@ label.ai-import-toggle span { font-weight: 600; }
   .receipt-table td[data-label]::before { content: attr(data-label); display: block; font-size: 0.7rem; font-weight: 700; color: var(--muted); text-align: left; }
   .receipt-table input.num { max-width: none; }
 }
+/* ---- Receipts by email: the box with the household's own address, and a receipt that came from an email ---- */
+.receipt-mail { border: 1px solid var(--line); border-radius: 10px; padding: 0.6rem 0.9rem; margin: 0.6rem 0; background: var(--panel); }
+.receipt-mail summary { cursor: pointer; font-weight: 600; }
+.receipt-mail p { margin: 0.5rem 0; }
+.receipt-mail ol { margin: 0.5rem 0 0.5rem 1.2rem; padding: 0; display: grid; gap: 0.3rem; }
+.receipt-mail-address { display: flex; gap: 0.5rem; align-items: center; }
+.receipt-mail-address input { flex: 1; min-width: 0; font-family: var(--font-mono, ui-monospace, monospace); font-size: 0.85rem; }
+.receipt-mail-pending { border-left: 4px solid var(--gold); background: color-mix(in srgb, var(--gold) 12%, transparent); border-radius: 0 10px 10px 0; padding: 0.6rem 0.9rem; margin: 0.6rem 0; display: flex; flex-wrap: wrap; gap: 0.5rem; align-items: center; }
+.link-button { background: none; border: 0; padding: 0; color: var(--blue); text-decoration: underline; cursor: pointer; font: inherit; min-height: 0; width: auto; }
+.receipt-source { margin: 0; font-size: 0.85rem; overflow-wrap: anywhere; }
+/* ---- Returns on a receipt ---- */
+.receipt-returned { display: flex; align-items: center; gap: 0.4rem; margin-top: 3px; font-size: 0.8rem; color: var(--muted); }
+.receipt-returned input { width: 16px; height: 16px; min-width: 16px; padding: 0; margin: 0; }
+.receipt-returns { border-left: 4px solid var(--blue); background: var(--soft-blue); border-radius: 0 10px 10px 0; padding: 0.6rem 0.9rem; display: grid; gap: 0.4rem; }
+.receipt-returns-row { display: flex; flex-wrap: wrap; align-items: center; gap: 0.4rem 0.7rem; }
+.receipt-returns-row > span:first-child { font-weight: 600; }
+.receipt-returns-total { margin: 0; }

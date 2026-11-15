@@ -936,6 +936,28 @@ there, or with **Edit holdings** on an account card here.
 - Values are the shares and prices you have entered or refreshed; they do not
   change by themselves. This page is for planning, not financial advice.
 
+### Receipts by email
+
+Instead of a screenshot per order, forward the order emails. On Transactions, open
+**Get receipts by email** to see your own receipts address (it looks like
+`receipts+…@gmail.com`; the long part is yours alone). Then:
+
+1. In Gmail, go to Settings, See all settings, Forwarding and POP/IMAP, and choose
+   **Add a forwarding address**. Paste your receipts address.
+2. Gmail sends a confirmation to that address. It shows up in the same box on
+   Transactions within a few minutes, with a code and a link: open the link or type
+   the code into Gmail.
+3. In Filters and Blocked Addresses, make a filter for your order emails (for example,
+   from the shops you buy from) and choose **Forward it to** your receipts address.
+
+After that, each order email becomes a receipt waiting for its charge, with the items,
+tax and total read from the email, and it links itself to the transaction when the charge
+arrives, like any other receipt. Shipping and delivery emails for the same order are not
+added again, and emails that are not orders (password resets, offers) are ignored.
+Forward only order emails, never your whole inbox: FamilyLoop reads what you send it.
+If the address gets out, **make a new address** in the same box; the old one stops
+working and you point Gmail at the new one.
+
 ## Item prices
 
 **Prices** (in the sidebar under Investments) turns the items on your receipts into
@@ -979,6 +1001,12 @@ Transactions).
   same name are really different varieties, give them different names ("banana",
   "plantain"). Leave it empty to use the item's own name. The note under the item
   ("dearer than your usual…") updates as you change it.
+- **Returned** (under an item) is for something you sent back. Tick it and the item is
+  left out of your price history. When a refund from the same shop arrives on the same
+  card, the receipt lists it ("Oct 3 · Amazon · $16.00 came back") and suggests the
+  items whose prices, with their share of the tax, add up to it; tap **Mark returned**
+  to tick them, or tick the items yourself, then **Save changes**. Nothing is ticked
+  until you say so.
 - **Saved** (next to Amount) is what a coupon or instant saving took off that item.
   The AI fills it in; correct it if it is wrong. Amount is what you were charged
   after the saving, and the price of one is worked out from both.
@@ -1047,6 +1075,28 @@ year older, never under 5.5%) and compounded monthly, with no inflation or tax t
 out unless you enter an inflation rate under Advanced. It shows why starting early
 matters; it is not a forecast. Under Advanced you can also change the age it looks
 ahead to (65) and the return.
+
+### Prodigious accumulator of wealth
+
+Are you a "prodigious accumulator of wealth" (PAW), from the book *The Millionaire Next
+Door*? It compares your net worth with the level your age and income would lead you to
+expect. Enter your age, your average yearly income over the last 3 years before tax
+(your household's, if you share your finances) and your net worth: what you own minus
+what you owe, which can be negative. A button fills the net worth from your own.
+You get:
+
+- Where you stand: **under accumulator** (half the expected level or less), **below
+  average**, **average accumulator**, **close to a prodigious accumulator** (1.5 times
+  the expected level or more) or **prodigious accumulator** (twice the expected level
+  or more), with your net worth as a multiple of the expected level.
+- The expected net worth for you, what it takes to be a PAW, how much more that is,
+  and a bar showing how far along you are.
+- Shortcuts to the Wealth multiplier and Know your number calculators.
+
+The expected level is Money Guy's adjusted formula: age x income / (10 + years until
+40), where years until 40 is 40 minus your age (0 from 40 on). It expects less of a
+younger person than the book's age x income / 10 does, and from 40 on it is the
+book's formula. It is a rule of thumb from one book, not a verdict on your finances.
 
 ### House affordability
 

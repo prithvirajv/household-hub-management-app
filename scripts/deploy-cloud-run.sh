@@ -50,6 +50,11 @@ SMTP_PORT="${SMTP_PORT:-587}"
 SMTP_SECURE="${SMTP_SECURE:-false}"
 SMTP_USER="${SMTP_USER:-}"
 SMTP_PASS="${SMTP_PASS:-}"
+# Receipts by email (optional): the shared mailbox that forwarded order emails land in. Leave RECEIPT_MAILBOX_USER empty to keep the feature off. The password
+# (for Gmail, an app password) is kept as a secret like the others, never as a plaintext env var.
+RECEIPT_MAILBOX_USER="${RECEIPT_MAILBOX_USER:-}"
+RECEIPT_MAILBOX_PASS="${RECEIPT_MAILBOX_PASS:-}"
+RECEIPT_MAILBOX_HOST="${RECEIPT_MAILBOX_HOST:-imap.gmail.com}"
 REQUIRE_SMTP="${REQUIRE_SMTP:-true}"
 NOTIFICATION_SECRET="${NOTIFICATION_SECRET:?Set NOTIFICATION_SECRET to authorize the scheduled notification worker}"
 GCS_BUCKET="${GCS_BUCKET:-}"
@@ -73,6 +78,7 @@ DB_PASSWORD_SECRET="${DB_PASSWORD_SECRET:-familyloop-db-password}"
 SESSION_SECRET_NAME="${SESSION_SECRET_NAME:-familyloop-session-secret}"
 ADMIN_PASSWORD_SECRET="${ADMIN_PASSWORD_SECRET:-familyloop-admin-password}"
 SMTP_PASS_SECRET="${SMTP_PASS_SECRET:-familyloop-smtp-pass}"
+RECEIPT_MAILBOX_PASS_SECRET="${RECEIPT_MAILBOX_PASS_SECRET:-familyloop-receipt-mailbox-pass}"
 NOTIFICATION_SECRET_NAME="${NOTIFICATION_SECRET_NAME:-familyloop-notification-secret}"
 FINNHUB_API_KEY_SECRET="${FINNHUB_API_KEY_SECRET:-familyloop-finnhub-api-key}"
 GEMINI_API_KEY_SECRET="${GEMINI_API_KEY_SECRET:-familyloop-gemini-api-key}"
@@ -191,6 +197,9 @@ put_secret "${NOTIFICATION_SECRET_NAME}" "${NOTIFICATION_SECRET}"
 if [[ -n "${SMTP_PASS}" ]]; then
   put_secret "${SMTP_PASS_SECRET}" "${SMTP_PASS}"
 fi
+if [[ -n "${RECEIPT_MAILBOX_PASS}" ]]; then
+  put_secret "${RECEIPT_MAILBOX_PASS_SECRET}" "${RECEIPT_MAILBOX_PASS}"
+fi
 if [[ -n "${FINNHUB_API_KEY}" ]]; then
   put_secret "${FINNHUB_API_KEY_SECRET}" "${FINNHUB_API_KEY}"
 fi
@@ -217,6 +226,11 @@ fi
 if [[ -n "${SMTP_PASS}" ]]; then
   SECRET_REFS="${SECRET_REFS},SMTP_PASS=${SMTP_PASS_SECRET}:latest"
 fi
+if [[ -n "${RECEIPT_MAILBOX_USER}" ]]; then
+  # Once the mailbox exists the password must stay wired in on every deploy: the secret is only created when RECEIPT_MAILBOX_PASS is given, so a later
+  # deploy without it keeps pointing at the secret that is already there.
+  SECRET_REFS="${SECRET_REFS},RECEIPT_MAILBOX_PASS=${RECEIPT_MAILBOX_PASS_SECRET}:latest"
+fi
 if [[ -n "${FINNHUB_API_KEY}" ]]; then
   SECRET_REFS="${SECRET_REFS},FINNHUB_API_KEY=${FINNHUB_API_KEY_SECRET}:latest"
 fi
@@ -229,6 +243,9 @@ if [[ -n "${SNAPTRADE_CONSUMER_KEY}" ]]; then
 fi
 
 ENV_VARS="ADMIN_EMAIL=${ADMIN_EMAIL},ADMIN_NAME=${ADMIN_NAME},APP_BASE_URL=${APP_BASE_URL},EMAIL_FROM=${EMAIL_FROM},SMTP_HOST=${SMTP_HOST},SMTP_PORT=${SMTP_PORT},SMTP_SECURE=${SMTP_SECURE},SMTP_USER=${SMTP_USER},GCS_BUCKET=${GCS_BUCKET},GOOGLE_CLIENT_ID=${GOOGLE_CLIENT_ID},GOOGLE_MAPS_API_KEY=${GOOGLE_MAPS_API_KEY}"
+if [[ -n "${RECEIPT_MAILBOX_USER}" ]]; then
+  ENV_VARS="${ENV_VARS},RECEIPT_MAILBOX_USER=${RECEIPT_MAILBOX_USER},RECEIPT_MAILBOX_HOST=${RECEIPT_MAILBOX_HOST}"
+fi
 if [[ -n "${SNAPTRADE_CLIENT_ID}" ]]; then
   ENV_VARS="${ENV_VARS},SNAPTRADE_CLIENT_ID=${SNAPTRADE_CLIENT_ID},SNAPTRADE_MODE=${SNAPTRADE_MODE},SNAPTRADE_PERSONAL_OWNER_EMAIL=${SNAPTRADE_PERSONAL_OWNER_EMAIL}"
 fi

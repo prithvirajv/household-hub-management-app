@@ -363,6 +363,36 @@ phone photo is stored as a few hundred KB; PDFs and files the browser cannot red
 thousand receipts is a few cents a month, so a lifecycle rule to Nearline was judged not worth its retrieval fees; revisit only if the bucket grows into
 tens of GB.
 
+### Receipts by email (forwarded order emails)
+
+Households forward order emails to `<mailbox local part>+<token>@<mailbox domain>`: ONE shared mailbox (default Gmail) with a 24-hex token per household after the
+plus (`receipt_mailboxes` table; `GET /api/receipt-mail/address`, `POST .../reset`, `POST .../clear-confirmation`; the routes are NOT under `/api/receipts/` because
+`/api/receipts/:id` would swallow them). `lib/receipt-email.js` is the pure part (token and address, HTML to text, Gmail forwarding confirmation, the "looks like an
+order" pre-check, the AI prompt `RECEIPT_EMAIL_SYSTEM`); `server/receipt-mail.js` is `ingestReceiptEmail` and the routes; `server/receipt-mailbox.js` reads the mailbox
+over IMAP (`imapflow` + `mailparser`, required lazily so everything else runs without them). Outcomes: created, duplicate, forwarding-confirmation, not-a-receipt,
+unknown-recipient, limit. Duplicates: the same Message-ID, or the same total to the cent at a shop with a name word in common within 7 days (an order, shipping and
+delivery email are one receipt; so is a photo of the same order). At most 60 email receipts per household per 24 hours. A "no items" answer from the AI is dropped, a busy AI
+leaves the email unread so the next poll retries it. Email receipts have `source = 'email'`, no documents (nothing is stored of the email but sender, subject, date and Message-ID)
+and cannot be "read again". The email text is untrusted: the prompt says so, and the real AI was checked ignoring an instruction planted in an email.
+
+Gmail forwarding must be confirmed from the shared mailbox: its confirmation email (from forwarding-noreply@google.com) is recognised and the code and link (only on
+mail-settings.google.com) are stored in `pending_forwarding` and shown in the household's "Get receipts by email" box until dismissed.
+
+Set-up (once): (1) create a mailbox, turn on 2-step verification, make an app password; (2) in `.env.deploy` set `RECEIPT_MAILBOX_USER` (the address) and
+`RECEIPT_MAILBOX_PASS` (the app password; the deploy script stores it as secret `familyloop-receipt-mailbox-pass`, only plaintext in `.env.deploy`), optional
+`RECEIPT_MAILBOX_HOST` (default imap.gmail.com); (3) deploy; (4) make a Cloud Scheduler job that POSTs every 10 minutes to `/api/internal/receipt-mail/poll` with
+`Authorization: Bearer <NOTIFICATION_SECRET>` (the same secret as the other internal jobs). Until the mailbox variables are set the box is not shown to anyone.
+A provider that receives mail itself can instead POST each email as JSON `{ to, from, subject, text, html, messageId, date }` to `/api/internal/receipt-mail`
+(same bearer secret). Not verified against a real mailbox yet: the poller is tested with a fake mailbox, and the AI reading with real order text.
+
+### Returns on a receipt
+
+An item can carry `returned: true` (kept by `cleanReceiptFields` only when true). `priceUnitPrice` returns null for a returned item, so the Prices page and the per-item
+notes leave it out. `lib/receipt-returns.js` suggests: refunds = money-in rows at a shop whose name matches (`receiptMatchSimilar`), on or after the purchase, within 120
+days, on the same account when both say which; item sets = one, two or three (three only on receipts of 40 items or fewer) unreturned items whose prices, with or
+without the tax share (total / subtotal), add up to the refund within two cents, at most three suggestions. Nothing is ticked without a tap; the existing exact-amount
+refund pairing on Transactions is unchanged. Returned items do not change the receipt's own "items add up" check.
+
 ### Receipt pop-up: item identity and savings
 
 Each item row has a "Counts as" box (`item.product`, lowercased, at most 60 characters, saved through the normal PATCH via `cleanReceiptFields`, which already
@@ -401,7 +431,12 @@ HOA taken off first). Cost is linear in the price, so the price is solved direct
 (the dearest home with no insurance). Defaults: tax 1%, insurance 0.5% of price a year, mortgage insurance 0.5% of the loan a year
 (`CALC_HOUSE_DEFAULTS`); they are US averages, so tell users to change them. Wealth multiplier (`calcMultiplier`): multiplier = (1 + r/12)^(12 x years) with r = `calcDefaultReturn(age)` held flat to the age looked ahead to (65), the same
 return Know your number uses; this reproduces Money Guy's published table (age 20 -> 88.35, 30 -> 23.06, 40 -> 7.34, 60 -> 1.35), which the tests pin. Monthly saving to
-a goal = (goal - invested x multiplier) / ((multiplier - 1) / (r/12)), never below 0. No inflation or tax unless an inflation rate is given. Inputs are saved in `state.goals.calculators` (cleaned by `calcSanitize`, blanks stay null) inside the existing `goals` object, so no new top-level state
+a goal = (goal - invested x multiplier) / ((multiplier - 1) / (r/12)), never below 0. No inflation or tax unless an inflation rate is given. Prodigious accumulator (`calcPaw`): expected = age x income / (10 + max(0, 40 - age)); PAW = 2 x expected; ratio = net worth / expected; tiers
+under (<= 0.5x, the book's UAW), below (< 1x), average (< 1.5x), close (< 2x), paw (>= 2x). The adjusted denominator and the 2x are what Money Guy publishes; "years
+until 40" is NOT defined on their page, so reading it as 40 minus age (floored at 0, which makes it the book's formula from 40 on) is our assumption, and the 0.5x
+and 1.5x cut-offs are ours (the book gives 2x and half; Money Guy's four messages have no stated bands). Net worth may be negative (blank is an error, 0 is an
+answer). The "Use my net worth" button reads `netWorth().total`. The result's shortcut buttons (`data-calc-tool`) are handled by ONE click listener on `.calcs`:
+the results are redrawn on every keystroke, so per-button listeners bound at render time miss them. Inputs are saved in `state.goals.calculators` (cleaned by `calcSanitize`, blanks stay null) inside the existing `goals` object, so no new top-level state
 key. The advanced `<details>` carries `data-keep-open`: the global outside-click closer in `app.js` skips any `<details>` with that attribute (also used by
 Investments' account cards and Prices' products). The phone app does not have this page yet.
 

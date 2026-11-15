@@ -1,6 +1,6 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
-const { calcDefaultSwr, calcDefaultReturn, calcSanitize, calcBalanceAfter, calcRetirement, calcCompound, calcCar, calcHouse, calcMultiplier } = require("../lib/calculators");
+const { calcDefaultSwr, calcDefaultReturn, calcSanitize, calcBalanceAfter, calcRetirement, calcCompound, calcCar, calcHouse, calcMultiplier, calcPaw } = require("../lib/calculators");
 
 const near = (actual, expected, tolerance = 0.5) => assert.ok(Math.abs(actual - expected) <= tolerance, `${actual} is not within ${tolerance} of ${expected}`);
 
@@ -302,4 +302,60 @@ test("inflation, when given, adds a today's-dollars figure, and bad input gives 
   assert.match(calcMultiplier({ age: 70, retireAge: 60 }).error, /later than your age/, "a chosen age that is too early is not blamed on the 65 default");
   const clean = calcSanitize({ wm: { age: "-3", invested: "x", retireAge: "200", returnRate: "", inflation: "3", advanced: 1 } });
   assert.deepEqual([clean.wm.age, clean.wm.invested, clean.wm.retireAge, clean.wm.returnRate, clean.wm.inflation, clean.wm.advanced], [0, null, 110, null, 3, true]);
+});
+
+test("the expected net worth is age x income / (10 + years until 40), and a prodigious accumulator holds twice that", () => {
+  // Age 30 on $100,000: 30 x 100,000 / (10 + 10) = $150,000 expected, $300,000 to be a PAW.
+  const result = calcPaw({ age: 30, income: 100000, netWorth: 300000 });
+  assert.equal(result.ok, true);
+  assert.deepEqual([result.yearsUntil40, result.expected, result.paw, result.ratio, result.tier], [10, 150000, 300000, 2, "paw"]);
+  near(calcPaw({ age: 25, income: 80000, netWorth: 0 }).expected, (25 * 80000) / 25, 0.001, "ten plus fifteen years until 40");
+  near(calcPaw({ age: 20, income: 50000, netWorth: 0 }).expected, (20 * 50000) / 30, 0.001);
+});
+
+test("from 40 on it is the book's age x income / 10, because there are no years left until 40", () => {
+  const result = calcPaw({ age: 50, income: 120000, netWorth: 1000000 });
+  assert.equal(result.yearsUntil40, 0);
+  near(result.expected, (50 * 120000) / 10, 0.001);
+  assert.equal(result.expected, result.bookExpected);
+  near(calcPaw({ age: 40, income: 100000, netWorth: 1 }).expected, 400000, 0.001);
+  assert.ok(calcPaw({ age: 30, income: 100000, netWorth: 1 }).expected === 150000 && calcPaw({ age: 30, income: 100000, netWorth: 1 }).bookExpected === 300000, "the adjusted formula expects less of a 30-year-old than the book does");
+});
+
+test("where a person stands: under half, below average, average, close, or twice the expected level", () => {
+  const at = (multiple) => calcPaw({ age: 30, income: 100000, netWorth: 150000 * multiple });
+  assert.equal(at(2).tier, "paw");
+  assert.equal(at(3.5).tier, "paw");
+  assert.equal(at(1.99).tier, "close");
+  assert.equal(at(1.5).tier, "close");
+  assert.equal(at(1.49).tier, "average");
+  assert.equal(at(1).tier, "average");
+  assert.equal(at(0.99).tier, "below");
+  assert.equal(at(0.51).tier, "below");
+  assert.equal(at(0.5).tier, "under", "half the expected level or less is the book's under accumulator");
+  assert.equal(at(0).tier, "under");
+  assert.equal(at(-0.2).tier, "under", "owing more than you own");
+  assert.equal(at(2).tierLabel, "Prodigious accumulator");
+});
+
+test("the gap to a prodigious accumulator, the progress made and the bar's bounds", () => {
+  const result = calcPaw({ age: 30, income: 100000, netWorth: 75000 });
+  assert.deepEqual([result.gap, result.gapToAverage, result.progressPercent], [225000, 75000, 25]);
+  const rich = calcPaw({ age: 30, income: 100000, netWorth: 900000 });
+  assert.deepEqual([rich.gap, rich.gapToAverage, rich.progressPercent], [0, 0, 100], "nothing short, and the bar stops at full");
+  const negative = calcPaw({ age: 30, income: 100000, netWorth: -20000 });
+  assert.equal(negative.progressPercent, 0, "the bar never goes below empty");
+  assert.equal(negative.gap, 320000);
+});
+
+test("bad or missing inputs give a plain message, and a blank net worth is not treated as zero", () => {
+  assert.match(calcPaw({}).error, /Enter your age/);
+  assert.match(calcPaw({ age: 12, income: 1, netWorth: 1 }).error, /16 or older/);
+  assert.match(calcPaw({ age: 30, netWorth: 5 }).error, /average yearly income/);
+  assert.match(calcPaw({ age: 30, income: 0, netWorth: 5 }).error, /average yearly income/);
+  assert.match(calcPaw({ age: 30, income: 90000 }).error, /Enter your net worth/);
+  assert.equal(calcPaw({ age: 30, income: 90000, netWorth: 0 }).ok, true, "an entered zero is a real answer");
+  const clean = calcSanitize({ paw: { age: "5", income: "-1", netWorth: "-5000" } });
+  assert.deepEqual([clean.paw.age, clean.paw.income, clean.paw.netWorth], [16, 0, -5000], "net worth may be negative");
+  assert.equal(calcSanitize({}).paw.netWorth, null);
 });

@@ -19,7 +19,10 @@ const { registerLinkedAccountRoutes } = require("./linked-accounts");
 const { registerPartnerGroupRoutes, forwardHouseholdPartnerRows } = require("./partner-groups");
 const { partnersParseAiSuggestions, partnersSanitizeConfig, PARTNER_KINDS } = require("../lib/partners-logic");
 const { registerReceiptRoutes, createReceiptStore } = require("./receipts");
+const { registerReceiptMailRoutes, createMailboxStore, ingestReceiptEmail } = require("./receipt-mail");
+const { pollReceiptMailbox } = require("./receipt-mailbox");
 const { RECEIPT_READ_SYSTEM, RECEIPT_IMAGE_TYPES, buildReceiptReadParts, parseReceiptDraft, receiptCheck } = require("../lib/receipt-read");
+const { RECEIPT_EMAIL_SYSTEM, buildReceiptEmailParts } = require("../lib/receipt-email");
 const { RECIPE_IMPORT_SYSTEM, canonicalYoutubeUrl, buildRecipeImportParts, validateRecipeImportRequest, parseRecipeDraft, createImportLimiter } = require("../lib/recipe-import");
 const { validateJournalPayload, buildDocumentObjectPath, sanitizeFilename, wouldCreateFolderCycle, collectDescendantFolderIds, SMS_CARRIERS, smsGatewayAddress, rollAnnualNotifyAtForward, choreNotifyAt, parseBankStatementPdfText, extractAccountActivityLabel, isValidEmail, parseImageReminderDraft, parseBatchSuggestions, parseHomeBriefing, parseAssistantPlan, pgDumpArgs } = require("../lib/shared-logic");
 const pdfParse = require("pdf-parse");
@@ -155,6 +158,7 @@ app.use("/api/reports", express.json({ limit: "20mb" }));
 app.use("/api/calendar/reminder-from-image", express.json({ limit: "10mb" }));
 app.use("/api/recipes/import", express.json({ limit: "24mb" }));
 app.use("/api/receipts", express.json({ limit: "40mb" }));
+app.use("/api/internal/receipt-mail", express.json({ limit: "4mb" })); // a forwarded order email (its text and HTML) from a provider
 app.use(express.json({ limit: "1mb" }));
 app.use(cookieParser(SESSION_SECRET));
 app.use(express.static(path.join(__dirname, ".."), {
@@ -1870,9 +1874,12 @@ async function loadReceiptDocumentFiles(documents) {
 }
 // One reading. A busy or slow AI becomes a plain message for the person (userMessage), never the AI service's own wording.
 async function askReceiptAi(files, temperature) {
+  return askReceiptDraft({ parts: buildReceiptReadParts(files), system: RECEIPT_READ_SYSTEM, temperature });
+}
+async function askReceiptDraft({ parts, system, temperature }) {
   let text;
   try {
-    text = await geminiGenerate({ parts: buildReceiptReadParts(files), system: RECEIPT_READ_SYSTEM, maxOutputTokens: 8000, timeoutMs: 120000, rounds: 3, temperature });
+    text = await geminiGenerate({ parts, system, maxOutputTokens: 8000, timeoutMs: 120000, rounds: 3, temperature });
   } catch (error) {
     if (error?.name === "TimeoutError" || error?.name === "AbortError") throw Object.assign(new Error("timeout"), { statusCode: 504, userMessage: "Reading that took too long. Try a smaller or clearer photo." });
     if (error?.statusCode === 502 && /high demand|overloaded|try again later|quota|resource.?exhausted/i.test(String(error.message))) throw Object.assign(new Error("busy"), { statusCode: 503, userMessage: "The AI service is very busy right now. The receipt is saved; try Read again in a minute or two." });
@@ -1884,10 +1891,17 @@ async function askReceiptAi(files, temperature) {
 // printed subtotal, it is read again (up to three readings, the first at temperature 0 for the steadiest result) and the closest one is kept. A receipt
 // that prints no subtotal has nothing to check against and is read once. The page still shows whether the final items add up.
 async function readReceiptWithAi(files) {
+  return readBestReceiptDraft((temperature) => askReceiptAi(files, temperature));
+}
+// The same, for the text of an order email (an order email prints its own subtotal, so the same "does it add up" check applies).
+async function readReceiptEmailWithAi(email) {
+  return readBestReceiptDraft((temperature) => askReceiptDraft({ parts: buildReceiptEmailParts(email), system: RECEIPT_EMAIL_SYSTEM, temperature }));
+}
+async function readBestReceiptDraft(ask) {
   let best = null;
   for (let attempt = 0; attempt < 3; attempt += 1) {
     let draft;
-    try { draft = await askReceiptAi(files, attempt === 0 ? 0 : 0.4); } catch (error) { if (best) break; throw error; }
+    try { draft = await ask(attempt === 0 ? 0 : 0.4); } catch (error) { if (best) break; throw error; }
     const check = receiptCheck(draft);
     const distance = check.difference === null ? 0 : Math.abs(check.difference);
     if (!best || distance < best.distance) best = { draft, distance };
@@ -1895,9 +1909,24 @@ async function readReceiptWithAi(files) {
   }
   return best.draft;
 }
+const receiptStore = createReceiptStore({ pool: MEMORY_DB ? null : pool, memory: MEMORY_DB });
 registerReceiptRoutes({
-  app, store: createReceiptStore({ pool: MEMORY_DB ? null : pool, memory: MEMORY_DB }), requireSession, requireEditAccess,
+  app, store: receiptStore, requireSession, requireEditAccess,
   findDocuments: findReceiptDocuments, loadDocumentFiles: loadReceiptDocumentFiles, readReceipt: readReceiptWithAi, aiConfigured: Boolean(GEMINI_API_KEY)
+});
+
+// Receipts by email: order emails forwarded to the household's own address (the shared mailbox plus a private token) become receipts. The mailbox is
+// read by a scheduler calling the poll route; a mail provider may instead post each email to the receipt-mail route.
+const RECEIPT_MAILBOX_USER = String(process.env.RECEIPT_MAILBOX_USER || "").trim();
+const RECEIPT_MAILBOX_PASS = String(process.env.RECEIPT_MAILBOX_PASS || "");
+const RECEIPT_MAILBOX_ADDRESS = String(process.env.RECEIPT_MAILBOX_ADDRESS || RECEIPT_MAILBOX_USER).trim();
+const receiptMailboxConfig = { host: String(process.env.RECEIPT_MAILBOX_HOST || "imap.gmail.com").trim(), port: Number(process.env.RECEIPT_MAILBOX_PORT || 993), user: RECEIPT_MAILBOX_USER, pass: RECEIPT_MAILBOX_PASS };
+const receiptMailStore = createMailboxStore({ pool: MEMORY_DB ? null : pool, memory: MEMORY_DB });
+const receiptMailIngest = (message) => ingestReceiptEmail({ mailStore: receiptMailStore, receiptStore, readEmail: readReceiptEmailWithAi, message });
+registerReceiptMailRoutes({
+  app, mailStore: receiptMailStore, receiptStore, requireSession, requireEditAccess, requireJobSecret: requireNotificationSecret, readEmail: readReceiptEmailWithAi,
+  config: { mailbox: RECEIPT_MAILBOX_ADDRESS || null },
+  poll: RECEIPT_MAILBOX_USER && RECEIPT_MAILBOX_PASS ? () => pollReceiptMailbox({ config: receiptMailboxConfig, ingest: receiptMailIngest }) : null
 });
 
 app.get("/api/stock-quote", requireSession, async (req, res, next) => {

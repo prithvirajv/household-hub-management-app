@@ -34,6 +34,8 @@ function toClient(row) {
     status: row.status,
     readAt: row.readAt || null,
     createdAt: row.createdAt,
+    source: row.source || "upload",
+    sourceInfo: row.sourceInfo || null,
     check: draft.items.length ? receiptCheck(draft) : null
   };
 }
@@ -45,7 +47,8 @@ function fromDatabaseRow(row) {
     id: row.id, documents: row.documents || [], merchant: row.merchant, location: row.location, date: row.receipt_day || "",
     subtotal: num(row.subtotal), tax: num(row.tax), total: num(row.total), savings: num(row.savings),
     items: row.items || [], status: row.status, readAt: row.read_at ? new Date(row.read_at).toISOString() : null,
-    createdAt: new Date(row.created_at).toISOString()
+    createdAt: new Date(row.created_at).toISOString(),
+    source: row.source || "upload", sourceMessageId: row.source_message_id || null, sourceInfo: row.source_info || null
   };
 }
 
@@ -58,6 +61,12 @@ function createReceiptStore({ pool = null, memory = false } = {}) {
     return {
       async create(householdId, userId, documents) {
         const row = { id: crypto.randomUUID(), householdId, documents, merchant: "", location: "", date: "", subtotal: null, tax: null, total: null, savings: null, items: [], status: "attached", readAt: null, createdAt: new Date().toISOString() };
+        rows.push(row);
+        return { ...row };
+      },
+      // A receipt made from a forwarded order email: no files, the items already read, and the message id that stops the same email being added twice.
+      async createFromEmail(householdId, fields, { messageId, info }) {
+        const row = { id: crypto.randomUUID(), householdId, documents: [], merchant: fields.merchant, location: fields.location, date: fields.date, subtotal: fields.subtotal, tax: fields.tax, total: fields.total, savings: fields.savings, items: fields.items, status: fields.status, readAt: fields.readAt, createdAt: new Date().toISOString(), source: "email", sourceMessageId: messageId, sourceInfo: info };
         rows.push(row);
         return { ...row };
       },
@@ -79,6 +88,16 @@ function createReceiptStore({ pool = null, memory = false } = {}) {
   return {
     async create(householdId, userId, documents) {
       const result = await pool.query(`INSERT INTO receipts (household_id, created_by, documents) VALUES ($1, $2, $3::jsonb) RETURNING ${COLUMNS}`, [householdId, userId, JSON.stringify(documents)]);
+      return fromDatabaseRow(result.rows[0]);
+    },
+    async createFromEmail(householdId, fields, { messageId, info }) {
+      const result = await pool.query(
+        `INSERT INTO receipts (household_id, documents, merchant, location, receipt_date, subtotal, tax, total, savings, items, status, read_at, source, source_message_id, source_info)
+         VALUES ($1, '[]'::jsonb, $2, $3, NULLIF($4, '')::date, $5, $6, $7, $8, $9::jsonb, $10, $11, 'email', $12, $13::jsonb)
+         ON CONFLICT (household_id, source_message_id) WHERE source_message_id IS NOT NULL DO UPDATE SET updated_at = receipts.updated_at
+         RETURNING ${COLUMNS}`,
+        [householdId, fields.merchant, fields.location, fields.date, fields.subtotal, fields.tax, fields.total, fields.savings, JSON.stringify(fields.items), fields.status, fields.readAt, messageId, JSON.stringify(info || {})]
+      );
       return fromDatabaseRow(result.rows[0]);
     },
     async get(householdId, id) {
@@ -134,7 +153,7 @@ function registerReceiptRoutes({ app, store, requireSession, requireEditAccess, 
       const rows = await store.list(householdOf(req), 500);
       // ?items=1 adds the items (the price analysis reads every receipt's items); the plain list stays small for the inbox.
       const withItems = req.query.items === "1";
-      res.json({ receipts: rows.map((row) => { const receipt = toClient(row); return { id: receipt.id, merchant: receipt.merchant, date: receipt.date, total: receipt.total, itemCount: receipt.items.length, status: receipt.status, documents: receipt.documents, ...(withItems ? { items: receipt.items, createdAt: receipt.createdAt } : {}) }; }) });
+      res.json({ receipts: rows.map((row) => { const receipt = toClient(row); return { id: receipt.id, merchant: receipt.merchant, date: receipt.date, total: receipt.total, itemCount: receipt.items.length, status: receipt.status, documents: receipt.documents, source: receipt.source, ...(withItems ? { items: receipt.items, createdAt: receipt.createdAt } : {}) }; }) });
     } catch (error) { next(error); }
   });
 

@@ -3176,6 +3176,8 @@ let receiptDialogOpen = false; // the pop-up is open: for a transaction (receipt
 let receiptInbox = null; // every receipt of the household as the server lists it (summaries), null until loaded
 let receiptInboxLoading = false;
 let receiptInboxLoadedAt = 0;
+let receiptMailInfo = null; // the household's receipts address (and a waiting Gmail confirmation) from the server: { configured, address, pending }, null until loaded
+let receiptMailOpen = false; // whether the "Get receipts by email" box is open
 
 const receiptFormatMoney = (value) => (value === null || value === undefined || value === "" || !Number.isFinite(Number(value)) ? "" : Number(value).toFixed(2));
 const receiptNumberOrNull = (value) => (String(value).trim() === "" || !Number.isFinite(Number(value)) ? null : Math.round(Number(value) * 100) / 100);
@@ -3223,6 +3225,36 @@ function receiptKnownProducts() {
   (priceReceipts || []).forEach((receipt) => (receipt.items || []).forEach(add));
   (receiptDraft?.items || []).forEach(add);
   return [...names].sort().slice(0, 300);
+}
+
+// Returns: refunds that look related to this receipt (money in, the same shop, afterwards, on the same card) and the items whose prices add up to each,
+// to tick as "Returned" with one tap; and what the ticked items come to. Only suggestions: nothing is ticked until the person says so. A returned item is
+// left out of the Prices page.
+function receiptReturnsHtml() {
+  if (!receiptDraft || !receiptDraft.items.length) return "";
+  const purchase = receiptTransaction();
+  const refunds = receiptReturnRefunds({ merchant: receiptDraft.merchant, date: receiptDraft.date }, state.transactions, purchase).slice(0, 4);
+  const ratio = receiptReturnTaxRatio(receiptDraft);
+  const returned = receiptDraft.items.filter((item) => item.returned);
+  if (!refunds.length && !returned.length) return "";
+  const rows = refunds.map((refund) => {
+    const sets = receiptReturnItemSets(receiptDraft.items, refund.amount, ratio);
+    const first = sets[0];
+    const covered = receiptDraft.items.some((item) => item.returned) && !first && receiptReturnedTotal(receiptDraft.items) > 0;
+    const label = `${escapeHtml(formatShortDate(refund.transaction.date))} · ${escapeHtml(refund.transaction.payee)} · ${exactMoney.format(refund.amount)} came back`;
+    return `<div class="receipt-returns-row"><span>${label}</span>${first
+      ? `<span class="muted">Looks like: ${first.map((index) => escapeHtml(receiptDraft.items[index].name)).join(" + ")}</span><button type="button" class="ghost" data-receipt-return="${first.join(",")}">Mark returned</button>`
+      : `<span class="muted">${covered ? "✓ The items you marked returned cover it." : "Tick the items it was for below."}</span>`}</div>`;
+  }).join("");
+  const total = receiptReturnedTotal(receiptDraft.items);
+  return `<div class="receipt-returns" id="receiptReturns">${refunds.length ? `<b>Refunds that look related</b>${rows}` : ""}${returned.length ? `<p class="muted receipt-returns-total">${returned.length} item${returned.length === 1 ? "" : "s"} marked returned, ${exactMoney.format(total)}${ratio > 1 ? ` (about ${exactMoney.format(Math.round(total * ratio * 100) / 100)} with tax)` : ""}. Returned items are left out of your price history. Save to keep this.</p>` : ""}</div>`;
+}
+
+function bindReceiptReturnButtons() {
+  document.querySelectorAll("[data-receipt-return]").forEach((button) => button.addEventListener("click", () => {
+    String(button.dataset.receiptReturn).split(",").forEach((value) => { const item = receiptDraft?.items[Number(value)]; if (item) item.returned = true; });
+    render();
+  }));
 }
 
 function refreshReceiptNotes() {
@@ -3291,6 +3323,7 @@ async function receiptRefreshInbox() {
   if (receiptInboxLoading) return;
   receiptInboxLoading = true;
   try { receiptInbox = (await api("/api/receipts")).receipts; } catch (_error) { receiptInbox ||= []; }
+  try { receiptMailInfo = await api("/api/receipt-mail/address"); } catch (_error) { receiptMailInfo ||= { configured: false }; }
   receiptInboxLoading = false;
   receiptInboxLoadedAt = Date.now();
   priceReceiptsLoadedAt = 0; // a receipt was read, corrected or removed: the price analysis reloads next time it is needed
@@ -3298,11 +3331,32 @@ async function receiptRefreshInbox() {
   if (currentView === "transactions") render();
 }
 
+// Order emails forwarded to the household's own address become receipts. The box shows the address, how to set Gmail to forward, and the confirmation
+// Gmail sends to that address (it arrives in the app's mailbox, not the person's, so it is shown here with its code and link).
+function receiptMailBoxHtml() {
+  const info = receiptMailInfo;
+  if (!info || !info.configured || !info.address) return "";
+  const pending = info.pending;
+  const link = pending && typeof pending.link === "string" && pending.link.startsWith("https://mail-settings.google.com/") ? pending.link : "";
+  return `<details class="receipt-mail" data-keep-open ${receiptMailOpen ? "open" : ""}><summary>✉️ Get receipts by email${pending ? " · Gmail is waiting for you to confirm" : ""}</summary>
+    <p>Forward your order emails (Amazon, Target and the like) to your own receipts address and they appear here by themselves, with the items read and the charge linked when it arrives.</p>
+    <div class="receipt-mail-address"><input readonly id="receiptMailAddress" value="${escapeHtml(info.address)}" aria-label="Your receipts address"><button type="button" class="ghost" id="receiptMailCopy">Copy</button></div>
+    ${pending ? `<div class="receipt-mail-pending"><b>Gmail's confirmation arrived.</b> ${pending.code ? `Your code is <b>${escapeHtml(pending.code)}</b>.` : ""} ${link ? `<a href="${escapeHtml(link)}" target="_blank" rel="noopener noreferrer">Open the confirmation link</a>` : ""} <button type="button" class="ghost" id="receiptMailDismiss">Done</button></div>` : ""}
+    <ol>
+      <li>In Gmail, open Settings, then See all settings, then Forwarding and POP/IMAP, and choose Add a forwarding address. Paste the address above.</li>
+      <li>Gmail sends a confirmation to that address. It shows up here within a few minutes: open the link, or type the code into Gmail.</li>
+      <li>Then, in Filters and Blocked Addresses, make a filter for your order emails (for example from the shops you buy from) and choose Forward it to this address.</li>
+    </ol>
+    <p class="muted">Forward only order emails, never your whole inbox: FamilyLoop reads what you send it. Anyone who has this address can add receipts to your household, so <button type="button" class="link-button" id="receiptMailReset">make a new address</button> if it gets out. The old one stops working.</p>
+  </details>`;
+}
+
 function receiptInboxHtml() {
   const waiting = receiptsWaiting();
   const plan = receiptMatchPlan(waiting, state.transactions);
   return `<div class="receipt-inbox">
     <div class="receipt-inbox-head"><button type="button" class="ghost" id="addReceiptButton">🧾 Add a receipt</button><small class="muted">Upload it as soon as you spend. It links to its transaction when the charge arrives.</small></div>
+    ${receiptMailBoxHtml()}
     ${waiting.length ? `<div class="receipt-waiting"><h4>Receipts waiting for a transaction (${waiting.length})</h4>
       ${waiting.map((receipt) => {
         const suggestion = (plan.suggestions[receipt.id] || [])[0];
@@ -3310,7 +3364,7 @@ function receiptInboxHtml() {
         const pending = suggestion ? null : receiptMatchPending(receipt, state.accounts);
         const total = receipt.total !== null && receipt.total !== undefined ? exactMoney.format(Number(receipt.total)) : (receipt.status === "attached" ? "not read yet" : "no total");
         return `<div class="receipt-waiting-row">
-          <button type="button" class="receipt-waiting-open" data-open-waiting-receipt="${escapeHtml(receipt.id)}"><span>🧾 ${escapeHtml(receipt.merchant || "Receipt")}</span><small class="muted">${receipt.date ? `${escapeHtml(formatShortDate(receipt.date))} · ` : ""}${total}</small></button>
+          <button type="button" class="receipt-waiting-open" data-open-waiting-receipt="${escapeHtml(receipt.id)}"><span>${receipt.source === "email" ? "✉️" : "🧾"} ${escapeHtml(receipt.merchant || "Receipt")}</span><small class="muted">${receipt.source === "email" ? "by email · " : ""}${receipt.date ? `${escapeHtml(formatShortDate(receipt.date))} · ` : ""}${total}</small></button>
           ${row ? `<span class="receipt-waiting-hint">Looks like ${escapeHtml(row.payee)} · ${exactMoney.format(Math.abs(Number(row.amount)))} · ${escapeHtml(formatShortDate(row.date))}</span><button type="button" class="ghost" data-inbox-link="${escapeHtml(receipt.id)}|${suggestion.index}">Attach</button>`
             : pending ? `<span class="receipt-waiting-hint">Its charge is still pending at ${escapeHtml(pending.accountName)}.</span>`
             : `<span class="receipt-waiting-hint muted">Waiting for its charge.</span>`}
@@ -3393,6 +3447,7 @@ function receiptDialogHtml() {
   const checkNote = receiptCheckNote();
   return `<dialog id="receiptDialog" class="app-dialog receipt-dialog" aria-labelledby="receiptDialogTitle">${head}
     <div class="receipt-body">
+      ${receiptData.source === "email" && receiptData.sourceInfo ? `<p class="receipt-source muted">✉️ From an email: ${escapeHtml(receiptData.sourceInfo.subject || "order email")}${receiptData.sourceInfo.from ? ` · ${escapeHtml(receiptData.sourceInfo.from)}` : ""}</p>` : ""}
       <div class="receipt-files">${receiptData.documents.map((doc) => `<button type="button" class="receipt-file" data-open-receipt-file="${escapeHtml(doc.documentId)}" title="Open ${escapeHtml(doc.name)}">${receiptPreviews[doc.documentId] ? `<img src="${escapeHtml(receiptPreviews[doc.documentId])}" alt="">` : (/pdf/i.test(doc.contentType) ? "📄" : "🧾")}<span>${escapeHtml(doc.name)}</span></button>`).join("")}</div>
       ${busy}${error}
       ${transaction ? "" : receiptLinkHtml()}
@@ -3404,11 +3459,13 @@ function receiptDialogHtml() {
         <label>Receipt total<input type="number" step="0.01" data-receipt-field="total" value="${receiptFormatMoney(draft.total)}"></label>
       </div>
       <p id="receiptMatchNote" class="receipt-note ${matchNote.kind}" ${matchNote.text ? "" : "hidden"}>${escapeHtml(matchNote.text)}</p>
+      ${receiptReturnsHtml()}
       <datalist id="receiptProductList">${receiptKnownProducts().map((name) => `<option value="${escapeHtml(name)}"></option>`).join("")}</datalist>
       <div class="receipt-scroll"><table class="receipt-table"><thead><tr><th>Item</th><th class="r">Qty</th><th class="receipt-opt">Unit</th><th class="r receipt-opt">Unit price</th><th class="r" title="What a coupon or instant saving took off this item">Saved</th><th class="r">Amount</th><th></th></tr></thead><tbody>
         ${draft.items.map((item, index) => `<tr>
           <td><input data-receipt-item="${index}" data-key="name" value="${escapeHtml(item.name)}" aria-label="Item name" maxlength="120">
             <label class="receipt-product-line"><small class="muted">Counts as</small><input data-receipt-item="${index}" data-key="product" value="${escapeHtml(item.product || "")}" list="receiptProductList" placeholder="same as the item name" aria-label="Counts as: items with the same name here are compared on the Prices page" maxlength="60"></label>
+            <label class="receipt-returned"><input type="checkbox" data-receipt-item="${index}" data-key="returned" ${item.returned ? "checked" : ""}> <span>Returned</span></label>
             <span class="receipt-hint-slot" data-receipt-hint="${index}">${receiptPriceHintHtml(item)}</span></td>
           <td class="r" data-label="Qty"><input class="num" type="number" step="any" min="0" data-receipt-item="${index}" data-key="qty" value="${item.qty}" aria-label="Quantity"></td>
           <td class="receipt-opt"><select data-receipt-item="${index}" data-key="unit" aria-label="Unit">${RECEIPT_UNITS.map((unit) => `<option ${unit === item.unit ? "selected" : ""}>${unit}</option>`).join("")}</select></td>
@@ -3425,7 +3482,7 @@ function receiptDialogHtml() {
       <button type="button" class="danger-button ghost" id="receiptRemove" ${receiptBusy ? "disabled" : ""}>Remove receipt</button>
       ${transaction ? `<button type="button" class="ghost" id="receiptDetach" ${receiptBusy ? "disabled" : ""} title="Keep the receipt, but unlink it from this transaction">Detach</button>` : ""}
       <span class="receipt-actions-spacer"></span>
-      ${receiptData.status === "read" ? `<button type="button" class="ghost" id="receiptReadAgain" ${receiptBusy ? "disabled" : ""}>Read again</button>` : ""}
+      ${receiptData.status === "read" && receiptData.documents.length ? `<button type="button" class="ghost" id="receiptReadAgain" ${receiptBusy ? "disabled" : ""}>Read again</button>` : ""}
       <button type="button" class="ghost" data-close-receipt>Close</button>
       ${draft.items.length || receiptData.status === "read" ? `<button type="button" id="receiptSave" ${receiptBusy ? "disabled" : ""}>Save changes</button>` : ""}
     </footer></dialog>`;
@@ -3628,6 +3685,22 @@ async function receiptRemove() {
 function bindReceiptEvents() {
   document.querySelectorAll("[data-receipt-ledger]").forEach((button) => button.addEventListener("click", () => { void openReceiptDialog(Number(button.dataset.receiptLedger)); }));
   $("#addReceiptButton")?.addEventListener("click", () => { void openReceiptStandalone(null); });
+  document.querySelector(".receipt-mail")?.addEventListener("toggle", (event) => { receiptMailOpen = event.currentTarget.open; });
+  $("#receiptMailCopy")?.addEventListener("click", async () => {
+    const address = receiptMailInfo?.address || "";
+    try { await navigator.clipboard.writeText(address); showToast("Address copied.", { type: "info" }); }
+    catch (_error) { const box = $("#receiptMailAddress"); box?.focus(); box?.select(); showToast("Press Cmd+C (or Ctrl+C) to copy the address.", { type: "info" }); }
+  });
+  $("#receiptMailAddress")?.addEventListener("focus", (event) => event.currentTarget.select());
+  $("#receiptMailDismiss")?.addEventListener("click", async () => {
+    try { receiptMailInfo = await api("/api/receipt-mail/address/clear-confirmation", { method: "POST" }); } catch (_error) { /* the notice stays */ }
+    render();
+  });
+  $("#receiptMailReset")?.addEventListener("click", async () => {
+    if (!await showConfirm("The old address stops working straight away. Update any forwarding you set up in Gmail to the new one.", { title: "Make a new receipts address?", confirmLabel: "Make a new address" })) return;
+    try { receiptMailInfo = await api("/api/receipt-mail/address/reset", { method: "POST" }); showToast("New address ready. Update your Gmail forwarding.", { type: "info" }); } catch (error) { showToast(error.message || "Couldn't make a new address", { type: "error" }); }
+    render();
+  });
   document.querySelectorAll("[data-open-waiting-receipt]").forEach((button) => button.addEventListener("click", () => { void openReceiptStandalone(button.dataset.openWaitingReceipt); }));
   document.querySelectorAll("[data-inbox-link]").forEach((button) => button.addEventListener("click", () => {
     const [receiptId, index] = button.dataset.inboxLink.split("|");
@@ -3678,7 +3751,8 @@ function bindReceiptEvents() {
       const item = receiptDraft.items[Number(input.dataset.receiptItem)];
       if (!item) return;
       const key = input.dataset.key;
-      item[key] = key === "name" || key === "unit" || key === "product" ? input.value : (receiptNumberOrNull(input.value) ?? 0);
+      if (key === "returned") item.returned = input.checked;
+      else item[key] = key === "name" || key === "unit" || key === "product" ? input.value : (receiptNumberOrNull(input.value) ?? 0);
       if (key === "discount") item.discount = Math.max(0, item.discount);
       // The price of one follows the quantity and amount you correct, unless you typed a price of one yourself (then it is left alone).
       if (key === "unitPrice") item.unitPriceTyped = true;
@@ -3692,9 +3766,10 @@ function bindReceiptEvents() {
       if (slot) slot.innerHTML = receiptPriceHintHtml(item);
     };
     input.addEventListener("input", () => { update(); refreshReceiptNotes(); });
-    input.addEventListener("change", () => { update(); refreshReceiptNotes(); });
+    input.addEventListener("change", () => { update(); refreshReceiptNotes(); if (input.dataset.key === "returned") render(); }); // the suggestions and the returned summary depend on the tick
   });
   dialog.querySelectorAll("[data-remove-receipt-item]").forEach((button) => button.addEventListener("click", () => { receiptDraft.items.splice(Number(button.dataset.removeReceiptItem), 1); render(); }));
+  bindReceiptReturnButtons();
   $("#receiptAddItem")?.addEventListener("click", () => { receiptDraft.items.push({ name: "", qty: 1, unit: "each", unitPrice: 0, amount: 0, discount: 0 }); render(); });
 }
 
@@ -8249,7 +8324,7 @@ function bindPricesEvents() {
 // ---- Calculators: "Know your number" (how much you need to retire, and whether you are on track), compound interest, and car and house affordability. The arithmetic is in
 // lib/calculators.js; what was typed is kept in state.goals.calculators so it is there next time. Estimates, not advice: every result shows the assumptions
 // behind it.
-let calcTool = "kyn"; // which calculator is open: kyn | compound | car | house | wm
+let calcTool = "kyn"; // which calculator is open: kyn | compound | car | house | wm | paw
 
 const calcInputs = () => calcSanitize(state.goals.calculators);
 
@@ -8494,19 +8569,58 @@ function calcWealthFormHtml(values) {
   </form>`;
 }
 
+function pawResultsHtml(values) {
+  const result = calcPaw(values);
+  const empty = values.age === null && values.income === null && values.netWorth === null;
+  if (!result.ok) return `<p class="muted calc-prompt">${empty ? "Enter your age, income and net worth to see where you stand." : escapeHtml(result.error)}</p>`;
+  const dollars = (value) => money.format(Math.round(value));
+  const verdictClass = { paw: "on_track", close: "close", under: "behind" }[result.tier] || "";
+  const verdictText = {
+    paw: "You've made it! You hold twice the expected net worth for your age and income, or more.",
+    close: `You are so close. ${dollars(result.gap)} more makes you a prodigious accumulator.`,
+    average: `You are right on track. Keep saving and investing: ${dollars(result.gap)} more makes you a prodigious accumulator.`,
+    below: `Keep saving and investing. You are ${dollars(result.gapToAverage)} short of the expected level, and ${dollars(result.gap)} short of a prodigious accumulator.`,
+    under: `Keep saving and investing. You are at half the expected level or less, which is the book's "under accumulator". ${dollars(result.gapToAverage)} more reaches the expected level.`
+  }[result.tier];
+  const ratio = result.ratio < 0 ? "below zero" : `${calcOneDecimal(result.ratio)}x`;
+  return `<div class="calc-number-label">${escapeHtml(result.tierLabel)}</div>
+    <div class="calc-number">${ratio === "below zero" ? "Under water" : ratio}</div>
+    <p class="muted calc-number-note">${ratio === "below zero" ? "You owe more than you own right now." : `Your net worth is ${ratio} the level expected for your age and income. 1x is the expected level; 2x or more is a prodigious accumulator.`}</p>
+    <div class="calc-bar" role="img" aria-label="${Math.round(result.progressPercent)}% of the way to a prodigious accumulator"><i style="width:${result.progressPercent}%"></i></div>
+    <p class="muted calc-bar-note">${dollars(result.netWorth)} of the ${dollars(result.paw)} it takes to be a prodigious accumulator (${Math.round(result.progressPercent)}%).</p>
+    <div class="calc-verdict ${verdictClass}">${escapeHtml(verdictText)}</div>
+    <div class="calc-two">
+      <div><h4>Expected net worth</h4><p class="calc-figure">${dollars(result.expected)}</p><small class="muted">for age ${result.age} on ${dollars(result.income)} a year</small></div>
+      <div><h4>Prodigious accumulator</h4><p class="calc-figure">${dollars(result.paw)}</p><small class="muted">${CALC_PAW_MULTIPLE}x the expected level</small></div>
+    </div>
+    <p class="calc-reach">Next: <button type="button" class="ghost calc-use" data-calc-tool="wm">What a dollar invested today becomes</button> <button type="button" class="ghost calc-use" data-calc-tool="kyn">Know your number</button></p>
+    <p class="muted calc-assumptions">Expected net worth = age x income / (10 + years until 40), where years until 40 is 40 minus your age (0 from 40 on). That is Money Guy's adjusted version of the book's age x income / 10, which would expect ${dollars(result.bookExpected)} of you. Net worth is what you own (home, cars, accounts, investments) minus what you owe. A rule of thumb from one book, not a verdict on your finances.</p>`;
+}
+
+function calcPawFormHtml(values) {
+  const total = Math.round(netWorth().total);
+  return `<form class="calc-form" id="calcPawForm" autocomplete="off">
+    <h3>Your numbers</h3>
+    ${calcField("age", "How old are you?", values.age, { min: "16" })}
+    ${calcField("income", "Average yearly income over the last 3 years, before tax", values.income, { hint: `<small class="muted calc-hint">Your household's, if you share your finances.</small>` })}
+    ${calcField("netWorth", "Your net worth now", values.netWorth, { min: "", hint: `<small class="muted calc-hint">What you own minus what you owe; it can be negative. ${total !== 0 ? calcUseButton("netWorth", total, `Use my net worth (${money.format(total)})`) : ""}</small>` })}
+  </form>`;
+}
+
 function renderCalculators() {
   const values = calcInputs();
-  const tools = [["kyn", "Know your number"], ["compound", "Compound interest"], ["car", "Car affordability"], ["house", "House affordability"], ["wm", "Wealth multiplier"]];
+  const tools = [["kyn", "Know your number"], ["compound", "Compound interest"], ["car", "Car affordability"], ["house", "House affordability"], ["wm", "Wealth multiplier"], ["paw", "Prodigious accumulator"]];
   const tool = tools.some(([key]) => key === calcTool) ? calcTool : "kyn";
   const intros = {
     kyn: "How much do you need in your retirement accounts to fund the life you want, and are you on track? Only the first five numbers are needed; the advanced assumptions are optional.",
     compound: "See what a starting amount and regular saving grow into, and how much of it is growth rather than your own money.",
     car: "How much car can you afford without wrecking your budget? The 20/3/8 rule: 20% down, a loan of 3 years or less, and all car payments within 8% of your income before tax.",
     wm: "What is one dollar invested today worth when you retire? The younger you start, the more each dollar multiplies, which is the whole case for investing early.",
+    paw: "Are you a prodigious accumulator of wealth? From The Millionaire Next Door: your net worth against what your age and income would lead you to expect. Twice the expected level or more is a prodigious accumulator.",
     house: "How much home can you afford? The 3/5/25 guide: at least 3% down on a first home, plan to stay 5 years or more, and a total housing cost within 25% of your income before tax."
   };
-  const forms = { kyn: calcKynFormHtml, compound: calcCompoundFormHtml, car: calcCarFormHtml, house: calcHouseFormHtml, wm: calcWealthFormHtml };
-  const results = { kyn: kynResultsHtml, compound: compoundResultsHtml, car: carResultsHtml, house: houseResultsHtml, wm: wealthMultiplierResultsHtml };
+  const forms = { kyn: calcKynFormHtml, compound: calcCompoundFormHtml, car: calcCarFormHtml, house: calcHouseFormHtml, wm: calcWealthFormHtml, paw: calcPawFormHtml };
+  const results = { kyn: kynResultsHtml, compound: compoundResultsHtml, car: carResultsHtml, house: houseResultsHtml, wm: wealthMultiplierResultsHtml, paw: pawResultsHtml };
   return `<div class="calcs">
     <section class="calcs-hero">
       <span class="inv-eyebrow">Calculators</span>
@@ -8526,11 +8640,15 @@ function renderCalculators() {
 
 function bindCalculatorEvents() {
   if (currentView !== "calculators") return;
-  document.querySelectorAll("[data-calc-tool]").forEach((button) => button.addEventListener("click", () => { calcTool = button.dataset.calcTool; render(); }));
-  const form = $("#calcKynForm") || $("#calcCompoundForm") || $("#calcCarForm") || $("#calcHouseForm") || $("#calcWealthForm");
+  // One listener for the whole page, not one per button: the results are redrawn as you type, and the shortcut buttons inside them are new each time.
+  $(".calcs")?.addEventListener("click", (event) => {
+    const button = event.target.closest("[data-calc-tool]");
+    if (button) { calcTool = button.dataset.calcTool; render(); }
+  });
+  const form = $("#calcKynForm") || $("#calcCompoundForm") || $("#calcCarForm") || $("#calcHouseForm") || $("#calcWealthForm") || $("#calcPawForm");
   if (!form) return;
-  const tool = { calcKynForm: "kyn", calcCompoundForm: "compound", calcCarForm: "car", calcHouseForm: "house", calcWealthForm: "wm" }[form.id];
-  const resultsFor = { kyn: kynResultsHtml, compound: compoundResultsHtml, car: carResultsHtml, house: houseResultsHtml, wm: wealthMultiplierResultsHtml }[tool];
+  const tool = { calcKynForm: "kyn", calcCompoundForm: "compound", calcCarForm: "car", calcHouseForm: "house", calcWealthForm: "wm", calcPawForm: "paw" }[form.id];
+  const resultsFor = { kyn: kynResultsHtml, compound: compoundResultsHtml, car: carResultsHtml, house: houseResultsHtml, wm: wealthMultiplierResultsHtml, paw: pawResultsHtml }[tool];
   // The results follow every keystroke (from what is typed, so a half-typed age is never changed under the cursor); what is typed is saved when a box is left.
   const refresh = () => {
     const raw = calcReadForm(form);

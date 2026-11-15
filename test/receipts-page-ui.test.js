@@ -76,7 +76,7 @@ test("a receipt can be added on its own, waits in an inbox, and is linked when i
 test("the list of receipts is loaded when Transactions opens and every couple of minutes, and a failure can never loop", () => {
   assert.match(app, /if \(currentView === "transactions" && !receiptInboxLoading && \(receiptInbox === null \|\| Date\.now\(\) - receiptInboxLoadedAt > 120000\)\) void receiptRefreshInbox\(\);/);
   const refresh = app.slice(app.indexOf("function receiptsLinkWaiting("), app.indexOf("function receiptInboxHtml("));
-  assert.match(refresh, /catch \(_error\) \{ receiptInbox \|\|= \[\]; \}\s*receiptInboxLoading = false;\s*receiptInboxLoadedAt = Date\.now\(\);/, "the time is stamped even when the load fails, so a failure is not retried on every redraw");
+  assert.match(refresh, /catch \(_error\) \{ receiptInbox \|\|= \[\]; \}\s*(?:try \{ receiptMailInfo = [^\n]*\n\s*)?receiptInboxLoading = false;\s*receiptInboxLoadedAt = Date\.now\(\);/, "the time is stamped even when the load fails, so a failure is not retried on every redraw");
   assert.match(refresh, /showToast\(`\$\{linked\.length === 1 \? "A receipt was" : /, "the person is told when receipts were linked for them");
   assert.match(app, /void receiptRefreshInbox\(\); \/\/ its total may now match a transaction/, "reading a receipt looks for its transaction");
 });
@@ -134,4 +134,23 @@ test("on a phone each item is a card, and the pop-up scrolls instead of squeezin
   assert.match(app, /<td class="r" data-label="Qty">/);
   assert.match(app, /<td class="r" data-label="Saved">/);
   assert.match(app, /<td class="r" data-label="Amount">/);
+});
+
+test("the Transactions page shows the household's receipts address with Gmail's steps, and the confirmation Gmail sends to it", () => {
+  assert.match(app, /receiptMailInfo = await api\("\/api\/receipt-mail\/address"\)/, "loaded with the inbox, and a failure just hides the box");
+  assert.match(app, /\$\{receiptMailBoxHtml\(\)\}\s*\$\{waiting\.length/, "sits in the receipts inbox");
+  assert.match(app, /if \(!info \|\| !info\.configured \|\| !info\.address\) return "";/, "nothing is shown until a mailbox is set up");
+  assert.match(app, /<details class="receipt-mail" data-keep-open \$\{receiptMailOpen \? "open" : ""\}>/, "it stays open until the person closes it");
+  assert.match(app, /pending\.link\.startsWith\("https:\/\/mail-settings\.google\.com\/"\)/, "only a link on Google's settings host is ever made clickable");
+  assert.match(app, /target="_blank" rel="noopener noreferrer">Open the confirmation link/);
+  assert.match(app, /api\("\/api\/receipt-mail\/address\/clear-confirmation", \{ method: "POST" \}\)/);
+  assert.match(app, /api\("\/api\/receipt-mail\/address\/reset", \{ method: "POST" \}\)/);
+  assert.match(app, /"The old address stops working straight away\./, "making a new address is confirmed first");
+  assert.match(app, /Forward only order emails, never your whole inbox/);
+});
+
+test("a receipt that came from an email says so, and has no files to read again", () => {
+  assert.match(app, /receipt\.source === "email" \? "✉️" : "🧾"/);
+  assert.match(app, /receiptData\.source === "email" && receiptData\.sourceInfo \? `<p class="receipt-source muted">✉️ From an email: /);
+  assert.match(app, /receiptData\.status === "read" && receiptData\.documents\.length \? `<button type="button" class="ghost" id="receiptReadAgain"/, "no photo to read again for an email receipt");
 });
