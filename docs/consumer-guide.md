@@ -972,6 +972,16 @@ Transactions).
   own name instead; **Read again** on such a receipt adds the generic name.
 - A misread price or name shows up here too. Correct it on the receipt and this
   page follows.
+- Each item in the receipt pop-up has a **Counts as** box: the product it is compared
+  as. Items that count as the same thing are compared with each other. If "Bananas"
+  and "Organic bananas" should be one product, type the same name in both (pick it
+  from the suggestions, which come from your other receipts); if two lines with the
+  same name are really different varieties, give them different names ("banana",
+  "plantain"). Leave it empty to use the item's own name. The note under the item
+  ("dearer than your usual…") updates as you change it.
+- **Saved** (next to Amount) is what a coupon or instant saving took off that item.
+  The AI fills it in; correct it if it is wrong. Amount is what you were charged
+  after the saving, and the price of one is worked out from both.
 
 ## Calculators
 
@@ -1015,6 +1025,28 @@ get the most car you can afford, the monthly payment, the interest over the loan
 whether your savings cover the 20% (and what they would buy if not). "Change the rule"
 lets you use other numbers. It is the outer limit, not a target; tax, fees, insurance
 and fuel are extra.
+
+### Wealth multiplier
+
+What is one dollar invested today worth when you retire? The **wealth multiplier** is
+what $1 invested at your age grows to by 65: about 88 times at 20, 23 at 30, 7 at 40,
+and 1.35 at 60. Enter your age and, if you like, what you have invested now (a button
+fills it from your investments). The page shows:
+
+- Your multiplier, and what the money you already have grows to by 65 if you add
+  nothing.
+- What you would need to save each month to reach **$1 million** and **$2 million**
+  (less, if what you have already invested will do part of the work, or "already on
+  course" if it will do all of it).
+- What a dollar you spend now really costs at 65 ($100 now is $1,602 less at 65 for
+  someone aged 33), and a table of the same dollar at other ages, with your own row
+  highlighted, so you can see what waiting costs.
+
+The return is set from your age (10% at 20 or younger, a tenth of a point less each
+year older, never under 5.5%) and compounded monthly, with no inflation or tax taken
+out unless you enter an inflation rate under Advanced. It shows why starting early
+matters; it is not a forecast. Under Advanced you can also change the age it looks
+ahead to (65) and the return.
 
 ### House affordability
 

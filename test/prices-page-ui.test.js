@@ -40,7 +40,8 @@ test("search, shop and order redraw only the list, so typing keeps the cursor in
 });
 
 test("each item in the receipt pop-up carries a note on how its price compares with the other receipts", () => {
-  assert.match(app, /\$\{receiptPriceHintHtml\(item\)\}\$\{item\.discount \?/);
+  assert.match(app, /<span class="receipt-hint-slot" data-receipt-hint="\$\{index\}">\$\{receiptPriceHintHtml\(item\)\}<\/span>/);
+  assert.match(app, /slot\.innerHTML = receiptPriceHintHtml\(item\);/, "the note follows an edit to the product, unit, price or amount");
   assert.match(app, /const hint = priceHintFor\(priceReceipts, receiptData\.id, item\);/, "against the OTHER receipts: this receipt's own purchase is excluded");
   assert.match(app, /if \(priceStale\(\)\) void loadPriceReceipts\(\); \/\/ for the price notes under the items/);
   assert.match(css, /\.price-hint\.dearer \{ color: var\(--coral\); \}/);

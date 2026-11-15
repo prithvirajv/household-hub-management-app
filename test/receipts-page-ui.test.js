@@ -47,7 +47,7 @@ test("corrections are kept as you type without a redraw, the notes update in pla
   assert.match(app, /input\.addEventListener\("input", \(\) => \{ update\(\); refreshReceiptNotes\(\); \}\);/);
   assert.match(app, /function refreshReceiptNotes\(\) \{[\s\S]*?\$\("#receiptMatchNote"\)[\s\S]*?\$\("#receiptCheckNote"\)/);
   assert.match(app, /if \(key === "unitPrice"\) item\.unitPriceTyped = true;/);
-  assert.match(app, /\(key === "amount" \|\| key === "qty"\) && !item\.unitPriceTyped && Number\(item\.qty\) > 0/);
+  assert.match(app, /\(key === "amount" \|\| key === "qty" \|\| key === "discount"\) && !item\.unitPriceTyped && Number\(item\.qty\) > 0/);
   assert.match(css, /@media \(max-width: 560px\) \{ \.receipt-table \{ min-width: 0; \} \.receipt-table \.receipt-opt \{ display: none; \} \}/, "on a phone Item, Qty and Amount fit without sideways scrolling");
   assert.match(css, /\.receipt-dialog\[open\] \{ display: grid;/, "only an open dialog is displayed");
 });
@@ -114,4 +114,24 @@ test("several photos added together become one receipt each unless they are said
   assert.match(separate, /could not be read yet: open \$\{unread === 1 \? "it" : "them"\} from the waiting list and press Read/, "an unread one is still attached and says how to read it");
   assert.match(separate, /await receiptRefreshInbox\(\);\s*\}\s*$/, "afterwards the certain ones link at once");
   assert.match(app, /const limit = receiptTransaction\(\) \? 6 : 12;/, "more photos at a time when each is its own receipt");
+});
+
+test("each item's saving is its own box, and each item says which product it counts as (the same product, or a different variety)", () => {
+  assert.match(app, /data-key="discount" value="\$\{item\.discount \? receiptFormatMoney\(item\.discount\) : ""\}"/, "the saving can be corrected, not only read");
+  assert.match(app, /item\.discount = Math\.max\(0, item\.discount\);/, "a saving is never negative");
+  assert.match(app, /<th class="r" title="What a coupon or instant saving took off this item">Saved<\/th>/);
+  assert.match(app, /data-key="product" value="\$\{escapeHtml\(item\.product \|\| ""\)\}" list="receiptProductList"/, "the product an item counts as is a box, with the household's known products to pick from");
+  assert.match(app, /key === "name" \|\| key === "unit" \|\| key === "product" \? input\.value/, "the product is text");
+  assert.match(app, /function receiptKnownProducts\(\) \{[\s\S]*?\(priceReceipts \|\| \[\]\)\.forEach[\s\S]*?\(receiptDraft\?\.items \|\| \[\]\)\.forEach\(add\);/, "suggestions come from every receipt and this draft");
+  assert.match(app, /<datalist id="receiptProductList">/);
+});
+
+test("on a phone each item is a card, and the pop-up scrolls instead of squeezing the item list over the buttons below it", () => {
+  const css = fs.readFileSync(path.join(__dirname, "..", "styles.css"), "utf8");
+  assert.match(css, /\.receipt-body \{ overflow-y: auto; padding: 0\.4rem 1\.2rem 1rem; display: flex; flex-direction: column;/);
+  assert.match(css, /\.receipt-body > \* \{ flex: none; \}/);
+  assert.match(css, /\.receipt-table td\[data-label\]::before \{ content: attr\(data-label\);/, "the cells carry their own label once the header is hidden");
+  assert.match(app, /<td class="r" data-label="Qty">/);
+  assert.match(app, /<td class="r" data-label="Saved">/);
+  assert.match(app, /<td class="r" data-label="Amount">/);
 });

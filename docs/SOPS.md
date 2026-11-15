@@ -363,6 +363,15 @@ phone photo is stored as a few hundred KB; PDFs and files the browser cannot red
 thousand receipts is a few cents a month, so a lifecycle rule to Nearline was judged not worth its retrieval fees; revisit only if the bucket grows into
 tens of GB.
 
+### Receipt pop-up: item identity and savings
+
+Each item row has a "Counts as" box (`item.product`, lowercased, at most 60 characters, saved through the normal PATCH via `cleanReceiptFields`, which already
+keeps `product` and `discount`). `priceKey` in `lib/price-analysis.js` groups by `product` when present, else by the tidied item name, so typing the same
+product on two lines merges them and a different product separates identical names. Suggestions (`receiptKnownProducts`) are the products on every receipt
+in `priceReceipts` plus the draft's. The "Saved" box is `item.discount` (never negative); changing it moves the price of one (`(amount + discount) / qty`)
+unless that price was typed by hand. The price note under an item sits in `[data-receipt-hint]` and is redrawn on each edit. On a phone the item table is a card
+per item (CSS only; cells carry `data-label`), and `.receipt-body` is a flex column with `flex: none` children so the pop-up scrolls instead of squeezing the list.
+
 ### Investments page
 
 A page of its own (`renderInvestments` in `app.js`, numbers from `lib/investments-logic.js`, loaded as a third classic script, so its top-level
@@ -390,7 +399,9 @@ buys `saved / down%`. Checked against Money Guy's worked example ($5,000 a month
 HOA taken off first). Cost is linear in the price, so the price is solved directly: without mortgage insurance P = (budget + down*k)/(k + carry); over the
 20%-down price (5 x down) it is P = (budget + down*(k + pmi))/(k + pmi + carry), and if that falls under the 20% line the answer is the 20% price itself
 (the dearest home with no insurance). Defaults: tax 1%, insurance 0.5% of price a year, mortgage insurance 0.5% of the loan a year
-(`CALC_HOUSE_DEFAULTS`); they are US averages, so tell users to change them. Inputs are saved in `state.goals.calculators` (cleaned by `calcSanitize`, blanks stay null) inside the existing `goals` object, so no new top-level state
+(`CALC_HOUSE_DEFAULTS`); they are US averages, so tell users to change them. Wealth multiplier (`calcMultiplier`): multiplier = (1 + r/12)^(12 x years) with r = `calcDefaultReturn(age)` held flat to the age looked ahead to (65), the same
+return Know your number uses; this reproduces Money Guy's published table (age 20 -> 88.35, 30 -> 23.06, 40 -> 7.34, 60 -> 1.35), which the tests pin. Monthly saving to
+a goal = (goal - invested x multiplier) / ((multiplier - 1) / (r/12)), never below 0. No inflation or tax unless an inflation rate is given. Inputs are saved in `state.goals.calculators` (cleaned by `calcSanitize`, blanks stay null) inside the existing `goals` object, so no new top-level state
 key. The advanced `<details>` carries `data-keep-open`: the global outside-click closer in `app.js` skips any `<details>` with that attribute (also used by
 Investments' account cards and Prices' products). The phone app does not have this page yet.
 

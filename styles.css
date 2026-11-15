@@ -9780,7 +9780,8 @@ label.ai-import-toggle span { font-weight: 600; }
 .receipt-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 0.8rem; padding: 1rem 1.2rem 0.6rem; }
 .receipt-head h2 { margin: 0; }
 .receipt-head p { margin: 0.15rem 0 0; }
-.receipt-body { overflow-y: auto; padding: 0.4rem 1.2rem 1rem; display: grid; gap: 0.8rem; align-content: start; }
+.receipt-body { overflow-y: auto; padding: 0.4rem 1.2rem 1rem; display: flex; flex-direction: column; gap: 0.8rem; }
+.receipt-body > * { flex: none; } /* nothing in the pop-up is squeezed to fit: the pop-up scrolls instead (the item list was squashed over the buttons below it on a phone) */
 .receipt-chosen, .receipt-files { display: flex; flex-wrap: wrap; gap: 0.5rem; }
 .receipt-chip, .receipt-file { display: inline-flex; align-items: center; gap: 0.45rem; border: 1px solid var(--line); border-radius: 10px; padding: 0.25rem 0.5rem; background: var(--panel); max-width: 100%; }
 .receipt-chip img, .receipt-file img { width: 44px; height: 44px; object-fit: cover; border-radius: 6px; }
@@ -9918,3 +9919,24 @@ label.ai-import-toggle span { font-weight: 600; }
 .calc-table th { position: sticky; top: 0; background: var(--panel); text-align: left; color: var(--muted); font-size: 0.74rem; font-weight: 700; padding: 4px 6px; border-bottom: 1px solid var(--line); }
 .calc-table td { padding: 5px 6px; border-bottom: 1px solid var(--line); }
 .calc-table .r { text-align: right; }
+.calc-table tr.me td { font-weight: 700; background: var(--green-soft); }
+.calc-scroll.short { max-height: none; margin-top: 0.3rem; }
+.calc-results > .calc-number-label { margin-top: 0.9rem; }
+.calc-results > .calc-number-label:first-child { margin-top: 0; }
+
+/* Line icons on the small action buttons of transaction rows: they take the button's text colour. */
+.icon-button .row-icon { width: 20px; height: 20px; display: block; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; pointer-events: none; }
+.receipt-product-line { display: flex; align-items: center; gap: 0.4rem; margin-top: 3px; }
+.receipt-product-line small { flex: none; }
+.receipt-product-line input { flex: 1; min-width: 0; font-size: 0.8rem; padding: 0.2rem 0.4rem; }
+.receipt-table .receipt-hint-slot:empty { display: none; }
+/* On a phone each item is a small card: the name (with what it counts as) on a row of its own, then quantity, saving and amount side by side. */
+@media (max-width: 560px) {
+  .receipt-table, .receipt-table tbody { display: block; }
+  .receipt-table thead { display: none; }
+  .receipt-table tr { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)) auto; gap: 4px 6px; align-items: end; padding: 8px 0; border-bottom: 1px solid var(--line); }
+  .receipt-table td { display: block; padding: 0; border: 0; }
+  .receipt-table td:first-child { grid-column: 1 / -1; }
+  .receipt-table td[data-label]::before { content: attr(data-label); display: block; font-size: 0.7rem; font-weight: 700; color: var(--muted); text-align: left; }
+  .receipt-table input.num { max-width: none; }
+}

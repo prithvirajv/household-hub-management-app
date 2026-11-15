@@ -1,6 +1,6 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
-const { calcDefaultSwr, calcDefaultReturn, calcSanitize, calcBalanceAfter, calcRetirement, calcCompound, calcCar, calcHouse } = require("../lib/calculators");
+const { calcDefaultSwr, calcDefaultReturn, calcSanitize, calcBalanceAfter, calcRetirement, calcCompound, calcCar, calcHouse, calcMultiplier } = require("../lib/calculators");
 
 const near = (actual, expected, tolerance = 0.5) => assert.ok(Math.abs(actual - expected) <= tolerance, `${actual} is not within ${tolerance} of ${expected}`);
 
@@ -241,4 +241,65 @@ test("the car and house forms are kept safe and bounded like the others", () => 
   assert.deepEqual([clean.house.income, clean.house.years, clean.house.hoa, clean.house.mortgageInsurance], [0, 5, null, 0], "0 stays 0 (insurance switched off), a blank stays blank");
   assert.equal(calcSanitize({}).car.income, null);
   assert.equal(calcSanitize(undefined).house.rate, null);
+});
+
+test("the wealth multiplier is what $1 becomes by 65 at the age-based return, compounded monthly: it matches Money Guy's published table", () => {
+  // [age, multiplier, monthly saving to reach $1 million at 65] as published.
+  const published = [[0, 647.47, 13], [5, 393.52, 21], [10, 239.18, 35], [15, 145.37, 58], [20, 88.35, 95], [25, 44.04, 184], [30, 23.06, 340], [35, 12.69, 606], [40, 7.34, 1052], [45, 4.46, 1806], [50, 2.85, 3155], [55, 1.91, 5938], [60, 1.35, 14333]];
+  published.forEach(([age, multiplier, monthly]) => {
+    const result = calcMultiplier({ age });
+    near(result.multiplier, multiplier, 0.01);
+    near(result.targets[0].monthly, monthly, 1);
+  });
+});
+
+test("the multiplier is built from the return for the age, the months left and monthly compounding", () => {
+  const result = calcMultiplier({ age: 40 });
+  assert.equal(result.ok, true);
+  assert.deepEqual([result.years, result.retireAge, result.assumptions.returnRate, result.assumptions.automaticReturn], [25, 65, 8, true]);
+  near(result.multiplier, (1 + 0.08 / 12) ** 300, 1e-9);
+  near(calcMultiplier({ age: 20 }).multiplier, (1 + 0.1 / 12) ** 540, 1e-9, "a flat 10% for the 45 years from 20");
+  near(calcMultiplier({ age: 30, returnRate: 0 }).multiplier, 1, 1e-9, "no growth, no multiple");
+  near(calcMultiplier({ age: 30, returnRate: 6, retireAge: 60 }).multiplier, (1 + 0.06 / 12) ** 360, 1e-9, "own return and own age");
+});
+
+test("money already invested grows by the multiplier and lowers the monthly saving needed; enough of it needs none", () => {
+  const none = calcMultiplier({ age: 30 });
+  const some = calcMultiplier({ age: 30, invested: 20000 });
+  near(some.projected, 20000 * some.multiplier, 0.001);
+  assert.ok(some.targets[0].monthly < none.targets[0].monthly);
+  // The saving found really does reach the goal: its pot plus what is already invested.
+  const months = 420;
+  const i = 0.09 / 12;
+  const pot = some.targets[0].monthly * (((1 + i) ** months - 1) / i) + 20000 * (1 + i) ** months;
+  near(pot, 1000000, 0.5);
+  const rich = calcMultiplier({ age: 30, invested: 100000 });
+  assert.equal(rich.targets[0].reached, true, "100,000 at 30 grows past a million");
+  assert.equal(rich.targets[0].monthly, 0);
+  assert.equal(rich.targets[1].reached, true, "and past two million (a multiplier of 23)");
+  assert.equal(calcMultiplier({ age: 30, invested: 50000 }).targets[1].reached, false);
+});
+
+test("the age table has a row for every five years below 65 and one for the person's own age, and waiting costs more each year", () => {
+  const result = calcMultiplier({ age: 33 });
+  assert.deepEqual(result.rows.map((row) => row.age), [0, 5, 10, 15, 20, 25, 30, 33, 35, 40, 45, 50, 55, 60]);
+  assert.deepEqual(result.rows.filter((row) => row.mine).map((row) => row.age), [33]);
+  for (let i = 1; i < result.rows.length; i += 1) {
+    assert.ok(result.rows[i].multiplier < result.rows[i - 1].multiplier, "a later start multiplies less");
+    assert.ok(result.rows[i].monthlyToMillion > result.rows[i - 1].monthlyToMillion, "and needs more a month");
+  }
+  assert.equal(calcMultiplier({ age: 35 }).rows.filter((row) => row.age === 35).length, 1, "no duplicate when the age is a multiple of five");
+  assert.deepEqual(calcMultiplier({ age: 20, retireAge: 40 }).rows.map((row) => row.age), [0, 5, 10, 15, 20, 25, 30, 35], "only ages before the age looked ahead to");
+});
+
+test("inflation, when given, adds a today's-dollars figure, and bad input gives a plain message", () => {
+  const result = calcMultiplier({ age: 30, invested: 10000, inflation: 3 });
+  near(result.projectedToday, result.projected / 1.03 ** 35, 0.001);
+  assert.equal(calcMultiplier({ age: 30, invested: 10000 }).projectedToday, null);
+  assert.match(calcMultiplier({}).error, /Enter your age/);
+  assert.match(calcMultiplier({ age: 70 }).error, /past 65/);
+  assert.match(calcMultiplier({ age: 50, retireAge: 45 }).error, /later than your age/);
+  assert.match(calcMultiplier({ age: 70, retireAge: 60 }).error, /later than your age/, "a chosen age that is too early is not blamed on the 65 default");
+  const clean = calcSanitize({ wm: { age: "-3", invested: "x", retireAge: "200", returnRate: "", inflation: "3", advanced: 1 } });
+  assert.deepEqual([clean.wm.age, clean.wm.invested, clean.wm.retireAge, clean.wm.returnRate, clean.wm.inflation, clean.wm.advanced], [0, null, 110, null, 3, true]);
 });

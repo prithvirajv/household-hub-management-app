@@ -48,11 +48,11 @@ test("the page says its results are estimates, not advice, and shows the assumpt
   assert.ok(app.includes("calc-assumptions"));
 });
 
-test("the page offers four calculators, each with its own form, results and saved values", () => {
+test("the page offers five calculators, each with its own form, results and saved values", () => {
   assert.match(app, /\["car", "Car affordability"\], \["house", "House affordability"\]/);
-  assert.match(app, /const forms = \{ kyn: calcKynFormHtml, compound: calcCompoundFormHtml, car: calcCarFormHtml, house: calcHouseFormHtml \};/);
-  assert.match(app, /const results = \{ kyn: kynResultsHtml, compound: compoundResultsHtml, car: carResultsHtml, house: houseResultsHtml \};/);
-  assert.match(app, /calcCarForm: "car", calcHouseForm: "house"/, "every form is recognised when its events are bound");
+  assert.match(app, /const forms = \{ kyn: calcKynFormHtml, compound: calcCompoundFormHtml, car: calcCarFormHtml, house: calcHouseFormHtml, wm: calcWealthFormHtml \};/);
+  assert.match(app, /const results = \{ kyn: kynResultsHtml, compound: compoundResultsHtml, car: carResultsHtml, house: houseResultsHtml, wm: wealthMultiplierResultsHtml \};/);
+  assert.match(app, /calcCarForm: "car", calcHouseForm: "house", calcWealthForm: "wm"/, "every form is recognised when its events are bound");
   assert.match(app, /addEventListener\("toggle", \(event\) => calcSave\(tool, calcReadForm\(form\), \{ advanced: event\.currentTarget\.open \}\)\);/, "each calculator remembers its own advanced section");
   assert.match(app, /const tool = tools\.some\(\(\[key\]\) => key === calcTool\) \? calcTool : "kyn";/, "an unknown tool falls back to the first");
 });
@@ -62,4 +62,15 @@ test("the car and house results name the rule they use and what is not included"
   assert.ok(app.includes("The 3/5/25 guide: at least "));
   assert.ok(app.includes("Tax, fees, insurance and fuel are extra."));
   assert.ok(app.includes("Maintenance, repairs and moving costs are extra."));
+});
+
+test("the wealth multiplier is the fifth calculator, with its own form, results and saved values", () => {
+  assert.match(app, /\["house", "House affordability"\], \["wm", "Wealth multiplier"\]\]/);
+  assert.match(app, /wm: calcWealthFormHtml \};/);
+  assert.match(app, /wm: wealthMultiplierResultsHtml \};\s*return `<div class="calcs">/);
+  assert.match(app, /calcWealthForm: "wm" \}\[form\.id\]/, "recognised when its events are bound");
+  assert.match(app, /\$\("#calcHouseForm"\) \|\| \$\("#calcWealthForm"\);/);
+  assert.match(css, /\.calc-table tr\.me td \{ font-weight: 700;/, "the person's own age row stands out");
+  assert.ok(app.includes("it is not a forecast"));
+  assert.ok(app.includes("What a dollar spent now really costs"));
 });

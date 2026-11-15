@@ -1833,6 +1833,18 @@ function formatReminderTime(value) {
 // least one real device even though it looked fine here. A plain color
 // strip carries the same "tear-off calendar" look without that risk, and
 // the full date is still available via the title tooltip.
+// One consistent set of line icons for the small action buttons on transaction rows (emoji and text glyphs drew in mixed colours and sizes on the green buttons).
+// They draw in the button's own text colour, so the blue "matched" and green "has a receipt" states and the red delete button keep working.
+const ROW_ICON_PATHS = {
+  split: '<circle cx="6" cy="6" r="3"/><circle cx="6" cy="18" r="3"/><path d="M20 4 8.12 15.88"/><path d="M14.47 14.48 20 20"/><path d="M8.12 8.12 12 12"/>',
+  friend: '<path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/>',
+  transfer: '<path d="M8 3 4 7l4 4"/><path d="M4 7h16"/><path d="m16 21 4-4-4-4"/><path d="M20 17H4"/>',
+  receipt: '<path d="M4 2v20l2-1 2 1 2-1 2 1 2-1 2 1 2-1 2 1V2l-2 1-2-1-2 1-2-1-2 1-2-1-2 1Z"/><path d="M16 8h-6a2 2 0 1 0 0 4h4a2 2 0 1 1 0 4H8"/><path d="M12 17.5v-11"/>',
+  close: '<path d="M18 6 6 18"/><path d="m6 6 12 12"/>',
+  check: '<path d="M20 6 9 17l-5-5"/>'
+};
+const rowIconHtml = (name) => `<svg class="row-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false">${ROW_ICON_PATHS[name] || ""}</svg>`;
+
 function calendarNavIconHtml() {
   const now = new Date();
   const fullLabel = now.toLocaleDateString("en-US", { month: "long", day: "numeric" });
@@ -3203,6 +3215,16 @@ function receiptCheckNote() {
   return { kind: "warn", text: `${count}; the receipt's subtotal is ${exactMoney.format(printed)}. That is ${exactMoney.format(Math.abs(difference))} ${difference > 0 ? "too much: a discount may be missing" : "too little: a line may be missing"}, so check it against the photo.` };
 }
 
+// The generic products already on the household's receipts (and in this draft), for the "Counts as" box: pick one to say "this is the same product",
+// or type a new name to say it is a different variety.
+function receiptKnownProducts() {
+  const names = new Set();
+  const add = (item) => { const name = String((item && item.product) || "").trim().toLowerCase(); if (name) names.add(name); };
+  (priceReceipts || []).forEach((receipt) => (receipt.items || []).forEach(add));
+  (receiptDraft?.items || []).forEach(add);
+  return [...names].sort().slice(0, 300);
+}
+
 function refreshReceiptNotes() {
   const match = $("#receiptMatchNote");
   const check = $("#receiptCheckNote");
@@ -3382,13 +3404,17 @@ function receiptDialogHtml() {
         <label>Receipt total<input type="number" step="0.01" data-receipt-field="total" value="${receiptFormatMoney(draft.total)}"></label>
       </div>
       <p id="receiptMatchNote" class="receipt-note ${matchNote.kind}" ${matchNote.text ? "" : "hidden"}>${escapeHtml(matchNote.text)}</p>
-      <div class="receipt-scroll"><table class="receipt-table"><thead><tr><th>Item</th><th class="r">Qty</th><th class="receipt-opt">Unit</th><th class="r receipt-opt">Unit price</th><th class="r">Amount</th><th></th></tr></thead><tbody>
+      <datalist id="receiptProductList">${receiptKnownProducts().map((name) => `<option value="${escapeHtml(name)}"></option>`).join("")}</datalist>
+      <div class="receipt-scroll"><table class="receipt-table"><thead><tr><th>Item</th><th class="r">Qty</th><th class="receipt-opt">Unit</th><th class="r receipt-opt">Unit price</th><th class="r" title="What a coupon or instant saving took off this item">Saved</th><th class="r">Amount</th><th></th></tr></thead><tbody>
         ${draft.items.map((item, index) => `<tr>
-          <td><input data-receipt-item="${index}" data-key="name" value="${escapeHtml(item.name)}" aria-label="Item name" maxlength="120">${receiptPriceHintHtml(item)}${item.discount ? `<small class="muted">saved ${exactMoney.format(item.discount)}</small>` : ""}</td>
-          <td class="r"><input class="num" type="number" step="any" min="0" data-receipt-item="${index}" data-key="qty" value="${item.qty}" aria-label="Quantity"></td>
+          <td><input data-receipt-item="${index}" data-key="name" value="${escapeHtml(item.name)}" aria-label="Item name" maxlength="120">
+            <label class="receipt-product-line"><small class="muted">Counts as</small><input data-receipt-item="${index}" data-key="product" value="${escapeHtml(item.product || "")}" list="receiptProductList" placeholder="same as the item name" aria-label="Counts as: items with the same name here are compared on the Prices page" maxlength="60"></label>
+            <span class="receipt-hint-slot" data-receipt-hint="${index}">${receiptPriceHintHtml(item)}</span></td>
+          <td class="r" data-label="Qty"><input class="num" type="number" step="any" min="0" data-receipt-item="${index}" data-key="qty" value="${item.qty}" aria-label="Quantity"></td>
           <td class="receipt-opt"><select data-receipt-item="${index}" data-key="unit" aria-label="Unit">${RECEIPT_UNITS.map((unit) => `<option ${unit === item.unit ? "selected" : ""}>${unit}</option>`).join("")}</select></td>
           <td class="r receipt-opt"><input class="num" type="number" step="0.01" min="0" data-receipt-item="${index}" data-key="unitPrice" value="${receiptFormatMoney(item.unitPrice)}" aria-label="Price of one"></td>
-          <td class="r"><input class="num" type="number" step="0.01" data-receipt-item="${index}" data-key="amount" value="${receiptFormatMoney(item.amount)}" aria-label="Amount charged"></td>
+          <td class="r" data-label="Saved"><input class="num" type="number" step="0.01" min="0" data-receipt-item="${index}" data-key="discount" value="${item.discount ? receiptFormatMoney(item.discount) : ""}" placeholder="0.00" aria-label="Saved on this item (coupon or discount)"></td>
+          <td class="r" data-label="Amount"><input class="num" type="number" step="0.01" data-receipt-item="${index}" data-key="amount" value="${receiptFormatMoney(item.amount)}" aria-label="Amount charged"></td>
           <td><button type="button" class="icon-button danger-button" data-remove-receipt-item="${index}" aria-label="Remove ${escapeHtml(item.name)}">×</button></td>
         </tr>`).join("")}
       </tbody></table></div>
@@ -3652,14 +3678,18 @@ function bindReceiptEvents() {
       const item = receiptDraft.items[Number(input.dataset.receiptItem)];
       if (!item) return;
       const key = input.dataset.key;
-      item[key] = key === "name" || key === "unit" ? input.value : (receiptNumberOrNull(input.value) ?? 0);
+      item[key] = key === "name" || key === "unit" || key === "product" ? input.value : (receiptNumberOrNull(input.value) ?? 0);
+      if (key === "discount") item.discount = Math.max(0, item.discount);
       // The price of one follows the quantity and amount you correct, unless you typed a price of one yourself (then it is left alone).
       if (key === "unitPrice") item.unitPriceTyped = true;
-      if ((key === "amount" || key === "qty") && !item.unitPriceTyped && Number(item.qty) > 0) {
+      if ((key === "amount" || key === "qty" || key === "discount") && !item.unitPriceTyped && Number(item.qty) > 0) {
         item.unitPrice = Math.round(((Number(item.amount) || 0) + (Number(item.discount) || 0)) / Number(item.qty) * 100) / 100;
         const priceBox = document.querySelector(`[data-receipt-item="${input.dataset.receiptItem}"][data-key="unitPrice"]`);
         if (priceBox) priceBox.value = receiptFormatMoney(item.unitPrice);
       }
+      // The note on how this item's price compares with the other receipts follows the change (the product, unit, price or amount can all change which items it is compared with).
+      const slot = document.querySelector(`[data-receipt-hint="${input.dataset.receiptItem}"]`);
+      if (slot) slot.innerHTML = receiptPriceHintHtml(item);
     };
     input.addEventListener("input", () => { update(); refreshReceiptNotes(); });
     input.addEventListener("change", () => { update(); refreshReceiptNotes(); });
@@ -3692,11 +3722,11 @@ function ledgerEntryRow(transaction, index, transferMatch, refundPair = null) {
         ? `<button type="button" class="split-transaction-badge" data-split-transaction-edit="${index}">✂ Split (${transaction.splits.length})</button>`
         : `<select class="income-recurrence-select" aria-label="Subcategory" data-ledger-entry-line="${index}">${lineOptions}</select>`}
       ${state.accounts.length ? `<select class="income-recurrence-select" aria-label="Account" data-ledger-entry-account="${index}"><option value="">Not linked</option>${accountOptions(transaction.accountId || "")}</select>` : ""}
-      <button class="icon-button ${isSplit ? "has-transfer-match" : ""}" data-split-transaction-edit="${index}" type="button" aria-label="Split ${escapeHtml(transaction.payee)} across categories" title="Split across categories">✂</button>
-      <button class="icon-button" data-assign-iou-ledger="${index}" type="button" aria-label="Split with a friend ${escapeHtml(transaction.payee)}" title="Split with a friend (they owe you)">👥</button>
-      <button class="icon-button ${transferMatch ? "has-transfer-match" : ""}" data-move-to-transfer-ledger="${index}" type="button" aria-label="Move ${escapeHtml(transaction.payee)} to Transfers" title="${transferMatch ? `Matches ${escapeHtml(accountName(transferMatch.accountId))}'s ${exactMoney.format(Math.abs(transferMatch.amount))} on ${formatShortDate(transferMatch.date)}` : "Move to Transfers (account-to-account movement)"}">⇄</button>
-      <button class="icon-button ${(transaction.receiptIds || []).length ? "has-receipt" : ""}" data-receipt-ledger="${index}" type="button" aria-label="${(transaction.receiptIds || []).length ? "View the receipt for" : "Attach a receipt to"} ${escapeHtml(transaction.payee)}" title="${(transaction.receiptIds || []).length ? "View the receipt and its items" : "Attach a receipt (photo or PDF)"}">🧾</button>
-      <button class="icon-button danger-button" data-delete-transaction="${index}" type="button" aria-label="Delete ${escapeHtml(transaction.payee)}">×</button>
+      <button class="icon-button ${isSplit ? "has-transfer-match" : ""}" data-split-transaction-edit="${index}" type="button" aria-label="Split ${escapeHtml(transaction.payee)} across categories" title="Split across categories">${rowIconHtml("split")}</button>
+      <button class="icon-button" data-assign-iou-ledger="${index}" type="button" aria-label="Split with a friend ${escapeHtml(transaction.payee)}" title="Split with a friend (they owe you)">${rowIconHtml("friend")}</button>
+      <button class="icon-button ${transferMatch ? "has-transfer-match" : ""}" data-move-to-transfer-ledger="${index}" type="button" aria-label="Move ${escapeHtml(transaction.payee)} to Transfers" title="${transferMatch ? `Matches ${escapeHtml(accountName(transferMatch.accountId))}'s ${exactMoney.format(Math.abs(transferMatch.amount))} on ${formatShortDate(transferMatch.date)}` : "Move to Transfers (account-to-account movement)"}">${rowIconHtml("transfer")}</button>
+      <button class="icon-button ${(transaction.receiptIds || []).length ? "has-receipt" : ""}" data-receipt-ledger="${index}" type="button" aria-label="${(transaction.receiptIds || []).length ? "View the receipt for" : "Attach a receipt to"} ${escapeHtml(transaction.payee)}" title="${(transaction.receiptIds || []).length ? "View the receipt and its items" : "Attach a receipt (photo or PDF)"}">${rowIconHtml("receipt")}</button>
+      <button class="icon-button danger-button" data-delete-transaction="${index}" type="button" aria-label="Delete ${escapeHtml(transaction.payee)}">${rowIconHtml("close")}</button>
       ${ledgerRefundPill(refundPair)}
       ${!transaction.lineId && !isSplit ? `<span class="pill pill-warning ledger-needs-category" title="No subcategory yet - this counts toward your balance but not toward any budget line. Choose one on this row.">Needs a category</span>` : ""}
       ${tagChipsHtml(transaction.tags, "data-remove-ledger-tag", "data-add-ledger-tag", index)}
@@ -4121,10 +4151,10 @@ function renderTransactions() {
                 ${state.accounts.length ? `<label class="row-field row-select"><small>Account</small><select data-bank-stream-account="${transaction.id}"><option value="">Not linked</option>${accountOptions(transaction.accountId || "")}</select></label>` : ""}
                 ${state.accounts.length && !transaction.accountId ? `<button class="icon-button" data-ai-suggest-account="${transaction.id}" type="button" aria-label="Suggest an account with AI for ${escapeHtml(transaction.payee)}" title="No history match for this payee - ask AI to suggest an account">✨</button>` : ""}
                 <div class="row-actions">
-                  <button class="icon-button" data-accept-import="${transaction.id}" type="button" aria-label="Accept ${escapeHtml(transaction.payee)}" title="Add to the ledger">✓</button>
-                  <button class="icon-button" data-assign-iou="${transaction.id}" type="button" aria-label="Split with a friend ${escapeHtml(transaction.payee)}" title="Split with a friend (they owe you)">👥</button>
-                  <button class="icon-button ${transaction.transferMatch ? "has-transfer-match" : ""}" data-move-to-transfer="${transaction.id}" type="button" aria-label="Move ${escapeHtml(transaction.payee)} to Transfers" title="Move to Transfers (money moved between your own accounts)">⇄</button>
-                  <button class="icon-button danger-button" data-dismiss-import="${transaction.id}" type="button" aria-label="Dismiss ${escapeHtml(transaction.payee)}" title="Skip - do not add to the ledger">×</button>
+                  <button class="icon-button" data-accept-import="${transaction.id}" type="button" aria-label="Accept ${escapeHtml(transaction.payee)}" title="Add to the ledger">${rowIconHtml("check")}</button>
+                  <button class="icon-button" data-assign-iou="${transaction.id}" type="button" aria-label="Split with a friend ${escapeHtml(transaction.payee)}" title="Split with a friend (they owe you)">${rowIconHtml("friend")}</button>
+                  <button class="icon-button ${transaction.transferMatch ? "has-transfer-match" : ""}" data-move-to-transfer="${transaction.id}" type="button" aria-label="Move ${escapeHtml(transaction.payee)} to Transfers" title="Move to Transfers (money moved between your own accounts)">${rowIconHtml("transfer")}</button>
+                  <button class="icon-button danger-button" data-dismiss-import="${transaction.id}" type="button" aria-label="Dismiss ${escapeHtml(transaction.payee)}" title="Skip - do not add to the ledger">${rowIconHtml("close")}</button>
                 </div>
               </div>
               ${tagChipsHtml(transaction.tags, "data-remove-bank-stream-tag", "data-add-bank-stream-tag", transaction.id)}
@@ -8219,7 +8249,7 @@ function bindPricesEvents() {
 // ---- Calculators: "Know your number" (how much you need to retire, and whether you are on track), compound interest, and car and house affordability. The arithmetic is in
 // lib/calculators.js; what was typed is kept in state.goals.calculators so it is there next time. Estimates, not advice: every result shows the assumptions
 // behind it.
-let calcTool = "kyn"; // which calculator is open: kyn | compound | car | house
+let calcTool = "kyn"; // which calculator is open: kyn | compound | car | house | wm
 
 const calcInputs = () => calcSanitize(state.goals.calculators);
 
@@ -8420,18 +8450,63 @@ function calcHouseFormHtml(values) {
   </form>`;
 }
 
+const calcMultipleText = (value) => Number(value.toFixed(2)).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+
+function wealthMultiplierResultsHtml(values) {
+  const result = calcMultiplier(values);
+  const empty = values.age === null && values.invested === null;
+  if (!result.ok) return `<p class="muted calc-prompt">${empty ? "Enter your age to see what a dollar invested today becomes." : escapeHtml(result.error)}</p>`;
+  const a = result.assumptions;
+  const x = calcMultipleText(result.multiplier);
+  const target = (item) => item.reached
+    ? `<p class="calc-figure">Already on course</p><small class="muted">what you have invested grows past ${money.format(item.target)} by ${result.retireAge} without adding a cent</small>`
+    : `<p class="calc-figure">${money.format(Math.round(item.monthly))} a month</p><small class="muted">${result.invested > 0 ? `on top of what you have invested${item.monthlyFromZero > item.monthly ? `, instead of ${money.format(Math.round(item.monthlyFromZero))} a month from nothing` : ""}` : `saved every month until ${result.retireAge}`}</small>`;
+  const costs = [10, 100, 1000].map((dollars) => `<tr><td>${money.format(dollars)} spent now</td><td class="r">${money.format(Math.round(dollars * result.multiplier))} less at ${result.retireAge}</td></tr>`).join("");
+  return `<div class="calc-number-label">Your wealth multiplier</div>
+    <div class="calc-number">${x}x</div>
+    <p class="muted calc-number-note">Every $1 you invest at ${values.age} grows to about $${x} by ${result.retireAge}, over ${result.years} year${result.years === 1 ? "" : "s"}.</p>
+    ${result.invested > 0 ? `<div class="calc-verdict on_track"><b>Your ${money.format(Math.round(result.invested))} invested today</b> grows to about <b>${money.format(Math.round(result.projected))}</b> by ${result.retireAge} if you add nothing${result.projectedToday !== null ? ` (${money.format(Math.round(result.projectedToday))} in today's dollars)` : ""}.</div>` : ""}
+    <div class="calc-two">
+      <div><h4>To reach ${money.format(result.targets[0].target)}</h4>${target(result.targets[0])}</div>
+      <div><h4>To reach ${money.format(result.targets[1].target)}</h4>${target(result.targets[1])}</div>
+    </div>
+    <div class="calc-number-label">What a dollar spent now really costs</div>
+    <div class="calc-scroll short"><table class="calc-table"><tbody>${costs}</tbody></table></div>
+    <div class="calc-number-label">The same dollar at other ages</div>
+    <div class="calc-scroll"><table class="calc-table"><thead><tr><th>Age</th><th class="r">$1 becomes</th><th class="r">A month to reach ${money.format(result.targets[0].target)}</th></tr></thead><tbody>
+      ${result.rows.map((row) => `<tr class="${row.mine ? "me" : ""}"><td>${row.age}${row.mine ? " (you)" : ""}</td><td class="r">$${calcMultipleText(row.multiplier)}</td><td class="r">${money.format(Math.round(row.monthlyToMillion))}</td></tr>`).join("")}
+    </tbody></table></div>
+    <p class="muted calc-assumptions">Assumes ${calcOneDecimal(a.returnRate)}% a year${a.automaticReturn ? ` (set from your age: 10% at 20 or younger, a tenth of a point less each year older, never under 5.5%)` : ""}, compounded monthly, ${a.inflation === null ? "with no inflation and no tax taken out" : `with ${calcOneDecimal(a.inflation)}% inflation taken out of the today's-dollars figure and no tax taken out`}. Real returns vary year to year: this shows why starting early matters, it is not a forecast.</p>`;
+}
+
+function calcWealthFormHtml(values) {
+  const invested = calcInvestedTotal();
+  return `<form class="calc-form" id="calcWealthForm" autocomplete="off">
+    <h3>Your numbers</h3>
+    ${calcField("age", "How old are you?", values.age, { min: "0" })}
+    ${calcField("invested", "Amount you have invested now", values.invested, { hint: `<small class="muted calc-hint">Retirement and investment accounts. ${invested > 0 ? calcUseButton("invested", invested, `Use my investments (${money.format(invested)})`) : ""}</small>` })}
+    <details id="calcAdvanced" data-keep-open ${values.advanced ? "open" : ""}><summary>Advanced assumptions</summary>
+      <p class="muted">Leave a box empty to use the automatic value.</p>
+      ${calcField("retireAge", "Look ahead to age", values.retireAge, { min: "1", placeholder: `automatic: ${CALC_WM_RETIRE_AGE}` })}
+      ${calcField("returnRate", "Yearly return (%)", values.returnRate, { step: "0.1", min: "-10", placeholder: values.age === null ? "automatic, from your age" : `automatic: ${calcDefaultReturn(values.age)}` })}
+      ${calcField("inflation", "Inflation a year (%), to also see today's dollars (optional)", values.inflation, { step: "0.1", min: "-5", placeholder: "leave empty to skip" })}
+    </details>
+  </form>`;
+}
+
 function renderCalculators() {
   const values = calcInputs();
-  const tools = [["kyn", "Know your number"], ["compound", "Compound interest"], ["car", "Car affordability"], ["house", "House affordability"]];
+  const tools = [["kyn", "Know your number"], ["compound", "Compound interest"], ["car", "Car affordability"], ["house", "House affordability"], ["wm", "Wealth multiplier"]];
   const tool = tools.some(([key]) => key === calcTool) ? calcTool : "kyn";
   const intros = {
     kyn: "How much do you need in your retirement accounts to fund the life you want, and are you on track? Only the first five numbers are needed; the advanced assumptions are optional.",
     compound: "See what a starting amount and regular saving grow into, and how much of it is growth rather than your own money.",
     car: "How much car can you afford without wrecking your budget? The 20/3/8 rule: 20% down, a loan of 3 years or less, and all car payments within 8% of your income before tax.",
+    wm: "What is one dollar invested today worth when you retire? The younger you start, the more each dollar multiplies, which is the whole case for investing early.",
     house: "How much home can you afford? The 3/5/25 guide: at least 3% down on a first home, plan to stay 5 years or more, and a total housing cost within 25% of your income before tax."
   };
-  const forms = { kyn: calcKynFormHtml, compound: calcCompoundFormHtml, car: calcCarFormHtml, house: calcHouseFormHtml };
-  const results = { kyn: kynResultsHtml, compound: compoundResultsHtml, car: carResultsHtml, house: houseResultsHtml };
+  const forms = { kyn: calcKynFormHtml, compound: calcCompoundFormHtml, car: calcCarFormHtml, house: calcHouseFormHtml, wm: calcWealthFormHtml };
+  const results = { kyn: kynResultsHtml, compound: compoundResultsHtml, car: carResultsHtml, house: houseResultsHtml, wm: wealthMultiplierResultsHtml };
   return `<div class="calcs">
     <section class="calcs-hero">
       <span class="inv-eyebrow">Calculators</span>
@@ -8452,10 +8527,10 @@ function renderCalculators() {
 function bindCalculatorEvents() {
   if (currentView !== "calculators") return;
   document.querySelectorAll("[data-calc-tool]").forEach((button) => button.addEventListener("click", () => { calcTool = button.dataset.calcTool; render(); }));
-  const form = $("#calcKynForm") || $("#calcCompoundForm") || $("#calcCarForm") || $("#calcHouseForm");
+  const form = $("#calcKynForm") || $("#calcCompoundForm") || $("#calcCarForm") || $("#calcHouseForm") || $("#calcWealthForm");
   if (!form) return;
-  const tool = { calcKynForm: "kyn", calcCompoundForm: "compound", calcCarForm: "car", calcHouseForm: "house" }[form.id];
-  const resultsFor = { kyn: kynResultsHtml, compound: compoundResultsHtml, car: carResultsHtml, house: houseResultsHtml }[tool];
+  const tool = { calcKynForm: "kyn", calcCompoundForm: "compound", calcCarForm: "car", calcHouseForm: "house", calcWealthForm: "wm" }[form.id];
+  const resultsFor = { kyn: kynResultsHtml, compound: compoundResultsHtml, car: carResultsHtml, house: houseResultsHtml, wm: wealthMultiplierResultsHtml }[tool];
   // The results follow every keystroke (from what is typed, so a half-typed age is never changed under the cursor); what is typed is saved when a box is left.
   const refresh = () => {
     const raw = calcReadForm(form);
