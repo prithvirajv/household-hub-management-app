@@ -23,7 +23,8 @@ const { registerReceiptMailRoutes, createMailboxStore, ingestReceiptEmail } = re
 const { pollReceiptMailbox } = require("./receipt-mailbox");
 const { RECEIPT_READ_SYSTEM, RECEIPT_IMAGE_TYPES, buildReceiptReadParts, parseReceiptDraft, receiptCheck } = require("../lib/receipt-read");
 const { RECEIPT_EMAIL_SYSTEM, buildReceiptEmailParts } = require("../lib/receipt-email");
-const { RECIPE_IMPORT_SYSTEM, canonicalYoutubeUrl, buildRecipeImportParts, validateRecipeImportRequest, parseRecipeDraft, createImportLimiter } = require("../lib/recipe-import");
+const { fetchRecipeCaption } = require("./recipe-caption");
+const { RECIPE_IMPORT_SYSTEM, buildRecipeImportParts, validateRecipeImportRequest, parseRecipeDraft, createImportLimiter } = require("../lib/recipe-import");
 const { validateJournalPayload, buildDocumentObjectPath, sanitizeFilename, wouldCreateFolderCycle, collectDescendantFolderIds, SMS_CARRIERS, smsGatewayAddress, rollAnnualNotifyAtForward, choreNotifyAt, parseBankStatementPdfText, extractAccountActivityLabel, isValidEmail, parseImageReminderDraft, parseBatchSuggestions, parseHomeBriefing, parseAssistantPlan, pgDumpArgs } = require("../lib/shared-logic");
 const pdfParse = require("pdf-parse");
 const ExcelJS = require("exceljs");
@@ -1822,19 +1823,37 @@ app.post("/api/calendar/reminder-from-image", requireSession, async (req, res, n
   }
 });
 
-// A public YouTube video and/or screenshots of an ingredient list become a DRAFT recipe (name, ingredients, steps, tips) handed back for the person
-// to review and edit; nothing is saved here and the photos are never stored. Same pattern as the Calendar photo import, plus a per-person hourly
-// limit because reading a video costs far more than reading a photo (the AI key is shared by every household).
+// A public video link (YouTube, Instagram, Facebook, TikTok...), the caption posted with it and/or screenshots of an ingredient list become a DRAFT
+// recipe (name, ingredients, steps, tips) handed back for the person to review and edit; nothing is saved here and the photos are never stored.
+// Only YouTube can be watched by the AI; for the other sites the caption is read from the post's public page when the site shows it, or pasted by
+// the person when it does not. Same pattern as the Calendar photo import, plus a per-person hourly limit because reading a video costs far more
+// than reading a photo (the AI key is shared by every household).
 const recipeImportLimiter = createImportLimiter({ max: 10, windowMs: 60 * 60 * 1000 });
+const recipeCaptionLimiter = createImportLimiter({ max: 60, windowMs: 60 * 60 * 1000 });
+// Tests never reach the real sites: the page reader is off in test mode unless it is pointed at a local stand-in.
+const RECIPE_CAPTION_TEST_BASE = process.env.NODE_ENV === "test" ? String(process.env.RECIPE_CAPTION_TEST_BASE || "") : "";
 app.post("/api/recipes/import", requireSession, requireEditAccess, async (req, res, next) => {
   try {
     if (!GEMINI_API_KEY) return res.status(503).json({ error: "AI recipe reading is not configured for this deployment" });
     const request = validateRecipeImportRequest(req.body);
     if (request.error) return res.status(400).json({ error: request.error });
+    if (!recipeCaptionLimiter.take(req.sessionUser.id)) return res.status(429).json({ error: "You have read several recipes in the last hour - try again a little later" });
+    // The caption on the post's page (if the site shows it) plus anything the person pasted.
+    let written = { title: "", caption: "" };
+    if (request.link && (process.env.NODE_ENV !== "test" || RECIPE_CAPTION_TEST_BASE)) {
+      written = await fetchRecipeCaption(request.link, RECIPE_CAPTION_TEST_BASE ? { rewrite: (url) => `${RECIPE_CAPTION_TEST_BASE}/page?u=${encodeURIComponent(url)}` } : {});
+    }
+    const caption = [written.caption, request.caption].filter(Boolean).join("\n\n").slice(0, 8000);
+    if (request.link && !request.videoId && !caption && !request.images.length) {
+      return res.status(422).json({ needsCaption: true, error: `I could not read the caption from that ${request.link.label} link - ${request.link.label} does not show it to other apps. Paste the caption text from the post into the box, or add a screenshot of the ingredients.` });
+    }
     if (!recipeImportLimiter.take(req.sessionUser.id)) return res.status(429).json({ error: "You have read several recipes in the last hour - try again a little later" });
     let text;
     try {
-      text = await geminiGenerate({ parts: buildRecipeImportParts(request), system: RECIPE_IMPORT_SYSTEM, maxOutputTokens: 8000, timeoutMs: 150000, rounds: 3 });
+      text = await geminiGenerate({
+        parts: buildRecipeImportParts({ videoId: request.videoId, images: request.images, caption, title: written.title, platform: request.link?.label || "" }),
+        system: RECIPE_IMPORT_SYSTEM, maxOutputTokens: 8000, timeoutMs: 150000, rounds: 3
+      });
     } catch (error) {
       if (error?.name === "TimeoutError" || error?.name === "AbortError") return res.status(504).json({ error: "Reading that took too long. A shorter video, or just the ingredient photos, will be quicker." });
       // Google's own wording for an overloaded model ("experiencing high demand...") says nothing the person can act on; say what to do.
@@ -1842,7 +1861,12 @@ app.post("/api/recipes/import", requireSession, requireEditAccess, async (req, r
       throw error;
     }
     const draft = parseRecipeDraft(text);
-    res.json({ ...draft, sourceUrl: request.videoId ? canonicalYoutubeUrl(request.videoId) : "" });
+    res.json({
+      ...draft,
+      sourceUrl: request.link?.url || "",
+      sourceLabel: request.link?.label || "",
+      used: [request.videoId && "video", caption && "caption", request.images.length && "photos"].filter(Boolean)
+    });
   } catch (error) {
     if (error?.statusCode) return res.status(error.statusCode).json({ error: error.message });
     next(error);

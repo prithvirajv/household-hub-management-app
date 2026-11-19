@@ -5043,13 +5043,14 @@ let recipeAddFormOpen = false;
 let recipesSearchQuery = "";
 let recipesSortBy = "name";
 let recipesFilterMode = "all";
-// Add a recipe from a public YouTube video and/or photos of an ingredient list: the AI drafts it, the person reviews it, nothing is saved before that.
+// Add a recipe from a public video link (YouTube, Instagram, Facebook, TikTok...), its caption and/or photos of an ingredient list: the AI drafts it, the person reviews it, nothing is saved before that.
 let recipeImportOpen = false;
 let recipeImportUrl = "";
+let recipeImportCaption = ""; // the post's caption, when the person pastes it (sites like Instagram do not show it to other apps)
 let recipeImportImages = []; // { name, mimeType, imageBase64 } - held in memory only, never saved
 let recipeImportBusy = false;
 let recipeImportError = "";
-let recipeImportDraft = null; // { name, ingredients[], steps[], tips[{text, important}], calories, protein, sourceUrl }
+let recipeImportDraft = null; // { name, ingredients[], steps[], tips[{text, important}], calories, protein, sourceUrl, sourceLabel, used[] }
 let recipeDetailId = ""; // the recipe whose full-recipe pop-up is open
 const recipeChecked = new Set(); // ingredient ticks in the pop-up ("recipeId:index"), kept for the session
 
@@ -7834,6 +7835,20 @@ function readRecipeTips(root) {
     .filter((tip) => tip.text);
 }
 
+// "Instagram", "Facebook", ... for a saved source address (the plain host for anything else).
+function recipeSourceLabel(url) {
+  let host = "";
+  try { host = new URL(url).hostname.toLowerCase(); } catch (_error) { return "the original post"; }
+  const known = [["youtu", "YouTube"], ["instagram", "Instagram"], ["instagr.am", "Instagram"], ["facebook", "Facebook"], ["fb.", "Facebook"], ["tiktok", "TikTok"], ["pinterest", "Pinterest"], ["pin.it", "Pinterest"], ["x.com", "X"], ["twitter", "X"], ["reddit", "Reddit"], ["redd.it", "Reddit"], ["threads", "Threads"]].find(([part]) => host.includes(part));
+  return known ? `the ${known[1]} post` : "the original post";
+}
+function recipeImportUsedText(draft) {
+  const used = Array.isArray(draft?.used) && draft.used.length ? draft.used : [draft?.sourceUrl ? "video" : "photos"];
+  const names = { video: "video", caption: "caption", photos: "photos" };
+  const list = used.map((item) => names[item] || item);
+  return list.length > 1 ? `${list.slice(0, -1).join(", ")} and ${list[list.length - 1]}` : list[0];
+}
+
 function renderRecipeImportPanel() {
   const draft = recipeImportDraft;
   return `<section class="card recipe-import">
@@ -7843,23 +7858,24 @@ function renderRecipeImportPanel() {
     </div>
     ${draft ? `
     <form id="recipeImportForm" class="recipe-builder recipe-import-draft">
-      <p class="muted" role="status">The AI drafted this from your ${draft.sourceUrl ? "video" : "photos"}. Fix anything that is off, then add it. Nothing is saved until you do.</p>
+      <p class="muted" role="status">The AI drafted this from your ${recipeImportUsedText(draft)}. Fix anything that is off, then add it. Nothing is saved until you do.</p>
       <label class="recipe-field-wide">Name<input name="name" value="${escapeHtml(draft.name)}" required placeholder="Recipe name"></label>
       <label class="recipe-field-wide">Ingredients (one per line)<textarea name="ingredients" rows="${Math.min(14, Math.max(4, draft.ingredients.length + 1))}">${escapeHtml(draft.ingredients.join("\n"))}</textarea></label>
       <label class="recipe-field-wide">Steps (one per line)<textarea name="steps" rows="${Math.min(12, Math.max(4, draft.steps.length + 1))}">${escapeHtml(draft.steps.join("\n"))}</textarea></label>
       ${recipeTipsEditorHtml(draft.tips)}
       <label>Calories<input name="calories" type="number" min="0" value="${Number(draft.calories || 0)}"></label>
       <label>Protein (g)<input name="protein" type="number" min="0" value="${Number(draft.protein || 0)}"></label>
-      ${draft.sourceUrl ? `<small class="muted">Source: <a href="${escapeHtml(draft.sourceUrl)}" target="_blank" rel="noopener noreferrer">the video</a></small>` : ""}
+      ${draft.sourceUrl ? `<small class="muted">Source: <a href="${escapeHtml(draft.sourceUrl)}" target="_blank" rel="noopener noreferrer">${escapeHtml(recipeSourceLabel(draft.sourceUrl))}</a></small>` : ""}
       <div class="recipe-form-actions">
         <button class="ghost" id="recipeImportDiscardButton" type="button">Discard</button>
         <button type="submit">Add recipe</button>
       </div>
     </form>` : `
-    <p class="muted">Paste a public YouTube link, add screenshots of the ingredient list, or both. The AI reads them and drafts the recipe, with the cook's tips marked Important. Spoken quantities can be missed, so check the draft.</p>
-    <label>YouTube link<input type="url" id="recipeImportUrl" value="${escapeHtml(recipeImportUrl)}" placeholder="https://youtu.be/…" autocomplete="off"></label>
+    <p class="muted">Paste the link of a recipe video or post from YouTube, Instagram, Facebook, TikTok or another social site (use the app's Share, then Copy link). The AI reads the caption posted with it, and for YouTube it also watches the video. Instagram, Facebook and TikTok often hide their captions from other apps: if it asks, paste the caption text below. You can also add screenshots of the ingredient list. Spoken quantities can be missed, so check the draft.</p>
+    <label>Video or post link<input type="url" id="recipeImportUrl" value="${escapeHtml(recipeImportUrl)}" placeholder="https://www.instagram.com/reel/… or youtu.be/… or fb.watch/…" autocomplete="off"></label>
+    <label>Caption or description (optional)<textarea id="recipeImportCaption" rows="4" placeholder="Paste the post's caption here if it lists the ingredients or steps">${escapeHtml(recipeImportCaption)}</textarea></label>
     <div class="recipe-import-photos">
-      <label class="documents-upload-button">+ Add photos of the ingredients<input type="file" id="recipeImportFiles" accept="image/*" multiple></label>
+      <label class="documents-upload-button">+ Add photos or screenshots<input type="file" id="recipeImportFiles" accept="image/*" multiple></label>
       ${recipeImportImages.map((image, index) => `<span class="pill">${escapeHtml(image.name)} <button type="button" class="icon-button" data-recipe-import-remove="${index}" aria-label="Remove ${escapeHtml(image.name)}">×</button></span>`).join("")}
     </div>
     ${recipeImportError ? `<p class="recipe-import-error" role="alert">${escapeHtml(recipeImportError)}</p>` : ""}
@@ -7926,7 +7942,7 @@ function renderRecipeDetailDialog(recipe) {
         ${steps.length ? `<section><h3>Steps</h3><ol class="recipe-steps">${steps.map((step) => `<li><span>${escapeHtml(step)}</span></li>`).join("")}</ol></section>` : ""}
       </div>
       ${other.length ? `<section><h3>More tips</h3><ul class="recipe-other-tips">${other.map((tip) => `<li>${escapeHtml(tip.text)}</li>`).join("")}</ul></section>` : ""}
-      ${recipe.sourceUrl ? `<p class="recipe-detail-source"><a href="${escapeHtml(recipe.sourceUrl)}" target="_blank" rel="noopener noreferrer">▶ Watch the video</a></p>` : ""}
+      ${recipe.sourceUrl ? `<p class="recipe-detail-source"><a href="${escapeHtml(recipe.sourceUrl)}" target="_blank" rel="noopener noreferrer">▶ Open ${escapeHtml(recipeSourceLabel(recipe.sourceUrl))}</a></p>` : ""}
     </div>
     <footer class="recipe-detail-actions">
       <button type="button" class="ghost" data-select-recipe="${escapeHtml(recipe.id)}">Use in Meals</button>
@@ -14217,10 +14233,11 @@ function bindViewEvents() {
   };
   $("#openRecipeImportButton")?.addEventListener("click", () => { recipeImportOpen = true; recipeImportError = ""; render(); $("#recipeImportUrl")?.focus(); });
   $("#recipeImportCloseButton")?.addEventListener("click", () => {
-    recipeImportOpen = false; recipeImportDraft = null; recipeImportError = ""; recipeImportImages = []; recipeImportUrl = "";
+    recipeImportOpen = false; recipeImportDraft = null; recipeImportError = ""; recipeImportImages = []; recipeImportUrl = ""; recipeImportCaption = "";
     render();
   });
   $("#recipeImportUrl")?.addEventListener("input", (event) => { recipeImportUrl = event.target.value; });
+  $("#recipeImportCaption")?.addEventListener("input", (event) => { recipeImportCaption = event.target.value; });
   $("#recipeImportFiles")?.addEventListener("change", async (event) => {
     const files = [...(event.target.files || [])];
     event.target.value = "";
@@ -14238,13 +14255,14 @@ function bindViewEvents() {
   $("#recipeImportRunButton")?.addEventListener("click", async () => {
     if (recipeImportBusy) return;
     const url = recipeImportUrl.trim();
-    if (!url && !recipeImportImages.length) { recipeImportError = "Paste a YouTube link, add photos of the ingredients, or both."; render(); return; }
+    const caption = recipeImportCaption.trim();
+    if (!url && !caption && !recipeImportImages.length) { recipeImportError = "Paste a link to the video, paste its caption, add photos of the ingredients, or any mix."; render(); return; }
     recipeImportBusy = true;
     recipeImportError = "";
     render();
     try {
-      const draft = await api("/api/recipes/import", { method: "POST", body: JSON.stringify({ videoUrl: url, images: recipeImportImages.map(({ mimeType, imageBase64 }) => ({ mimeType, imageBase64 })) }) });
-      recipeImportDraft = { name: draft.name || "", ingredients: draft.ingredients || [], steps: draft.steps || [], tips: draft.tips || [], calories: draft.calories || 0, protein: draft.protein || 0, sourceUrl: draft.sourceUrl || "" };
+      const draft = await api("/api/recipes/import", { method: "POST", body: JSON.stringify({ videoUrl: url, caption, images: recipeImportImages.map(({ mimeType, imageBase64 }) => ({ mimeType, imageBase64 })) }) });
+      recipeImportDraft = { name: draft.name || "", ingredients: draft.ingredients || [], steps: draft.steps || [], tips: draft.tips || [], calories: draft.calories || 0, protein: draft.protein || 0, sourceUrl: draft.sourceUrl || "", sourceLabel: draft.sourceLabel || "", used: draft.used || [] };
     } catch (error) {
       recipeImportError = error.message || "Couldn't read that recipe.";
     }
@@ -14269,7 +14287,7 @@ function bindViewEvents() {
       steps: draft.steps, tips: draft.tips,
       ...(draft.sourceUrl ? { sourceUrl: draft.sourceUrl } : {})
     });
-    recipeImportDraft = null; recipeImportOpen = false; recipeImportUrl = ""; recipeImportImages = [];
+    recipeImportDraft = null; recipeImportOpen = false; recipeImportUrl = ""; recipeImportCaption = ""; recipeImportImages = [];
     showToast(`Added "${name}" to your recipes.`, { type: "info" });
     autosaveState();
     render();

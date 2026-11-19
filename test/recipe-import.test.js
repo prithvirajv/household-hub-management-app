@@ -1,6 +1,6 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
-const { youtubeVideoId, canonicalYoutubeUrl, buildRecipeImportParts, validateRecipeImportRequest, parseRecipeDraft, createImportLimiter, RECIPE_MAX_IMAGES } = require("../lib/recipe-import");
+const { youtubeVideoId, canonicalYoutubeUrl, recipeSourceLink, buildRecipeImportParts, validateRecipeImportRequest, parseRecipeDraft, createImportLimiter, RECIPE_MAX_IMAGES } = require("../lib/recipe-import");
 
 const ID = "abcdefghijk";
 const PNG = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=";
@@ -27,13 +27,14 @@ test("the request to the AI carries only the canonical video link, the photos an
 });
 
 test("validateRecipeImportRequest needs a source and rejects bad links, types and sizes", () => {
-  assert.match(validateRecipeImportRequest({}).error, /Paste a YouTube link/);
-  assert.match(validateRecipeImportRequest({ videoUrl: "https://example.com/x" }).error, /YouTube link/);
+  assert.match(validateRecipeImportRequest({}).error, /Paste a link to the video/);
+  assert.match(validateRecipeImportRequest({ videoUrl: "https://example.com/x" }).error, /not one I can use/);
   assert.match(validateRecipeImportRequest({ images: [{ mimeType: "application/pdf", imageBase64: PNG }] }).error, /Unsupported image type/);
   assert.match(validateRecipeImportRequest({ images: [{ mimeType: "image/png", imageBase64: "" }] }).error, /empty/);
   assert.match(validateRecipeImportRequest({ images: [{ mimeType: "image/png", imageBase64: "A".repeat(5 * 1024 * 1024 + 1) }] }).error, /too large/);
   assert.match(validateRecipeImportRequest({ images: Array.from({ length: RECIPE_MAX_IMAGES + 1 }, () => ({ mimeType: "image/png", imageBase64: PNG })) }).error, /at most/);
-  assert.deepEqual(validateRecipeImportRequest({ videoUrl: `https://youtu.be/${ID}?si=x` }), { videoId: ID, images: [] });
+  const yt = validateRecipeImportRequest({ videoUrl: `https://youtu.be/${ID}?si=x` });
+  assert.deepEqual([yt.videoId, yt.link.platform, yt.link.url, yt.caption, yt.images], [ID, "youtube", `https://www.youtube.com/watch?v=${ID}`, "", []]);
   const both = validateRecipeImportRequest({ videoUrl: `https://youtu.be/${ID}`, images: [{ mimeType: "IMAGE/JPEG", imageBase64: PNG }] });
   assert.deepEqual([both.videoId, both.images[0].mimeType], [ID, "image/jpeg"]);
 });
@@ -71,4 +72,32 @@ test("the import limiter lets each person start a few reads an hour, separately,
   assert.equal(limiter.take("a", 1005), true, "the first one has aged out of the window");
   assert.equal(limiter.take("a", 1015), true);
   assert.equal(limiter.take("a", 1016), false);
+});
+
+test("recipeSourceLink accepts Instagram, Facebook, TikTok and the other supported sites, tidies the address, and rejects look-alikes", () => {
+  const ok = (input) => recipeSourceLink(input);
+  assert.deepEqual([ok("https://www.instagram.com/reel/Cxyz123/?igsh=abc&utm_source=ig").platform, ok("https://www.instagram.com/reel/Cxyz123/?igsh=abc&utm_source=ig").url], ["instagram", "https://www.instagram.com/reel/Cxyz123/"], "tracking parameters removed");
+  assert.equal(ok("instagram.com/p/abc/#comments").url, "https://instagram.com/p/abc/", "no scheme is fine, the fragment is dropped");
+  assert.equal(ok("https://fb.watch/abc123/").platform, "facebook");
+  assert.equal(ok("https://www.facebook.com/share/v/1AbC/?mibextid=xx").url, "https://www.facebook.com/share/v/1AbC/");
+  assert.equal(ok("https://www.facebook.com/watch/?v=123456").url, "https://www.facebook.com/watch/?v=123456", "the video id parameter is kept");
+  assert.equal(ok("https://vm.tiktok.com/ZMabc/").platform, "tiktok");
+  assert.equal(ok("https://www.tiktok.com/@cook/video/123?is_from_webapp=1").url, "https://www.tiktok.com/@cook/video/123");
+  ["pinterest", "x", "reddit", "threads"].forEach((platform, index) => assert.equal(ok(["https://pin.it/abc", "https://x.com/cook/status/1", "https://www.reddit.com/r/food/comments/1/x/", "https://www.threads.net/@cook/post/1"][index]).platform, platform));
+  assert.equal(ok("http://www.instagram.com/reel/a/").url, "https://www.instagram.com/reel/a/", "always https");
+  ["https://instagram.com.evil.example/reel/1", "https://evil.example/?u=https://instagram.com/reel/1", "https://user:pw@instagram.com/reel/1", "https://instagram.com:8443/x", "http://127.0.0.1/",
+    "https://notinstagram.com/x", "https://www.youtube.com/playlist?list=1", "javascript:alert(1)", "", "x".repeat(600)].forEach((input) => assert.equal(ok(input), null, `rejects: ${input.slice(0, 50)}`));
+});
+
+test("a caption pasted by the person is cleaned and counts as a source; the AI request quotes it as untrusted text", () => {
+  const request = validateRecipeImportRequest({ caption: "  Ingredients:\r\n2 cups rice\n\n\n\n1 tsp salt   #yum  " });
+  assert.equal(request.caption, "Ingredients:\n2 cups rice\n\n1 tsp salt #yum");
+  assert.equal(request.link, null);
+  assert.equal(validateRecipeImportRequest({ caption: "x".repeat(9000) }).caption.length, 6000);
+  const parts = buildRecipeImportParts({ caption: request.caption, title: "Rice bowl", platform: "Instagram" });
+  assert.equal(parts.some((part) => part.fileData), false, "only YouTube is handed to the AI as a video");
+  assert.match(parts[0].text, /on Instagram \(untrusted content/);
+  assert.match(parts[0].text, /Title: Rice bowl/);
+  assert.match(parts[0].text, /2 cups rice/);
+  assert.ok(parts[parts.length - 1].text, "the instruction comes last");
 });

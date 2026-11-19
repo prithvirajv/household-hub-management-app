@@ -451,6 +451,19 @@ link. It saves nothing; the Recipes page shows a review form and only "Add recip
 is passed on, for example a private video), 503 no `GEMINI_API_KEY`, 504 timeout. A long video is expensive: one 19-minute video was about 75,000
 prompt tokens and 50 seconds. The import goes round the whole model list three times before giving up (a demand spike is common and a video read is worth waiting for), and an overloaded AI is reported as a 503 "very busy, try again in a minute or two" instead of Google's wording. Ingredient items never contain commas (the recipe form stores ingredients as a comma-separated list).
 
+**Links from other social sites (Instagram, Facebook, TikTok, Pinterest, X, Reddit, Threads).** `recipeSourceLink` (`lib/recipe-import.js`) accepts a link only on
+those hosts (and YouTube), https only, no login or port, tracking parameters stripped; that cleaned address is saved as the recipe's `sourceUrl`. Only YouTube
+can be handed to Gemini as a video (`fileData`); for every other site the AI reads the post's caption. `server/recipe-caption.js` fetches the public page
+(honest user agent, 8 s, 2 MB cap, redirects followed by hand with the host list re-checked at every hop, so a redirect to anywhere else, or to an internal
+address, is refused) and `lib/recipe-caption.js` reads the caption from it: YouTube's full `shortDescription`, TikTok's oEmbed title or `desc`, Instagram's
+`og:description` with the likes line removed, Facebook and the rest from the standard description tags or JSON-LD. Login-wall text is discarded. The
+caption is quoted to the AI as untrusted text; it is authoritative for ingredients and quantities. Instagram, Facebook and TikTok often show no caption to
+other apps (tested: YouTube and Instagram pages did, TikTok's page did not); then the route answers 422 `needsCaption` and the form's "Caption or
+description" box takes the pasted text, so the import always has a way through. A caption alone (no link) also works. The response carries `used`
+(`video`, `caption`, `photos`) so the review form says what the draft came from. Caption page reads have their own limit (60 an hour per person) and the
+AI limit (10) is only used when the AI is actually called. Tests never reach the real sites: in test mode the page reader is off unless
+`RECIPE_CAPTION_TEST_BASE` points it at a local stand-in.
+
 ### A card or bank shows "synced" but its newest charges are missing
 
 Credit cards (Citi, Apple Card) list new purchases as *pending* for a day or more, and a pending row can still change or vanish, so no

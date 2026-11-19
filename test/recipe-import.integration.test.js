@@ -49,7 +49,7 @@ test("POST /api/recipes/import rejects a bad link, a missing source and a bad ph
     assert.equal((await post({})).status, 400);
     const badLink = await post({ videoUrl: "https://example.com/watch?v=" + ID });
     assert.equal(badLink.status, 400);
-    assert.match(badLink.body.error, /YouTube link/);
+    assert.match(badLink.body.error, /not one I can use/);
     assert.equal((await post({ images: [{ mimeType: "application/pdf", imageBase64: PNG }] })).status, 400);
     assert.equal(stub.requests.length, 0, "nothing reached the AI");
   } finally { await server.stop(); await stub.stop(); }
@@ -127,4 +127,104 @@ test("POST /api/recipes/import waits out an overloaded AI by going round the mod
     assert.doesNotMatch(response.body.error, /Spikes in demand/);
     assert.equal(alwaysBusy.requests.length, 7, "two models, three rounds, plus one last try of the first");
   } finally { await server2.stop(); await alwaysBusy.stop(); }
+});
+
+// A stand-in for the social sites' pages: the server's page reader is pointed here (see RECIPE_CAPTION_TEST_BASE) and asks for /page?u=<address>.
+async function startPageStub(pages) {
+  const requests = [];
+  const stub = http.createServer((req, res) => {
+    const address = new URL(req.url, "http://x").searchParams.get("u") || "";
+    requests.push(address);
+    const page = pages[address];
+    if (page?.redirect) { res.writeHead(302, { location: page.redirect }); return res.end(); }
+    if (!page) { res.writeHead(404); return res.end("no"); }
+    res.writeHead(200, { "Content-Type": "text/html" });
+    res.end(page.html);
+  });
+  await new Promise((resolve) => stub.listen(0, "127.0.0.1", resolve));
+  return { url: `http://127.0.0.1:${stub.address().port}`, requests, stop: () => new Promise((resolve) => stub.close(resolve)) };
+}
+
+test("POST /api/recipes/import reads an Instagram caption from the post's page and gives it to the AI", async () => {
+  const reel = "https://www.instagram.com/reel/Cabc123/";
+  const pages = startPageStub({ [reel]: { html: `<html><head><meta property="og:title" content="cook on Instagram: &quot;Idli podi&quot;"><meta property="og:description" content="1,204 likes, 33 comments - cook on March 3, 2025: &quot;Idli podi%0A1 cup urad dal &amp; 1/2 cup chana dal. Roast on low flame.&quot;."></head></html>` } });
+  const page = await pages;
+  const stub = await startGeminiStub({ body: answer(RECIPE) });
+  const server = await startTestServer({ GEMINI_API_KEY: "test-key", GEMINI_API_BASE_URL: stub.url, RECIPE_CAPTION_TEST_BASE: page.url });
+  try {
+    const cookie = await signedIn(server, "recipe-instagram");
+    const response = await server.request("/api/recipes/import", { method: "POST", headers: { cookie }, body: JSON.stringify({ videoUrl: `${reel}?igsh=tracking` }) });
+    assert.equal(response.status, 200, JSON.stringify(response.body));
+    assert.deepEqual([response.body.sourceUrl, response.body.sourceLabel, response.body.used], [reel, "Instagram", ["caption"]], "tracking removed, caption was the source");
+    const parts = stub.requests[0].contents[0].parts;
+    assert.equal(parts.some((part) => part.fileData), false, "Instagram is not handed over as a video file");
+    const text = parts.map((part) => part.text || "").join("\n");
+    assert.match(text, /1 cup urad dal & 1\/2 cup chana dal/, "the caption text reached the AI, decoded");
+    assert.doesNotMatch(text, /1,204 likes/, "the likes line is not part of the caption");
+    assert.deepEqual(page.requests, [reel], "the page was asked for with the tracking removed");
+  } finally { await server.stop(); await stub.stop(); await page.stop(); }
+});
+
+test("POST /api/recipes/import follows a short link to the real post but never to another site", async () => {
+  const short = "https://fb.watch/abc/";
+  const target = "https://www.facebook.com/reel/777/";
+  const page = await startPageStub({
+    [short]: { redirect: target },
+    [target]: { html: '<meta property="og:description" content="Paneer wrap: 200 g paneer, 2 rotis, 1 tbsp butter. Fry paneer, wrap.">' },
+    "https://www.instagram.com/reel/evil/": { redirect: "https://example.com/steal" },
+    "https://example.com/steal": { html: '<meta property="og:description" content="should never be read">' }
+  });
+  const stub = await startGeminiStub({ body: answer(RECIPE) });
+  const server = await startTestServer({ GEMINI_API_KEY: "test-key", GEMINI_API_BASE_URL: stub.url, RECIPE_CAPTION_TEST_BASE: page.url });
+  try {
+    const cookie = await signedIn(server, "recipe-redirect");
+    const post = (body) => server.request("/api/recipes/import", { method: "POST", headers: { cookie }, body: JSON.stringify(body) });
+    const ok = await post({ videoUrl: short });
+    assert.equal(ok.status, 200);
+    assert.deepEqual(page.requests, [short, target], "followed the short link to the post");
+    assert.match(JSON.stringify(stub.requests[0]), /200 g paneer/);
+    const bad = await post({ videoUrl: "https://www.instagram.com/reel/evil/" });
+    assert.equal(bad.status, 422, "the redirect to another site was refused, so there was no caption");
+    assert.equal(bad.body.needsCaption, true);
+    assert.ok(!page.requests.includes("https://example.com/steal"), "the other site was never contacted");
+    assert.equal(stub.requests.length, 1, "no second AI call");
+  } finally { await server.stop(); await stub.stop(); await page.stop(); }
+});
+
+test("POST /api/recipes/import asks for the caption when a site hides it, and works with a pasted caption", async () => {
+  const page = await startPageStub({ "https://www.tiktok.com/@cook/video/1": { html: "<html><head><title>TikTok - Make Your Day</title><meta property=\"og:description\" content=\"Log in to see more\"></head></html>" } });
+  const stub = await startGeminiStub({ body: answer(RECIPE) });
+  const server = await startTestServer({ GEMINI_API_KEY: "test-key", GEMINI_API_BASE_URL: stub.url, RECIPE_CAPTION_TEST_BASE: page.url });
+  try {
+    const cookie = await signedIn(server, "recipe-hidden");
+    const post = (body) => server.request("/api/recipes/import", { method: "POST", headers: { cookie }, body: JSON.stringify(body) });
+    const hidden = await post({ videoUrl: "https://www.tiktok.com/@cook/video/1" });
+    assert.equal(hidden.status, 422);
+    assert.equal(hidden.body.needsCaption, true);
+    assert.match(hidden.body.error, /TikTok does not show it/);
+    assert.equal(stub.requests.length, 0, "the AI was not asked with nothing to read");
+    const pasted = await post({ videoUrl: "https://www.tiktok.com/@cook/video/1", caption: "2 cups rice, 1 tsp salt. Boil 12 minutes." });
+    assert.equal(pasted.status, 200);
+    assert.deepEqual(pasted.body.used, ["caption"]);
+    assert.match(JSON.stringify(stub.requests[0]), /2 cups rice/);
+    const captionOnly = await post({ caption: "Rice: 2 cups rice. Boil." });
+    assert.equal(captionOnly.status, 200, "a caption alone is enough");
+    assert.equal(captionOnly.body.sourceUrl, "");
+  } finally { await server.stop(); await stub.stop(); await page.stop(); }
+});
+
+test("POST /api/recipes/import also reads a YouTube description and still sends the video itself", async () => {
+  const id = "abcdefghijk";
+  const page = await startPageStub({ [`https://www.youtube.com/watch?v=${id}`]: { html: '<meta property="og:title" content="Sambar"><script>var x={"shortDescription":"Ingredients:\\n1 cup toor dal\\n2 tomatoes\\nSubscribe!"};</script>' } });
+  const stub = await startGeminiStub({ body: answer(RECIPE) });
+  const server = await startTestServer({ GEMINI_API_KEY: "test-key", GEMINI_API_BASE_URL: stub.url, RECIPE_CAPTION_TEST_BASE: page.url });
+  try {
+    const cookie = await signedIn(server, "recipe-youtube-description");
+    const response = await server.request("/api/recipes/import", { method: "POST", headers: { cookie }, body: JSON.stringify({ videoUrl: `https://youtu.be/${id}` }) });
+    assert.equal(response.status, 200);
+    assert.deepEqual(response.body.used, ["video", "caption"]);
+    const parts = stub.requests[0].contents[0].parts;
+    assert.deepEqual(parts[0], { fileData: { fileUri: `https://www.youtube.com/watch?v=${id}` } });
+    assert.match(parts.map((part) => part.text || "").join("\n"), /1 cup toor dal\n2 tomatoes/);
+  } finally { await server.stop(); await stub.stop(); await page.stop(); }
 });

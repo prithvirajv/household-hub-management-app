@@ -574,16 +574,27 @@ button on every screen. People with view-only access don't see it.
    shop.
 
 **Add a recipe from a video or photos**
-- On **Recipes**, choose **+ From a video or photos**. Paste a public
-  YouTube link, add up to four screenshots or photos of the ingredient
-  list, or both. The AI reads them and drafts the recipe: a name, the
-  ingredients with quantities, the steps, and the cook's tips.
+- On **Recipes**, choose **+ From a video or photos**. Paste the link of a
+  recipe video or post from **YouTube, Instagram, Facebook, TikTok** (or
+  Pinterest, X, Reddit, Threads): in that app choose Share, then Copy link.
+  You can also add up to four screenshots or photos of the ingredient list,
+  or paste the post's caption. The AI reads what you give it and drafts the
+  recipe: a name, the ingredients with quantities, the steps, and the cook's
+  tips.
+- **The caption or description is read too.** Cooks often write the exact
+  ingredients and quantities there. For YouTube the AI also watches the
+  video. For Instagram, Facebook and TikTok the AI reads the caption only, and
+  those apps sometimes hide even that from other apps. If that happens you are
+  told, and you paste the caption text from the post into the **Caption or
+  description** box (long-press the caption, Copy) and try again. A caption
+  alone, with no link, works as well.
 - Nothing is saved yet. You get a review form to fix the name, the
   ingredients and steps (one per line) and the tips, then choose **Add
   recipe**. Every tip starts ticked **Important**; untick the ones that
   are not, remove any, or add your own.
-- When both a video and photos are given, the photos win for ingredient
-  names and quantities, and the video supplies the steps and tips. A
+- When a video, a caption and photos are given together, the photos and the
+  caption win for ingredient names and quantities, and the video supplies
+  the steps and tips. A
   video in another language (Tamil, for example) is translated into
   English. Quantities that are only spoken can be missed, so check them.
 - A recipe card stays compact: the name, calories and every ingredient,
@@ -593,7 +604,8 @@ button on every screen. People with view-only access don't see it.
   numbered steps, any other tips, and a link back to the video. **Use in
   Meals** and **Edit** are in the pop-up too, and you can add or change steps
   and tips on any recipe with **Edit**.
-- The video must be public (not private or members-only). Reading a
+- The video or post must be public (not private, friends-only or
+  members-only). The recipe keeps a link back to the original post. Reading a
   long video can take a minute, and each person can read about ten
   recipes an hour. The photos are sent to the AI only for that reading
   and are never stored.
