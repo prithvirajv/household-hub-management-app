@@ -464,6 +464,15 @@ description" box takes the pasted text, so the import always has a way through. 
 AI limit (10) is only used when the AI is actually called. Tests never reach the real sites: in test mode the page reader is off unless
 `RECIPE_CAPTION_TEST_BASE` points it at a local stand-in.
 
+**A video file instead of a link.** Instagram, Facebook and TikTok will not give their video files to a server, so the person saves or screen-records the
+video and picks it in the form (`#recipeImportVideoFile`, 30 MB max, MP4/MOV/WEBM). `POST /api/recipes/import-video` takes the raw file
+(`express.raw`, `video/*`), hands it to Gemini's file service (`server/gemini-files.js`: resumable upload, then polls until the file is ACTIVE) and
+answers `{ videoUploadId }`; the id is held in memory for one hour against that user (`recipeVideoUploads`), is single-use, and is what the import call
+sends as `videoUploadId` (an unknown, expired or someone else's id gives 410, a file Gemini cannot process 422). The import then passes the file to the
+model as `fileData { mimeType, fileUri }` next to any caption or photos, and deletes it from Gemini afterwards (after a failed reading it is kept so a retry
+does not re-upload; Gemini expires files after about 48 h anyway). Uploads are limited to 10 an hour per person; the 30 MB cap keeps the request under
+Cloud Run's 32 MB limit. Nothing is written to disk or the database.
+
 ### A card or bank shows "synced" but its newest charges are missing
 
 Credit cards (Citi, Apple Card) list new purchases as *pending* for a day or more, and a pending row can still change or vanish, so no

@@ -581,6 +581,15 @@ button on every screen. People with view-only access don't see it.
   or paste the post's caption. The AI reads what you give it and drafts the
   recipe: a name, the ingredients with quantities, the steps, and the cook's
   tips.
+- **Instagram, Facebook and TikTok videos: add the video file.** Those apps
+  do not let other apps download their videos, so save the video to your
+  phone (or screen-record it playing), then choose **+ Add a video file** and
+  pick it. The AI watches it, hears the cook and reads what is shown on
+  screen, just as it does a YouTube video. Keep it to about two minutes and
+  under 30 MB; a screen recording of just the recipe part is ideal. The video
+  is deleted from the AI service as soon as the recipe is read and is never
+  stored in FamilyLoop. Add the post's link as well if you want the recipe to
+  link back to it.
 - **The caption or description is read too.** Cooks often write the exact
   ingredients and quantities there. For YouTube the AI also watches the
   video. For Instagram, Facebook and TikTok the AI reads the caption only, and

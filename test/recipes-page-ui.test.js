@@ -8,9 +8,12 @@ const css = fs.readFileSync(path.join(__dirname, "..", "styles.css"), "utf8");
 
 test("Recipes can be added from a video and/or photos: a reviewed draft, never saved by the AI call itself", () => {
   assert.match(app, /id="openRecipeImportButton" type="button">\+ From a video or photos<\/button>/);
-  assert.match(app, /api\("\/api\/recipes\/import", \{ method: "POST", body: JSON\.stringify\(\{ videoUrl: url, caption, images: recipeImportImages\.map/, "the link, the caption and the photos go to the import route");
+  assert.match(app, /api\("\/api\/recipes\/import", \{ method: "POST", body: JSON\.stringify\(\{ videoUrl: url, caption, videoUploadId: recipeImportVideo\?\.uploadId \|\| "", images: recipeImportImages\.map/, "the link, the caption and the photos go to the import route");
   assert.match(app, /Paste the link of a recipe video or post from YouTube, Instagram, Facebook, TikTok/, "the form says any of these sites works");
   assert.match(app, /id="recipeImportCaption"/, "there is a box for a pasted caption");
+  assert.match(app, /id="recipeImportVideoFile" accept="video\/\*"/, "a video file can be picked");
+  assert.match(app, /api\("\/api\/recipes\/import-video", \{ method: "POST", headers: \{ "Content-Type": recipeImportVideo\.file\.type/, "the picked video is sent as the raw file");
+  assert.match(app, /videoUploadId: recipeImportVideo\?\.uploadId/, "the reading refers to the sent video by id");
   assert.match(app, /Nothing is saved until you do\./, "the draft is reviewed first");
   // Only the review form's submit adds the recipe; the import call just fills the draft.
   const importCall = app.slice(app.indexOf('$("#recipeImportRunButton")?.addEventListener'), app.indexOf('$("#recipeImportForm")?.addEventListener("input"'));

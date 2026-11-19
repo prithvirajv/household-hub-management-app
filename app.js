@@ -5046,6 +5046,7 @@ let recipesFilterMode = "all";
 // Add a recipe from a public video link (YouTube, Instagram, Facebook, TikTok...), its caption and/or photos of an ingredient list: the AI drafts it, the person reviews it, nothing is saved before that.
 let recipeImportOpen = false;
 let recipeImportUrl = "";
+let recipeImportVideo = null; // { file, name, size, uploadId } - a video the person picked (a saved or screen-recorded reel); the file stays in memory, uploadId is set once it has been sent
 let recipeImportCaption = ""; // the post's caption, when the person pastes it (sites like Instagram do not show it to other apps)
 let recipeImportImages = []; // { name, mimeType, imageBase64 } - held in memory only, never saved
 let recipeImportBusy = false;
@@ -7871,16 +7872,18 @@ function renderRecipeImportPanel() {
         <button type="submit">Add recipe</button>
       </div>
     </form>` : `
-    <p class="muted">Paste the link of a recipe video or post from YouTube, Instagram, Facebook, TikTok or another social site (use the app's Share, then Copy link). The AI reads the caption posted with it, and for YouTube it also watches the video. Instagram, Facebook and TikTok often hide their captions from other apps: if it asks, paste the caption text below. You can also add screenshots of the ingredient list. Spoken quantities can be missed, so check the draft.</p>
+    <p class="muted">Paste the link of a recipe video or post from YouTube, Instagram, Facebook, TikTok or another social site (use the app's Share, then Copy link). The AI reads the caption posted with it, and for YouTube it also watches the video. For Instagram, Facebook or TikTok, save or screen-record the video on your phone and add it with "Add a video file": the AI then watches it too. Those apps often hide their captions from other apps: if it asks, paste the caption text below. You can also add screenshots of the ingredient list. Spoken quantities can be missed, so check the draft.</p>
     <label>Video or post link<input type="url" id="recipeImportUrl" value="${escapeHtml(recipeImportUrl)}" placeholder="https://www.instagram.com/reel/… or youtu.be/… or fb.watch/…" autocomplete="off"></label>
     <label>Caption or description (optional)<textarea id="recipeImportCaption" rows="4" placeholder="Paste the post's caption here if it lists the ingredients or steps">${escapeHtml(recipeImportCaption)}</textarea></label>
     <div class="recipe-import-photos">
+      <label class="documents-upload-button">+ Add a video file<input type="file" id="recipeImportVideoFile" accept="video/*"></label>
+      ${recipeImportVideo ? `<span class="pill">${escapeHtml(recipeImportVideo.name)} (${Math.max(1, Math.round(recipeImportVideo.size / 1048576))} MB) <button type="button" class="icon-button" id="recipeImportVideoRemove" aria-label="Remove the video">×</button></span>` : ""}
       <label class="documents-upload-button">+ Add photos or screenshots<input type="file" id="recipeImportFiles" accept="image/*" multiple></label>
       ${recipeImportImages.map((image, index) => `<span class="pill">${escapeHtml(image.name)} <button type="button" class="icon-button" data-recipe-import-remove="${index}" aria-label="Remove ${escapeHtml(image.name)}">×</button></span>`).join("")}
     </div>
     ${recipeImportError ? `<p class="recipe-import-error" role="alert">${escapeHtml(recipeImportError)}</p>` : ""}
     <div class="recipe-form-actions">
-      <button type="button" id="recipeImportRunButton" ${recipeImportBusy ? "disabled" : ""}>${recipeImportBusy ? "Reading… a video can take a minute" : "Read the recipe"}</button>
+      <button type="button" id="recipeImportRunButton" ${recipeImportBusy ? "disabled" : ""}>${recipeImportBusy ? "Reading… a video can take a minute or two" : "Read the recipe"}</button>
     </div>`}
   </section>`;
 }
@@ -14233,11 +14236,21 @@ function bindViewEvents() {
   };
   $("#openRecipeImportButton")?.addEventListener("click", () => { recipeImportOpen = true; recipeImportError = ""; render(); $("#recipeImportUrl")?.focus(); });
   $("#recipeImportCloseButton")?.addEventListener("click", () => {
-    recipeImportOpen = false; recipeImportDraft = null; recipeImportError = ""; recipeImportImages = []; recipeImportUrl = ""; recipeImportCaption = "";
+    recipeImportOpen = false; recipeImportDraft = null; recipeImportError = ""; recipeImportImages = []; recipeImportUrl = ""; recipeImportCaption = ""; recipeImportVideo = null;
     render();
   });
   $("#recipeImportUrl")?.addEventListener("input", (event) => { recipeImportUrl = event.target.value; });
   $("#recipeImportCaption")?.addEventListener("input", (event) => { recipeImportCaption = event.target.value; });
+  $("#recipeImportVideoFile")?.addEventListener("change", (event) => {
+    const file = event.target.files?.[0];
+    event.target.value = "";
+    if (!file) return;
+    if (file.size > 30 * 1024 * 1024) { showToast("That video is over 30 MB. Record or trim a shorter clip (about 2 minutes) and try again."); return; }
+    recipeImportVideo = { file, name: file.name || "video", size: file.size, uploadId: "" };
+    recipeImportError = "";
+    render();
+  });
+  $("#recipeImportVideoRemove")?.addEventListener("click", () => { recipeImportVideo = null; render(); });
   $("#recipeImportFiles")?.addEventListener("change", async (event) => {
     const files = [...(event.target.files || [])];
     event.target.value = "";
@@ -14256,15 +14269,22 @@ function bindViewEvents() {
     if (recipeImportBusy) return;
     const url = recipeImportUrl.trim();
     const caption = recipeImportCaption.trim();
-    if (!url && !caption && !recipeImportImages.length) { recipeImportError = "Paste a link to the video, paste its caption, add photos of the ingredients, or any mix."; render(); return; }
+    if (!url && !caption && !recipeImportVideo && !recipeImportImages.length) { recipeImportError = "Paste a link to the video, paste its caption, add a video file, add photos of the ingredients, or any mix."; render(); return; }
     recipeImportBusy = true;
     recipeImportError = "";
     render();
     try {
-      const draft = await api("/api/recipes/import", { method: "POST", body: JSON.stringify({ videoUrl: url, caption, images: recipeImportImages.map(({ mimeType, imageBase64 }) => ({ mimeType, imageBase64 })) }) });
+      // A picked video goes up first (once: a retry after an error reuses it); the reading then refers to it by id.
+      if (recipeImportVideo && !recipeImportVideo.uploadId) {
+        const sent = await api("/api/recipes/import-video", { method: "POST", headers: { "Content-Type": recipeImportVideo.file.type || "video/mp4" }, body: recipeImportVideo.file });
+        recipeImportVideo.uploadId = sent.videoUploadId;
+      }
+      const draft = await api("/api/recipes/import", { method: "POST", body: JSON.stringify({ videoUrl: url, caption, videoUploadId: recipeImportVideo?.uploadId || "", images: recipeImportImages.map(({ mimeType, imageBase64 }) => ({ mimeType, imageBase64 })) }) });
+      if (recipeImportVideo) recipeImportVideo.uploadId = ""; // the server has finished with it; a new reading sends the file again
       recipeImportDraft = { name: draft.name || "", ingredients: draft.ingredients || [], steps: draft.steps || [], tips: draft.tips || [], calories: draft.calories || 0, protein: draft.protein || 0, sourceUrl: draft.sourceUrl || "", sourceLabel: draft.sourceLabel || "", used: draft.used || [] };
     } catch (error) {
       recipeImportError = error.message || "Couldn't read that recipe.";
+      if (recipeImportVideo && /expired/i.test(recipeImportError)) recipeImportVideo.uploadId = "";
     }
     recipeImportBusy = false;
     render();
@@ -14287,7 +14307,7 @@ function bindViewEvents() {
       steps: draft.steps, tips: draft.tips,
       ...(draft.sourceUrl ? { sourceUrl: draft.sourceUrl } : {})
     });
-    recipeImportDraft = null; recipeImportOpen = false; recipeImportUrl = ""; recipeImportCaption = ""; recipeImportImages = [];
+    recipeImportDraft = null; recipeImportOpen = false; recipeImportUrl = ""; recipeImportCaption = ""; recipeImportImages = []; recipeImportVideo = null;
     showToast(`Added "${name}" to your recipes.`, { type: "info" });
     autosaveState();
     render();

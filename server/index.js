@@ -24,7 +24,8 @@ const { pollReceiptMailbox } = require("./receipt-mailbox");
 const { RECEIPT_READ_SYSTEM, RECEIPT_IMAGE_TYPES, buildReceiptReadParts, parseReceiptDraft, receiptCheck } = require("../lib/receipt-read");
 const { RECEIPT_EMAIL_SYSTEM, buildReceiptEmailParts } = require("../lib/receipt-email");
 const { fetchRecipeCaption } = require("./recipe-caption");
-const { RECIPE_IMPORT_SYSTEM, buildRecipeImportParts, validateRecipeImportRequest, parseRecipeDraft, createImportLimiter } = require("../lib/recipe-import");
+const { uploadGeminiVideo, deleteGeminiFile } = require("./gemini-files");
+const { RECIPE_IMPORT_SYSTEM, RECIPE_VIDEO_TYPES, RECIPE_VIDEO_MAX_BYTES, buildRecipeImportParts, validateRecipeImportRequest, parseRecipeDraft, createImportLimiter } = require("../lib/recipe-import");
 const { validateJournalPayload, buildDocumentObjectPath, sanitizeFilename, wouldCreateFolderCycle, collectDescendantFolderIds, SMS_CARRIERS, smsGatewayAddress, rollAnnualNotifyAtForward, choreNotifyAt, parseBankStatementPdfText, extractAccountActivityLabel, isValidEmail, parseImageReminderDraft, parseBatchSuggestions, parseHomeBriefing, parseAssistantPlan, pgDumpArgs } = require("../lib/shared-logic");
 const pdfParse = require("pdf-parse");
 const ExcelJS = require("exceljs");
@@ -158,6 +159,7 @@ app.use("/api/bank-statement", express.json({ limit: "15mb" }));
 app.use("/api/reports", express.json({ limit: "20mb" }));
 app.use("/api/calendar/reminder-from-image", express.json({ limit: "10mb" }));
 app.use("/api/recipes/import", express.json({ limit: "24mb" }));
+app.use("/api/recipes/import-video", express.raw({ type: "video/*", limit: RECIPE_VIDEO_MAX_BYTES }));
 app.use("/api/receipts", express.json({ limit: "40mb" }));
 app.use("/api/internal/receipt-mail", express.json({ limit: "4mb" })); // a forwarded order email (its text and HTML) from a provider
 app.use(express.json({ limit: "1mb" }));
@@ -1832,6 +1834,34 @@ const recipeImportLimiter = createImportLimiter({ max: 10, windowMs: 60 * 60 * 1
 const recipeCaptionLimiter = createImportLimiter({ max: 60, windowMs: 60 * 60 * 1000 });
 // Tests never reach the real sites: the page reader is off in test mode unless it is pointed at a local stand-in.
 const RECIPE_CAPTION_TEST_BASE = process.env.NODE_ENV === "test" ? String(process.env.RECIPE_CAPTION_TEST_BASE || "") : "";
+// A video file the person picked (a saved or screen-recorded reel, which is how Instagram, Facebook and TikTok videos get in) is handed to Gemini's
+// file service and remembered here for one hour under an id only that person can use in the import call. Nothing is stored on this server.
+const recipeVideoUploads = new Map(); // id -> { userId, name, uri, mimeType, at }
+const recipeVideoLimiter = createImportLimiter({ max: 10, windowMs: 60 * 60 * 1000 });
+const takeRecipeVideoUpload = (id, userId) => {
+  const upload = recipeVideoUploads.get(id);
+  if (!upload || upload.userId !== userId || Date.now() - upload.at > 60 * 60 * 1000) return null;
+  return upload;
+};
+app.post("/api/recipes/import-video", requireSession, requireEditAccess, async (req, res, next) => {
+  try {
+    if (!GEMINI_API_KEY) return res.status(503).json({ error: "AI recipe reading is not configured for this deployment" });
+    const mimeType = String(req.headers["content-type"] || "").split(";")[0].trim().toLowerCase();
+    if (!RECIPE_VIDEO_TYPES.has(mimeType)) return res.status(400).json({ error: "Unsupported video type - use an MP4, MOV or WEBM file" });
+    const bytes = Buffer.isBuffer(req.body) ? req.body : Buffer.alloc(0);
+    if (!bytes.length) return res.status(400).json({ error: "That video file was empty" });
+    if (!recipeVideoLimiter.take(req.sessionUser.id)) return res.status(429).json({ error: "You have sent several videos in the last hour - try again a little later" });
+    for (const [id, upload] of recipeVideoUploads) if (Date.now() - upload.at > 60 * 60 * 1000) recipeVideoUploads.delete(id);
+    const file = await uploadGeminiVideo({ baseUrl: GEMINI_API_BASE_URL, apiKey: GEMINI_API_KEY, bytes, mimeType, pollMs: Number(process.env.GEMINI_FILE_POLL_MS) || 1500 });
+    const id = crypto.randomBytes(18).toString("base64url");
+    recipeVideoUploads.set(id, { userId: req.sessionUser.id, ...file, at: Date.now() });
+    res.json({ videoUploadId: id });
+  } catch (error) {
+    if (error?.name === "TimeoutError" || error?.name === "AbortError") return res.status(504).json({ error: "Sending that video took too long. Try a shorter one." });
+    if (error?.statusCode) return res.status(error.statusCode).json({ error: error.message });
+    next(error);
+  }
+});
 app.post("/api/recipes/import", requireSession, requireEditAccess, async (req, res, next) => {
   try {
     if (!GEMINI_API_KEY) return res.status(503).json({ error: "AI recipe reading is not configured for this deployment" });
@@ -1844,14 +1874,16 @@ app.post("/api/recipes/import", requireSession, requireEditAccess, async (req, r
       written = await fetchRecipeCaption(request.link, RECIPE_CAPTION_TEST_BASE ? { rewrite: (url) => `${RECIPE_CAPTION_TEST_BASE}/page?u=${encodeURIComponent(url)}` } : {});
     }
     const caption = [written.caption, request.caption].filter(Boolean).join("\n\n").slice(0, 8000);
-    if (request.link && !request.videoId && !caption && !request.images.length) {
+    const uploaded = request.uploadId ? takeRecipeVideoUpload(request.uploadId, req.sessionUser.id) : null;
+    if (request.uploadId && !uploaded) return res.status(410).json({ error: "That video upload has expired. Pick the video again." });
+    if (request.link && !request.videoId && !uploaded && !caption && !request.images.length) {
       return res.status(422).json({ needsCaption: true, error: `I could not read the caption from that ${request.link.label} link - ${request.link.label} does not show it to other apps. Paste the caption text from the post into the box, or add a screenshot of the ingredients.` });
     }
     if (!recipeImportLimiter.take(req.sessionUser.id)) return res.status(429).json({ error: "You have read several recipes in the last hour - try again a little later" });
     let text;
     try {
       text = await geminiGenerate({
-        parts: buildRecipeImportParts({ videoId: request.videoId, images: request.images, caption, title: written.title, platform: request.link?.label || "" }),
+        parts: buildRecipeImportParts({ videoId: request.videoId, uploadedVideo: uploaded, images: request.images, caption, title: written.title, platform: request.link?.label || "" }),
         system: RECIPE_IMPORT_SYSTEM, maxOutputTokens: 8000, timeoutMs: 150000, rounds: 3
       });
     } catch (error) {
@@ -1861,11 +1893,13 @@ app.post("/api/recipes/import", requireSession, requireEditAccess, async (req, r
       throw error;
     }
     const draft = parseRecipeDraft(text);
+    // Done with the video: forget it and delete it from Gemini. (After a failed reading it stays for a retry, and expires by itself within the hour.)
+    if (uploaded) { recipeVideoUploads.delete(request.uploadId); deleteGeminiFile({ baseUrl: GEMINI_API_BASE_URL, apiKey: GEMINI_API_KEY, name: uploaded.name }); }
     res.json({
       ...draft,
       sourceUrl: request.link?.url || "",
       sourceLabel: request.link?.label || "",
-      used: [request.videoId && "video", caption && "caption", request.images.length && "photos"].filter(Boolean)
+      used: [(request.videoId || uploaded) && "video", caption && "caption", request.images.length && "photos"].filter(Boolean)
     });
   } catch (error) {
     if (error?.statusCode) return res.status(error.statusCode).json({ error: error.message });

@@ -228,3 +228,84 @@ test("POST /api/recipes/import also reads a YouTube description and still sends 
     assert.match(parts.map((part) => part.text || "").join("\n"), /1 cup toor dal\n2 tomatoes/);
   } finally { await server.stop(); await stub.stop(); await page.stop(); }
 });
+
+// A stand-in for Gemini that also has the file service: start an upload, receive the bytes, report the file ACTIVE after one PROCESSING answer.
+async function startGeminiFilesStub(reply) {
+  const log = [];
+  let checks = 0;
+  const stub = http.createServer((req, res) => {
+    const chunks = [];
+    req.on("data", (chunk) => chunks.push(chunk));
+    req.on("end", () => {
+      const body = Buffer.concat(chunks);
+      const url = new URL(req.url, "http://x");
+      log.push(`${req.method} ${url.pathname}`);
+      const base = `http://127.0.0.1:${stub.address().port}`;
+      if (req.method === "POST" && url.pathname === "/upload/v1beta/files") {
+        log.push(`type ${req.headers["x-goog-upload-header-content-type"]} length ${req.headers["x-goog-upload-header-content-length"]}`);
+        res.writeHead(200, { "x-goog-upload-url": `${base}/upload-target/1` });
+        return res.end("{}");
+      }
+      if (req.method === "POST" && url.pathname === "/upload-target/1") {
+        log.push(`bytes ${body.length}`);
+        res.writeHead(200, { "Content-Type": "application/json" });
+        return res.end(JSON.stringify({ file: { name: "files/abc123", uri: `${base}/v1beta/files/abc123`, mimeType: "video/mp4", state: "PROCESSING" } }));
+      }
+      if (req.method === "GET" && url.pathname === "/v1beta/files/abc123") {
+        checks += 1;
+        res.writeHead(200, { "Content-Type": "application/json" });
+        return res.end(JSON.stringify({ name: "files/abc123", uri: `${base}/v1beta/files/abc123`, mimeType: "video/mp4", state: reply.failProcessing ? "FAILED" : "ACTIVE" }));
+      }
+      if (req.method === "DELETE") { res.writeHead(200); return res.end("{}"); }
+      try { log.push(JSON.parse(body)); } catch (_error) { log.push(null); }
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end(JSON.stringify(answer(RECIPE)));
+    });
+  });
+  await new Promise((resolve) => stub.listen(0, "127.0.0.1", resolve));
+  return { url: `http://127.0.0.1:${stub.address().port}`, log, checks: () => checks, stop: () => new Promise((resolve) => stub.close(resolve)) };
+}
+
+test("a picked video file is sent to Gemini's file service, watched with the caption, and deleted afterwards", async () => {
+  const stub = await startGeminiFilesStub({});
+  const server = await startTestServer({ GEMINI_API_KEY: "test-key", GEMINI_API_BASE_URL: stub.url, GEMINI_FILE_POLL_MS: "10" });
+  try {
+    const cookie = await signedIn(server, "recipe-video-file");
+    const upload = (type, body) => fetch(`${server.baseUrl}/api/recipes/import-video`, { method: "POST", headers: { "content-type": type, cookie }, body });
+    assert.equal((await fetch(`${server.baseUrl}/api/recipes/import-video`, { method: "POST", headers: { "content-type": "video/mp4" }, body: Buffer.from("x") })).status, 401);
+    assert.equal((await upload("application/pdf", Buffer.from("x"))).status, 400, "not a video");
+    assert.equal((await upload("video/mp4", Buffer.alloc(0))).status, 400, "empty");
+    const sent = await upload("video/mp4", Buffer.alloc(5000, 1));
+    assert.equal(sent.status, 200);
+    const { videoUploadId } = await sent.json();
+    assert.ok(videoUploadId.length >= 20);
+    assert.ok(stub.log.includes("type video/mp4 length 5000") && stub.log.includes("bytes 5000"), "the bytes went to the file service");
+    assert.ok(stub.checks() >= 1, "it waited until the file was ready");
+
+    const post = (body, headers = {}) => server.request("/api/recipes/import", { method: "POST", headers: { cookie, ...headers }, body: JSON.stringify(body) });
+    const other = await signedIn(server, "recipe-video-other");
+    assert.equal((await post({ videoUploadId }, { cookie: other })).status, 410, "someone else cannot use that upload");
+    assert.equal((await post({ videoUploadId: "no-such-upload-id-1234" })).status, 410);
+    const read = await post({ videoUploadId, caption: "2 cups rice" });
+    assert.equal(read.status, 200, JSON.stringify(read.body));
+    assert.deepEqual(read.body.used, ["video", "caption"]);
+    const request = stub.log.find((entry) => entry && entry.contents);
+    assert.deepEqual(request.contents[0].parts[0], { fileData: { mimeType: "video/mp4", fileUri: `${stub.url}/v1beta/files/abc123` } }, "the AI is given the uploaded file");
+    assert.ok(stub.log.includes("DELETE /v1beta/files/abc123"), "the file was deleted after reading");
+    assert.equal((await post({ videoUploadId })).status, 410, "an upload is used once");
+  } finally { await server.stop(); await stub.stop(); }
+});
+
+test("a video the AI service cannot process is reported plainly, and an oversize video is refused", async () => {
+  const stub = await startGeminiFilesStub({ failProcessing: true });
+  const server = await startTestServer({ GEMINI_API_KEY: "test-key", GEMINI_API_BASE_URL: stub.url, GEMINI_FILE_POLL_MS: "10" });
+  try {
+    const cookie = await signedIn(server, "recipe-video-bad");
+    const upload = (body) => fetch(`${server.baseUrl}/api/recipes/import-video`, { method: "POST", headers: { "content-type": "video/quicktime", cookie }, body });
+    const failed = await upload(Buffer.alloc(100, 1));
+    assert.equal(failed.status, 422);
+    assert.match((await failed.json()).error, /could not read that video file/);
+    const big = await upload(Buffer.alloc(31 * 1024 * 1024, 1));
+    assert.equal(big.status, 413, "over 30 MB");
+  } finally { await server.stop(); await stub.stop(); }
+});
