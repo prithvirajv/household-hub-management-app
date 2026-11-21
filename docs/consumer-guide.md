@@ -828,7 +828,13 @@ entry. It is read-only: FamilyLoop can never move money or place trades.
   only part of a month for an account, that whole month is left out and you are
   asked to import it from a statement. Each bank-fed account in Wealth shows a
   small **Synced from <date>** tag - the date its bank records are complete
-  from; anything earlier has to come from a statement. A link's first sync
+  from; anything earlier has to come from a statement. Once you import
+  older statements for that account (Transactions → Bank stream → **+ Import
+  CSV/PDF**), a second tag, **Imported back to <date>**, shows the earliest
+  record you have from before the bank feed starts, so you can see how far
+  back the history reaches. It counts rows still waiting in Bank stream too
+  and moves as soon as the file is imported; it does not change "Synced from",
+  which stays the bank's own start date. A link's first sync
   always happens in the app (never overnight), so you see that explanation
   first.
 - **If SimpleFIN is slow ("HTTP 524"):** SimpleFIN's servers sometimes
