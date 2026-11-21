@@ -232,6 +232,13 @@ button on every screen. People with view-only access don't see it.
   reverses is never flagged as a possible transfer, and once it is in the ledger
   both rows carry a tile: **Refund of $X** on the return and **Refunded $X** on
   the purchase, each with the other row's date.
+- **Look at one account at a time:** above **Recent transactions** the
+  **Account** menu limits both the Ledger and Bank stream to one account (or
+  to rows that are not linked to any account). Like the rest of the page it
+  shows the month chosen at the top; tick **All months** next to it to see
+  that account's whole history in one list, for example to check that an
+  imported statement landed. The choice is not saved: it resets when you
+  reload the page.
 - Tag transactions (e.g. "Florida trip") to see them grouped together later
   in Reports.
 - A new transaction's Subcategory **and** Wealth account are both pre-filled

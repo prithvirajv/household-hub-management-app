@@ -9957,3 +9957,8 @@ label.ai-import-toggle span { font-weight: 600; }
 .receipt-returns-row { display: flex; flex-wrap: wrap; align-items: center; gap: 0.4rem 0.7rem; }
 .receipt-returns-row > span:first-child { font-weight: 600; }
 .receipt-returns-total { margin: 0; }
+
+/* The Transactions page's account filter: one row above Recent transactions, the select growing and the "All months" tick beside it. */
+.ledger-filter-row { display: flex; flex-wrap: wrap; align-items: end; gap: 10px 16px; margin: 6px 0 10px; }
+.ledger-filter-row label:first-child { flex: 1 1 220px; min-width: 0; }
+.ledger-filter-row select { width: 100%; }

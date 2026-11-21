@@ -73,6 +73,10 @@ let transactionSort = { field: "date", direction: "desc" };
 // same field/direction pair for one shouldn't force a reorder of the other.
 let bankStreamSort = { field: "date", direction: "desc" };
 let selectedTransactionTag = "";
+// The Transactions page's account filter (session-local, like selectedTransactionTag): "" = every account, "none" = rows not linked to an account,
+// else an account id. With one chosen, "All months" drops the month limit so one account's whole history can be checked at once.
+let ledgerAccountFilter = "";
+let ledgerAllMonths = false;
 // null until the Reports page is first opened, at which point it syncs to
 // the currently-viewed budget month - once the user picks a range/year
 // explicitly it's left alone, so switching months elsewhere doesn't stomp on
@@ -1459,6 +1463,14 @@ function isAccountLinked(type, id) {
     ? state.accounts.some((account) => account.netWorthAssetId === id)
     : state.accounts.some((account) => account.netWorthLiabilityId === id);
 }
+
+// Whether a Ledger or Bank stream row belongs to the account chosen in the Transactions page's account filter.
+function ledgerAccountFilterMatches(row) {
+  if (!ledgerAccountFilter) return true;
+  return ledgerAccountFilter === "none" ? !row.accountId : row.accountId === ledgerAccountFilter;
+}
+// The month limit of Recent transactions and Bank stream; it is lifted only when an account is chosen and "All months" is ticked.
+const ledgerMonthMatches = (row) => (ledgerAccountFilter && ledgerAllMonths) || row.date?.slice(0, 7) === state.budget.month;
 
 function accountOptions(selectedId, { excludeType } = {}) {
   return state.accounts
@@ -3938,6 +3950,8 @@ function renderTransactions() {
   // the stored draft — otherwise an item imported before a matching-logic
   // fix shipped (or before another transaction it now matches existed)
   // would stay stuck showing its stale result forever.
+  // A filter on an account that has since been deleted would hide everything.
+  if (ledgerAccountFilter && ledgerAccountFilter !== "none" && !state.accounts.some((account) => account.id === ledgerAccountFilter)) { ledgerAccountFilter = ""; ledgerAllMonths = false; }
   const allImported = transactionInboxItems()
     .filter((transaction) => !(state.transactionInboxDone || []).includes(transaction.id))
     .map((transaction) => ({
@@ -3966,7 +3980,7 @@ function renderTransactions() {
   // (whatever order the imported file's rows happened to be in), which
   // rarely matches any useful order on its own.
   const imported = sortTransactionsByField(
-    allImported.filter((transaction) => transaction.date?.slice(0, 7) === state.budget.month),
+    allImported.filter((transaction) => ledgerMonthMatches(transaction) && ledgerAccountFilterMatches(transaction)),
     bankStreamSort.field,
     bankStreamSort.direction
   );
@@ -4083,13 +4097,22 @@ function renderTransactions() {
               <button data-assign-ledger="${transaction.id}:${transaction.payee}:${transaction.amount}:${transaction.date}" type="button">Assign</button>
             </div>
           `).join("")}
+          ${state.accounts.length ? `<div class="ledger-filter-row">
+            <label>Account<select id="ledgerAccountFilter" aria-label="Show only one account's transactions">
+              <option value="">All accounts</option>
+              ${accountOptions(ledgerAccountFilter)}
+              <option value="none" ${ledgerAccountFilter === "none" ? "selected" : ""}>Not linked to an account</option>
+            </select></label>
+            ${ledgerAccountFilter ? `<label class="ai-import-toggle"><input type="checkbox" id="ledgerAllMonths" ${ledgerAllMonths ? "checked" : ""}> <span>All months</span></label>` : ""}
+          </div>` : ""}
           <div class="card-label">Recent transactions</div>
           ${ledgerAcceptFeedback ? `<p class="muted" role="status">${escapeHtml(ledgerAcceptFeedback)}</p>` : ""}
           ${(() => {
             const monthTransactions = state.transactions
               .map((transaction, index) => ({ transaction, index }))
-              .filter(({ transaction }) => transaction.date?.slice(0, 7) === state.budget.month);
+              .filter(({ transaction }) => ledgerMonthMatches(transaction) && ledgerAccountFilterMatches(transaction));
             if (!monthTransactions.length) {
+              if (ledgerAccountFilter) return `<div class="empty-inline">No transactions for this account${ledgerAllMonths ? "" : " in this month"}.${ledgerAllMonths ? "" : " Tick All months to look across every month."}</div>`;
               // Rows the bank has sent for this month can be waiting in Bank stream (held for a look), so say so instead of looking like nothing synced.
               if (!imported.length) return `<div class="empty-inline">No transactions yet</div>`;
               const held = {};
@@ -13169,6 +13192,18 @@ function bindViewEvents() {
       autosaveState();
       render();
     });
+  });
+
+  $("#ledgerAccountFilter")?.addEventListener("change", (event) => {
+    ledgerAccountFilter = event.currentTarget.value;
+    if (!ledgerAccountFilter) ledgerAllMonths = false;
+    ledgerSelectedIndices.clear(); // a selection from the other view must not carry into this one
+    render();
+  });
+  $("#ledgerAllMonths")?.addEventListener("change", (event) => {
+    ledgerAllMonths = event.currentTarget.checked;
+    ledgerSelectedIndices.clear();
+    render();
   });
 
   $("#transactionTagFilter")?.addEventListener("change", (event) => {
