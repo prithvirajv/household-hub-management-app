@@ -372,7 +372,13 @@ button on every screen. People with view-only access don't see it.
 - CSV import recognizes exports from Chase, Capital One, Wells Fargo,
   Discover, Amex, and Citi, among others — both plain checking-style files
   and credit-card-style files (positive = purchase) are detected
-  automatically. PDF import recognizes both a monthly credit-card statement
+  automatically. When a file has both a **Transaction Date** (the day of the
+  purchase) and a **Post Date** (the day the bank posted it), as Chase and
+  Discover card files do, the **Post Date** is used, because that is the date
+  a linked bank reports for the same charge. The two sources then agree, so
+  duplicates are recognised and a month's totals match; a row with no post
+  date keeps its transaction date. Rows imported earlier keep the dates they
+  were saved with. PDF import recognizes both a monthly credit-card statement
   and a checking/deposit account's "Account Activity" print export (e.g.
   Bank of America's Online Banking print-to-PDF); a still-"Processing" row
   that hasn't posted yet imports dated today with a **Pending** pill, so it

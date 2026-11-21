@@ -1252,9 +1252,27 @@ test("parseBankCsvTransactions: recognizes Discover's own 'Trans. Date'/'Post Da
     "06/09/2026,06/10/2026,SAMPLE PAYMENT - THANK YOU,-400.00,Payments and Credits"
   ].join("\n");
   assert.deepEqual(parseBankCsvTransactions(csv), [
-    { date: "2026-06-12", payee: "SAMPLE RESTAURANT", amount: 25.40 },
-    { date: "2026-06-09", payee: "SAMPLE PAYMENT - THANK YOU", amount: -400, isPayment: true }
+    { date: "2026-06-13", payee: "SAMPLE RESTAURANT", amount: 25.40 },
+    { date: "2026-06-10", payee: "SAMPLE PAYMENT - THANK YOU", amount: -400, isPayment: true }
   ], "with one purchase and one payment (a volume tie), the payment-description signal alone must decide this is credit-card-style - without it, the tie falls back to checking-style and both rows come out with flipped/wrong signs");
+});
+
+test("parseBankCsvTransactions: a file with both a transaction date and a post date uses the post date (what a linked bank reports), falling back per row", () => {
+  const csv = [
+    "Transaction Date,Post Date,Description,Category,Type,Amount,Memo",
+    "11/15/2026,11/17/2026,SAMPLE PEST CONTROL,Home,Sale,-26.66,",
+    "11/03/2026,11/03/2026,AUTOMATIC PAYMENT - THANK,,Payment,46.66,",
+    "11/20/2026,,SAMPLE NO POST DATE,Home,Sale,-5.00,"
+  ].join("\n");
+  const rows = parseBankCsvTransactions(csv);
+  assert.deepEqual(rows.map((row) => [row.date, row.payee]), [
+    ["2026-11-17", "SAMPLE PEST CONTROL"],
+    ["2026-11-03", "AUTOMATIC PAYMENT - THANK"],
+    ["2026-11-20", "SAMPLE NO POST DATE"]
+  ], "the posted date wins; a row with no posted date keeps its transaction date");
+  // A file with only one date column behaves as before.
+  assert.equal(parseBankCsvTransactions(["Date,Description,Amount", "06/12/2026,SAMPLE SHOP,-4.00"].join("\n"))[0].date, "2026-06-12");
+  assert.equal(parseBankCsvTransactions(["Posting Date,Description,Amount", "06/12/2026,SAMPLE SHOP,-4.00"].join("\n"))[0].date, "2026-06-12");
 });
 
 test("parseBankCsvTransactions: a payment/thank-you description signal fixes an Amex-style export where the tied purchase-vs-payment count would otherwise flip both rows' signs", () => {
