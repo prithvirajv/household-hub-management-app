@@ -76,6 +76,9 @@ let selectedTransactionTag = "";
 // The Transactions page's account filter (session-local, like selectedTransactionTag): "" = every account, "none" = rows not linked to an account,
 // else an account id. With one chosen, "All months" drops the month limit so one account's whole history can be checked at once.
 let ledgerAccountFilter = "";
+// "Re-date from a CSV": { fileName, rows (the statement's rows with both dates), accountId, fixes, notFound, picked: Set of fix indexes } - the preview
+// of moving rows imported earlier (on their purchase day) to the post date; nothing changes until Apply. Session-local.
+let postDateFixPlan = null;
 let ledgerAllMonths = false;
 // null until the Reports page is first opened, at which point it syncs to
 // the currently-viewed budget month - once the user picks a range/year
@@ -1471,6 +1474,34 @@ function ledgerAccountFilterMatches(row) {
 }
 // The month limit of Recent transactions and Bank stream; it is lifted only when an account is chosen and "All months" is ticked.
 const ledgerMonthMatches = (row) => (ledgerAccountFilter && ledgerAllMonths) || row.date?.slice(0, 7) === state.budget.month;
+
+// The preview card of "Re-date from a CSV": the rows that would move to their post dates, each with a tick, and the account the file is for.
+function postDateFixPanelHtml() {
+  const plan = postDateFixPlan;
+  if (!plan) return "";
+  const picked = plan.picked.size;
+  const monthMoves = plan.fixes.filter((fix, index) => fix.monthChanges && plan.picked.has(index)).length;
+  const day = (key) => formatShortDate(key);
+  return `<div class="post-date-fix card soft-card">
+    <strong>Move rows to their post dates</strong>
+    <p class="muted">From ${escapeHtml(plan.fileName)}. These rows were imported on the purchase day; a linked bank dates the same charge by its post date. Nothing changes until you choose Move.</p>
+    <label>Which account is this file for?<select id="postDateFixAccount"><option value="">Any account</option>${accountOptions(plan.accountId)}</select></label>
+    ${plan.fixes.length ? `<div class="post-date-fix-list">${plan.fixes.map((fix, index) => `<label class="post-date-fix-row"><input type="checkbox" data-post-date-fix="${index}" ${plan.picked.has(index) ? "checked" : ""}> <span>${escapeHtml(fix.payee)} · ${exactMoney.format(Math.abs(fix.amount))}</span> <small>${day(fix.from)} → ${day(fix.to)}${fix.monthChanges ? " (next month)" : ""}</small></label>`).join("")}</div>`
+      : `<p class="muted">No imported rows need moving for this account${plan.notFound ? ` (${plan.notFound} row${plan.notFound === 1 ? "" : "s"} in the file differ in date but were not found - already moved, deleted, in Transfers or never imported)` : ""}.</p>`}
+    ${plan.fixes.length && plan.notFound ? `<small class="muted">${plan.notFound} other row${plan.notFound === 1 ? "" : "s"} in the file differ in date but were not found (already moved, deleted, in Transfers or never imported).</small>` : ""}
+    ${monthMoves ? `<small class="muted">${monthMoves} of these move into the next month, so that month's totals change by their amounts.</small>` : ""}
+    <div class="button-row">
+      <button type="button" id="postDateFixApply" ${picked ? "" : "disabled"}>Move ${picked} row${picked === 1 ? "" : "s"}</button>
+      <button type="button" class="ghost" id="postDateFixCancel">Cancel</button>
+    </div>
+  </div>`;
+}
+// Works the preview out again (the file's rows are kept; the account or the ledger may have changed).
+function replanPostDateFix() {
+  if (!postDateFixPlan) return;
+  const { fixes, notFound } = planPostDateFixes(postDateFixPlan.rows, state.transactions, state.transactionInboxDrafts, postDateFixPlan.accountId);
+  postDateFixPlan = { ...postDateFixPlan, fixes, notFound, picked: new Set(fixes.map((_fix, index) => index)) };
+}
 
 function accountOptions(selectedId, { excludeType } = {}) {
   return state.accounts
@@ -4182,12 +4213,14 @@ function renderTransactions() {
             <div><span class="card-label">Bank expense</span><h3>Bank stream</h3></div>
             <div class="button-row">
               <label class="documents-upload-button">+ Import CSV/PDF<input type="file" id="bankStreamCsvInput" accept=".csv,text/csv,.pdf,application/pdf"></label>
+              <label class="documents-upload-button" title="For rows you imported earlier from a card file that has both a Transaction Date and a Post Date: move them to the post date, as a linked bank dates them.">Re-date from a CSV<input type="file" id="postDateFixInput" accept=".csv,text/csv"></label>
               <button id="addTransactionButton" type="button">+ Add transaction</button>
             </div>
           </div>
           <label class="ai-import-toggle"><input type="checkbox" id="aiImportToggle" ${aiImportEnabled() ? "checked" : ""}> <span>Use AI to categorize and tag imports and add them to the ledger; anything it is unsure about stays in Bank stream for review</span></label>
           ${(state.transactionInboxDrafts || []).length ? `<div class="button-row"><button type="button" class="ghost" id="bankStreamAiProcess" ${aiImportRunning ? "disabled" : ""}>${aiImportRunning ? "Working…" : `Let AI categorize and add the ${(state.transactionInboxDrafts || []).length} waiting row${(state.transactionInboxDrafts || []).length === 1 ? "" : "s"}`}</button><small class="muted">Confident rows go to the ledger with a category and tags; the rest stay here for review.</small></div>` : ""}
           ${bankImportFeedback ? `<p class="muted" role="status">${escapeHtml(bankImportFeedback)}</p>` : ""}
+          ${postDateFixPanelHtml()}
           ${otherMonthEntries.length ? `<div class="bank-stream-other-months">
             <small>Also pending in:</small>
             ${otherMonthEntries.map(([month, count]) => `<button type="button" class="pill-button" data-switch-budget-month="${month}">${formatMonth(month)} (${count})</button>`).join("")}
@@ -13118,6 +13151,46 @@ function bindViewEvents() {
 
   $("#aiImportToggle")?.addEventListener("change", (event) => {
     setAiImportEnabled(event.currentTarget.checked);
+  });
+
+  $("#postDateFixInput")?.addEventListener("change", async (event) => {
+    const file = event.target.files?.[0];
+    event.target.value = "";
+    if (!file) return;
+    const rows = parseBankCsvTransactions(await file.text(), { withTransactionDate: true });
+    if (!rows.length) { bankImportFeedback = `Could not read any transactions from ${file.name}.`; postDateFixPlan = null; render(); return; }
+    if (!rows.some((row) => row.transactionDate)) { bankImportFeedback = `${file.name} has no separate Transaction Date and Post Date columns, so there is nothing to re-date.`; postDateFixPlan = null; render(); return; }
+    const matched = matchAccountByHints([file.name], state.accounts);
+    postDateFixPlan = { fileName: file.name, rows, accountId: matched?.id || "", fixes: [], notFound: 0, picked: new Set() };
+    bankImportFeedback = "";
+    replanPostDateFix();
+    render();
+  });
+  $("#postDateFixAccount")?.addEventListener("change", (event) => { postDateFixPlan.accountId = event.currentTarget.value; replanPostDateFix(); render(); });
+  document.querySelectorAll("[data-post-date-fix]").forEach((box) => box.addEventListener("change", () => {
+    const index = Number(box.dataset.postDateFix);
+    if (box.checked) postDateFixPlan.picked.add(index); else postDateFixPlan.picked.delete(index);
+    render();
+  }));
+  $("#postDateFixCancel")?.addEventListener("click", () => { postDateFixPlan = null; render(); });
+  $("#postDateFixApply")?.addEventListener("click", () => {
+    const plan = postDateFixPlan;
+    if (!plan) return;
+    let moved = 0;
+    plan.fixes.forEach((fix, index) => {
+      if (!plan.picked.has(index)) return;
+      const list = fix.kind === "ledger" ? state.transactions : (state.transactionInboxDrafts || []);
+      // The row is found by its id (or its place when it has none) and only moved if it still carries the date the preview showed.
+      const row = (fix.id && list.find((item) => item.id === fix.id)) || (!fix.id ? list[fix.index] : null);
+      if (!row || String(row.date || "").slice(0, 10) !== fix.from) return;
+      row.date = fix.to;
+      moved += 1;
+    });
+    state.household.activity.unshift(`Moved ${moved} imported row${moved === 1 ? "" : "s"} to their post dates (from ${plan.fileName})`);
+    postDateFixPlan = null;
+    bankImportFeedback = `Moved ${moved} row${moved === 1 ? "" : "s"} to their post dates.`;
+    autosaveState();
+    render();
   });
 
   $("#bankStreamCsvInput")?.addEventListener("change", (event) => {

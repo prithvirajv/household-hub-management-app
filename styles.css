@@ -9962,3 +9962,9 @@ label.ai-import-toggle span { font-weight: 600; }
 .ledger-filter-row { display: flex; flex-wrap: wrap; align-items: end; gap: 10px 16px; margin: 6px 0 10px; }
 .ledger-filter-row label:first-child { flex: 1 1 220px; min-width: 0; }
 .ledger-filter-row select { width: 100%; }
+
+/* "Re-date from a CSV" preview: a tick, the payee and amount, and the old and new day on each row. */
+.post-date-fix { display: grid; gap: 8px; margin: 8px 0; }
+.post-date-fix-list { display: grid; gap: 4px; max-height: 320px; overflow: auto; }
+.post-date-fix-row { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 10px; }
+.post-date-fix-row small { color: var(--muted, #6b6b6b); }

@@ -378,7 +378,17 @@ button on every screen. People with view-only access don't see it.
   a linked bank reports for the same charge. The two sources then agree, so
   duplicates are recognised and a month's totals match; a row with no post
   date keeps its transaction date. Rows imported earlier keep the dates they
-  were saved with. PDF import recognizes both a monthly credit-card statement
+  were saved with.
+- **Re-date rows you imported earlier:** in Bank stream, **Re-date from a
+  CSV** takes the same card file again (it needs both date columns), finds
+  the rows already in your Ledger or Bank stream that came from it (same
+  amount, still on the purchase day, similar payee, on the account you
+  pick), and shows a list of what would move, for example "Nov 15 → Nov 17",
+  each with a tick. Nothing changes until you choose **Move**. Rows that came
+  from a linked bank are never touched (they already carry the post date), a
+  row you changed since is left alone, and the preview says how many move
+  into the next month, because that month's totals change by those
+  amounts. PDF import recognizes both a monthly credit-card statement
   and a checking/deposit account's "Account Activity" print export (e.g.
   Bank of America's Online Banking print-to-PDF); a still-"Processing" row
   that hasn't posted yet imports dated today with a **Pending** pill, so it
