@@ -629,8 +629,11 @@ button on every screen. People with view-only access don't see it.
   the steps and tips. A
   video in another language (Tamil, for example) is translated into
   English. Quantities that are only spoken can be missed, so check them.
-- A recipe card stays compact: the name, calories and every ingredient,
-  with small "6 steps" and "★ 3 important tips" tags. **Click the card** to
+- A recipe card stays compact, however long the recipe is: the name,
+  calories, the first few ingredient names (no quantities, with "+9 more"
+  when there are more; hover for the full list), and small "46 ingredients",
+  "6 steps" and "★ 3 important tips" tags. Cards are laid out in a grid that
+  wraps, and each is only as tall as its own content. **Click the card** to
   open the full recipe in a pop-up: the Important tips first, then the
   ingredients as a checklist (tick them off as you gather them) beside the
   numbered steps, any other tips, and a link back to the video. **Use in

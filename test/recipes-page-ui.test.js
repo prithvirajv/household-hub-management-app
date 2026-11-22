@@ -30,9 +30,11 @@ test("what the person types in the review form survives a re-render, and tips ar
   assert.match(app, /editingRecipe\.tips = readRecipeTips\(event\.currentTarget\)/);
 });
 
-test("a recipe card is compact (name, calories, every ingredient) and opens the full recipe in a pop-up", () => {
-  assert.match(app, /<div class="mini-tags">\$\{recipe\.ingredients\.map\(\(ingredient\) => `<span>\$\{escapeHtml\(ingredient\)\}<\/span>`\)\.join\(""\)\}<\/div>/, "all ingredients, none hidden behind a +N");
-  assert.doesNotMatch(app, /extraCount/, "no truncated ingredient list");
+test("a recipe card is compact (name, calories, a short ingredient summary) and opens the full recipe in a pop-up", () => {
+  assert.match(app, /<p class="recipe-card-ingredients" title="\$\{escapeHtml\(recipe\.ingredients\.join\(", "\)\)\}">/, "ingredient names in a short paragraph, the full list on hover");
+  assert.doesNotMatch(app, /<div class="mini-tags">\$\{recipe\.ingredients\.map/, "no chip for every ingredient any more: a long recipe made a card taller than the screen");
+  assert.match(css, /\.recipe-card-ingredients \{[^}]*-webkit-line-clamp: 3;/, "at most three lines of ingredients");
+  assert.match(css, /\.recipe-card-grid \{[^}]*align-items: start;/, "a short recipe is not stretched to its row's longest card");
   assert.doesNotMatch(app, /recipe-card-tips|recipe-card-more|recipeDetailsOpen/, "no tips box or fold-out on the card itself");
   assert.match(app, /<div class="recipe-card-body" data-open-recipe="\$\{escapeHtml\(recipe\.id\)\}" role="button" tabindex="0"/, "the card opens the recipe, by mouse or keyboard");
   assert.match(app, /recipe-meta-pill important">★ \$\{importantCount\} important tip/, "a small pill says there are important tips");

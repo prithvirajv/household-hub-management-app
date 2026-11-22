@@ -7944,6 +7944,31 @@ function renderRecipeImportPanel() {
   </section>`;
 }
 
+// An ingredient line cut down to the ingredient itself for the recipe card: "1 tbsp ginger garlic paste (for gravy base)" -> "ginger garlic paste",
+// "1 cup urad dal - roasted" -> "urad dal". The full lines, with quantities, are in the recipe pop-up.
+function recipeIngredientShortName(line) {
+  let text = String(line || "").replace(/\([^)]*\)/g, " ").replace(/\s+[-–—]\s+.*$/, " ").replace(/\s+/g, " ").trim();
+  const unit = "(?:cups?|tbsp|tsp|teaspoons?|tablespoons?|g|gm|grams?|kg|ml|l|litres?|liters?|oz|lbs?|pinch(?:es)?|cloves?|inch(?:es)?|pieces?|strands?|sprigs?|stems?|glasses?|bunch(?:es)?|cans?|packets?|slices?|handful)";
+  const lead = new RegExp(`^(?:(?:about|approx\\.?|around|~)\\s+)?(?:[\\d½¼¾⅓⅔.,/]+(?:\\s*(?:-|–|to)\\s*[\\d.,/]+)?\\s*)?(?:${unit}\\b\\.?\\s*)?(?:(?:of|small|medium|large|whole|few|a|an)\\s+)*`, "i");
+  const noUnitLead = new RegExp(`^(?:(?:about|approx\\.?|around|~)\\s+)?[\\d½¼¾⅓⅔.,/]+(?:\\s*(?:-|–|to)\\s*[\\d.,/]+)?\\s*`, "i");
+  // "2 cloves garlic" -> "garlic", but "4 cloves" alone is the spice, so only the number goes.
+  const name = (pattern) => text.replace(pattern, "").replace(/,.*$/, "").trim();
+  return (name(lead) || name(noUnitLead) || String(line || "").trim()).slice(0, 40);
+}
+// The ingredient names to show on a recipe card: the first few distinct ones, and how many more there are.
+function recipeCardIngredients(ingredients, limit = 8) {
+  const seen = new Set();
+  const names = [];
+  (ingredients || []).forEach((line) => {
+    const name = recipeIngredientShortName(line);
+    const key = name.toLowerCase();
+    if (!name || seen.has(key)) return;
+    seen.add(key);
+    names.push(name);
+  });
+  return { shown: names.slice(0, limit), more: Math.max(0, names.length - limit), total: (ingredients || []).length };
+}
+
 function renderRecipeCard(recipe, plannedIds) {
   const isPlanned = plannedIds.has(recipe.id);
   const tips = Array.isArray(recipe.tips) ? recipe.tips : [];
@@ -7958,8 +7983,8 @@ function renderRecipeCard(recipe, plannedIds) {
     <div class="recipe-card-body" data-open-recipe="${escapeHtml(recipe.id)}" role="button" tabindex="0" aria-label="Open the full recipe for ${escapeHtml(recipe.name)}">
       <strong>${escapeHtml(recipe.name)}</strong>
       ${recipe.calories || recipe.protein ? `<small>${recipe.calories} cal · ${recipe.protein}g protein</small>` : ""}
-      <div class="mini-tags">${recipe.ingredients.map((ingredient) => `<span>${escapeHtml(ingredient)}</span>`).join("")}</div>
-      ${steps.length || tips.length ? `<div class="recipe-meta-pills">${steps.length ? `<span class="recipe-meta-pill">${steps.length} step${steps.length === 1 ? "" : "s"}</span>` : ""}${importantCount ? `<span class="recipe-meta-pill important">★ ${importantCount} important tip${importantCount === 1 ? "" : "s"}</span>` : ""}</div>` : ""}
+      ${(() => { const summary = recipeCardIngredients(recipe.ingredients); return summary.shown.length ? `<p class="recipe-card-ingredients" title="${escapeHtml(recipe.ingredients.join(", "))}">${escapeHtml(summary.shown.join(" · "))}${summary.more ? ` <em>+${summary.more} more</em>` : ""}</p>` : ""; })()}
+      ${recipe.ingredients.length || steps.length || tips.length ? `<div class="recipe-meta-pills">${recipe.ingredients.length ? `<span class="recipe-meta-pill">${recipe.ingredients.length} ingredient${recipe.ingredients.length === 1 ? "" : "s"}</span>` : ""}${steps.length ? `<span class="recipe-meta-pill">${steps.length} step${steps.length === 1 ? "" : "s"}</span>` : ""}${importantCount ? `<span class="recipe-meta-pill important">★ ${importantCount} important tip${importantCount === 1 ? "" : "s"}</span>` : ""}</div>` : ""}
     </div>
     <div class="recipe-actions">
       <button class="ghost" type="button" data-select-recipe="${recipe.id}">Use in Meals</button>

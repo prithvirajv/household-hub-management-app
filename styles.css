@@ -3809,8 +3809,9 @@ html[data-theme="dark"] .compact-row.overdue {
 
 .recipe-card-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
-  gap: 0.7rem;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 0.8rem;
+  align-items: start; /* a short recipe is not stretched to the height of its row's longest one */
 }
 
 .recipe-card-v2 {
@@ -3827,8 +3828,8 @@ html[data-theme="dark"] .compact-row.overdue {
   display: flex;
   align-items: center;
   justify-content: center;
-  height: 96px;
-  font-size: 2.4rem;
+  height: 72px;
+  font-size: 2rem;
   color: white;
 }
 
@@ -9968,3 +9969,22 @@ label.ai-import-toggle span { font-weight: 600; }
 .post-date-fix-list { display: grid; gap: 4px; max-height: 320px; overflow: auto; }
 .post-date-fix-row { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 10px; }
 .post-date-fix-row small { color: var(--muted, #6b6b6b); }
+
+/* A recipe card shows the ingredient names (no quantities) in at most three lines; the full list is in the pop-up. */
+.recipe-card-ingredients {
+  margin: 0;
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  color: var(--muted);
+  font-size: 0.8rem;
+  line-height: 1.35;
+}
+.recipe-card-ingredients em { font-style: normal; font-weight: 700; color: var(--text); white-space: nowrap; }
+
+/* The three buttons at the foot of a recipe card stay on one line and inside the card, however narrow it is. */
+.recipe-actions { grid-template-columns: minmax(0, 1fr) auto 32px; gap: 0.35rem; }
+.recipe-actions button { min-width: 0; padding-inline: 0.5rem; font-size: 0.8rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.recipe-actions button { min-height: 36px; }
+.recipe-actions .icon-button { width: 32px; height: 36px; padding: 0; }
