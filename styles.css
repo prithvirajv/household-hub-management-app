@@ -10049,3 +10049,22 @@ body {
   .topbar-actions #signOutButton { width: auto; margin-left: auto; }
   .month-control input[type="month"] { display: block; width: 100%; min-width: 0; max-width: 100%; box-sizing: border-box; -webkit-appearance: none; appearance: none; }
 }
+
+/* Phones: rows built for a wide screen wrapped or squeezed instead of running past the right edge, where the page's overflow-x:hidden made them unreachable
+   (found by measuring every page at 375px: Wealth's account cards were 717px wide, Reports' budget-vs-actual rows 430px). */
+@media (max-width: 760px) {
+  .account-item,
+  .net-worth-item { min-width: 0; grid-template-columns: minmax(0, 1fr); }
+  .account-balance-row { flex-wrap: wrap; }
+  .button-row,
+  .section-head { flex-wrap: wrap; }
+  .split-stat { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .split-stat span,
+  .split-stat b { min-width: 0; overflow-wrap: anywhere; }
+  .quick-add-group { min-width: 0; }
+  /* The row's name takes a line of its own; Planned, Actual and the difference share the line under it. */
+  .budget-vs-actual-row { grid-template-columns: repeat(3, auto); justify-content: space-between; gap: 0.2rem 0.6rem; font-size: 0.8rem; }
+  .budget-vs-actual-row > :first-child { grid-column: 1 / -1; font-weight: 700; }
+  .budget-vs-actual-row span,
+  .budget-vs-actual-row b { white-space: nowrap; }
+}

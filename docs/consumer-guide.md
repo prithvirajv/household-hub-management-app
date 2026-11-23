@@ -247,7 +247,10 @@ button on every screen. People with view-only access don't see it.
   only what is left (your share) and the deposits are not counted as income;
   each bank balance stays exactly as the bank has it. The charge shows
   **Paid back $377.10 of $419.00 · your share $41.90**, and each deposit says
-  what it paid back, with **Undo** to unlink it. Deposits you already filed
+  what it paid back, with **Undo** to unlink it. When a deposit's own note
+  names the same merchant as a charge (for example "IXL share 2026" and an IXL
+  charge), the deposit shows **Looks like a repayment for …** with **Review and
+  link**, which opens the charge with that deposit and its look-alikes ticked. Deposits you already filed
   under the charge's budget line are listed first. The charge needs a
   subcategory first; if you later change it, the linked deposits follow. If a
   deposit lands in a later month than the charge, it reduces that later
@@ -258,6 +261,8 @@ button on every screen. People with view-only access don't see it.
   **Show 200 more** (or **Show all**) under the list; it starts over at 200
   whenever you change the month, the account or the sort. **Select all** ticks
   only the rows on screen, so a bulk change never reaches rows you cannot see.
+  Bank stream shows 100 waiting rows at a time and Notes 30 unpinned notes at a
+  time, each with a **Show more** button.
 - **Look at one account at a time:** above **Recent transactions** the
   **Account** menu limits both the Ledger and Bank stream to one account (or
   to rows that are not linked to any account). Like the rest of the page it
@@ -629,8 +634,10 @@ button on every screen. People with view-only access don't see it.
   video, then **FamilyLoop**. The app opens on Recipes with the link already in
   the form; press **Read the video**. If you were signed out, sign in first and
   the link is still there.
-- iPhones do not offer apps in the Share menu this way yet: copy the link and
-  paste it into **+ From a video or photos** instead.
+- iPhones do not offer apps in the Share menu this way yet: in the other app
+  choose **Share**, then **Copy link**, open **+ From a video or photos** in
+  FamilyLoop and tap **📋 Paste copied link** (your phone may ask you to allow
+  the paste). Then press **Read the recipe**.
 
 **Add a recipe from a video or photos**
 - On **Recipes**, choose **+ From a video or photos**. Paste the link of a

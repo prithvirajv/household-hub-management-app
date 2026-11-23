@@ -81,6 +81,12 @@ let ledgerAccountFilter = "";
 let postDateFixPlan = null;
 let ledgerAllMonths = false;
 const LEDGER_PAGE_SIZE = 200;
+const BANK_STREAM_PAGE_SIZE = 100;
+const NOTES_PAGE_SIZE = 30;
+let notesRowLimit = NOTES_PAGE_SIZE;
+let notesRowLimitKey = "";
+let bankStreamRowLimit = BANK_STREAM_PAGE_SIZE; // how many Bank stream rows are drawn
+let bankStreamRowLimitKey = "";
 let ledgerRowLimit = LEDGER_PAGE_SIZE; // how many ledger rows are drawn; "Show more" raises it
 let ledgerRowLimitKey = ""; // the month/account/sort the limit belongs to
 // null until the Reports page is first opened, at which point it syncs to
@@ -3826,7 +3832,7 @@ function ledgerEntryRow(transaction, index, transferMatch, refundPair = null) {
   // option and the browser silently displays whichever line sorts first
   // alphabetically, indistinguishable from a real choice.
   const isSplit = transaction.splits?.length > 0;
-  const lineOptions = (transaction.lineId ? "" : `<option value="" disabled selected>Choose a subcategory…</option>`) + allLines().map((line) => `<option value="${line.id}" ${line.id === transaction.lineId ? "selected" : ""}>${line.category} - ${line.name}</option>`).join("");
+  const lineOptions = lazyLineOptionsHtml(transaction.lineId);
   const displayAmount = displayTransactionAmount(transaction);
   // Color reflects real-world direction of money (stored transaction.amount:
   // positive is always an expense, negative always money back, regardless of
@@ -3842,8 +3848,8 @@ function ledgerEntryRow(transaction, index, transferMatch, refundPair = null) {
       <input aria-label="Date" type="date" data-ledger-entry-date="${index}" value="${transaction.date}">
       ${isSplit
         ? `<button type="button" class="split-transaction-badge" data-split-transaction-edit="${index}">✂ Split (${transaction.splits.length})</button>`
-        : `<select class="income-recurrence-select" aria-label="Subcategory" data-ledger-entry-line="${index}">${lineOptions}</select>`}
-      ${state.accounts.length ? `<select class="income-recurrence-select" aria-label="Account" data-ledger-entry-account="${index}"><option value="">Not linked</option>${accountOptions(transaction.accountId || "")}</select>` : ""}
+        : `<select class="income-recurrence-select" aria-label="Subcategory" data-ledger-entry-line="${index}" data-lazy-options="line">${lineOptions}</select>`}
+      ${state.accounts.length ? `<select class="income-recurrence-select" aria-label="Account" data-ledger-entry-account="${index}" data-lazy-options="account">${lazyAccountOptionsHtml(transaction.accountId || "")}</select>` : ""}
       <button class="icon-button ${isSplit ? "has-transfer-match" : ""}" data-split-transaction-edit="${index}" type="button" aria-label="Split ${escapeHtml(transaction.payee)} across categories" title="Split across categories">${rowIconHtml("split")}</button>
       <button class="icon-button" data-assign-iou-ledger="${index}" type="button" aria-label="Split with a friend ${escapeHtml(transaction.payee)}" title="Split with a friend (they owe you)">${rowIconHtml("friend")}</button>
       <button class="icon-button ${transferMatch ? "has-transfer-match" : ""}" data-move-to-transfer-ledger="${index}" type="button" aria-label="Move ${escapeHtml(transaction.payee)} to Transfers" title="${transferMatch ? `Matches ${escapeHtml(accountName(transferMatch.accountId))}'s ${exactMoney.format(Math.abs(transferMatch.amount))} on ${formatShortDate(transferMatch.date)}` : "Move to Transfers (account-to-account movement)"}">${rowIconHtml("transfer")}</button>
@@ -3856,6 +3862,30 @@ function ledgerEntryRow(transaction, index, transferMatch, refundPair = null) {
       ${splitEditorHtml(transaction, index)}
     </div>
     ${paybackFindHtml(transaction, index)}`;
+}
+
+// The Ledger draws two menus per row, each listing every subcategory or account: most of a long list's markup. Until one is touched, a row's menu holds
+// only the current choice; touching it (pointer or keyboard focus) fills in the full list first, keeping the choice, so it behaves like any other menu.
+function lazyLineOptionsHtml(selectedId) {
+  const current = selectedId ? allLines().find((line) => line.id === selectedId) : null;
+  if (!selectedId) return `<option value="" disabled selected>Choose a subcategory…</option>`;
+  return `<option value="${escapeHtml(selectedId)}" selected>${current ? `${current.category} - ${current.name}` : "Deleted subcategory"}</option>`;
+}
+
+function lazyAccountOptionsHtml(selectedId) {
+  const current = selectedId ? state.accounts.find((account) => account.id === selectedId) : null;
+  return `<option value="" ${current ? "" : "selected"}>Not linked</option>${current ? `<option value="${current.id}" selected>${escapeHtml(current.name)}${current.closedAt ? " (closed)" : ""}</option>` : ""}`;
+}
+
+function fillLazySelect(select) {
+  const kind = select && select.dataset && select.dataset.lazyOptions;
+  if (!kind) return;
+  const value = select.value;
+  select.innerHTML = kind === "line"
+    ? (value ? "" : `<option value="" disabled selected>Choose a subcategory…</option>`) + allLines().map((line) => `<option value="${line.id}" ${line.id === value ? "selected" : ""}>${line.category} - ${line.name}</option>`).join("")
+    : `<option value="">Not linked</option>${accountOptions(value)}`;
+  select.value = value;
+  delete select.dataset.lazyOptions;
 }
 
 // ---- Paid back by others (see paybackSummary in shared-logic.js): a charge the household fronted that other people repaid by deposit. The row under a
@@ -3876,9 +3906,10 @@ function paybackLineHtml(transaction, index) {
     return `<span class="ledger-payback-line"><span class="pill pill-info" title="Counted against the charge's budget line, not as income">${label}</span><button class="ghost small-button" data-payback-undo="${index}" type="button">Undo</button></span>`;
   }
   if (Number(transaction.amount) < 0) {
-    return PEER_PAYMENT_PAYEE.test(String(transaction.payee || "")) && paybackFindIndex !== index
-      ? `<span class="ledger-payback-line"><button class="ghost small-button" data-payback-find="${index}" type="button" title="Link this deposit to the charge it repaid, so the budget shows only your share">Pays back a charge?</button></span>`
-      : "";
+    if (!PEER_PAYMENT_PAYEE.test(String(transaction.payee || "")) || paybackFindIndex === index) return "";
+    const guess = paybackMemoHint(transaction, state.transactions);
+    const guessAt = guess ? state.transactions.indexOf(guess) : -1;
+    return `<span class="ledger-payback-line">${guess ? `<span class="pill pill-info" title="This deposit's note names the same merchant as the charge">Looks like a repayment for ${escapeHtml(guess.payee.slice(0, 40))} · ${formatShortDate(guess.date)} · ${exactMoney.format(Number(guess.amount))}</span><button class="small-button" data-payback-choose="${guessAt}" data-payback-from="${index}" type="button">Review and link</button>` : ""}<button class="ghost small-button" data-payback-find="${index}" type="button" title="Link this deposit to the charge it repaid, so the budget shows only your share">${guess ? "Another charge?" : "Pays back a charge?"}</button></span>`;
   }
   const summary = paybackSummary(transaction, state.transactions);
   if (!summary.count) return "";
@@ -4060,26 +4091,21 @@ function renderTransactions() {
   // would stay stuck showing its stale result forever.
   // A filter on an account that has since been deleted would hide everything.
   if (ledgerAccountFilter && ledgerAccountFilter !== "none" && !state.accounts.some((account) => account.id === ledgerAccountFilter)) { ledgerAccountFilter = ""; ledgerAllMonths = false; }
-  const allImported = transactionInboxItems()
-    .filter((transaction) => !(state.transactionInboxDone || []).includes(transaction.id))
-    .map((transaction) => ({
+  // The cross-checks for each Bank stream row (possible duplicate, refund, transfer, confidence) compare it against the whole ledger, so they are worked out
+  // only for the rows that are drawn, not for every waiting row in every month: 600 queued rows cost more than a second before this.
+  const allImported = transactionInboxItems().filter((transaction) => !(state.transactionInboxDone || []).includes(transaction.id));
+  const enrichBankRow = (transaction) => {
+    const pool = [...state.transactions, ...(state.transactionInboxDrafts || []).filter((other) => other.id !== transaction.id)];
+    const enriched = {
       ...transaction,
-      possibleDuplicate: isDuplicateTransaction(transaction, [
-        ...state.transactions,
-        ...(state.transactionInboxDrafts || []).filter((other) => other.id !== transaction.id)
-      ]),
-      refundMatch: refundMatch(transaction, [
-        ...state.transactions,
-        ...(state.transactionInboxDrafts || []).filter((other) => other.id !== transaction.id)
-      ]),
-      transferMatch: findTransferCandidate(transaction, [
-        ...state.transactions,
-        ...(state.transactionInboxDrafts || []).filter((other) => other.id !== transaction.id)
-      ]),
+      possibleDuplicate: isDuplicateTransaction(transaction, pool),
+      refundMatch: refundMatch(transaction, pool),
+      transferMatch: findTransferCandidate(transaction, pool),
       categorizationConfidence: transaction.lineId ? payeeCategorizationConfidence(transaction.payee, state.transactions) : null,
       categorizationRuleLineId: categorizationRuleForPayee(transaction.payee)
-    }))
-    .map((transaction) => ({ ...transaction, heldReason: bankStreamHeldReason(transaction) }));
+    };
+    return { ...enriched, heldReason: bankStreamHeldReason(enriched) };
+  };
   // Recent transactions is already filtered to the viewed month, so filter
   // Bank stream to match — otherwise a pending item from a different month
   // sits next to a ledger list it can never be compared against. Sorted per
@@ -4087,11 +4113,15 @@ function renderTransactions() {
   // defaulting to date/desc) - Bank Stream drafts land in insertion order
   // (whatever order the imported file's rows happened to be in), which
   // rarely matches any useful order on its own.
-  const imported = sortTransactionsByField(
+  const importedBase = sortTransactionsByField(
     allImported.filter((transaction) => ledgerMonthMatches(transaction) && ledgerAccountFilterMatches(transaction)),
     bankStreamSort.field,
     bankStreamSort.direction
   );
+  const importedTotal = importedBase.length;
+  const bankLimitKey = [state.budget.month, ledgerAccountFilter, ledgerAllMonths, bankStreamSort.field, bankStreamSort.direction].join("|");
+  if (bankLimitKey !== bankStreamRowLimitKey) { bankStreamRowLimitKey = bankLimitKey; bankStreamRowLimit = BANK_STREAM_PAGE_SIZE; }
+  const imported = importedBase.slice(0, bankStreamRowLimit).map(enrichBankRow);
   const otherMonthCounts = {};
   allImported.forEach((transaction) => {
     const month = transaction.date?.slice(0, 7);
@@ -4222,11 +4252,11 @@ function renderTransactions() {
             if (!monthTransactions.length) {
               if (ledgerAccountFilter) return `<div class="empty-inline">No transactions for this account${ledgerAllMonths ? "" : " in this month"}.${ledgerAllMonths ? "" : " Tick All months to look across every month."}</div>`;
               // Rows the bank has sent for this month can be waiting in Bank stream (held for a look), so say so instead of looking like nothing synced.
-              if (!imported.length) return `<div class="empty-inline">No transactions yet</div>`;
+              if (!importedTotal) return `<div class="empty-inline">No transactions yet</div>`;
               const held = {};
-              imported.forEach((transaction) => { const reason = transaction.heldReason || "waiting for a look"; held[reason] = (held[reason] || 0) + 1; });
+              importedBase.map(enrichBankRow).forEach((transaction) => { const reason = transaction.heldReason || "waiting for a look"; held[reason] = (held[reason] || 0) + 1; });
               const why = Object.entries(held).map(([reason, count]) => `${count} ${reason}`).join(", ");
-              return `<div class="empty-inline">No transactions in the ledger for this month yet. ${imported.length} row${imported.length === 1 ? " is" : "s are"} waiting in Bank stream (${escapeHtml(why)}); accept or move them to Transfers there and they land here.</div>`;
+              return `<div class="empty-inline">No transactions in the ledger for this month yet. ${importedTotal} row${importedTotal === 1 ? " is" : "s are"} waiting in Bank stream (${escapeHtml(why)}); accept or move them to Transfers there and they land here.</div>`;
             }
             const allSorted = sortByTransactionField(monthTransactions, transactionSort.field, transactionSort.direction);
             // A whole year of one account is a thousand rows, each with two menus: several MB of markup that froze phones. Show a page at a time; the page
@@ -4336,7 +4366,7 @@ function renderTransactions() {
             </label>
             <button type="button" id="bankStreamClearAccountButton" class="ghost danger-button">Clear</button>
           </div>` : ""}
-          ${imported.length ? `<div class="bank-stream-sort-row">
+          ${importedTotal ? `<div class="bank-stream-sort-row">
             <span>Sort:</span>
             <button type="button" data-sort-bank-stream="date">Date${bankStreamSortIndicator("date")}</button>
             <button type="button" data-sort-bank-stream="amount">Amount${bankStreamSortIndicator("amount")}</button>
@@ -4376,6 +4406,7 @@ function renderTransactions() {
               ${tagChipsHtml(transaction.tags, "data-remove-bank-stream-tag", "data-add-bank-stream-tag", transaction.id)}
             </div>
           `).join("") || `<div class="empty-inline">No bank stream items waiting</div>`}
+          ${importedTotal > imported.length ? `<div class="ledger-show-more"><span class="muted">Showing ${imported.length} of ${importedTotal}</span><button type="button" class="ghost" id="bankStreamShowMore">Show ${Math.min(BANK_STREAM_PAGE_SIZE, importedTotal - imported.length)} more</button></div>` : ""}
         </section>
         ${categorizationRuleEntries().length || (state.removalRules || []).length ? `<p class="muted learned-rules-pointer">FamilyLoop has learned ${categorizationRuleEntries().length} category rule${categorizationRuleEntries().length === 1 ? "" : "s"}${(state.removalRules || []).length ? ` and ${(state.removalRules || []).length} rule${(state.removalRules || []).length === 1 ? "" : "s"} from rows you removed` : ""}. <button type="button" class="ghost" data-open-learned-rules>Manage in Profile</button></p>` : ""}
         <section class="card cleanup-card">
@@ -4883,6 +4914,10 @@ function renderNotes() {
   const notes = visibleNotes();
   const pinned = notes.filter((note) => note.pinned);
   const others = notes.filter((note) => !note.pinned);
+  // Each note card carries a row of pickers, so a long board is heavy: draw 30 unpinned notes at a time (pinned ones always show).
+  const notesLimitKey = [state.notes.activeView, state.notes.activeLabel, notes.length].join("|");
+  if (notesLimitKey !== notesRowLimitKey) { notesRowLimitKey = notesLimitKey; notesRowLimit = NOTES_PAGE_SIZE; }
+  const shownOthers = others.slice(0, notesRowLimit);
   const canCompose = !["archive", "trash"].includes(state.notes.activeView);
   const emptyMessage = state.notes.activeView === "reminders"
     ? "Notes with upcoming reminders appear here."
@@ -4934,7 +4969,7 @@ function renderNotes() {
         </form>` : ""}
         ${notes.length ? `
           ${pinned.length ? `<section class="notes-result-section"><div class="notes-section-label">Pinned</div><div class="notes-board">${pinned.map(renderNoteCard).join("")}</div></section>` : ""}
-          ${others.length ? `<section class="notes-result-section"><div class="notes-section-label">${pinned.length ? "Others" : "Notes"}</div><div class="notes-board">${others.map(renderNoteCard).join("")}</div></section>` : ""}
+          ${others.length ? `<section class="notes-result-section"><div class="notes-section-label">${pinned.length ? "Others" : "Notes"}</div><div class="notes-board">${shownOthers.map(renderNoteCard).join("")}</div>${others.length > shownOthers.length ? `<div class="ledger-show-more"><span class="muted">Showing ${shownOthers.length} of ${others.length}</span><button type="button" class="ghost" id="notesShowMore">Show ${Math.min(NOTES_PAGE_SIZE, others.length - shownOthers.length)} more</button></div>` : ""}</section>` : ""}
         ` : `<div class="notes-empty">${emptyMessage}</div>`}
       </div>
       <dialog id="noteLabelsDialog" class="app-dialog note-labels-dialog">
@@ -8014,6 +8049,7 @@ function renderRecipeImportPanel() {
       </div>
     </form>` : `
     <p class="muted">Paste the link of a recipe video or post from YouTube, Instagram, Facebook, TikTok or another social site (use the app's Share, then Copy link). The AI reads the caption posted with it, and for YouTube it also watches the video. For Instagram, Facebook or TikTok, save or screen-record the video on your phone and add it with "Add a video file": the AI then watches it too. Those apps often hide their captions from other apps: if it asks, paste the caption text below. You can also add screenshots of the ingredient list. Spoken quantities can be missed, so check the draft.</p>
+    <div class="recipe-form-actions"><button type="button" class="ghost" id="recipeImportPasteButton" title="Fill in the link you just copied from Instagram, TikTok, Facebook or YouTube">📋 Paste copied link</button></div>
     <label>Video or post link<input type="url" id="recipeImportUrl" value="${escapeHtml(recipeImportUrl)}" placeholder="https://www.instagram.com/reel/… or youtu.be/… or fb.watch/…" autocomplete="off"></label>
     <label>Caption or description (optional)<textarea id="recipeImportCaption" rows="4" placeholder="Paste the post's caption here if it lists the ingredients or steps">${escapeHtml(recipeImportCaption)}</textarea></label>
     <div class="recipe-import-photos">
@@ -9798,7 +9834,7 @@ function renderHelp() {
         "Short on time? On <strong>Recipes</strong> choose <strong>+ From a video or photos</strong>: paste a YouTube, Instagram, Facebook or TikTok link, add the post's caption, a saved or screen-recorded video file, or screenshots of the ingredients, and the AI drafts the recipe for you to check before it is saved."
       ],
       tips: [
-        "On an Android phone, install FamilyLoop (browser menu, <strong>Install app</strong> or <strong>Add to Home screen</strong>) and it appears in the <strong>Share</strong> menu: share a video from Instagram, TikTok or Facebook to FamilyLoop and the recipe form opens with the link filled in. iPhones do not offer this yet, so copy the link and paste it instead.",
+        "On an Android phone, install FamilyLoop (browser menu, <strong>Install app</strong> or <strong>Add to Home screen</strong>) and it appears in the <strong>Share</strong> menu: share a video from Instagram, TikTok or Facebook to FamilyLoop and the recipe form opens with the link filled in. iPhones do not offer this yet: choose <strong>Copy link</strong>, then tap <strong>Paste copied link</strong> on the recipe form.",
         "Build a small library of go-to recipes once — planning a week becomes picking from a list instead of starting from zero. Your account starts with a few recipes to edit or delete.",
         "Instagram, Facebook and TikTok hide their videos and often their captions from other apps: save or screen-record the video and add it as a <strong>video file</strong>, or paste the caption into the box.",
         "A recipe card stays short however long the recipe is; click it to open the full recipe with every quantity."
@@ -13512,6 +13548,8 @@ function bindViewEvents() {
       if (panel.scrollHeight > room && room > 140) { panel.style.maxHeight = `${Math.floor(room)}px`; panel.style.overflowY = "auto"; }
     });
   });
+  $("#notesShowMore")?.addEventListener("click", () => { notesRowLimit += NOTES_PAGE_SIZE; render(); });
+  $("#bankStreamShowMore")?.addEventListener("click", () => { bankStreamRowLimit += BANK_STREAM_PAGE_SIZE; render(); });
   $("#ledgerShowMore")?.addEventListener("click", () => { ledgerRowLimit += LEDGER_PAGE_SIZE; render(); });
   $("#ledgerShowAll")?.addEventListener("click", () => { ledgerRowLimit = Infinity; render(); });
   $("#ledgerAllMonths")?.addEventListener("change", (event) => {
@@ -14678,6 +14716,20 @@ function bindViewEvents() {
     render();
   });
   $("#recipeImportUrl")?.addEventListener("input", (event) => { recipeImportUrl = event.target.value; });
+  // iPhones cannot list FamilyLoop in the Share menu, so this is the shortest path there: Share, Copy link, then one tap here.
+  $("#recipeImportPasteButton")?.addEventListener("click", async () => {
+    try {
+      const link = sharedLinkFromShare({ text: await navigator.clipboard.readText() });
+      if (!link) { recipeImportError = "There is no link on the clipboard. In Instagram, TikTok or Facebook choose Share, then Copy link, and try again."; render(); return; }
+      recipeImportUrl = link;
+      recipeImportError = "";
+      render();
+      showToast("Link pasted. Press Read the recipe.", { type: "success" });
+    } catch (_error) {
+      recipeImportError = "FamilyLoop could not read the clipboard here. Press and hold in the link box and choose Paste instead.";
+      render();
+    }
+  });
   $("#recipeImportCaption")?.addEventListener("input", (event) => { recipeImportCaption = event.target.value; });
   $("#recipeImportVideoFile")?.addEventListener("change", (event) => {
     const file = event.target.files?.[0];
@@ -17579,6 +17631,11 @@ function setMobileDrawer(open) {
   $("#mobileSidebarBackdrop").hidden = !open;
   $("#mobileMoreButton").setAttribute("aria-expanded", String(open));
 }
+
+["pointerdown", "focusin", "touchstart"].forEach((type) => view.addEventListener(type, (event) => {
+  const select = event.target.closest && event.target.closest("select[data-lazy-options]");
+  if (select) fillLazySelect(select);
+}, { capture: true, passive: true }));
 
 $("#mobileMoreButton").addEventListener("click", (event) => {
   event.stopPropagation();

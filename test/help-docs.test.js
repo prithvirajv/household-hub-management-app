@@ -33,7 +33,7 @@ test("every page in the sidebar has a Help guide", () => {
 test("the consumer guide has a section for every page and the main features", () => {
   ["Budget", "Bills", "Transactions", "Paycheck/Income", "Calendar", "Notes", "Journal", "Plan", "Documents", "Decisions", "Shared Expenses", "Meals and Recipes", "Goals", "Partners", "Wealth", "Investments", "Item prices", "Calculators", "Sharing", "Reports and Export"]
     .forEach((heading) => assert.match(guide, new RegExp(`^## ${heading.replace(/[/()]/g, "\\$&")}`, "m"), `a "${heading}" section`));
-  ["Receipts by email", "Know your number", "Car affordability", "House affordability", "Wealth multiplier", "Prodigious accumulator", "Re-date rows you imported earlier", "Imported back to", "Look at one account at a time", "Add a video file", "ready-made budget", "Pays back a charge?", "Share a video straight to FamilyLoop"]
+  ["Receipts by email", "Know your number", "Car affordability", "House affordability", "Wealth multiplier", "Prodigious accumulator", "Re-date rows you imported earlier", "Imported back to", "Look at one account at a time", "Add a video file", "ready-made budget", "Pays back a charge?", "Share a video straight to FamilyLoop", "Looks like a repayment", "Paste copied link"]
     .forEach((phrase) => assert.ok(guide.includes(phrase), `the consumer guide mentions "${phrase}"`));
 });
 

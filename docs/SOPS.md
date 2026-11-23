@@ -566,6 +566,15 @@ top bar's icon buttons sit in one row, the month input cannot exceed the screen 
 (`viewport-fit=cover` in `index.html` makes `env(safe-area-inset-*)` real; the bar's bottom padding has a 20px floor because a tap in that strip is taken by the system), and a
 file's ⋮ menu is height-capped to the room above the bar. `historyGapMissingMonths` feeds the "still empty" text of history-gap notices.
 
+### Long lists and lazy menus
+Bank stream enriches (`enrichBankRow`: possible duplicate, refund and transfer matches, confidence, held reason, each a scan of the ledger) only the rows it draws
+(100 at a time, `BANK_STREAM_PAGE_SIZE`); counts and sorting use the plain rows. Notes draws 30 unpinned notes at a time. A Ledger row's Subcategory and Account menus are
+rendered holding only the current choice (`data-lazy-options`) and filled with the full list on the first pointerdown/focus/touchstart (`fillLazySelect`, one delegated
+listener on `#view`), which keeps a 200-row page near 600 KB instead of 860 KB. `paybackMemoHint` (`lib/shared-logic.js`) matches a repayment's note to a charge by the
+charge's first meaningful word (`paybackNameToken`). Recipes' "Paste copied link" reads the clipboard (`navigator.clipboard.readText`, user gesture required) and reuses
+`sharedLinkFromShare`. A phone-width audit (every page at 375px, looking for boxes past the right edge outside deliberately scrolling containers) found Wealth's account
+cards 717px wide and Reports' budget-vs-actual rows 430px; fixed in the last `@media (max-width: 760px)` blocks of `styles.css`.
+
 ### Installable app and Share target
 `manifest.webmanifest` (name, 192/512 icons incl. maskable from `assets/`, `share_target` GET to `/index.html` with `title`, `text`, `url`) and `sw.js`
 (registers in `app.js`; a fetch handler that caches nothing so deploys are never hidden) make Chrome on Android offer Install and list FamilyLoop in the Share

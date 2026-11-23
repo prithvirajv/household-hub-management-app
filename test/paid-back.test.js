@@ -1,6 +1,6 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
-const { paybackSummary, paybackCandidates, paybackChargesFor, paybackSiblings, applyPayback, removePayback, syncPaybackLines, paybackLineOf, spentByLineInMonth, monthSpendingSummary } = require("../lib/shared-logic");
+const { paybackSummary, paybackCandidates, paybackChargesFor, paybackSiblings, paybackNameToken, paybackMemoHint, applyPayback, removePayback, syncPaybackLines, paybackLineOf, spentByLineInMonth, monthSpendingSummary } = require("../lib/shared-logic");
 
 const charge = () => ({ id: "tx-ixl", payee: "IXL LEARNING", amount: 419, date: "2026-11-02", lineId: "edu", accountId: "citi-card" });
 const zelle = (id, amount, date, payee = "Zelle payment from Sam") => ({ id, payee, amount: -amount, date, accountId: "citi-checking" });
@@ -116,4 +116,26 @@ test("look-alike deposits are pre-ticked only while they fit under the charge", 
   const rows = [c, first, zelle("b", 42, "2026-11-05"), zelle("c", 41, "2026-11-06"), zelle("d", 42, "2026-11-07"), zelle("odd", 7, "2026-11-06"), { id: "nz", payee: "ACME", amount: -42, date: "2026-11-06" }];
   assert.deepEqual(paybackSiblings(c, first, rows).map((row) => row.id), ["b"], "42 + 42 = 84; a third would pass 100; the odd amount and the non-Zelle row are left out");
   assert.deepEqual(paybackSiblings(null, first, rows), []);
+});
+
+test("the merchant name is the first meaningful word of the charge, after processor prefixes and filler", () => {
+  assert.equal(paybackNameToken("IXL FAMILY SUBSCRIPT 650-372-4040 CA"), "ixl");
+  assert.equal(paybackNameToken("SQ *MADURAI FOOD"), "madurai");
+  assert.equal(paybackNameToken("TST* PAYMENT THE HOME DEPOT"), "home");
+  assert.equal(paybackNameToken("AMAZON MKTPLACE PMTS"), "amazon");
+  assert.equal(paybackNameToken("12 34 56"), "");
+  assert.equal(paybackNameToken(""), "");
+});
+
+test("a repayment whose note names the charge's merchant is matched to it; timing alone is not enough", () => {
+  const c = { ...charge(), payee: "IXL FAMILY SUBSCRIPT 650-372-4040 CA" };
+  const named = zelle("n", 42, "2026-11-08", 'Zelle payment from SAM LEE for "IXL share 2026";');
+  const unnamed = zelle("u", 42, "2026-11-08", 'Zelle payment from SAM LEE for "kids";');
+  const other = { id: "o", payee: "COSTCO WHSE", amount: 300, date: "2026-11-07", lineId: "food" };
+  assert.equal(paybackMemoHint(named, [c, named, other]), c);
+  assert.equal(paybackMemoHint(unnamed, [c, unnamed, other]), null, "no merchant in the note");
+  assert.equal(paybackMemoHint({ ...named, paidBackFor: "x" }, [c, named]), null, "already linked");
+  assert.equal(paybackMemoHint({ id: "p", payee: "ACME PAYROLL for IXL", amount: -42, date: "2026-11-08" }, [c]), null, "not a person-to-person payment");
+  assert.equal(paybackMemoHint(zelle("big", 900, "2026-11-08", 'Zelle for "IXL"'), [c]), null, "bigger than the charge");
+  assert.equal(paybackMemoHint(named, []), null);
 });
