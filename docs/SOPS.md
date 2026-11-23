@@ -541,6 +541,35 @@ Each debt in `state.goals.debts` shares its id with a liability in `state.goals.
 
 `render()` rebuilds the whole page on every edit. Lists with their own scrollbar (`INNER_SCROLL_SELECTORS` in app.js: the ledger list and the tag transaction list) have their `scrollTop` captured before the rebuild and restored after it, as long as the page and month are unchanged. Add any new scrollable list to that array.
 
+### Paid back by others (shared charges)
+A charge the household fronted for a group is later repaid by deposits. `lib/shared-logic.js` (`paybackCandidates`, `applyPayback`, `removePayback`,
+`syncPaybackLines`, `paybackSummary`) links them: the deposit gets `paidBackFor` (the charge's id, assigned on demand), the charge's budget line (the biggest
+split's line when the charge is split) with `lineSource: "payback"`, and `paidBackPrev` holding what it had before, which `removePayback` restores. Because a
+negative amount on a budget line already nets that line (`spentByLineInMonth`, `monthSpendingSummary`), no totals code changed and no account balance moves.
+Candidates are unlinked money-in rows from 3 days before to 60 days after the charge, no bigger than it; ones already on the charge's own line come first, then
+Zelle/Venmo/Cash App/PayPal/Apple Cash-style payees. Entry points: "Pays back a charge?" under an unlinked Zelle-style deposit (`paybackChargesFor` lists the
+charges it could repay; picking one opens the charge's editor with the deposit and look-alikes from `paybackSiblings` pre-ticked), "Paid back by others…" in the
+select bar when exactly one charge is ticked, and "Add more"/"Review" on a charge that already has links. There is deliberately no hint on charges themselves:
+against a real year of data every heuristic tried (a nearby Zelle, a group of equal-sized Zelles) lit up 60-380 ordinary purchases. Re-categorizing the charge re-files its
+`payback` deposits (`refreshPaybackLines`); a deposit the person re-filed by hand (another `lineSource`) is left alone. This is separate from Shared
+Expenses' IOU split, which shrinks the ledger row to the household's share; use one or the other per charge.
+
+### History-gap notices clear themselves
+`historyGapCovered` / `openHistoryGapNotices` (`lib/shared-logic.js`) hide a notice once the account has at least one ledger or Bank stream row in every
+month from `fromMonth` to `toMonth`. It is derived at render time (`openGapNotices` in `app.js`), never saved, so deleting those rows brings it back; the
+notice object stays in `state.historyGapNotices` until the person selects "I've imported it".
+
+### Installable app and Share target
+`manifest.webmanifest` (name, 192/512 icons incl. maskable from `assets/`, `share_target` GET to `/index.html` with `title`, `text`, `url`) and `sw.js`
+(registers in `app.js`; a fetch handler that caches nothing so deploys are never hidden) make Chrome on Android offer Install and list FamilyLoop in the Share
+menu. `captureSharedLink()` (run first in `initializeApp`) pulls the first http(s) link out of the share fields (`sharedLinkFromShare`), removes those
+parameters from the address bar and keeps the link in `sessionStorage` so it survives the sign-in screen; `loadApp` then opens Recipes with the import form
+open and the link filled in. The AI is not called until the person presses Read the video. iOS Safari does not support Web Share Target.
+
+### Admin: preview of a new household
+`GET /api/admin/new-user-preview?currency=` (admin only) builds a household with the same `householdState()` a signup uses, without saving it, and returns its
+budget, recipes, notes, chores, goals and which areas start empty; the Admin card shows it with "Preview what a new household gets".
+
 ### Same bank transaction through two connections
 
 Re-authorising a bank in SimpleFIN Bridge can return its accounts with new ids, and a joint account can be visible through two logins; the same transaction then arrives with a different transaction id and the id check misses it. `selectNewLinkedTransactions` (lib/shared-logic.js) takes the existing ledger and Bank stream rows and skips an incoming row that matches one from a *different* remote account on the same app account, same date, same amount and same payee text (digits and masking ignored); skipped ids are remembered in `linkedImportedIds`. Equal purchases from the same remote account are kept. `findCrossConnectionDuplicates` finds copies already in the ledger (the copy with a category, split or tags is kept); Transactions shows a note with a one-click "Remove the extra copies" button. Mobile's in-app sync does not have the guard yet (the overnight server sync does).

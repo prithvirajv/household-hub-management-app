@@ -2604,7 +2604,7 @@ function bankSyncFacts() {
   fed.slice(0, 10).forEach((account) => {
     facts.push(`- ${account.name}: bank records ${account.syncedFrom ? `from ${day(account.syncedFrom)} ` : ""}${account.syncedThrough ? `through ${day(account.syncedThrough)}${account.syncedThrough < behind ? " (BEHIND - the bank has not reported anything newer)" : ""}` : ""}.`);
   });
-  (state.historyGapNotices || []).forEach((notice) => facts.push(`- NOT imported (the bank did not return it; needs a statement import): ${accountName(notice.accountId) || notice.accountName}, ${historyGapMonths(notice)}.`));
+  openGapNotices().forEach((notice) => facts.push(`- NOT imported (the bank did not return it; needs a statement import): ${accountName(notice.accountId) || notice.accountName}, ${historyGapMonths(notice)}.`));
   return facts;
 }
 
@@ -3847,10 +3847,83 @@ function ledgerEntryRow(transaction, index, transferMatch, refundPair = null) {
       <button class="icon-button ${(transaction.receiptIds || []).length ? "has-receipt" : ""}" data-receipt-ledger="${index}" type="button" aria-label="${(transaction.receiptIds || []).length ? "View the receipt for" : "Attach a receipt to"} ${escapeHtml(transaction.payee)}" title="${(transaction.receiptIds || []).length ? "View the receipt and its items" : "Attach a receipt (photo or PDF)"}">${rowIconHtml("receipt")}</button>
       <button class="icon-button danger-button" data-delete-transaction="${index}" type="button" aria-label="Delete ${escapeHtml(transaction.payee)}">${rowIconHtml("close")}</button>
       ${ledgerRefundPill(refundPair)}
+      ${paybackLineHtml(transaction, index)}
       ${!transaction.lineId && !isSplit ? `<span class="pill pill-warning ledger-needs-category" title="No subcategory yet - this counts toward your balance but not toward any budget line. Choose one on this row.">Needs a category</span>` : ""}
       ${tagChipsHtml(transaction.tags, "data-remove-ledger-tag", "data-add-ledger-tag", index)}
       ${splitEditorHtml(transaction, index)}
-    </div>`;
+    </div>
+    ${paybackFindHtml(transaction, index)}`;
+}
+
+// ---- Paid back by others (see paybackSummary in shared-logic.js): a charge the household fronted that other people repaid by deposit. The row under a
+// charge says how much came back and what the household's own share is; the row under a repayment says what it paid back. The editor lists the
+// deposits that could be repayments and links the ones ticked. paybackEditorIndex is the ledger index whose editor is open (null when closed).
+let paybackEditorIndex = null;
+let paybackPicked = new Set(); // ledger indexes of the deposits ticked in the open editor
+
+// Where it starts: a repayment that has not been linked yet offers "Pays back a charge?" (a picker of the charges it could belong to), and the select
+// bar offers "Paid back by others..." when exactly one charge is ticked. Showing a button on every charge was tried against real data and would have
+// lit up hundreds of ordinary purchases, so nothing is suggested on a charge by itself.
+let paybackFindIndex = null; // ledger index of the repayment whose "which charge?" picker is open
+
+function paybackLineHtml(transaction, index) {
+  if (transaction.paidBackFor) {
+    const charge = state.transactions.find((row) => row.id === transaction.paidBackFor);
+    const label = charge ? `Paid back for ${escapeHtml(charge.payee)} · ${exactMoney.format(Number(charge.amount))} on ${formatShortDate(charge.date)}` : "Paid back for a charge that is no longer in the ledger";
+    return `<span class="ledger-payback-line"><span class="pill pill-info" title="Counted against the charge's budget line, not as income">${label}</span><button class="ghost small-button" data-payback-undo="${index}" type="button">Undo</button></span>`;
+  }
+  if (Number(transaction.amount) < 0) {
+    return PEER_PAYMENT_PAYEE.test(String(transaction.payee || "")) && paybackFindIndex !== index
+      ? `<span class="ledger-payback-line"><button class="ghost small-button" data-payback-find="${index}" type="button" title="Link this deposit to the charge it repaid, so the budget shows only your share">Pays back a charge?</button></span>`
+      : "";
+  }
+  const summary = paybackSummary(transaction, state.transactions);
+  if (!summary.count) return "";
+  return `<span class="ledger-payback-line"><span class="pill pill-info" title="${summary.count} repayment${summary.count === 1 ? "" : "s"} linked: ${exactMoney.format(summary.paid)}. The budget line shows only what is left, ${exactMoney.format(summary.share)}.">Paid back ${exactMoney.format(summary.paid)} of ${exactMoney.format(summary.total)} · your share ${exactMoney.format(summary.share)}</span><button class="ghost small-button" data-payback-open="${index}" type="button">${summary.covered ? "Review" : "Add more"}</button></span>`;
+}
+
+// The picker under a repayment: the charges it could be paying back; choosing one opens that charge's editor with this deposit (and any look-alikes) ticked.
+function paybackFindHtml(transaction, index) {
+  if (paybackFindIndex !== index) return "";
+  const charges = paybackChargesFor(transaction, state.transactions);
+  return `<div class="payback-editor">
+    <p class="muted">Which charge did this ${exactMoney.format(-Number(transaction.amount))} repay? Choose it and you can tick the other deposits for the same charge before linking.</p>
+    ${charges.length ? charges.map((item) => `<button type="button" class="payback-candidate payback-charge-choice" data-payback-choose="${state.transactions.indexOf(item.row)}" data-payback-from="${index}"><span>${escapeHtml(item.row.payee)}</span><small>${formatShortDate(item.row.date)}${item.sameLine ? " · same budget line" : ""}</small><b>${exactMoney.format(Number(item.row.amount))}</b></button>`).join("") : `<p class="muted">No charge at least this big within two months of this deposit.</p>`}
+    <div class="split-editor-actions"><button type="button" class="ghost" data-payback-cancel>Cancel</button></div>
+  </div>`;
+}
+
+// The linking panel sits above the list rather than under the charge's row, so it is there whatever month or account the list is showing.
+function paybackEditorHtml(transaction, index) {
+  if (!transaction || paybackEditorIndex !== index) return "";
+  const summary = paybackSummary(transaction, state.transactions);
+  // Zelle-style deposits (and ones the person already filed on this line) in full; other money in (refunds, payroll) only a few, so the list stays about the likely ones.
+  const everything = paybackCandidates(transaction, state.transactions);
+  const strong = everything.filter((item) => item.likely || item.sameLine);
+  const candidates = [...strong.slice(0, 30), ...everything.filter((item) => !item.likely && !item.sameLine).slice(0, strong.length ? 4 : 12)];
+  const hidden = everything.length - candidates.length;
+  const pickedTotal = candidates.reduce((sum, item) => sum + (paybackPicked.has(state.transactions.indexOf(item.row)) ? -Number(item.row.amount) : 0), 0);
+  const rows = candidates.map((item) => {
+    const at = state.transactions.indexOf(item.row);
+    return `<label class="payback-candidate"><input type="checkbox" data-payback-toggle="${at}" ${paybackPicked.has(at) ? "checked" : ""}> <span>${escapeHtml(item.row.payee)}</span><small>${formatShortDate(item.row.date)}${item.sameLine ? " · already on this budget line" : item.likely ? "" : " · not a Zelle/Venmo-style deposit"}</small><b>${exactMoney.format(-Number(item.row.amount))}</b></label>`;
+  }).join("");
+  return `<div class="payback-editor" role="region" aria-label="Link repayments to a charge">
+    <strong>${escapeHtml(transaction.payee)} · ${formatShortDate(transaction.date)} · ${exactMoney.format(Number(transaction.amount))}${transaction.accountId ? ` · ${escapeHtml(accountName(transaction.accountId))}` : ""}</strong>
+    <p class="muted">${summary.count ? `${exactMoney.format(summary.paid)} is already linked. ` : ""}Tick the deposits that repaid this ${exactMoney.format(Number(transaction.amount))} charge. They are filed under the charge's budget line, so the line shows only your share and the deposits do not count as income. Both bank balances stay exactly as the bank has them.</p>
+    ${rows || `<p class="muted">No unlinked deposits within two months of this charge. If the money has not arrived yet, come back when it has.</p>`}
+    ${hidden > 0 ? `<p class="muted">${hidden} other deposit${hidden === 1 ? "" : "s"} in that period not shown.</p>` : ""}
+    <div class="split-editor-actions">
+      <span class="split-editor-remaining ${pickedTotal ? "good" : ""}">${pickedTotal ? `${exactMoney.format(pickedTotal)} picked · your share would be ${exactMoney.format(Math.max(0, Number(transaction.amount) - summary.paid - pickedTotal))}` : "Nothing picked yet"}</span>
+      <button type="button" class="ghost" data-payback-cancel>Cancel</button>
+      <button type="button" data-payback-apply="${index}" ${paybackPicked.size ? "" : "disabled"}>Link ${paybackPicked.size || ""} deposit${paybackPicked.size === 1 ? "" : "s"}</button>
+    </div>
+  </div>`;
+}
+
+// Repayments follow their charge when it is re-categorized, and show the new line's names.
+function refreshPaybackLines() {
+  if (!syncPaybackLines(state.transactions)) return;
+  state.transactions.forEach((row) => { if (row.paidBackFor && row.lineSource === "payback") Object.assign(row, lineSnapshot(row.lineId)); });
 }
 
 function splitEditorHtml(transaction, index) {
@@ -4155,13 +4228,14 @@ function renderTransactions() {
             const sorted = sortByTransactionField(monthTransactions, transactionSort.field, transactionSort.direction);
             const visibleIndices = sorted.map(({ index }) => index);
             const allVisibleSelected = visibleIndices.length > 0 && visibleIndices.every((index) => ledgerSelectedIndices.has(index));
-            return `${ledgerSelectedIndices.size ? `<div class="ledger-bulk-bar">
+            return `${paybackEditorHtml(state.transactions[paybackEditorIndex], paybackEditorIndex)}${ledgerSelectedIndices.size ? `<div class="ledger-bulk-bar">
                 <strong>${ledgerSelectedIndices.size} selected</strong>
                 <select id="ledgerBulkLineSelect" aria-label="Subcategory to apply to selected transactions">
                   <option value="" disabled selected>Choose a subcategory…</option>
                   ${allLines().map((line) => `<option value="${line.id}">${line.category} - ${line.name}</option>`).join("")}
                 </select>
                 <button id="ledgerBulkApplyButton" type="button">Apply to selected</button>
+                ${ledgerSelectedIndices.size === 1 && Number(state.transactions[[...ledgerSelectedIndices][0]]?.amount) > 0 ? `<button id="ledgerBulkPaybackButton" class="ghost" type="button" title="Link the Zelle or Venmo deposits that repaid this charge, so the budget shows only your share">Paid back by others…</button>` : ""}
                 <button id="ledgerBulkClearButton" class="ghost" type="button">Clear selection</button>
               </div>` : ""}
               <div class="ledger-entry-scroll">
@@ -9610,6 +9684,7 @@ function renderHelp() {
       tips: [
         "A card file with both a <strong>Transaction Date</strong> and a <strong>Post Date</strong> is imported with the post date, the date a linked bank reports. Already imported earlier? <strong>Re-date from a CSV</strong> in Bank Stream previews the rows to move and changes nothing until you confirm.",
         "On Wealth, a bank-linked account shows <strong>Synced from</strong> (where the bank's own records start) and, once you've imported older statements, <strong>Imported back to</strong> (how far back your history goes).",
+        "<strong>Others repaid you?</strong> When you paid for a group (a $419 membership for ten) and friends send their share by Zelle or Venmo, press <strong>Pays back a charge?</strong> under one of those deposits, choose the charge, and tick the deposits that belong to it (or tick the charge and choose <strong>Paid back by others…</strong>). They are filed under the charge's budget line, so it shows only your share and they do not count as income; both bank balances stay as the bank has them. <strong>Undo</strong> on a deposit unlinks it.",
         "A refund or return is auto-matched to its original purchase by payee, amount, and date, and pre-filled with that purchase's budget line — always double-check the suggested line before accepting, especially if it wasn't a confident match.",
         "\"Possible duplicate\" and \"Possible transfer\" pills flag likely re-imports and account-to-account movements (like a credit card payment from checking) before you accept them — use the ⇄ icon to move a transfer instead of counting it as an expense.",
         "Tag transactions (e.g. \"Florida trip\") to see them grouped together later in Reports.",
@@ -9713,6 +9788,7 @@ function renderHelp() {
         "Short on time? On <strong>Recipes</strong> choose <strong>+ From a video or photos</strong>: paste a YouTube, Instagram, Facebook or TikTok link, add the post's caption, a saved or screen-recorded video file, or screenshots of the ingredients, and the AI drafts the recipe for you to check before it is saved."
       ],
       tips: [
+        "On an Android phone, install FamilyLoop (browser menu, <strong>Install app</strong> or <strong>Add to Home screen</strong>) and it appears in the <strong>Share</strong> menu: share a video from Instagram, TikTok or Facebook to FamilyLoop and the recipe form opens with the link filled in. iPhones do not offer this yet, so copy the link and paste it instead.",
         "Build a small library of go-to recipes once — planning a week becomes picking from a list instead of starting from zero. Your account starts with a few recipes to edit or delete.",
         "Instagram, Facebook and TikTok hide their videos and often their captions from other apps: save or screen-record the video and add it as a <strong>video file</strong>, or paste the caption into the box.",
         "A recipe card stays short however long the recipe is; click it to open the full recipe with every quantity."
@@ -9911,6 +9987,33 @@ function hidePublicHelp() {
 
 // Admin: the budget every new household starts with. The owner picks one of their own months (their January 2025, say) and saves it; recipes and the
 // other starters (notes, chores, savings goals) are always the built-in defaults, and existing households are never changed.
+// What a new household would get right now (GET /api/admin/new-user-preview), shown under the template card; null until asked for.
+let newUserPreview = null;
+
+async function loadNewUserPreview() {
+  try {
+    newUserPreview = await api(`/api/admin/new-user-preview?currency=${encodeURIComponent(state.household?.currency || "USD")}`);
+  } catch (error) {
+    newUserPreview = { error: error.message };
+  }
+}
+
+function newUserPreviewHtml() {
+  const preview = newUserPreview;
+  if (!preview) return "";
+  if (preview.error) return `<p class="field-error" role="alert">${escapeHtml(preview.error)}</p>`;
+  const list = (items) => items.map((item) => `<li>${escapeHtml(item)}</li>`).join("");
+  const budgetMoney = (value) => new Intl.NumberFormat(undefined, { style: "currency", currency: preview.currency, maximumFractionDigits: 0 }).format(value);
+  return `<div class="new-user-preview" role="region" aria-label="What a new household gets">
+    <div><h4>Budget</h4><p class="muted">${preview.categories.length} categories, ${preview.categories.reduce((sum, category) => sum + category.lines.length, 0)} subcategories${preview.plannedTotal ? `, ${budgetMoney(preview.plannedTotal)} planned in total` : ", amounts left at zero"}.</p>
+      <ul>${preview.categories.map((category) => `<li><strong>${escapeHtml(category.name)}</strong>: ${escapeHtml(category.lines.map((line) => (line.planned ? `${line.name} ${budgetMoney(line.planned)}` : line.name)).join(", "))}</li>`).join("")}</ul></div>
+    <div><h4>Recipes</h4><ul>${list(preview.recipes)}</ul></div>
+    <div><h4>Notes</h4><ul>${list(preview.notes)}</ul><h4>Chores</h4><ul>${list(preview.chores)}</ul></div>
+    <div><h4>Savings goals</h4><ul>${list(preview.goals.map((goal) => `${goal.name}: ${budgetMoney(goal.target)}`))}</ul>
+      <h4>Left empty</h4><p class="muted">Income${preview.startsEmpty.income ? "" : " (NOT empty)"}, accounts${preview.startsEmpty.accounts ? "" : " (NOT empty)"}, transactions${preview.startsEmpty.transactions ? "" : " (NOT empty)"} and debts${preview.startsEmpty.debts ? "" : " (NOT empty)"}.</p></div>
+  </div>`;
+}
+
 function newUserTemplateCardHtml() {
   const info = adminData?.template;
   if (!info) return "";
@@ -9927,7 +10030,9 @@ function newUserTemplateCardHtml() {
       <label>Save this month's budget as the template<select id="newUserTemplateMonth">${months.map((month) => `<option value="${month}" ${month === preferred ? "selected" : ""}>${escapeHtml(formatMonth(month))}</option>`).join("")}</select></label>
       <button type="button" id="newUserTemplateSave">Save as the new-user budget</button>
       ${info.saved ? `<button type="button" class="ghost" id="newUserTemplateReset">Use the built-in budget instead</button>` : ""}
+      <button type="button" class="ghost" id="newUserPreviewButton">${newUserPreview ? "Refresh the preview" : "Preview what a new household gets"}</button>
     </div>
+    ${newUserPreviewHtml()}
     <small class="muted">It saves that month as it was: its categories, subcategories, due days and planned amounts, never the income. Make sure your latest changes have saved first.</small>
   </section>`;
 }
@@ -13842,6 +13947,7 @@ function bindViewEvents() {
       const transaction = state.transactions[index];
       if (!transaction) return;
       Object.assign(transaction, { lineId: select.value }, lineSnapshot(select.value));
+      refreshPaybackLines();
       autosaveState();
       render();
       await learnFromCategoryChange(index);
@@ -13908,6 +14014,92 @@ function bindViewEvents() {
     });
   });
 
+  document.querySelectorAll("[data-payback-open]").forEach((button) => {
+    button.addEventListener("click", () => {
+      const index = Number(button.dataset.paybackOpen);
+      if (!state.transactions[index]) return;
+      paybackEditorIndex = index;
+      paybackPicked = new Set();
+      render();
+    });
+  });
+
+  document.querySelectorAll("[data-payback-toggle]").forEach((box) => {
+    box.addEventListener("change", () => {
+      const at = Number(box.dataset.paybackToggle);
+      if (box.checked) paybackPicked.add(at); else paybackPicked.delete(at);
+      render();
+    });
+  });
+
+  document.querySelectorAll("[data-payback-find]").forEach((button) => {
+    button.addEventListener("click", () => {
+      paybackFindIndex = Number(button.dataset.paybackFind);
+      paybackEditorIndex = null;
+      paybackPicked = new Set();
+      render();
+    });
+  });
+
+  document.querySelectorAll("[data-payback-choose]").forEach((button) => {
+    button.addEventListener("click", () => {
+      const charge = state.transactions[Number(button.dataset.paybackChoose)];
+      const deposit = state.transactions[Number(button.dataset.paybackFrom)];
+      if (!charge || !deposit) return;
+      paybackEditorIndex = state.transactions.indexOf(charge);
+      paybackPicked = new Set([deposit, ...paybackSiblings(charge, deposit, state.transactions)].map((row) => state.transactions.indexOf(row)));
+      paybackFindIndex = null;
+      render();
+      document.querySelector(".payback-editor")?.scrollIntoView({ block: "center" });
+    });
+  });
+
+  document.querySelector("[data-payback-cancel]")?.addEventListener("click", () => {
+    paybackEditorIndex = null;
+    paybackFindIndex = null;
+    paybackPicked = new Set();
+    render();
+  });
+
+  $("#ledgerBulkPaybackButton")?.addEventListener("click", () => {
+    const [only] = [...ledgerSelectedIndices];
+    if (ledgerSelectedIndices.size !== 1 || !(Number(state.transactions[only]?.amount) > 0)) return;
+    paybackEditorIndex = only;
+    paybackFindIndex = null;
+    paybackPicked = new Set();
+    ledgerSelectedIndices.clear();
+    render();
+    document.querySelector(".payback-editor")?.scrollIntoView({ block: "center" });
+  });
+
+  document.querySelectorAll("[data-payback-apply]").forEach((button) => {
+    button.addEventListener("click", () => {
+      const charge = state.transactions[Number(button.dataset.paybackApply)];
+      const deposits = [...paybackPicked].map((at) => state.transactions[at]).filter(Boolean);
+      const result = applyPayback(charge, deposits);
+      if (!result.ok) { showToast(result.error, { type: "error" }); return; }
+      deposits.forEach((row) => { if (row.paidBackFor) Object.assign(row, lineSnapshot(row.lineId)); });
+      const summary = paybackSummary(charge, state.transactions);
+      state.household.activity.unshift(`Linked ${result.linked} repayment${result.linked === 1 ? "" : "s"} to ${charge.payee}: ${exactMoney.format(summary.paid)} paid back, your share ${exactMoney.format(summary.share)}`);
+      paybackEditorIndex = null;
+      paybackFindIndex = null;
+      paybackPicked = new Set();
+      autosaveState();
+      render();
+      showToast(`Linked ${result.linked} repayment${result.linked === 1 ? "" : "s"}. Your share of ${charge.payee} is ${exactMoney.format(summary.share)}.`, { type: "success" });
+    });
+  });
+
+  document.querySelectorAll("[data-payback-undo]").forEach((button) => {
+    button.addEventListener("click", () => {
+      const row = state.transactions[Number(button.dataset.paybackUndo)];
+      if (!row || !removePayback(row)) return;
+      if (row.lineId) Object.assign(row, lineSnapshot(row.lineId)); else { row.categoryName = ""; row.subcategoryName = ""; }
+      autosaveState();
+      render();
+    });
+  });
+
   document.querySelectorAll("[data-split-editor-line]").forEach((select) => {
     select.addEventListener("change", () => {
       const row = splitEditorRows[Number(select.dataset.splitEditorLine)];
@@ -13966,6 +14158,7 @@ function bindViewEvents() {
       transaction.lineId = "";
       transaction.categoryName = "";
       transaction.subcategoryName = "";
+      refreshPaybackLines();
       splitEditorLedgerIndex = null;
       splitEditorRows = [];
       autosaveState();
@@ -16256,13 +16449,18 @@ function bindViewEvents() {
       autosaveState();
       await new Promise((resolve) => setTimeout(resolve, 900));
       adminData.template = await api("/api/admin/new-user-template", { method: "PUT", body: JSON.stringify({ month }) });
+      if (newUserPreview) await loadNewUserPreview();
       showToast("Saved. New households will start with that budget.", { type: "info" });
     } catch (error) { showToast(error.message); }
     render();
   });
+  $("#newUserPreviewButton")?.addEventListener("click", async () => {
+    await loadNewUserPreview();
+    render();
+  });
   $("#newUserTemplateReset")?.addEventListener("click", async () => {
     if (!await showConfirm("New households will start with the built-in budget again. Existing households are not changed.", { title: "Use the built-in budget?", confirmLabel: "Use built-in", danger: false })) return;
-    try { adminData.template = await api("/api/admin/new-user-template", { method: "DELETE" }); } catch (error) { showToast(error.message); }
+    try { adminData.template = await api("/api/admin/new-user-template", { method: "DELETE" }); if (newUserPreview) await loadNewUserPreview(); } catch (error) { showToast(error.message); }
     render();
   });
 
@@ -17817,12 +18015,17 @@ function recordHistoryGapNotices(link, gaps) {
   });
 }
 
+// The notices still worth showing: ones whose months the person's own records now cover disappear by themselves.
+function openGapNotices() {
+  return openHistoryGapNotices(state.historyGapNotices || [], state.transactions, state.transactionInboxDrafts);
+}
+
 function renderHistoryGapCard() {
-  const notices = state.historyGapNotices || [];
+  const notices = openGapNotices();
   if (!notices.length) return "";
   return `<section class="card history-gap-card" role="alert">
     <div class="card-label">Action needed</div><h3>Some bank history is missing - import it from a statement</h3>
-    <p class="muted">The bank did not return these months, so they were left out rather than half-filled. For each, go to Transactions, choose Import a statement, and pick the account. Mark it done once you have.</p>
+    <p class="muted">The bank did not return these months, so they were left out rather than half-filled. For each, go to Transactions, choose Import a statement, and pick the account. A notice disappears by itself once your records cover every month it names; you can also mark it done.</p>
     ${notices.map((notice) => `<div class="compact-row"><div><strong>${escapeHtml(accountName(notice.accountId) || notice.accountName)}</strong><small>${escapeHtml(historyGapMonths(notice))} · ${notice.oldestReturned ? `the bank's rows start on ${escapeHtml(notice.oldestReturned)}` : "SimpleFIN did not answer for this period"}</small></div>
       <div class="button-row"><button class="pill-button" data-goto-view="transactions" type="button">Import a statement</button><button class="ghost" data-ack-history-gap="${escapeHtml(notice.id)}" type="button">I've imported it</button></div></div>`).join("")}
   </section>`;
@@ -20094,9 +20297,41 @@ async function loadApp() {
   if (migrated || shouldForceCurrentMonth || shouldForceCurrentWeek) autosaveState();
   const hashView = location.hash.slice(1);
   if (hashView && renderers[hashView]) currentView = hashView;
+  const sharedLink = takeSharedLink();
+  if (sharedLink) {
+    currentView = "recipes";
+    recipeImportOpen = true;
+    recipeImportUrl = sharedLink;
+    recipeImportError = "";
+    recipeImportVideo = null;
+    recipeImportCaption = "";
+    recipeImportDraft = null;
+  }
   $("#authPanel").hidden = true;
   $("#workspace").hidden = false;
   render();
+  if (sharedLink) showToast("Link received from your Share menu. Press Read the video to turn it into a recipe.", { type: "success" });
+}
+
+// A link shared to the installed app from a phone's Share menu arrives as ?title=&text=&url= (the manifest's share_target). It is kept for the
+// session so it survives the sign-in screen, taken out of the address bar at once, and picked up here once the household has loaded.
+function captureSharedLink() {
+  const params = new URLSearchParams(location.search);
+  if (!["url", "text", "title"].some((name) => params.has(name))) return;
+  const link = sharedLinkFromShare({ url: params.get("url"), text: params.get("text"), title: params.get("title") });
+  ["url", "text", "title"].forEach((name) => params.delete(name));
+  const rest = params.toString();
+  history.replaceState({}, "", `${location.pathname}${rest ? `?${rest}` : ""}${location.hash}`);
+  if (!link) return;
+  try { sessionStorage.setItem("familyloop-shared-link", link); } catch (_error) { /* private mode: the link is lost, the person can paste it */ }
+}
+
+function takeSharedLink() {
+  try {
+    const link = sessionStorage.getItem("familyloop-shared-link") || "";
+    sessionStorage.removeItem("familyloop-shared-link");
+    return link;
+  } catch (_error) { return ""; }
 }
 
 function setAuthShell(title) {
@@ -20510,6 +20745,7 @@ function buildWorkbookSpec({ section, scope }) {
 }
 
 async function initializeApp() {
+  captureSharedLink();
   countryCatalog = await api("/api/countries");
   populateCountrySelects();
   populateCarrierSelects();
@@ -20546,6 +20782,11 @@ async function initializeApp() {
 initializeApp().catch((error) => {
   setAuthMessage(error.message);
 });
+
+// Registers the (cache-free) service worker that lets a phone install the app and list it in the Share menu.
+if (typeof navigator !== "undefined" && "serviceWorker" in navigator && location.protocol !== "file:") {
+  window.addEventListener("load", () => navigator.serviceWorker.register("/sw.js").catch(() => {}));
+}
 
 // Keeps Wealth's live-price captions from going stale on a long-open tab,
 // without polling a page nobody is looking at.

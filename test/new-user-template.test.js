@@ -91,6 +91,14 @@ test("a new account starts with the defaults; an admin can save a month as the t
     assert.equal(saved.status, 200, JSON.stringify(saved.body));
     assert.deepEqual([saved.body.saved, saved.body.categories, saved.body.lines, saved.body.sourceMonth], [true, 1, 1, adminState.budget.month]);
 
+    const preview = await server.request("/api/admin/new-user-preview?currency=USD", { headers: { cookie: admin.cookie } });
+    assert.equal(preview.status, 200);
+    assert.deepEqual(preview.body.categories, [{ name: "Test category", color: "#123456", lines: [{ name: "Test line", planned: 321 }] }], "the preview shows the saved budget");
+    assert.equal(preview.body.plannedTotal, 321);
+    assert.equal(preview.body.recipes.length, BUILT_IN_RECIPES.length);
+    assert.deepEqual(preview.body.startsEmpty, { income: true, accounts: true, transactions: true, debts: true });
+    assert.equal((await server.request("/api/admin/new-user-preview", { headers: { cookie: first.cookie } })).status, 403, "owner only");
+
     const second = await signup("second-user");
     const secondState = (await server.request("/api/state", { headers: { cookie: second.cookie } })).body;
     assert.deepEqual(secondState.budget.categories, [{ name: "Test category", color: "#123456", lines: [{ id: "test-line", name: "Test line", planned: 321, dueDay: 5 }] }]);

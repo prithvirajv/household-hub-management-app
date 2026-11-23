@@ -2813,6 +2813,28 @@ app.post("/api/auth/demo", async (_req, res, next) => {
 app.get("/api/admin/new-user-template", requireAdmin, (_req, res) => {
   res.json(describeTemplate(newUserTemplate));
 });
+// What a brand-new household would get right now, built by the very function that creates one (nothing is saved): lets the owner see the effect of the
+// saved budget without making a test account.
+app.get("/api/admin/new-user-preview", requireAdmin, (req, res) => {
+  const currency = /^[A-Z]{3}$/.test(String(req.query.currency || "")) ? String(req.query.currency) : "USD";
+  const fresh = householdState("Preview household", "US", currency);
+  const categories = (fresh.budget.categories || []).map((category) => ({ name: category.name, color: category.color, lines: (category.lines || []).map((line) => ({ name: line.name, planned: Number(line.planned) || 0 })) }));
+  res.json({
+    currency,
+    categories,
+    plannedTotal: categories.reduce((sum, category) => sum + category.lines.reduce((inner, line) => inner + line.planned, 0), 0),
+    recipes: (fresh.meals.recipes || []).map((recipe) => recipe.name),
+    notes: (fresh.notes.entries || []).map((note) => note.title),
+    chores: (fresh.calendar.chores || []).map((chore) => `${chore.title} (${chore.cadence.toLowerCase()})`),
+    goals: (fresh.goals.sinkingFunds || []).map((fund) => ({ name: fund.name, target: fund.target })),
+    startsEmpty: {
+      income: Number(fresh.budget.income) === 0,
+      accounts: !(fresh.accounts || []).length,
+      transactions: !(fresh.transactions || []).length,
+      debts: !(fresh.goals.debts || []).length
+    }
+  });
+});
 app.put("/api/admin/new-user-template", requireAdmin, async (req, res, next) => {
   try {
     const month = String(req.body?.month || "");

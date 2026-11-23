@@ -33,7 +33,7 @@ test("every page in the sidebar has a Help guide", () => {
 test("the consumer guide has a section for every page and the main features", () => {
   ["Budget", "Bills", "Transactions", "Paycheck/Income", "Calendar", "Notes", "Journal", "Plan", "Documents", "Decisions", "Shared Expenses", "Meals and Recipes", "Goals", "Partners", "Wealth", "Investments", "Item prices", "Calculators", "Sharing", "Reports and Export"]
     .forEach((heading) => assert.match(guide, new RegExp(`^## ${heading.replace(/[/()]/g, "\\$&")}`, "m"), `a "${heading}" section`));
-  ["Receipts by email", "Know your number", "Car affordability", "House affordability", "Wealth multiplier", "Prodigious accumulator", "Re-date rows you imported earlier", "Imported back to", "Look at one account at a time", "Add a video file", "ready-made budget"]
+  ["Receipts by email", "Know your number", "Car affordability", "House affordability", "Wealth multiplier", "Prodigious accumulator", "Re-date rows you imported earlier", "Imported back to", "Look at one account at a time", "Add a video file", "ready-made budget", "Pays back a charge?", "Share a video straight to FamilyLoop"]
     .forEach((phrase) => assert.ok(guide.includes(phrase), `the consumer guide mentions "${phrase}"`));
 });
 
@@ -48,4 +48,11 @@ test("the Help page packs its guides into two columns instead of stretching rows
   const css = read("styles.css");
   assert.match(css, /\.help-grid \{[^}]*column-count: 2;/);
   assert.match(css, /\.help-topic \{\s*break-inside: avoid;/);
+});
+
+test("Help explains repayments of shared charges and sharing a video from the phone", () => {
+  assert.match(app, /Others repaid you\?/);
+  assert.match(app, /Pays back a charge\?/);
+  assert.match(app, /Paid back by others…/);
+  assert.match(app, /appears in the <strong>Share<\/strong> menu/);
 });

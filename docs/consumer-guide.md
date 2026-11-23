@@ -237,6 +237,23 @@ button on every screen. People with view-only access don't see it.
   reverses is never flagged as a possible transfer, and once it is in the ledger
   both rows carry a tile: **Refund of $X** on the return and **Refunded $X** on
   the purchase, each with the other row's date.
+- **Friends repaid you (Zelle, Venmo...):** when you paid a charge for a group
+  and the money comes back as separate deposits, press **Pays back a charge?**
+  under one of those deposits (it appears on Zelle-, Venmo-, Cash App- and
+  PayPal-style deposits), choose the charge it repaid, tick the other deposits
+  for the same charge and choose **Link deposits**. You can also tick the
+  charge itself and choose **Paid back by others…** in the bar that appears.
+  The deposits are filed under the charge's budget line, so the line shows
+  only what is left (your share) and the deposits are not counted as income;
+  each bank balance stays exactly as the bank has it. The charge shows
+  **Paid back $377.10 of $419.00 · your share $41.90**, and each deposit says
+  what it paid back, with **Undo** to unlink it. Deposits you already filed
+  under the charge's budget line are listed first. The charge needs a
+  subcategory first; if you later change it, the linked deposits follow. If a
+  deposit lands in a later month than the charge, it reduces that later
+  month's line. Prefer **Split with a friend** (👥) when you want the friends'
+  part removed from the ledger and tracked as an IOU in Shared Expenses
+  instead; use one or the other for a given charge, not both.
 - **Look at one account at a time:** above **Recent transactions** the
   **Account** menu limits both the Ledger and Bank stream to one account (or
   to rows that are not linked to any account). Like the rest of the page it
@@ -601,6 +618,16 @@ button on every screen. People with view-only access don't see it.
 4. Post the grocery list straight to a budget line when you're ready to
    shop.
 
+**Share a video straight to FamilyLoop (Android)**
+- Open FamilyLoop in Chrome on your phone and choose **Install app** (or **Add
+  to Home screen**). FamilyLoop then appears in the phone's **Share** menu.
+- In Instagram, TikTok, Facebook or YouTube, choose **Share** on a recipe
+  video, then **FamilyLoop**. The app opens on Recipes with the link already in
+  the form; press **Read the video**. If you were signed out, sign in first and
+  the link is still there.
+- iPhones do not offer apps in the Share menu this way yet: copy the link and
+  paste it into **+ From a video or photos** instead.
+
 **Add a recipe from a video or photos**
 - On **Recipes**, choose **+ From a video or photos**. Paste the link of a
   recipe video or post from **YouTube, Instagram, Facebook, TikTok** (or
@@ -910,7 +937,7 @@ entry. It is read-only: FamilyLoop can never move money or place trades.
 - **Import history:** under a bank link, **Import older transactions from**
   a date (for example January 1) fetches everything from then on for the
   accounts you chose; it goes to Bank stream like any import. How far back
-  it reaches depends on the bank (often 3-12 months). If a bank returns only part of the period for an account that has regular activity, a window appears naming the account, the months it did not return and the date its rows really start; those whole months are **not** imported for that account (half a month would make the ledger wrong), and nothing is imported until you choose **Import the rest** (or **Cancel - import nothing**). Home then keeps a red **Some bank history is missing** card until you import those months from a statement (Transactions, then Import a statement, picking the account) and select **I've imported it**. Rows already in the
+  it reaches depends on the bank (often 3-12 months). If a bank returns only part of the period for an account that has regular activity, a window appears naming the account, the months it did not return and the date its rows really start; those whole months are **not** imported for that account (half a month would make the ledger wrong), and nothing is imported until you choose **Import the rest** (or **Cancel - import nothing**). Home then keeps a red **Some bank history is missing** card until you import those months from a statement (Transactions, then Import a statement, picking the account); the notice goes away by itself once your records have at least one row in every month it names, or you can select **I've imported it**. Rows already in the
   ledger or waiting in Bank stream are skipped, and rows you removed earlier
   (Clean up) come back. If you're replacing hand-entered history, clean it up
   first so the two don't double up.
