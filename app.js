@@ -376,7 +376,7 @@ async function handleAuthExpired() {
   $("#workspace").hidden = true;
   $("#authPanel").hidden = false;
   $("#mobileTabBar").hidden = true;
-  document.body.classList.remove("mobile-sidebar-open");
+  setMobileDrawer(false);
   showSigninForm();
   setAuthMessage("Your session expired. Please sign in again.");
 }
@@ -17541,25 +17541,34 @@ nav.addEventListener("click", async (event) => {
     }
   }
   currentView = button.dataset.view;
-  document.body.classList.remove("mobile-sidebar-open");
+  setMobileDrawer(false);
   render();
+});
+
+// The bottom bar's "More" opens the sidebar as a drawer. It listens on the button itself (not through the bar) and sets the drawer state in one place,
+// so the button, the dimmed backdrop (tap outside to close) and aria-expanded cannot disagree. A tap's target can be the text or icon inside the
+// button on some phones, hence the parent-element fallback.
+function setMobileDrawer(open) {
+  document.body.classList.toggle("mobile-sidebar-open", open);
+  $("#mobileSidebarBackdrop").hidden = !open;
+  $("#mobileMoreButton").setAttribute("aria-expanded", String(open));
+}
+
+$("#mobileMoreButton").addEventListener("click", (event) => {
+  event.stopPropagation();
+  setMobileDrawer(!document.body.classList.contains("mobile-sidebar-open"));
 });
 
 $("#mobileTabBar").addEventListener("click", (event) => {
-  if (event.target.closest("#mobileMoreButton")) {
-    document.body.classList.toggle("mobile-sidebar-open");
-    return;
-  }
-  const button = event.target.closest("[data-view]");
+  const origin = event.target.closest ? event.target : event.target.parentElement;
+  const button = origin && origin.closest("[data-view]");
   if (!button) return;
   currentView = button.dataset.view;
-  document.body.classList.remove("mobile-sidebar-open");
+  setMobileDrawer(false);
   render();
 });
 
-$("#mobileSidebarBackdrop").addEventListener("click", () => {
-  document.body.classList.remove("mobile-sidebar-open");
-});
+$("#mobileSidebarBackdrop").addEventListener("click", () => setMobileDrawer(false));
 
 view.addEventListener("click", (event) => {
   const helpJumpButton = event.target.closest("[data-help-jump]");
@@ -18623,7 +18632,7 @@ $("#signOutButton").addEventListener("click", async () => {
   $("#workspace").hidden = true;
   $("#authPanel").hidden = false;
   $("#mobileTabBar").hidden = true;
-  document.body.classList.remove("mobile-sidebar-open");
+  setMobileDrawer(false);
   showSigninForm();
 });
 

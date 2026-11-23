@@ -7184,12 +7184,16 @@ html[data-theme="dark"] .note-check-delete {
     z-index: 45;
     background: var(--panel);
     border-top: 1px solid var(--line);
-    padding: 6px 2px calc(6px + env(safe-area-inset-bottom));
+    padding: 6px 2px calc(10px + env(safe-area-inset-bottom));
     box-shadow: 0 -8px 24px rgba(0, 0, 0, 0.1);
   }
 
   .mobile-tab-bar-button {
     flex: 1;
+    min-height: 48px;
+    cursor: pointer;
+    touch-action: manipulation;
+    -webkit-tap-highlight-color: transparent;
     display: flex;
     flex-direction: column;
     align-items: center;
@@ -7231,6 +7235,8 @@ html[data-theme="dark"] .note-check-delete {
     transform: translateX(-100%);
     transition: transform 0.25s ease;
     overflow-y: auto;
+    overscroll-behavior: contain;
+    -webkit-overflow-scrolling: touch;
     box-shadow: 10px 0 30px rgba(0, 0, 0, 0.3);
   }
 

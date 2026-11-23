@@ -9,7 +9,7 @@
     <link rel="apple-touch-icon" href="/assets/apple-touch-icon.png">
     <link rel="manifest" href="/manifest.webmanifest">
     <meta name="theme-color" content="#20c997">
-    <link rel="stylesheet" href="/styles.css?v=20261123-2">
+    <link rel="stylesheet" href="/styles.css?v=20261123-3">
     <script>
       (function () {
         var saved = localStorage.getItem("familyloop-theme");
@@ -20,7 +20,7 @@
   </head>
   <body>
     <div class="app-shell">
-      <aside class="sidebar">
+      <aside class="sidebar" id="sidebar">
         <button id="brandHomeButton" class="brand" type="button" aria-label="Go to Home">
           <img class="brand-mark" src="/assets/favicon.svg" alt="FamilyLoop logo">
           <div>
@@ -144,7 +144,7 @@
       <button class="mobile-tab-bar-button" data-view="budget" type="button"><span>📊</span>Budget</button>
       <button class="mobile-tab-bar-button" data-view="transactions" type="button"><span>💳</span>Activity</button>
       <button class="mobile-tab-bar-button" data-view="wealth" type="button"><span>🏦</span>Wealth</button>
-      <button id="mobileMoreButton" class="mobile-tab-bar-button" type="button"><span>⋯</span>More</button>
+      <button id="mobileMoreButton" class="mobile-tab-bar-button" type="button" aria-label="More pages" aria-controls="sidebar" aria-expanded="false"><span>⋯</span>More</button>
     </nav>
 
     <dialog id="onboardingWizardDialog" class="app-dialog onboarding-wizard-dialog">
@@ -491,6 +491,6 @@
     <script src="/lib/receipt-returns.js?v=20261114-1"></script>
     <script src="/lib/price-analysis.js?v=20261113-1"></script>
     <script src="/lib/calculators.js?v=20261114-1"></script>
-    <script src="/app.js?v=20261123-2"></script>
+    <script src="/app.js?v=20261123-3"></script>
   </body>
 </html>
