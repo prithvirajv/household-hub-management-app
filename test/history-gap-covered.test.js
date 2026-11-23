@@ -1,6 +1,6 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
-const { historyGapCovered, openHistoryGapNotices } = require("../lib/shared-logic");
+const { historyGapCovered, historyGapMissingMonths, openHistoryGapNotices } = require("../lib/shared-logic");
 
 const notice = { id: "g1", accountId: "amex", fromMonth: "2026-09", toMonth: "2026-10" };
 const row = (date, accountId = "amex") => ({ accountId, date });
@@ -28,4 +28,13 @@ test("openHistoryGapNotices keeps only the notices that are still open", () => {
   const other = { id: "g3", accountId: "chase", fromMonth: "2026-03", toMonth: "2026-03" };
   const open = openHistoryGapNotices([notice, other], [row("2026-09-04"), row("2026-10-02")], []);
   assert.deepEqual(open.map((item) => item.id), ["g3"]);
+});
+
+test("the months still empty are named, for notices that are partly covered", () => {
+  const wide = { id: "g9", accountId: "amex", fromMonth: "2026-01", toMonth: "2026-07" };
+  const rows = [row("2026-01-15"), row("2026-04-02"), row("2026-07-30"), row("2026-02-03", "chase")];
+  assert.deepEqual(historyGapMissingMonths(wide, rows, []), ["2026-02", "2026-03", "2026-05", "2026-06"]);
+  assert.deepEqual(historyGapMissingMonths(wide, [...rows, row("2026-03-01")], [row("2026-02-20")]).length, 2);
+  assert.equal(historyGapMissingMonths({ ...wide, accountId: "" }, rows, []), null, "a notice with no account cannot be judged");
+  assert.deepEqual(historyGapMissingMonths({ ...wide, fromMonth: "2025-11", toMonth: "2026-01" }, rows, []), ["2025-11", "2025-12"]);
 });

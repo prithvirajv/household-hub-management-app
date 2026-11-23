@@ -559,6 +559,13 @@ Expenses' IOU split, which shrinks the ledger row to the household's share; use 
 month from `fromMonth` to `toMonth`. It is derived at render time (`openGapNotices` in `app.js`), never saved, so deleting those rows brings it back; the
 notice object stays in `state.historyGapNotices` until the person selects "I've imported it".
 
+### Ledger paging and phone layout
+The Ledger draws `LEDGER_PAGE_SIZE` (200) rows at a time (`ledgerRowLimit`, reset when the month/account/all-months/sort key changes; "Show more" / "Show all"). A year of one
+account was 830 rows and 3.5 MB of markup (51,000 elements, two menus per row), about 1.2 s per render on a laptop and far worse on a phone. On phones (max-width 760px): the
+top bar's icon buttons sit in one row, the month input cannot exceed the screen (iOS gives it its own minimum width), the bottom tab bar clears the home-indicator strip
+(`viewport-fit=cover` in `index.html` makes `env(safe-area-inset-*)` real; the bar's bottom padding has a 20px floor because a tap in that strip is taken by the system), and a
+file's ⋮ menu is height-capped to the room above the bar. `historyGapMissingMonths` feeds the "still empty" text of history-gap notices.
+
 ### Installable app and Share target
 `manifest.webmanifest` (name, 192/512 icons incl. maskable from `assets/`, `share_target` GET to `/index.html` with `title`, `text`, `url`) and `sw.js`
 (registers in `app.js`; a fetch handler that caches nothing so deploys are never hidden) make Chrome on Android offer Install and list FamilyLoop in the Share

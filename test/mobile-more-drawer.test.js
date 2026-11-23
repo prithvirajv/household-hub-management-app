@@ -21,5 +21,13 @@ test("the bar's buttons are real touch targets: pointer cursor, no tap delay, 48
   assert.match(block, /cursor: pointer/);
   assert.match(block, /touch-action: manipulation/);
   assert.match(block, /min-height: 48px/);
-  assert.match(css, /padding: 6px 2px calc\(10px \+ env\(safe-area-inset-bottom\)\)/);
+  assert.match(css, /calc\(8px \+ max\(env\(safe-area-inset-bottom\), 20px\)\)/, "the bar's bottom padding clears the home-indicator strip even when the inset reads 0");
+  assert.match(html, /<meta name="viewport" content="[^"]*viewport-fit=cover"/, "without this the safe-area insets are always 0");
+});
+
+test("on phones the top bar's icon buttons share one row, the month field cannot outgrow the screen, and a file's menu is capped to the room above the bottom bar", () => {
+  assert.match(css, /@media \(max-width: 760px\) \{\s*\.topbar-actions \{ flex-direction: row; flex-wrap: wrap;/);
+  assert.match(css, /\.month-control input\[type="month"\] \{[^}]*max-width: 100%/);
+  assert.match(app, /panel\.style\.maxHeight = `\$\{Math\.floor\(room\)\}px`; panel\.style\.overflowY = "auto"/);
+  assert.match(css, /body \{\s*padding-left: env\(safe-area-inset-left\);/);
 });

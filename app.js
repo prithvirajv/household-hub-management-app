@@ -80,6 +80,9 @@ let ledgerAccountFilter = "";
 // of moving rows imported earlier (on their purchase day) to the post date; nothing changes until Apply. Session-local.
 let postDateFixPlan = null;
 let ledgerAllMonths = false;
+const LEDGER_PAGE_SIZE = 200;
+let ledgerRowLimit = LEDGER_PAGE_SIZE; // how many ledger rows are drawn; "Show more" raises it
+let ledgerRowLimitKey = ""; // the month/account/sort the limit belongs to
 // null until the Reports page is first opened, at which point it syncs to
 // the currently-viewed budget month - once the user picks a range/year
 // explicitly it's left alone, so switching months elsewhere doesn't stomp on
@@ -4225,7 +4228,13 @@ function renderTransactions() {
               const why = Object.entries(held).map(([reason, count]) => `${count} ${reason}`).join(", ");
               return `<div class="empty-inline">No transactions in the ledger for this month yet. ${imported.length} row${imported.length === 1 ? " is" : "s are"} waiting in Bank stream (${escapeHtml(why)}); accept or move them to Transfers there and they land here.</div>`;
             }
-            const sorted = sortByTransactionField(monthTransactions, transactionSort.field, transactionSort.direction);
+            const allSorted = sortByTransactionField(monthTransactions, transactionSort.field, transactionSort.direction);
+            // A whole year of one account is a thousand rows, each with two menus: several MB of markup that froze phones. Show a page at a time; the page
+            // size starts over whenever the month, account or sort changes.
+            const limitKey = [state.budget.month, ledgerAccountFilter, ledgerAllMonths, transactionSort.field, transactionSort.direction].join("|");
+            if (limitKey !== ledgerRowLimitKey) { ledgerRowLimitKey = limitKey; ledgerRowLimit = LEDGER_PAGE_SIZE; }
+            const sorted = allSorted.slice(0, ledgerRowLimit);
+            const hiddenRows = allSorted.length - sorted.length;
             const visibleIndices = sorted.map(({ index }) => index);
             const allVisibleSelected = visibleIndices.length > 0 && visibleIndices.every((index) => ledgerSelectedIndices.has(index));
             return `${paybackEditorHtml(state.transactions[paybackEditorIndex], paybackEditorIndex)}${ledgerSelectedIndices.size ? `<div class="ledger-bulk-bar">
@@ -4255,6 +4264,7 @@ function renderTransactions() {
                   ...(state.transactionInboxDrafts || [])
                 ]), refundPairs.get(transaction))).join("");
               })()}</div>
+              ${hiddenRows > 0 ? `<div class="ledger-show-more"><span class="muted">Showing ${sorted.length} of ${allSorted.length}</span><button type="button" class="ghost" id="ledgerShowMore">Show ${Math.min(LEDGER_PAGE_SIZE, hiddenRows)} more</button>${hiddenRows > LEDGER_PAGE_SIZE ? `<button type="button" class="ghost" id="ledgerShowAll">Show all ${allSorted.length}</button>` : ""}</div>` : ""}
             </div>`;
           })()}
         </section>
@@ -13488,6 +13498,22 @@ function bindViewEvents() {
     ledgerSelectedIndices.clear(); // a selection from the other view must not carry into this one
     render();
   });
+  // A file's ⋮ menu hangs below its card and can run past the screen's bottom (behind the fixed bottom bar on a phone). When it would, cap its height
+  // to the room there is and let it scroll inside itself, so every item stays reachable.
+  document.querySelectorAll(".documents-item-menu").forEach((details) => {
+    details.addEventListener("toggle", () => {
+      const panel = details.open && details.querySelector(".documents-item-menu-options");
+      if (!panel) return;
+      const bar = $("#mobileTabBar");
+      const floor = bar && !bar.hidden && bar.offsetHeight ? bar.getBoundingClientRect().top : window.innerHeight;
+      const room = floor - panel.getBoundingClientRect().top - 12;
+      panel.style.maxHeight = "";
+      panel.style.overflowY = "";
+      if (panel.scrollHeight > room && room > 140) { panel.style.maxHeight = `${Math.floor(room)}px`; panel.style.overflowY = "auto"; }
+    });
+  });
+  $("#ledgerShowMore")?.addEventListener("click", () => { ledgerRowLimit += LEDGER_PAGE_SIZE; render(); });
+  $("#ledgerShowAll")?.addEventListener("click", () => { ledgerRowLimit = Infinity; render(); });
   $("#ledgerAllMonths")?.addEventListener("change", (event) => {
     ledgerAllMonths = event.currentTarget.checked;
     ledgerSelectedIndices.clear();
@@ -18010,6 +18036,16 @@ function historyGapMonths(gap) {
   return gap.fromMonth === gap.toMonth ? formatMonth(gap.fromMonth) : `${formatMonth(gap.fromMonth)} to ${formatMonth(gap.toMonth)}`;
 }
 
+// " - still empty: Feb, Mar, May, Jun 2026" for a notice whose range has some months already covered by the person's own records; "" for a one-month
+// notice or when nothing in the range is covered (the range already says it).
+function historyGapStillEmpty(notice) {
+  const missing = historyGapMissingMonths(notice, state.transactions, state.transactionInboxDrafts) || [];
+  if (notice.fromMonth === notice.toMonth || !missing.length) return "";
+  const years = [...new Set(missing.map((month) => month.slice(0, 4)))];
+  const label = (year) => `${missing.filter((month) => month.startsWith(year)).map((month) => new Date(Number(year), Number(month.slice(5)) - 1, 1).toLocaleDateString("en-US", { month: "short" })).join(", ")} ${year}`;
+  return ` - still empty: ${years.map(label).join("; ")}`;
+}
+
 function historyGapDialogText(gaps, nameOf) {
   const lines = gaps.map((gap) => `• ${nameOf(gap.remoteId) || gap.name}: ${historyGapMonths(gap)} will NOT be imported (${gap.oldestReturned ? `the bank's rows only start on ${gap.oldestReturned}` : "SimpleFIN did not answer for this period"})`);
   return `The bank did not return all the history you asked for.\n\n${lines.join("\n")}\n\nThose whole months are left out on purpose - half a month would make the ledger wrong and double up when you import it yourself. After this, import those months for ${gaps.length === 1 ? "that account" : "those accounts"} from a bank statement: Transactions, then Import a statement, and pick the account.\n\nImport everything else now?`;
@@ -18035,7 +18071,7 @@ function renderHistoryGapCard() {
   return `<section class="card history-gap-card" role="alert">
     <div class="card-label">Action needed</div><h3>Some bank history is missing - import it from a statement</h3>
     <p class="muted">The bank did not return these months, so they were left out rather than half-filled. For each, go to Transactions, choose Import a statement, and pick the account. A notice disappears by itself once your records cover every month it names; you can also mark it done.</p>
-    ${notices.map((notice) => `<div class="compact-row"><div><strong>${escapeHtml(accountName(notice.accountId) || notice.accountName)}</strong><small>${escapeHtml(historyGapMonths(notice))} · ${notice.oldestReturned ? `the bank's rows start on ${escapeHtml(notice.oldestReturned)}` : "SimpleFIN did not answer for this period"}</small></div>
+    ${notices.map((notice) => `<div class="compact-row"><div><strong>${escapeHtml(accountName(notice.accountId) || notice.accountName)}</strong><small>${escapeHtml(historyGapMonths(notice))}${escapeHtml(historyGapStillEmpty(notice))} · ${notice.oldestReturned ? `the bank's rows start on ${escapeHtml(notice.oldestReturned)}` : "SimpleFIN did not answer for this period"}</small></div>
       <div class="button-row"><button class="pill-button" data-goto-view="transactions" type="button">Import a statement</button><button class="ghost" data-ack-history-gap="${escapeHtml(notice.id)}" type="button">I've imported it</button></div></div>`).join("")}
   </section>`;
 }

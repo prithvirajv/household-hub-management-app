@@ -254,6 +254,10 @@ button on every screen. People with view-only access don't see it.
   month's line. Prefer **Split with a friend** (👥) when you want the friends'
   part removed from the ledger and tracked as an IOU in Shared Expenses
   instead; use one or the other for a given charge, not both.
+- **Long lists show a page at a time.** The Ledger draws 200 rows, then
+  **Show 200 more** (or **Show all**) under the list; it starts over at 200
+  whenever you change the month, the account or the sort. **Select all** ticks
+  only the rows on screen, so a bulk change never reaches rows you cannot see.
 - **Look at one account at a time:** above **Recent transactions** the
   **Account** menu limits both the Ledger and Bank stream to one account (or
   to rows that are not linked to any account). Like the rest of the page it
@@ -937,7 +941,7 @@ entry. It is read-only: FamilyLoop can never move money or place trades.
 - **Import history:** under a bank link, **Import older transactions from**
   a date (for example January 1) fetches everything from then on for the
   accounts you chose; it goes to Bank stream like any import. How far back
-  it reaches depends on the bank (often 3-12 months). If a bank returns only part of the period for an account that has regular activity, a window appears naming the account, the months it did not return and the date its rows really start; those whole months are **not** imported for that account (half a month would make the ledger wrong), and nothing is imported until you choose **Import the rest** (or **Cancel - import nothing**). Home then keeps a red **Some bank history is missing** card until you import those months from a statement (Transactions, then Import a statement, picking the account); the notice goes away by itself once your records have at least one row in every month it names, or you can select **I've imported it**. Rows already in the
+  it reaches depends on the bank (often 3-12 months). If a bank returns only part of the period for an account that has regular activity, a window appears naming the account, the months it did not return and the date its rows really start; those whole months are **not** imported for that account (half a month would make the ledger wrong), and nothing is imported until you choose **Import the rest** (or **Cancel - import nothing**). Home then keeps a red **Some bank history is missing** card until you import those months from a statement (Transactions, then Import a statement, picking the account); the notice goes away by itself once your records have at least one row in every month it names, or you can select **I've imported it**. When part of the range is already covered, the notice lists the months that are still empty (for example "still empty: Feb, Mar, May, Jun 2026"), so you import only those statements. Rows already in the
   ledger or waiting in Bank stream are skipped, and rows you removed earlier
   (Clean up) come back. If you're replacing hand-entered history, clean it up
   first so the two don't double up.
