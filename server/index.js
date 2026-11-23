@@ -23,6 +23,7 @@ const { registerReceiptMailRoutes, createMailboxStore, ingestReceiptEmail } = re
 const { pollReceiptMailbox } = require("./receipt-mailbox");
 const { RECEIPT_READ_SYSTEM, RECEIPT_IMAGE_TYPES, buildReceiptReadParts, parseReceiptDraft, receiptCheck } = require("../lib/receipt-read");
 const { RECEIPT_EMAIL_SYSTEM, buildReceiptEmailParts } = require("../lib/receipt-email");
+const { applyTemplate, templateFromState, describeTemplate, sanitizeTemplate } = require("./new-user-template");
 const { fetchRecipeCaption } = require("./recipe-caption");
 const { uploadGeminiVideo, deleteGeminiFile } = require("./gemini-files");
 const { RECIPE_IMPORT_SYSTEM, RECIPE_VIDEO_TYPES, RECIPE_VIDEO_MAX_BYTES, buildRecipeImportParts, validateRecipeImportRequest, parseRecipeDraft, createImportLimiter } = require("../lib/recipe-import");
@@ -943,6 +944,14 @@ function countryDetails(code) {
   };
 }
 
+// The budget a new household starts with (saved by the owner on the Admin page; null = the built-in starter budget). Loaded at boot, replaced on save.
+let newUserTemplate = null;
+async function loadNewUserTemplate() {
+  if (MEMORY_DB) return;
+  const result = await pool.query("SELECT template FROM app_templates WHERE key = 'new-user-budget'");
+  newUserTemplate = result.rows[0]?.template ? sanitizeTemplate(result.rows[0].template) : null;
+}
+
 function householdState(name, country = "US", currency = "USD", seededDemo = false) {
   const state = JSON.parse(JSON.stringify(defaultState));
   state.household.name = name;
@@ -982,6 +991,8 @@ function householdState(name, country = "US", currency = "USD", seededDemo = fal
     };
     state.accounts = [];
     state.transfers = [];
+    // Never an empty app: the owner's saved budget (or the built-in starter one), the built-in recipes, and starter notes, chores and savings goals.
+    applyTemplate(state, newUserTemplate, { currency });
   } else if (country === "IN") {
     state.budget.income = 320000;
     state.paychecks = [
@@ -2795,6 +2806,38 @@ app.post("/api/auth/demo", async (_req, res, next) => {
   } catch (error) {
     next(error);
   }
+});
+
+// The budget new households start with: what is saved now, saving one of the owner's own months (read from their saved household, so it is exactly what
+// the Budget page shows), and going back to the built-in starter budget. Existing households are never changed by any of this.
+app.get("/api/admin/new-user-template", requireAdmin, (_req, res) => {
+  res.json(describeTemplate(newUserTemplate));
+});
+app.put("/api/admin/new-user-template", requireAdmin, async (req, res, next) => {
+  try {
+    const month = String(req.body?.month || "");
+    if (!/^\d{4}-\d{2}$/.test(month)) return res.status(400).json({ error: "Choose the month to save" });
+    const loaded = await loadHouseholdStateVersioned(req.sessionUser.household_id);
+    if (!loaded?.state) return res.status(404).json({ error: "Your household was not found" });
+    const built = templateFromState(loaded.state, month);
+    if (built.error) return res.status(422).json({ error: built.error });
+    if (!MEMORY_DB) {
+      await pool.query(
+        `INSERT INTO app_templates (key, template, updated_by) VALUES ('new-user-budget', $1, $2)
+         ON CONFLICT (key) DO UPDATE SET template = EXCLUDED.template, updated_at = now(), updated_by = EXCLUDED.updated_by`,
+        [built.template, req.sessionUser.id]
+      );
+    }
+    newUserTemplate = built.template;
+    res.json(describeTemplate(newUserTemplate));
+  } catch (error) { next(error); }
+});
+app.delete("/api/admin/new-user-template", requireAdmin, async (_req, res, next) => {
+  try {
+    if (!MEMORY_DB) await pool.query("DELETE FROM app_templates WHERE key = 'new-user-budget'");
+    newUserTemplate = null;
+    res.json(describeTemplate(null));
+  } catch (error) { next(error); }
 });
 
 app.get("/api/admin/session", requireAdmin, (req, res) => {
@@ -5373,6 +5416,7 @@ let httpServer;
 
 async function main() {
   await migrate();
+  await loadNewUserTemplate();
   await seedDemoUser();
   await seedAdminUser();
   httpServer = app.listen(PORT, () => {

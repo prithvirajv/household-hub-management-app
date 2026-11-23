@@ -280,16 +280,19 @@ test("a user cannot create multiple households with the same currency", async ()
   });
   assert.equal(starterState.status, 200);
   assert.equal(starterState.body.budget.income, 0);
-  assert.equal(starterState.body.budget.setupStarted, false);
-  assert.equal(starterState.body.budget.categories.length, 0);
+  // A new household starts with ready-made defaults (a budget, recipes, notes, chores, savings goals) but nothing personal.
+  assert.equal(starterState.body.budget.setupStarted, true);
+  assert.ok(starterState.body.budget.categories.length >= 5, "a starter budget");
   assert.equal(starterState.body.transactions.length, 0);
   assert.equal(starterState.body.paychecks.length, 0);
   assert.equal(starterState.body.calendar.events.length, 0);
-  assert.equal(starterState.body.calendar.chores.length, 0);
-  assert.equal(starterState.body.notes.entries.length, 0);
-  assert.equal(starterState.body.notes.labels.length, 0);
-  assert.equal(starterState.body.meals.recipes.length, 0);
-  assert.equal(starterState.body.goals.sinkingFunds.length, 0);
+  assert.equal(starterState.body.calendar.chores.length, 3);
+  assert.equal(starterState.body.notes.entries.length, 2);
+  assert.ok(starterState.body.notes.labels.length >= 1);
+  assert.equal(starterState.body.meals.recipes.length, 6);
+  assert.equal(starterState.body.meals.plannedWeek.length, 0);
+  assert.equal(starterState.body.goals.sinkingFunds.length, 3);
+  assert.equal(starterState.body.goals.sinkingFunds[0].target, 80000, "starter savings targets are scaled for the rupee");
   assert.equal(starterState.body.ious.length, 0);
   assert.equal(starterState.body.goals.debts.length, 0);
   assert.equal(starterState.body.goals.netWorth.assets.length, 0);

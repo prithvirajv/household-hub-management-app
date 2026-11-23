@@ -22,10 +22,15 @@ more convenient.
 
 ## Getting Started
 
-1. Create an account and choose the household's country.
+1. Create an account and choose the household's country. A new household
+   does not start empty: it comes with a ready-made budget (categories and
+   subcategories to rename, delete or add to), a few recipes, starter notes
+   and labels (including a short getting-started checklist), three weekly
+   chores and three savings goals. Your income, accounts, debts, birthdays and
+   planned meals always start empty, because they are yours.
 2. Add income in **Budget**, under **Add income**.
-3. Create budget categories and subcategories (budget lines), each with a
-   planned amount.
+3. Fill in the planned amounts of the budget categories and subcategories
+   (budget lines), and change or add any to fit your household.
 4. Add transactions and assign each one to a budget line.
 5. Add calendar events, recurring chores, birthdays, meals, and goals as
    needed.
@@ -44,9 +49,9 @@ more convenient.
 8. Select the 🔍 icon in the top bar to search transactions, notes,
    documents, and decisions at once — type at least 2 characters, then
    select a result to jump straight to it.
-9. A brand-new household with no accounts, budget categories, or paychecks
+9. A brand-new household with no accounts, income, paychecks or transactions
    yet sees a short **Getting started** overlay pointing at linking an
-   account, inviting the household, and setting a first budget. Skip it or
+   account, inviting the household, and setting income and budget amounts. Skip it or
    step through it — it won't come back once dismissed.
 10. On a phone-width screen, the sidebar becomes a bottom tab bar (Home,
     Budget, Activity, Wealth, and More) — **More** slides in the full menu,

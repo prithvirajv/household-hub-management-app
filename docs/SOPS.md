@@ -440,6 +440,24 @@ the results are redrawn on every keystroke, so per-button listeners bound at ren
 key. The advanced `<details>` carries `data-keep-open`: the global outside-click closer in `app.js` skips any `<details>` with that attribute (also used by
 Investments' account cards and Prices' products). The phone app does not have this page yet.
 
+### What a new household starts with
+
+`householdState()` (`server/index.js`) builds every NEW (non-demo) household and then calls `applyTemplate` (`server/new-user-template.js`), so nobody lands on an
+empty app. Existing households are never touched: it runs only at creation (sign-up, Google sign-up, "Add household", the seeded admin household).
+
+- **Budget:** the owner's saved template, else a built-in starter budget (7 categories, 17 subcategories, amounts 0). The saved template is one month of
+  the owner's own budget: **Admin → Starting budget and defaults → Save as the new-user budget** reads the owner's *saved* household
+  (`PUT /api/admin/new-user-template { month }`), keeps the shared category structure (names, colours, due days, rollover flag) with that month's planned
+  amounts (`templateFromState`: the month's `budgetHistory` snapshot, or the live budget for the month being viewed) and stores it in `app_templates`
+  (`key = 'new-user-budget'`, loaded into memory at boot). It never holds income, people, accounts or recipes. Amounts are applied only when the new
+  household's currency equals the template's (else 0). `DELETE` goes back to the built-in budget. `budget.setupStarted` is true, income 0.
+- **Recipes:** always the six built-in ones (`BUILT_IN_RECIPES`), never anyone's own.
+- **Everything else (`applyStarterDefaults`):** note labels and two notes (a pinned "Getting started" checklist and an empty grocery list), three weekly chores
+  starting on the coming Saturday/Thursday/Sunday, three savings goals one year out (targets scaled for a few currencies), the usual calorie/protein targets.
+  Accounts, debts, net-worth entries, events/birthdays, paychecks, transactions and planned meals stay empty on purpose.
+- The Getting started overlay (`shouldShowOnboarding`) now keys on "no accounts, income, paychecks or transactions" because the starter categories exist.
+- Change the defaults by editing `server/new-user-template.js` (a new deploy; existing households are unaffected).
+
 ### Recipe import from a video or photos
 
 `POST /api/recipes/import` (`lib/recipe-import.js`, route in `server/index.js`) sends a public YouTube link (rebuilt from its 11-character

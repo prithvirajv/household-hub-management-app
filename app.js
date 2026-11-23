@@ -2368,13 +2368,14 @@ function globalSearchResults(query) {
   return results.slice(0, 40);
 }
 
-// Only a genuinely fresh household (no accounts, no budget, no income) is
+// Only a genuinely fresh household (no accounts, no income, no paychecks, no
+// transactions - the ready-made starter categories do not count) is
 // offered the wizard automatically - an established household that simply
 // has zero accounts by choice (cash-only) won't see it pop up on every
 // visit, since state.onboarding.dismissed sticks once set.
 function shouldShowOnboarding() {
   if (state.onboarding?.dismissed) return false;
-  return state.accounts.length === 0 && state.budget.categories.length === 0 && state.paychecks.length === 0;
+  return state.accounts.length === 0 && state.paychecks.length === 0 && state.transactions.length === 0 && !Number(state.budget.income || 0);
 }
 
 function dismissOnboarding() {
@@ -2386,7 +2387,7 @@ function dismissOnboarding() {
 const ONBOARDING_STEPS = [
   { title: "Link an account", body: "Add a real bank or credit-card account so balances update themselves as you go, instead of tracking everything by hand.", goto: "wealth", cta: "Add an account" },
   { title: "Invite your household", body: "Bring in the rest of the household - everyone sees the same budget, calendar, and shared expenses.", goto: "sharing", cta: "Invite someone" },
-  { title: "Set a starting budget", body: "Add your income and a first category or two - you can always add more later.", goto: "budget", cta: "Start planning" },
+  { title: "Set your income and budget", body: "Your budget already has ready-made categories. Add your income, then change the names and planned amounts to fit your household.", goto: "budget", cta: "Open Budget" },
   { title: "You're set", body: "That's the basics - explore the rest of FamilyLoop whenever you're ready.", goto: "home", cta: "Go to Home" }
 ];
 
@@ -3018,7 +3019,7 @@ function renderBudget() {
       <div class="onboarding-graphic" aria-hidden="true"><span>1</span><span>2</span><span>3</span></div>
       <span class="card-label">A clean monthly plan</span>
       <h3>Start your ${monthLabel()} budget</h3>
-      <p>Add only the income and categories that belong to this household. Nothing is prefilled.</p>
+      <p>Add your income, then the categories that belong to this household.</p>
       <button id="startBudgetButton" type="button">Start planning</button>
     </section>`;
   }
@@ -9579,13 +9580,23 @@ function renderHelp() {
         "Inside a category, select <strong>+ Add subcategory</strong> for each budget line (e.g. Rent, Groceries) and give it a planned amount.",
         "Optionally set a due day on a bill-like line to get it reminders on the Calendar and its own sinking-fund set-aside math.",
         "As you assign transactions to a line (see Transactions below), <strong>Spent</strong> and <strong>Remaining</strong> update automatically — nothing to recalculate by hand.",
-        "Starting a new month? Use <strong>Use previous budget</strong> at the top of Categories and subcategories to copy last month's categories and amounts instead of rebuilding from scratch."
+        "Starting a new month? Use <strong>Use previous budget</strong> at the top of Categories and subcategories to copy last month's categories and amounts instead of rebuilding from scratch.",
+        "New to FamilyLoop? Your account starts with a ready-made set of categories, so rename, delete or add to them and fill in your own amounts instead of building from nothing."
       ],
       tips: [
         "Build out every category before you start assigning transactions — an unassigned transaction can't tell you if you're over or under budget in that area.",
         "\"Left to budget\" at the top should reach $0 once every dollar of income has a job — that's zero-based budgeting.",
         "Recurring bills (HOA, insurance, property tax, subscriptions) are worth marking as recurring so FamilyLoop sets aside savings for them every month instead of one big hit when the bill lands."
       ] },
+    { icon: "🧾", title: "Bills", id: "bills",
+      steps: [
+        "Give a budget line a <strong>due day</strong> in Budget and it appears under <strong>Bills</strong> automatically - Bills is a view of those lines, not a second place to type.",
+        "Use the <strong>All / Due soon / Overdue</strong> pills to narrow the list.",
+        "Select <strong>Mark paid</strong> when you've paid a bill by hand; it also clears itself once a transaction on that line reaches the planned amount.",
+        "<strong>By category</strong> on the right totals your recurring bills per budget category.",
+        "To add a bill or change an amount, select <strong>Open Budget</strong>."
+      ],
+      tips: ["Marking a bill paid here also clears it from Home's Bills &amp; Goals card - they are the same reminder."] },
     { icon: "☰", title: "Transactions", id: "transactions",
       image: { src: "assets/mockup-bank-stream.svg", alt: "A Bank Stream refund row with a Refund match pill and Subcategory pre-filled to the matched purchase's budget line" },
       steps: [
@@ -9593,9 +9604,12 @@ function renderHelp() {
         "Imported rows land in the <strong>Bank Stream</strong> review queue first — nothing counts until you accept or dismiss each one.",
         "Pick the <strong>Subcategory</strong> (budget line) for each transaction so it counts toward that line's Spent total in Budget.",
         "If you've linked a bank account under Wealth, also link the transaction to that account so its running balance stays accurate.",
-        "Select the ✓ to accept a Bank Stream row into the ledger, or × to dismiss it."
+        "Select the ✓ to accept a Bank Stream row into the ledger, or × to dismiss it.",
+        "Use the <strong>Account</strong> menu above Recent transactions to look at one account at a time, and tick <strong>All months</strong> to see that account's whole history instead of one month."
       ],
       tips: [
+        "A card file with both a <strong>Transaction Date</strong> and a <strong>Post Date</strong> is imported with the post date, the date a linked bank reports. Already imported earlier? <strong>Re-date from a CSV</strong> in Bank Stream previews the rows to move and changes nothing until you confirm.",
+        "On Wealth, a bank-linked account shows <strong>Synced from</strong> (where the bank's own records start) and, once you've imported older statements, <strong>Imported back to</strong> (how far back your history goes).",
         "A refund or return is auto-matched to its original purchase by payee, amount, and date, and pre-filled with that purchase's budget line — always double-check the suggested line before accepting, especially if it wasn't a confident match.",
         "\"Possible duplicate\" and \"Possible transfer\" pills flag likely re-imports and account-to-account movements (like a credit card payment from checking) before you accept them — use the ⇄ icon to move a transfer instead of counting it as an expense.",
         "Tag transactions (e.g. \"Florida trip\") to see them grouped together later in Reports.",
@@ -9604,6 +9618,17 @@ function renderHelp() {
         "No history for a payee and AI import is off? Select <strong>✨ Suggest with AI</strong> for Subcategory, or <strong>✨ Suggest account with AI</strong> for the account (both on the Add transaction form, or their matching ✨ buttons next to an unlinked Bank Stream row) to have it pick from your real budget lines or Wealth accounts, one payee at a time.",
         "CSV import recognizes exports from Chase, Capital One, Wells Fargo, Discover, Amex, and Citi, among others — both plain checking-style files and credit-card-style files (positive = purchase) are detected automatically. PDF import recognizes both a monthly credit-card statement and a checking/deposit account's \"Account Activity\" print export (e.g. Bank of America's Online Banking print-to-PDF); a still-\"Processing\" row that hasn't posted yet imports dated today with a <strong>Pending</strong> pill, so it isn't lost — just correct the date once your bank posts it for real.",
         "An import auto-links to a Wealth account by matching its name against the file's own name (and, for a checking-account PDF, the account label printed on the statement itself, e.g. \"Adv Plus Banking - 6769\") — if that whole-file match comes up empty, each row still falls back to the per-payee account history/AI suggestion above; if nothing matches at all, use <strong>Set account for all unlinked rows</strong> above the list to assign one account to everything in a single action instead of picking it row by row."
+      ] },
+    { icon: "📎", title: "Receipts", id: "receipts",
+      steps: [
+        "On <strong>Transactions</strong>, select the 🧾 button on a charge to attach a photo or PDF of its receipt.",
+        "Let the AI read it: it lists the items with their prices, the tax and the total, and tells you if they do not add up. Fix any line - including <strong>Saved</strong> (a discount) and <strong>Counts as</strong> (so two kinds of banana are told apart).",
+        "Open <strong>Get receipts by email</strong> to see your own receipts address. In Gmail, add it as a forwarding address, then make a filter that forwards your order emails (Amazon, Target...) to it. Each order becomes a receipt that waits for its charge and links itself when it posts.",
+        "When a refund arrives from the same shop, tick <strong>Returned</strong> on the items that went back; FamilyLoop suggests which items add up to the refund, and returned items are left out of price checks."
+      ],
+      tips: [
+        "Forward only order emails, never your whole inbox. If your receipts address gets out, <strong>make a new address</strong> in the same box and the old one stops working.",
+        "Shipping and delivery emails for the same order are not added twice, and emails that are not orders are ignored."
       ] },
     { icon: "☑", title: "Paycheck/Income", id: "paycheck",
       steps: [
@@ -9684,9 +9709,14 @@ function renderHelp() {
         "Save a reusable recipe under <strong>Recipes</strong> with its ingredients and nutrition info.",
         "In <strong>Meals</strong>, drop a saved recipe into a day and slot on the weekly planner.",
         "Use the grocery list built automatically from that week's planned ingredients.",
-        "Post the grocery list straight to a budget line when you're ready to shop."
+        "Post the grocery list straight to a budget line when you're ready to shop.",
+        "Short on time? On <strong>Recipes</strong> choose <strong>+ From a video or photos</strong>: paste a YouTube, Instagram, Facebook or TikTok link, add the post's caption, a saved or screen-recorded video file, or screenshots of the ingredients, and the AI drafts the recipe for you to check before it is saved."
       ],
-      tips: ["Build a small library of go-to recipes once — planning a week becomes picking from a list instead of starting from zero."] },
+      tips: [
+        "Build a small library of go-to recipes once — planning a week becomes picking from a list instead of starting from zero. Your account starts with a few recipes to edit or delete.",
+        "Instagram, Facebook and TikTok hide their videos and often their captions from other apps: save or screen-record the video and add it as a <strong>video file</strong>, or paste the caption into the box.",
+        "A recipe card stays short however long the recipe is; click it to open the full recipe with every quantity."
+      ] },
     { icon: "◎", title: "Goals", id: "goals",
       steps: [
         "Add a sinking fund with a name, a target amount, and optionally a target date.",
@@ -9708,6 +9738,37 @@ function renderHelp() {
         "Enter each holding's <strong>Avg. cost</strong> in Manage list to see gain/loss in dollars and percent, per holding and totaled on the card - holdings with no cost basis entered are left out of the total rather than counted as break-even.",
         "No real ticker for a holding (like a proprietary 401(k) fund)? Type its dollar value straight into <strong>Market value</strong> in Manage list instead of shares × price - shares default to 1 and price adjusts to match."
       ] },
+    { icon: "📈", title: "Investments", id: "investments",
+      steps: [
+        "Add your stocks and funds under <strong>Wealth</strong> (or <strong>Edit holdings</strong> on an account card here); this page reads them as one portfolio.",
+        "Set an <strong>owner</strong> and a <strong>tax bucket</strong> (Pre-tax, Roth, HSA, Taxable) on each account.",
+        "Type your <strong>target mix</strong> (US stocks, International, Bonds, Cash) to see how much to add or trim.",
+        "Select <strong>Refresh prices</strong> to fetch today's price for each ticker; a ticker with no quote keeps its old price."
+      ],
+      tips: ["A red alert means one stock is over 10% of your household, or your employer stock is, or sector funds together pass 8%. Broad funds are never warned about. This page is for planning, not financial advice."] },
+    { icon: "🏷", title: "Item prices", id: "prices",
+      steps: [
+        "Attach receipts to your charges and let the AI read their items (see <strong>Receipts</strong> above); <strong>Prices</strong> builds from them.",
+        "See what you pay for each product, what you usually pay, and whether the latest price is <strong>dearer</strong> or <strong>cheaper than usual</strong>.",
+        "Check <strong>Shops differ most on</strong> to find where an item is cheapest."
+      ],
+      tips: ["Use the <strong>Counts as</strong> name on a receipt item to group the same product under different wording, or to keep two varieties apart."] },
+    { icon: "🧮", title: "Calculators", id: "calculators",
+      steps: [
+        "Open <strong>Calculators</strong> (under Personal) and pick a tool: <strong>Know your number</strong>, <strong>Compound growth</strong>, <strong>Car affordability</strong> (20/3/8), <strong>House affordability</strong> (3/5/25), <strong>Wealth multiplier</strong> or <strong>Prodigious accumulator</strong>.",
+        "Type your own figures; results update as you type and are remembered for next time.",
+        "Use the one-tap buttons (such as <strong>Use my investments</strong>) to fill a box from your own Wealth data.",
+        "Open <strong>Advanced</strong> to change the assumptions, such as the rate of return."
+      ],
+      tips: ["These are estimates for planning, not financial advice; every result shows the assumptions behind it."] },
+    { icon: "🏘", title: "Partners", id: "partners",
+      steps: [
+        "Use this when several people put money into one account that collects the rent and pays the loans and repairs of properties you own together. Under <strong>Money → Partners</strong>, create the group and list the properties and partners with their ownership percentages.",
+        "Give each partner access by email (<strong>Can edit</strong> or <strong>Can view</strong>); they see the group, never your own budget or accounts.",
+        "Bring in the shared account's transactions from your bank link or a CSV, and write <strong>rules</strong> that read the bank's wording (rent, loan, HOA, repairs, a partner's contribution).",
+        "Read the statement for any period: the pool, each property, and what each partner has sent and should send."
+      ],
+      tips: ["<strong>Share a read-only report</strong> makes a link anyone can open without an account; it never shows email addresses or anything from your household."] },
     { icon: "♙", title: "Sharing", id: "sharing",
       steps: [
         "Select <strong>Invite</strong>, choose a preset role (co-owner, adult, viewer, or meals/chores-only) or pick exact areas to share instead.",
@@ -9737,7 +9798,7 @@ function renderHelp() {
       </section>
       <section class="help-journey" aria-label="Getting started workflow">
         <article><span>1</span><div><strong>Choose a household</strong><small>Keep currencies and records separate; set one as your default.</small></div></article>
-        <article><span>2</span><div><strong>Add what is real</strong><small>Start empty and enter only your data.</small></div></article>
+        <article><span>2</span><div><strong>Make it yours</strong><small>Start from the ready-made budget, recipes and chores, then add your real income and accounts.</small></div></article>
         <article><span>3</span><div><strong>Review together</strong><small>Share access and revisit the plan.</small></div></article>
       </section>
       <nav class="help-toc" aria-label="Jump to a topic">
@@ -9848,6 +9909,29 @@ function hidePublicHelp() {
   history.replaceState({}, "", location.pathname);
 }
 
+// Admin: the budget every new household starts with. The owner picks one of their own months (their January 2025, say) and saves it; recipes and the
+// other starters (notes, chores, savings goals) are always the built-in defaults, and existing households are never changed.
+function newUserTemplateCardHtml() {
+  const info = adminData?.template;
+  if (!info) return "";
+  const months = [...new Set([state.budget.month, ...(state.budgetHistory || []).filter((budget) => (budget.categories || []).length).map((budget) => budget.month)])].sort().reverse();
+  const preferred = months.includes("2025-01") ? "2025-01" : months[0];
+  const saved = info.saved
+    ? `<p class="muted" role="status">New households start with your <strong>${escapeHtml(formatMonth(info.sourceMonth))}</strong> budget: ${info.categories} categories, ${info.lines} subcategories (amounts included when the household's currency is ${escapeHtml(info.currency)}). Saved ${escapeHtml(info.savedAt ? new Date(info.savedAt).toLocaleDateString() : "")}.</p>`
+    : `<p class="muted" role="status">No budget saved yet, so new households start with a built-in one: ${info.categories} categories, ${info.lines} subcategories, amounts left for them to fill in.</p>`;
+  return `<section class="card new-user-template">
+    <div class="section-head"><div><span class="card-label">New households</span><h3>Starting budget and defaults</h3></div></div>
+    ${saved}
+    <p class="muted">Every new household also starts with ${info.recipes} built-in recipes, starter notes and labels, three weekly chores and three savings goals. Income, accounts, debts and birthdays always start empty. Households that already exist are never changed.</p>
+    <div class="template-row">
+      <label>Save this month's budget as the template<select id="newUserTemplateMonth">${months.map((month) => `<option value="${month}" ${month === preferred ? "selected" : ""}>${escapeHtml(formatMonth(month))}</option>`).join("")}</select></label>
+      <button type="button" id="newUserTemplateSave">Save as the new-user budget</button>
+      ${info.saved ? `<button type="button" class="ghost" id="newUserTemplateReset">Use the built-in budget instead</button>` : ""}
+    </div>
+    <small class="muted">It saves that month as it was: its categories, subcategories, due days and planned amounts, never the income. Make sure your latest changes have saved first.</small>
+  </section>`;
+}
+
 function renderAdmin() {
   const users = adminData?.users || [];
   const monthly = adminData?.monthly || [];
@@ -9869,6 +9953,7 @@ function renderAdmin() {
           ].map(([label, value]) => `<article><span>${label}</span><strong>${value}</strong></article>`).join("")}
         </div>
       </section>
+      ${newUserTemplateCardHtml()}
       <section class="card">
         <div class="section-head"><div><span class="card-label">Logins</span><h3>User access</h3></div></div>
         ${adminData ? `
@@ -16162,6 +16247,25 @@ function bindViewEvents() {
     });
   });
 
+  $("#newUserTemplateSave")?.addEventListener("click", async () => {
+    const month = $("#newUserTemplateMonth")?.value;
+    if (!month) return;
+    if (!await showConfirm(`Every new household will start with your ${formatMonth(month)} budget from now on. Existing households are not changed.`, { title: "Save the new-user budget?", confirmLabel: "Save it", danger: false })) return;
+    try {
+      // The server reads the household as it is saved, so anything still waiting to be saved goes first.
+      autosaveState();
+      await new Promise((resolve) => setTimeout(resolve, 900));
+      adminData.template = await api("/api/admin/new-user-template", { method: "PUT", body: JSON.stringify({ month }) });
+      showToast("Saved. New households will start with that budget.", { type: "info" });
+    } catch (error) { showToast(error.message); }
+    render();
+  });
+  $("#newUserTemplateReset")?.addEventListener("click", async () => {
+    if (!await showConfirm("New households will start with the built-in budget again. Existing households are not changed.", { title: "Use the built-in budget?", confirmLabel: "Use built-in", danger: false })) return;
+    try { adminData.template = await api("/api/admin/new-user-template", { method: "DELETE" }); } catch (error) { showToast(error.message); }
+    render();
+  });
+
   $("#refreshAdminButton")?.addEventListener("click", () => {
     adminData = null;
     render();
@@ -20070,14 +20174,15 @@ async function loadSharedWithMeNotes(shouldRender = true) {
 async function loadAdminData() {
   if (!sessionUser?.isAdmin) return;
   try {
-    const [validation, stats, users, monthly] = await Promise.all([
+    const [validation, stats, users, monthly, template] = await Promise.all([
       api("/api/admin/session"),
       api("/api/admin/stats"),
       api("/api/admin/users"),
-      api("/api/admin/monthly-stats")
+      api("/api/admin/monthly-stats"),
+      api("/api/admin/new-user-template").catch(() => null)
     ]);
     sessionUser = validation.user;
-    adminData = { stats, users, monthly };
+    adminData = { stats, users, monthly, template };
     render();
   } catch (error) {
     sessionUser = { ...sessionUser, isAdmin: false };

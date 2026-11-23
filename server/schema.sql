@@ -414,3 +414,12 @@ CREATE TABLE IF NOT EXISTS partner_group_shares (
   created_by UUID REFERENCES users(id) ON DELETE SET NULL,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+
+-- Small named documents the owner manages for the whole deployment. "new-user-budget" is the budget a new household starts with (saved from the
+-- owner's own month on the Admin page); see server/new-user-template.js.
+CREATE TABLE IF NOT EXISTS app_templates (
+  key TEXT PRIMARY KEY,
+  template JSONB NOT NULL,
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_by UUID REFERENCES users(id) ON DELETE SET NULL
+);

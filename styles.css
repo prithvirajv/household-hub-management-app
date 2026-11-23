@@ -965,8 +965,11 @@ main {
 }
 
 .help-grid {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  /* Two packed columns: a short guide no longer sits above a blank gap beside a long one (the old rows stretched both cards to the taller). */
+  display: block;
+  column-count: 2;
+  column-gap: 0;
+  column-rule: 1px solid var(--line);
   overflow: hidden;
   border: 1px solid var(--line);
   border-radius: 8px;
@@ -984,11 +987,12 @@ main {
   border-bottom: 1px solid var(--line);
 }
 
-.help-topic:nth-child(2n) {
+.help-topic {
+  break-inside: avoid;
   border-right: 0;
 }
 
-.help-topic:nth-last-child(-n + 2) {
+.help-topic:last-child {
   border-bottom: 0;
 }
 
@@ -9988,3 +9992,13 @@ label.ai-import-toggle span { font-weight: 600; }
 .recipe-actions button { min-width: 0; padding-inline: 0.5rem; font-size: 0.8rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .recipe-actions button { min-height: 36px; }
 .recipe-actions .icon-button { width: 32px; height: 36px; padding: 0; }
+
+/* Admin: the new-user budget card - the month picker and its buttons on one wrapping row. */
+.new-user-template .template-row { display: flex; flex-wrap: wrap; align-items: end; gap: 10px 14px; margin: 8px 0; }
+.new-user-template .template-row label { flex: 1 1 240px; min-width: 0; }
+.new-user-template .template-row select { width: 100%; }
+
+/* One column of help guides on narrow screens (the packed two-column layout is for wide ones). */
+@media (max-width: 860px) {
+  .help-grid { column-count: 1; }
+}
