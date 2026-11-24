@@ -575,6 +575,14 @@ charge's first meaningful word (`paybackNameToken`). Recipes' "Paste copied link
 `sharedLinkFromShare`. A phone-width audit (every page at 375px, looking for boxes past the right edge outside deliberately scrolling containers) found Wealth's account
 cards 717px wide and Reports' budget-vs-actual rows 430px; fixed in the last `@media (max-width: 760px)` blocks of `styles.css`.
 
+### What's new card, Bank stream link, readability
+Home shows a "What's new" card (`renderWhatsNewCard`, `WHATS_NEW` in `app.js`) once per device (`localStorage` key `familyloop-whats-new-seen`) to people whose account was created
+before `WHATS_NEW.releasedAt` (`whatsNewVisible`, `lib/shared-logic.js`); to announce a release change `id`, `releasedAt` and `items`. Bank stream deposits get `paybackCharge`
+(`paybackMemoHint`) and "Accept and link" (`acceptImportAndLinkPayback`: `acceptImportTransaction`, then `applyPayback` on the row it posted). A phone audit (every page at 375px:
+interactive boxes under 30px, type under 11px, text contrast under 4.5:1) led to 36px touch boxes and 12px captions in the last phone media block of `styles.css`, and to the
+darker `--green` (#0f8461, white text 4.7:1), `--coral` (#c93f3f), `--blue` (#2c5ec9) and `--muted` tokens, with lighter coral/blue overrides for dark mode. The audit's contrast check
+cannot read `oklch()` backgrounds (the computed value is not rgb), so dark-mode numbers from it are not reliable; judge dark mode by eye.
+
 ### Installable app and Share target
 `manifest.webmanifest` (name, 192/512 icons incl. maskable from `assets/`, `share_target` GET to `/index.html` with `title`, `text`, `url`) and `sw.js`
 (registers in `app.js`; a fetch handler that caches nothing so deploys are never hidden) make Chrome on Android offer Install and list FamilyLoop in the Share

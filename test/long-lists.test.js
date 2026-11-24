@@ -36,3 +36,25 @@ test("Recipes can paste the copied link, which is the iPhone route since it cann
   assert.match(app, /id="recipeImportPasteButton"/);
   assert.match(app, /navigator\.clipboard\.readText\(\)/);
 });
+
+test("a Bank stream deposit whose note names a charge's merchant offers Accept and link, and its menus are lazy too", () => {
+  assert.match(app, /paybackCharge: paybackMemoHint\(transaction, state\.transactions\)/);
+  assert.match(app, /data-accept-link-payback="\$\{transaction\.id\}"[^>]*>Accept and link/);
+  assert.match(app, /function acceptImportAndLinkPayback\(button\)[\s\S]{0,900}applyPayback\(charge, \[posted\]\)/);
+  assert.match(app, /data-bank-stream-line="\$\{transaction\.id\}" data-lazy-options="line"/);
+  assert.match(app, /data-bank-stream-account="\$\{transaction\.id\}" data-lazy-options="account"/);
+});
+
+test("Home shows a dismissible What's new card, kept per device", () => {
+  assert.match(app, /const WHATS_NEW = \{\s*id: "[\d-]+",\s*releasedAt: "[\dT:-]+"/);
+  assert.match(app, /\$\{renderWhatsNewCard\(\)\}\s*\$\{renderHomeBriefingCard\(\)\}/);
+  assert.match(app, /localStorage\.setItem\(WHATS_NEW_KEY, WHATS_NEW\.id\)/);
+});
+
+test("phones get 36px touch boxes and readable captions, and the brand green and coral reach 4.5:1 with white / on light panels", () => {
+  assert.match(css, /\.pill-button, \.link-button, \.ledger-payback-line \.small-button, button\.small-button \{ min-height: 36px;/);
+  assert.match(css, /small, \.muted small \{ font-size: max\(0\.78rem, 12px\); \}/);
+  assert.match(css, /--green: #0f8461;/);
+  assert.match(css, /--coral: #c93f3f;/);
+  assert.match(css, /html\[data-theme="dark"\] \{\s*--coral: #ee6b6b;[^}]*--blue: #7ea6f5;/);
+});

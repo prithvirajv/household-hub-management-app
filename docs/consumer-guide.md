@@ -250,7 +250,10 @@ button on every screen. People with view-only access don't see it.
   what it paid back, with **Undo** to unlink it. When a deposit's own note
   names the same merchant as a charge (for example "IXL share 2026" and an IXL
   charge), the deposit shows **Looks like a repayment for …** with **Review and
-  link**, which opens the charge with that deposit and its look-alikes ticked. Deposits you already filed
+  link**, which opens the charge with that deposit and its look-alikes ticked.
+  The same hint appears on a deposit still waiting in **Bank stream**, with
+  **Accept and link**: it adds the deposit to the ledger and files it under the
+  charge in one step. Deposits you already filed
   under the charge's budget line are listed first. The charge needs a
   subcategory first; if you later change it, the linked deposits follow. If a
   deposit lands in a later month than the charge, it reduces that later

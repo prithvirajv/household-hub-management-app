@@ -15,16 +15,17 @@
   --soft-blue: oklch(93% 0.01 75);
   --line: oklch(90% 0.012 75);
   --text: oklch(23% 0.02 55);
-  --muted: oklch(52% 0.02 60);
-  --green: #13936d;
+  --muted: oklch(46% 0.02 60);
+  /* Darkened from #13936d / #e05252 so white text on them and the coral text on light panels reach 4.5:1 (they measured 3.9 and 3.7). */
+  --green: #0f8461;
   --green-soft: #e6f6ef;
   /* Green text that stays readable on --green-soft: darkened toward --text, so it flips light in dark mode. */
   --green-ink: color-mix(in srgb, var(--green) 75%, var(--text));
-  --blue: #3569d4;
+  --blue: #2c5ec9;
   --gold: #d99a24;
   /* Gold text that stays readable on light surfaces: darkened toward --text, lightened in dark mode. */
   --gold-ink: color-mix(in srgb, var(--gold) 62%, var(--text));
-  --coral: #e05252;
+  --coral: #c93f3f;
   --shadow: 0 14px 34px rgba(80, 60, 30, 0.1);
   --card-radius: 14px;
   --sidebar-text: oklch(88% 0.012 75);
@@ -39,6 +40,8 @@
    NOT covered by this pass and may not fully adapt - a disclosed, smaller
    scope than a pixel-perfect dark mode across every decorative color. */
 html[data-theme="dark"] {
+  --coral: #ee6b6b; /* the darker light-mode coral would sink into the dark panels */
+  --blue: #7ea6f5; /* likewise the darker blue: links and tags on dark panels */
   --navy: oklch(16% 0.014 65);
   --navy-2: oklch(22% 0.014 65);
   --bg: oklch(19% 0.012 65);
@@ -2043,6 +2046,10 @@ main {
 .danger-button {
   background: #fff0f0;
   color: var(--coral);
+}
+
+html[data-theme="dark"] .danger-button {
+  background: color-mix(in srgb, var(--coral) 20%, var(--panel));
 }
 
 .compact-row {
@@ -10067,4 +10074,19 @@ body {
   .budget-vs-actual-row > :first-child { grid-column: 1 / -1; font-weight: 700; }
   .budget-vs-actual-row span,
   .budget-vs-actual-row b { white-space: nowrap; }
+}
+
+/* Home: the "What's new" card. */
+.whats-new-card ul { margin: 0.4rem 0 0; padding-left: 1.2rem; display: grid; gap: 0.35rem; font-size: 0.92rem; }
+.whats-new-card { border-color: var(--green); }
+
+/* Phones: small type and small tap targets (measured on every page at 375px). Notes' checklist buttons, pill buttons, the small inline buttons and menu
+   summaries get a 36px touch box, and the 9-11px captions come up to a readable size. */
+@media (max-width: 760px) {
+  small, .muted small { font-size: max(0.78rem, 12px); }
+  .event-recurring-badge, .meal-day-date, .plan-week-day-label, .plan-timeline-hour, .home-week-day-label { font-size: max(0.72rem, 11.5px); }
+  .pill-button, .link-button, .ledger-payback-line .small-button, button.small-button { min-height: 36px; padding-inline: 0.8rem; }
+  summary { min-height: 36px; }
+  .note-check-level, .note-check-plan, .note-check-delete { min-width: 36px; min-height: 36px; }
+  .reports-theme-swatch { min-width: 36px; min-height: 36px; }
 }

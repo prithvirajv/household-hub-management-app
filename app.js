@@ -2815,6 +2815,32 @@ function undoAssistantChange() {
   renderAssistantDialog();
 }
 
+// ---- "What's new": a dismissible card at the top of Home after a release, once per device (see whatsNewVisible). To announce a release, change `id`,
+// `releasedAt` and `items` here; people who signed up after `releasedAt` never see it.
+const WHATS_NEW = {
+  id: "2026-11-23",
+  releasedAt: "2026-11-24T00:00:00",
+  items: [
+    "<strong>Paid back by others.</strong> When friends repay a shared charge by Zelle or Venmo, link the deposits to it (Transactions) and your budget shows only your share. A deposit whose note names the merchant is spotted for you.",
+    "<strong>Share recipes from your phone.</strong> Android: share a video to FamilyLoop. iPhone: copy the link, then tap Paste copied link on the recipe form.",
+    "<strong>Faster, and fits your phone.</strong> Long lists load a page at a time, and every page now fits the screen.",
+    "<strong>History notices tidy themselves.</strong> They clear once your records cover the months, and name the months still empty."
+  ]
+};
+const WHATS_NEW_KEY = "familyloop-whats-new-seen";
+
+function whatsNewSeenId() {
+  try { return localStorage.getItem(WHATS_NEW_KEY) || ""; } catch (_error) { return ""; }
+}
+
+function renderWhatsNewCard() {
+  if (!sessionUser || !whatsNewVisible({ seenId: whatsNewSeenId(), createdAt: sessionUser.createdAt, release: WHATS_NEW })) return "";
+  return `<section class="card whats-new-card" role="region" aria-label="What's new">
+    <div class="section-head"><div><span class="card-label">What's new</span><h3>New in FamilyLoop</h3></div><button class="ghost" id="whatsNewDismiss" type="button">Got it</button></div>
+    <ul>${WHATS_NEW.items.map((item) => `<li>${item}</li>`).join("")}</ul>
+  </section>`;
+}
+
 function renderHome() {
   const items = homeActionItems();
   const billsAndGoals = billAndGoalReminders();
@@ -2825,6 +2851,7 @@ function renderHome() {
   return `
     <section class="work-grid">
       <div class="main-stack">
+        ${renderWhatsNewCard()}
         ${renderHomeBriefingCard()}
         ${renderBankSyncHealthCard()}
         ${renderHistoryGapCard()}
@@ -4102,7 +4129,8 @@ function renderTransactions() {
       refundMatch: refundMatch(transaction, pool),
       transferMatch: findTransferCandidate(transaction, pool),
       categorizationConfidence: transaction.lineId ? payeeCategorizationConfidence(transaction.payee, state.transactions) : null,
-      categorizationRuleLineId: categorizationRuleForPayee(transaction.payee)
+      categorizationRuleLineId: categorizationRuleForPayee(transaction.payee),
+      paybackCharge: paybackMemoHint(transaction, state.transactions)
     };
     return { ...enriched, heldReason: bankStreamHeldReason(enriched) };
   };
@@ -4384,17 +4412,18 @@ function renderTransactions() {
               ${transaction.categorizationRuleLineId ? `<span class="pill pill-info" title="Subcategory pre-filled from your 'always categorize this way' rule for this payee">🔒 Rule</span>` : ""}
               ${transaction.categorizationConfidence ? `<span class="pill bank-stream-confidence-${transaction.categorizationConfidence.confidence >= 80 ? "good" : transaction.categorizationConfidence.confidence >= 50 ? "warning" : "danger"}" title="${transaction.categorizationConfidence.sampleSize} past transaction${transaction.categorizationConfidence.sampleSize === 1 ? "" : "s"} from this payee - ${transaction.categorizationConfidence.confidence}% used this same subcategory">${transaction.categorizationConfidence.confidence}% match</span>` : ""}
               ${transaction.accountHistoryMatch ? `<span class="pill pill-info" title="Account pre-filled from which account this payee's transactions have been linked to most recently - double-check before accepting">Account from history</span>` : ""}
+              ${transaction.paybackCharge ? `<span class="pill pill-info" title="This deposit's note names the same merchant as that charge. Accept and link files it under the charge's budget line, so the budget shows only your share.">Looks like a repayment for ${escapeHtml(transaction.paybackCharge.payee.slice(0, 40))} · ${formatShortDate(transaction.paybackCharge.date)}</span><button class="small-button" data-accept-link-payback="${transaction.id}" type="button">Accept and link</button>` : ""}
               ${transaction.possibleDuplicate ? `<span class="pill pill-warning" title="Matches an existing transaction with the same amount within 2 days">Possible duplicate</span>` : ""}
               ${transaction.refundMatch ? `<span class="pill pill-info" title="Refund for the ${money.format(transaction.refundMatch.amount)} purchase on ${formatShortDate(transaction.refundMatch.date)}${transaction.orderNumber ? ` (order ${escapeHtml(transaction.orderNumber)})` : ""}">Refund match</span>` : ""}
               ${transaction.transferMatch && !transaction.refundMatch ? `<span class="pill pill-info" title="Matches ${escapeHtml(accountName(transaction.transferMatch.accountId))}'s ${exactMoney.format(Math.abs(transaction.transferMatch.amount))} on ${formatShortDate(transaction.transferMatch.date)}">Possible transfer</span>` : ""}
               <label class="row-field row-payee"><small>Payee</small><input data-bank-stream-payee="${transaction.id}" value="${escapeHtml(transaction.payee)}"></label>
               <label class="row-field row-date"><small>Date</small><input type="date" data-bank-stream-date="${transaction.id}" value="${transaction.date}"></label>
               <label class="row-field row-amount"><small>Amount</small><input class="money-input ${Number(transaction.amount || 0) < 0 ? "amount-in" : "amount-out"}" type="number" step="0.01" data-bank-stream-amount="${transaction.id}" value="${displayTransactionAmount(transaction)}"></label>
-              <label class="row-field row-select"><small>Subcategory</small><select data-bank-stream-line="${transaction.id}">${lineOptions(transaction.lineId)}</select></label>
+              <label class="row-field row-select"><small>Subcategory</small><select data-bank-stream-line="${transaction.id}" data-lazy-options="line">${lazyLineOptionsHtml(transaction.lineId)}</select></label>
               ${!transaction.lineId ? `<button class="icon-button" data-ai-suggest-line="${transaction.id}" type="button" aria-label="Suggest a subcategory with AI for ${escapeHtml(transaction.payee)}" title="No history match for this payee - ask AI to suggest a subcategory">✨</button>` : ""}
               ${transaction.lineId ? `<button class="icon-button ${transaction.categorizationRuleLineId === transaction.lineId ? "active" : ""}" data-toggle-categorization-rule="${transaction.id}" type="button" aria-label="${transaction.categorizationRuleLineId === transaction.lineId ? "Remove" : "Set"} always-categorize rule for ${escapeHtml(transaction.payee)}" title="${transaction.categorizationRuleLineId === transaction.lineId ? "Always categorizing this payee this way - click to remove the rule" : "Always categorize this payee this way"}">🔒</button>` : ""}
               <div class="row-account-actions">
-                ${state.accounts.length ? `<label class="row-field row-select"><small>Account</small><select data-bank-stream-account="${transaction.id}"><option value="">Not linked</option>${accountOptions(transaction.accountId || "")}</select></label>` : ""}
+                ${state.accounts.length ? `<label class="row-field row-select"><small>Account</small><select data-bank-stream-account="${transaction.id}" data-lazy-options="account">${lazyAccountOptionsHtml(transaction.accountId || "")}</select></label>` : ""}
                 ${state.accounts.length && !transaction.accountId ? `<button class="icon-button" data-ai-suggest-account="${transaction.id}" type="button" aria-label="Suggest an account with AI for ${escapeHtml(transaction.payee)}" title="No history match for this payee - ask AI to suggest an account">✨</button>` : ""}
                 <div class="row-actions">
                   <button class="icon-button" data-accept-import="${transaction.id}" type="button" aria-label="Accept ${escapeHtml(transaction.payee)}" title="Add to the ledger">${rowIconHtml("check")}</button>
@@ -13548,6 +13577,10 @@ function bindViewEvents() {
       if (panel.scrollHeight > room && room > 140) { panel.style.maxHeight = `${Math.floor(room)}px`; panel.style.overflowY = "auto"; }
     });
   });
+  $("#whatsNewDismiss")?.addEventListener("click", () => {
+    try { localStorage.setItem(WHATS_NEW_KEY, WHATS_NEW.id); } catch (_error) { /* shown again next visit */ }
+    render();
+  });
   $("#notesShowMore")?.addEventListener("click", () => { notesRowLimit += NOTES_PAGE_SIZE; render(); });
   $("#bankStreamShowMore")?.addEventListener("click", () => { bankStreamRowLimit += BANK_STREAM_PAGE_SIZE; render(); });
   $("#ledgerShowMore")?.addEventListener("click", () => { ledgerRowLimit += LEDGER_PAGE_SIZE; render(); });
@@ -17660,6 +17693,12 @@ view.addEventListener("click", (event) => {
     return;
   }
 
+  const acceptLinkButton = event.target.closest("[data-accept-link-payback]");
+  if (acceptLinkButton) {
+    acceptImportAndLinkPayback(acceptLinkButton);
+    return;
+  }
+
   const acceptButton = event.target.closest("[data-accept-import]");
   if (acceptButton) {
     acceptImportTransaction(acceptButton);
@@ -18437,6 +18476,26 @@ function acceptImportTransaction(button) {
   }
   autosaveState();
   render();
+}
+
+// "Accept and link" on a Bank stream deposit that looks like a repayment: it is added to the ledger as usual, then filed under the charge it repays.
+function acceptImportAndLinkPayback(button) {
+  const id = button.dataset.acceptLinkPayback;
+  const draft = transactionInboxItems().find((item) => item.id === id);
+  if (!draft) return;
+  const charge = paybackMemoHint(draft, state.transactions);
+  const before = state.transactions.length;
+  acceptImportTransaction({ dataset: { acceptImport: id } });
+  const posted = state.transactions.length === before + 1 ? state.transactions[0] : null;
+  if (!charge || !posted || posted.payee !== draft.payee) return; // not added (a closed account, say): the message above the ledger says why
+  const result = applyPayback(charge, [posted]);
+  if (!result.ok) { showToast(`Added to the ledger, but not linked: ${result.error}`); return; }
+  Object.assign(posted, lineSnapshot(posted.lineId));
+  const summary = paybackSummary(charge, state.transactions);
+  state.household.activity.unshift(`Linked ${posted.payee} to ${charge.payee}: ${exactMoney.format(summary.paid)} paid back, your share ${exactMoney.format(summary.share)}`);
+  autosaveState();
+  render();
+  showToast(`Added and linked. Your share of ${charge.payee} is now ${exactMoney.format(summary.share)}.`, { type: "success" });
 }
 
 function dismissImportTransaction(button) {
