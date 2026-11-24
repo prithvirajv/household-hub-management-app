@@ -253,7 +253,13 @@ button on every screen. People with view-only access don't see it.
   link**, which opens the charge with that deposit and its look-alikes ticked.
   The same hint appears on a deposit still waiting in **Bank stream**, with
   **Accept and link**: it adds the deposit to the ledger and files it under the
-  charge in one step. Deposits you already filed
+  charge in one step. When a deposit's note names **exactly one** charge it
+  fits, with a budget line and enough still unpaid, FamilyLoop links it for you
+  as it reaches the ledger from Bank stream. Home then shows a
+  **Linked for you** card with **Undo** and **Looks right** for each one (kept for two
+  weeks); an undone deposit is never linked automatically again. Two charges
+  from the same merchant, or a note that names none, a transfer, a charge that was itself a Zelle, or a merchant's own refund, are left for you.
+  Deposits you already filed
   under the charge's budget line are listed first. The charge needs a
   subcategory first; if you later change it, the linked deposits follow. If a
   deposit lands in a later month than the charge, it reduces that later
@@ -951,7 +957,7 @@ entry. It is read-only: FamilyLoop can never move money or place trades.
 - **Import history:** under a bank link, **Import older transactions from**
   a date (for example January 1) fetches everything from then on for the
   accounts you chose; it goes to Bank stream like any import. How far back
-  it reaches depends on the bank (often 3-12 months). If a bank returns only part of the period for an account that has regular activity, a window appears naming the account, the months it did not return and the date its rows really start; those whole months are **not** imported for that account (half a month would make the ledger wrong), and nothing is imported until you choose **Import the rest** (or **Cancel - import nothing**). Home then keeps a red **Some bank history is missing** card until you import those months from a statement (Transactions, then Import a statement, picking the account); the notice goes away by itself once your records have at least one row in every month it names, or you can select **I've imported it**. When part of the range is already covered, the notice lists the months that are still empty (for example "still empty: Feb, Mar, May, Jun 2026"), so you import only those statements. Rows already in the
+  it reaches depends on the bank (often 3-12 months). If a bank returns only part of the period for an account that has regular activity, a window appears naming the account, the months it did not return and the date its rows really start; those whole months are **not** imported for that account (half a month would make the ledger wrong), and nothing is imported until you choose **Import the rest** (or **Cancel - import nothing**). Home then keeps a red **Some bank history is missing** card until you import those months from a statement (Transactions, then Import a statement, picking the account); the notice goes away by itself once your records have at least one row in every month it names, or you can select **I've imported it**. Home also lists **Statements to import**: accounts (checking, savings, cards) with nothing recorded in a month that falls between their first and last records (within the last twelve months), with **Import a statement** and **Nothing happened then** for months that really were idle. That list needs no action to clear: it empties as the months fill in, and the current month is never listed. When part of the range is already covered, the notice lists the months that are still empty (for example "still empty: Feb, Mar, May, Jun 2026"), so you import only those statements. Rows already in the
   ledger or waiting in Bank stream are skipped, and rows you removed earlier
   (Clean up) come back. If you're replacing hand-entered history, clean it up
   first so the two don't double up.

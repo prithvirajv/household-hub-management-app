@@ -583,6 +583,17 @@ interactive boxes under 30px, type under 11px, text contrast under 4.5:1) led to
 darker `--green` (#0f8461, white text 4.7:1), `--coral` (#c93f3f), `--blue` (#2c5ec9) and `--muted` tokens, with lighter coral/blue overrides for dark mode. The audit's contrast check
 cannot read `oklch()` backgrounds (the computed value is not rgb), so dark-mode numbers from it are not reliable; judge dark mode by eye.
 
+### Automatic repayment links, statement gaps, template reminder
+`paybackAutoMatch` (`lib/shared-logic.js`) is stricter than `paybackMemoHint`: the note must name exactly one charge in reach (`paybackMemoHits`), the charge needs a budget line,
+and the deposit must fit in what is still unpaid. `autoLinkPostedPayback` (`app.js`) runs on the row `postDraftToLedger` just posted, inside the import pass's `postSafeRows`
+(file import, bank sync and the catch-up pass all go through it); manual Accept does not auto-link. The row gets `paidBackAuto: { at, seen }`; Home's "Linked for you" card
+(`autoLinkedPaybacks`, 14 days) offers Undo (`removePayback` plus `paybackAutoDeclined`, so it is never auto-linked again) and "Looks right" (`seen`). `statementGaps` derives
+"Statements to import" from the records: statement-type accounts (checking, savings, credit card) with at least 5 rows, months between the account's own first and last record (max 12 back)
+with no ledger or Bank stream row (leading gaps are not guessed: the card may not have existed, and a bank that withheld early history raises its own notice); months named by an open `historyGapNotices` entry are left to that notice, and "Nothing happened then" stores
+`accountId|YYYY-MM` in `state.statementGapIgnored`. Real data (2026-11-23, 1,166 rows, 29 accounts): an unrestricted rule flagged "Nov-Dec 2025" on every account and linked 3 wrong deposits of 5 (a PayPal refund, a one-cent transfer, a Zelle matched to a Zelle), hence `paybackAutoMatch`'s exclusions (transfers, under $1, the deposit echoing the charge's own text, peer-payment charges) and the interior-only rule; with them it flags 0 extra months and 2 true IXL repayments. Re-check against a copy of the real household before changing these. `newUserTemplateReminder` drives the owner-only Home
+card (`homeTemplateInfo`, dismissal in `localStorage` key `familyloop-template-reminder-off`) and the Admin card's red "Not saved yet" banner; its Save button calls the same
+`PUT /api/admin/new-user-template` after `saveStateNow()`.
+
 ### Installable app and Share target
 `manifest.webmanifest` (name, 192/512 icons incl. maskable from `assets/`, `share_target` GET to `/index.html` with `title`, `text`, `url`) and `sw.js`
 (registers in `app.js`; a fetch handler that caches nothing so deploys are never hidden) make Chrome on Android offer Install and list FamilyLoop in the Share

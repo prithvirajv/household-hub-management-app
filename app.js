@@ -2818,13 +2818,12 @@ function undoAssistantChange() {
 // ---- "What's new": a dismissible card at the top of Home after a release, once per device (see whatsNewVisible). To announce a release, change `id`,
 // `releasedAt` and `items` here; people who signed up after `releasedAt` never see it.
 const WHATS_NEW = {
-  id: "2026-11-23",
-  releasedAt: "2026-11-24T00:00:00",
+  id: "2026-11-25",
+  releasedAt: "2026-11-26T00:00:00",
   items: [
-    "<strong>Paid back by others.</strong> When friends repay a shared charge by Zelle or Venmo, link the deposits to it (Transactions) and your budget shows only your share. A deposit whose note names the merchant is spotted for you.",
-    "<strong>Share recipes from your phone.</strong> Android: share a video to FamilyLoop. iPhone: copy the link, then tap Paste copied link on the recipe form.",
-    "<strong>Faster, and fits your phone.</strong> Long lists load a page at a time, and every page now fits the screen.",
-    "<strong>History notices tidy themselves.</strong> They clear once your records cover the months, and name the months still empty."
+    "<strong>Repayments link themselves.</strong> When a Zelle or Venmo deposit's note names exactly one charge it fits, it is linked to that charge as it arrives. Home lists each one with an Undo.",
+    "<strong>Missing statements are listed on Home.</strong> Accounts with months that have nothing recorded show up with a shortcut to import, and the list clears as the months fill in.",
+    "<strong>Owner reminder.</strong> Home and Admin say so while new households are still getting the built-in budget instead of yours."
   ]
 };
 const WHATS_NEW_KEY = "familyloop-whats-new-seen";
@@ -2854,7 +2853,10 @@ function renderHome() {
         ${renderWhatsNewCard()}
         ${renderHomeBriefingCard()}
         ${renderBankSyncHealthCard()}
+        ${renderTemplateReminderCard()}
+        ${renderAutoLinkedPaybackCard()}
         ${renderHistoryGapCard()}
+        ${renderStatementGapCard()}
         ${renderDetectedSalaryCard()}
         ${renderPlanSuggestionsCard()}
         <section class="card">
@@ -10097,8 +10099,10 @@ function newUserTemplateCardHtml() {
   const saved = info.saved
     ? `<p class="muted" role="status">New households start with your <strong>${escapeHtml(formatMonth(info.sourceMonth))}</strong> budget: ${info.categories} categories, ${info.lines} subcategories (amounts included when the household's currency is ${escapeHtml(info.currency)}). Saved ${escapeHtml(info.savedAt ? new Date(info.savedAt).toLocaleDateString() : "")}.</p>`
     : `<p class="muted" role="status">No budget saved yet, so new households start with a built-in one: ${info.categories} categories, ${info.lines} subcategories, amounts left for them to fill in.</p>`;
+  const banner = info.saved ? "" : `<p class="template-banner" role="alert"><strong>Not saved yet.</strong> New households are getting the built-in budget, not yours. Pick ${escapeHtml(formatMonth(preferred))} below and press Save as the new-user budget.</p>`;
   return `<section class="card new-user-template">
     <div class="section-head"><div><span class="card-label">New households</span><h3>Starting budget and defaults</h3></div></div>
+    ${banner}
     ${saved}
     <p class="muted">Every new household also starts with ${info.recipes} built-in recipes, starter notes and labels, three weekly chores and three savings goals. Income, accounts, debts and birthdays always start empty. Households that already exist are never changed.</p>
     <div class="template-row">
@@ -11589,6 +11593,24 @@ function bindViewEvents() {
     autosaveState();
     render();
   }));
+  document.querySelectorAll("[data-undo-auto-payback]").forEach((button) => button.addEventListener("click", () => undoAutoPayback(button.dataset.undoAutoPayback)));
+  document.querySelectorAll("[data-keep-auto-payback]").forEach((button) => button.addEventListener("click", () => keepAutoPayback(button.dataset.keepAutoPayback)));
+  document.querySelectorAll("[data-statement-gap-import]").forEach((button) => button.addEventListener("click", () => {
+    ledgerAccountFilter = button.dataset.statementGapImport;
+    currentView = "transactions";
+    render();
+  }));
+  document.querySelectorAll("[data-statement-gap-idle]").forEach((button) => button.addEventListener("click", () => {
+    const gap = currentStatementGaps().find((item) => item.accountId === button.dataset.statementGapIdle);
+    if (!gap) return;
+    state.statementGapIgnored ||= [];
+    gap.months.forEach((month) => { const key = `${gap.accountId}|${month}`; if (!state.statementGapIgnored.includes(key)) state.statementGapIgnored.push(key); });
+    autosaveState();
+    render();
+  }));
+  $("#templateReminderSave")?.addEventListener("click", (event) => { void saveTemplateFromReminder(event.currentTarget.dataset.month); });
+  $("#templateReminderDismiss")?.addEventListener("click", () => { try { localStorage.setItem(TEMPLATE_REMINDER_KEY, "1"); } catch (_error) { /* shown again next visit */ } render(); });
+  maybeLoadHomeTemplateInfo();
   maybeDetectSalaries();
   maybeOpenCurrentMonth();
   $("#homeAddChoreButton")?.addEventListener("click", () => goToViewAndRun("calendar", () => focusCalendarType("chore")));
@@ -16559,7 +16581,7 @@ function bindViewEvents() {
       // The server reads the household as it is saved, so anything still waiting to be saved goes first.
       autosaveState();
       await new Promise((resolve) => setTimeout(resolve, 900));
-      adminData.template = await api("/api/admin/new-user-template", { method: "PUT", body: JSON.stringify({ month }) });
+      adminData.template = homeTemplateInfo = await api("/api/admin/new-user-template", { method: "PUT", body: JSON.stringify({ month }) });
       if (newUserPreview) await loadNewUserPreview();
       showToast("Saved. New households will start with that budget.", { type: "info" });
     } catch (error) { showToast(error.message); }
@@ -16571,7 +16593,7 @@ function bindViewEvents() {
   });
   $("#newUserTemplateReset")?.addEventListener("click", async () => {
     if (!await showConfirm("New households will start with the built-in budget again. Existing households are not changed.", { title: "Use the built-in budget?", confirmLabel: "Use built-in", danger: false })) return;
-    try { adminData.template = await api("/api/admin/new-user-template", { method: "DELETE" }); if (newUserPreview) await loadNewUserPreview(); } catch (error) { showToast(error.message); }
+    try { adminData.template = homeTemplateInfo = await api("/api/admin/new-user-template", { method: "DELETE" }); if (newUserPreview) await loadNewUserPreview(); } catch (error) { showToast(error.message); }
     render();
   });
 
@@ -17772,6 +17794,21 @@ function postDraftToLedger(inboxItem) {
   if (!state.transactionInboxDone.includes(inboxItem.id)) state.transactionInboxDone.push(inboxItem.id);
   state.transactionInboxDrafts = (state.transactionInboxDrafts || []).filter((item) => item.id !== inboxItem.id);
   state.household.activity.unshift(`Assigned ${inboxItem.payee} to ${transactionAssignmentLabel({ lineId })}`);
+  return posted;
+}
+
+// A deposit that has just reached the ledger and whose note names exactly one charge it fits (paybackAutoMatch) is filed under that charge by the
+// app itself, marked so Home can list it with an Undo. Anything less certain is left for the person's own "Pays back a charge?" / Accept and link.
+function autoLinkPostedPayback(posted) {
+  const charge = posted ? paybackAutoMatch(posted, state.transactions) : null;
+  if (!charge) return false;
+  posted.id ||= `tx-${Math.random().toString(36).slice(2, 10)}${Date.now().toString(36)}`;
+  if (!applyPayback(charge, [posted]).ok) return false;
+  if (posted.memo === "Needs a category") posted.memo = `Paid back: ${charge.payee}`;
+  Object.assign(posted, lineSnapshot(posted.lineId));
+  posted.paidBackAuto = { at: new Date().toISOString() };
+  state.household.activity.unshift(`Linked ${posted.payee} to ${charge.payee} automatically (its note names the charge)`);
+  return true;
 }
 
 // ---- Linked accounts (SimpleFIN Bridge / SnapTrade) ----
@@ -18172,6 +18209,98 @@ function renderHistoryGapCard() {
   </section>`;
 }
 
+// Repayments the app linked on its own, for a look and an Undo. They stay for two weeks or until "Looks right".
+function renderAutoLinkedPaybackCard() {
+  const items = autoLinkedPaybacks(state.transactions, Date.now());
+  if (!items.length) return "";
+  return `<section class="card auto-link-card" role="status">
+    <div class="card-label">Linked for you</div><h3>${items.length} repayment${items.length === 1 ? " was" : "s were"} linked to the charge ${items.length === 1 ? "it pays" : "they pay"} back</h3>
+    <p class="muted">Each deposit's note named one charge it fits, so it now reduces that charge's budget line instead of counting as income. Undo any that is wrong.</p>
+    ${items.slice(0, 10).map(({ row, charge }) => {
+      const summary = paybackSummary(charge, state.transactions);
+      return `<div class="compact-row"><div><strong>${escapeHtml(row.payee)} · ${exactMoney.format(Math.abs(Number(row.amount)))}</strong><small>paid back ${escapeHtml(charge.payee)} (${escapeHtml(charge.date)}) · your share is now ${exactMoney.format(summary.share)}</small></div>
+        <div class="button-row"><button class="ghost" data-undo-auto-payback="${escapeHtml(row.id)}" type="button">Undo</button><button class="pill-button" data-keep-auto-payback="${escapeHtml(row.id)}" type="button">Looks right</button></div></div>`;
+    }).join("")}
+    ${items.length > 10 ? `<small class="muted">…and ${items.length - 10} more.</small>` : ""}
+  </section>`;
+}
+
+function undoAutoPayback(rowId) {
+  const row = state.transactions.find((item) => item.id === rowId);
+  if (!row?.paidBackAuto) return;
+  const charge = state.transactions.find((item) => item.id === row.paidBackFor);
+  removePayback(row);
+  row.paybackAutoDeclined = true;
+  Object.assign(row, lineSnapshot(row.lineId));
+  state.household.activity.unshift(`Undid the automatic link of ${row.payee}${charge ? ` to ${charge.payee}` : ""}`);
+  autosaveState();
+  render();
+}
+
+function keepAutoPayback(rowId) {
+  const row = state.transactions.find((item) => item.id === rowId);
+  if (!row?.paidBackAuto) return;
+  row.paidBackAuto.seen = true;
+  autosaveState();
+  render();
+}
+
+// Months with no records on a statement account that is clearly in use (see statementGaps), with a way to say a stretch was simply idle.
+function currentStatementGaps() {
+  return statementGaps({ accounts: state.accounts, transactions: state.transactions, drafts: state.transactionInboxDrafts, notices: openGapNotices(), ignored: state.statementGapIgnored, today: dateKey(new Date()) });
+}
+
+function renderStatementGapCard() {
+  const gaps = currentStatementGaps();
+  if (!gaps.length) return "";
+  return `<section class="card statement-gap-card" role="status">
+    <div class="card-label">Statements to import</div><h3>${gaps.length === 1 ? "One account has" : `${gaps.length} accounts have`} months with nothing recorded</h3>
+    <p class="muted">These accounts have activity in other months, so the empty ones probably need a statement. This list clears by itself as the months fill in. If an account really was idle, say so.</p>
+    ${gaps.map((gap) => `<div class="compact-row"><div><strong>${escapeHtml(gap.accountName)}</strong><small>${escapeHtml(monthRunsLabel(gap.months))}</small></div>
+      <div class="button-row"><button class="pill-button" data-statement-gap-import="${escapeHtml(gap.accountId)}" type="button">Import a statement</button><button class="ghost" data-statement-gap-idle="${escapeHtml(gap.accountId)}" type="button">Nothing happened then</button></div></div>`).join("")}
+  </section>`;
+}
+
+// A reminder for the owner: new households are still getting the built-in budget because their own has not been saved as the template.
+let homeTemplateInfo = null;
+let homeTemplateLoading = false;
+const TEMPLATE_REMINDER_KEY = "familyloop-template-reminder-off";
+
+function templateReminderDismissed() {
+  try { return localStorage.getItem(TEMPLATE_REMINDER_KEY) === "1"; } catch (_error) { return false; }
+}
+
+function currentTemplateReminder() {
+  const months = [state.budget.month, ...(state.budgetHistory || []).filter((budget) => (budget.categories || []).length).map((budget) => budget.month)];
+  return newUserTemplateReminder({ info: homeTemplateInfo, isAdmin: Boolean(sessionUser?.isAdmin), dismissed: templateReminderDismissed(), months });
+}
+
+function maybeLoadHomeTemplateInfo() {
+  if (homeTemplateInfo || homeTemplateLoading || !sessionUser?.isAdmin || currentView !== "home") return;
+  homeTemplateLoading = true;
+  api("/api/admin/new-user-template").then((info) => { homeTemplateInfo = info; }).catch(() => { homeTemplateInfo = null; }).finally(() => { homeTemplateLoading = false; if (homeTemplateInfo && currentView === "home") render(); });
+}
+
+function renderTemplateReminderCard() {
+  const reminder = currentTemplateReminder();
+  if (!reminder.show) return "";
+  return `<section class="card template-reminder-card" role="status">
+    <div class="card-label">Owner reminder</div><h3>New households are not using your ${escapeHtml(formatMonth(reminder.month))} budget yet</h3>
+    <p class="muted">They start with the built-in budget until you save yours as the template. Saving copies only that month's categories, subcategories, due days and amounts, never income or people, and existing households are never changed.</p>
+    <div class="button-row"><button class="pill-button" id="templateReminderSave" data-month="${escapeHtml(reminder.month)}" type="button">Save ${escapeHtml(formatMonth(reminder.month))} as the new-user budget</button><button class="ghost" data-goto-view="admin" type="button">Open Admin</button><button class="ghost" id="templateReminderDismiss" type="button">Keep the built-in budget</button></div>
+  </section>`;
+}
+
+async function saveTemplateFromReminder(month) {
+  try {
+    await saveStateNow();
+    homeTemplateInfo = await api("/api/admin/new-user-template", { method: "PUT", body: JSON.stringify({ month }) });
+    adminData = null;
+    showToast(`New households will now start with your ${formatMonth(month)} budget.`, { type: "success" });
+  } catch (error) { showToast(error.message); }
+  render();
+}
+
 async function syncLinkedAccount(linkId, addRows, { quiet = false, sinceDate = "", accountIds = [] } = {}) {
   const link = (linkedAccounts?.links || []).find((item) => item.id === linkId);
   if (!link || linkedBusyId) return;
@@ -18319,6 +18448,7 @@ async function runAiImportPassOnce(draftIds, fileName, importedCount, rerun, pas
   let aiFilled = 0;
   let added = 0;
   let uncategorizedAdded = 0;
+  let repaymentsLinked = 0;
   const reviewReasons = new Map();
   const settled = new Set();
 
@@ -18353,7 +18483,7 @@ async function runAiImportPassOnce(draftIds, fileName, importedCount, rerun, pas
       if (decision.accept) {
         if (returnOfPosted) draft.postMemo = refundMemo(returnOf);
         if (decision.uncategorized) { draft.lineId = ""; draft.lineSource = ""; draft.postMemo = "Needs a category"; uncategorizedAdded += 1; }
-        postDraftToLedger(draft);
+        if (autoLinkPostedPayback(postDraftToLedger(draft))) repaymentsLinked += 1;
         added += 1;
       } else {
         reviewReasons.set(decision.reason, (reviewReasons.get(decision.reason) || 0) + 1);
@@ -18435,7 +18565,7 @@ async function runAiImportPassOnce(draftIds, fileName, importedCount, rerun, pas
 
   const remaining = draftIds.filter(findDraft).length;
   const reasonText = [...reviewReasons.entries()].sort((a, b) => b[1] - a[1]).slice(0, 3).map(([reason, count]) => `${count} ${reason}`).join(", ");
-  bankImportFeedback = `${lead}${aiFilled ? ` AI filled in ${aiFilled} row${aiFilled === 1 ? "" : "s"}.` : ""} ${added} added to the ledger${uncategorizedAdded ? ` (${uncategorizedAdded} without a category - marked "Needs a category" there)` : ""}${remaining ? `; ${remaining} left in Bank stream to review${reasonText ? ` (${reasonText})` : ""}` : ""}.${aiNote}`;
+  bankImportFeedback = `${lead}${aiFilled ? ` AI filled in ${aiFilled} row${aiFilled === 1 ? "" : "s"}.` : ""} ${added} added to the ledger${uncategorizedAdded ? ` (${uncategorizedAdded} without a category - marked "Needs a category" there)` : ""}${repaymentsLinked ? `; ${repaymentsLinked} repayment${repaymentsLinked === 1 ? "" : "s"} linked to the charge ${repaymentsLinked === 1 ? "it pays" : "they pay"} back (see Home to undo)` : ""}${remaining ? `; ${remaining} left in Bank stream to review${reasonText ? ` (${reasonText})` : ""}` : ""}.${aiNote}`;
   if (added) state.household.activity.unshift(`${rerun ? "Bank stream" : `Imported ${fileName}`}: ${added} transaction${added === 1 ? "" : "s"} auto-added with AI categories`);
   autosaveState();
   render();
