@@ -10156,3 +10156,15 @@ body {
 .linked-add-bank > summary { cursor: pointer; font-weight: 700; color: var(--green); padding: 6px 0; }
 div.household-size-ok { margin: 0 0 8px; font-size: 0.82rem; color: var(--muted); }
 div.household-size-ok > .household-size-detail > summary { cursor: pointer; }
+
+.bank-check > summary { cursor: pointer; display: flex; gap: 0.6rem; align-items: baseline; flex-wrap: wrap; }
+.bank-check-controls { display: flex; flex-wrap: wrap; gap: 8px 12px; align-items: end; margin: 0.6rem 0; }
+.bank-check-controls label { margin: 0; }
+.bank-check-controls .disabled { opacity: 0.5; pointer-events: none; }
+.bank-check-result { display: grid; gap: 6px; padding: 10px 12px; border-radius: 10px; border: 2px solid var(--green); }
+.bank-check-result.bank-check-gap { border-color: var(--coral); }
+.bank-check-rows { list-style: none; margin: 4px 0 0; padding: 0; display: grid; gap: 3px; font-size: 0.88rem; }
+.bank-check-group > summary { cursor: pointer; font-weight: 700; }
+.bank-check-adjustments { margin-top: 0.8rem; display: grid; gap: 4px; }
+.bank-check-rows label { display: flex; flex-direction: row; align-items: center; gap: 8px; margin: 0; font-weight: 400; }
+.bank-check-rows input[type="checkbox"] { width: auto; flex: none; }

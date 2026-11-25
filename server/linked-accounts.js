@@ -706,6 +706,9 @@ function registerLinkedAccountRoutes({ forwardPartnerRows = null, app, requireSe
       const wantedMappings = Object.fromEntries(Object.entries(link.mappings || {}).filter(([remoteId]) => !accountIds.length || accountIds.includes(remoteId)));
       const catchUpFrom = link.provider === "simplefin" && !req.body?.sinceDate && link.lastSyncAt && loadHouseholdState ? behindAccountsSince(await loadHouseholdState(sessionHouseholdId(req)), wantedMappings, new Date().toISOString().slice(0, 10)) : "";
       const fetched = await fetchLinkPayload(link, { sinceDate: req.body?.sinceDate, catchUpFrom, allowPartial: Boolean(since), accountIds });
+      // A check ("ask the bank again"): the rows come straight back to be compared with the household's records. Nothing is staged, nothing is imported,
+      // and the link's last-sync date and last-run record are left alone.
+      if (req.body?.dryRun === true) return res.json({ dryRun: true, accounts: fetched.accounts || [], transactions: fetched.transactions || [], errors: fetched.errors || [], ...(fetched.limitHit ? { limitHit: true, fetchedThrough: fetched.fetchedThrough } : {}), ...(fetched.failedWindows?.length ? { failedWindows: fetched.failedWindows } : {}) });
       const failed = gapsFromFailedWindows(fetched, fetched.failedWindows, link.mappings);
       const trimmed = trimPartialHistory(failed.payload, since);
       const payload = trimmed.payload;
@@ -720,7 +723,8 @@ function registerLinkedAccountRoutes({ forwardPartnerRows = null, app, requireSe
       await recordOutcome(req, link, null, payload.accounts, { touchLastSync: false });
       res.json({ ...merged, ...(gaps.length ? { historyGaps: gaps } : {}), ...(Object.keys(coverage).length ? { coverage } : {}) });
     } catch (error) {
-      await recordOutcome(req, link, error);
+      // A check that fails (the daily limit, a timeout) says nothing about the link itself; only a connection the bank refused is recorded.
+      if (!req.body?.dryRun || error.statusCode === 409) await recordOutcome(req, link, error);
       throw error;
     }
   }));

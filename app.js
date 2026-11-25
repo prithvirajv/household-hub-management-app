@@ -79,6 +79,8 @@ let ledgerAccountFilter = "";
 // "Re-date from a CSV": { fileName, rows (the statement's rows with both dates), accountId, fixes, notFound, picked: Set of fix indexes } - the preview
 // of moving rows imported earlier (on their purchase day) to the post date; nothing changes until Apply. Session-local.
 let postDateFixPlan = null;
+// "Check against the bank": the source's rows are kept so changing the account re-runs the check without asking the bank again.
+let bankCheck = { open: false, accountId: "", source: "", fileName: "", rows: [], from: "", busy: false, error: "", unchecked: new Set() };
 let ledgerAllMonths = false;
 const LEDGER_PAGE_SIZE = 200;
 const BANK_STREAM_PAGE_SIZE = 100;
@@ -1509,6 +1511,62 @@ function postDateFixPanelHtml() {
     </div>
   </div>`;
 }
+// ---- Check against the bank ----
+// Compares what FamilyLoop holds for one account with a statement file, or with the bank asked again for a period, and accounts for every row: in the
+// ledger, waiting in Bank stream, deleted by the household, half of a transfer, pending at the bank - or missing, with a button to add those.
+function bankCheckLink(accountId) {
+  for (const link of linkedAccounts?.links || []) {
+    if (link.provider !== "simplefin" || link.status !== "active") continue;
+    const remoteId = Object.entries(link.mappings || {}).find(([, mapping]) => mapping && mapping.accountId === accountId)?.[0];
+    if (remoteId) return { link, remoteId };
+  }
+  return null;
+}
+
+function bankCheckResult() {
+  if (!bankCheck.accountId || !bankCheck.rows.length) return null;
+  return checkRowsAgainstRecords({ rows: bankCheck.rows, accountId: bankCheck.accountId, transactions: state.transactions, drafts: state.transactionInboxDrafts, removedSignatures: state.removedRowSignatures, transfers: state.transfers, importedIds: bankCheck.source === "bank" ? state.linkedImportedIds : [] });
+}
+
+function bankCheckRowsHtml(items, { checkbox = false } = {}) {
+  return `<ul class="bank-check-rows">${items.map((item, index) => {
+    const row = item.row;
+    return `<li>${checkbox ? `<label><input type="checkbox" data-bank-check-pick="${index}" ${bankCheck.unchecked.has(`${row.date}|${row.amount}|${row.payee}`) ? "" : "checked"}> ` : ""}<span>${escapeHtml(formatShortDate(String(row.date).slice(0, 10)))} · ${escapeHtml(row.payee || "")} · ${exactMoney.format(Number(row.amount))}</span>${checkbox ? "</label>" : ""}</li>`;
+  }).join("")}</ul>`;
+}
+
+function bankCheckCardHtml() {
+  const account = state.accounts.find((item) => item.id === bankCheck.accountId);
+  const linked = bankCheck.accountId ? bankCheckLink(bankCheck.accountId) : null;
+  const result = bankCheckResult();
+  const by = (status) => (result ? result.items.filter((item) => item.status === status) : []);
+  const missing = by("missing");
+  const picked = missing.filter((item) => !bankCheck.unchecked.has(`${item.row.date}|${item.row.amount}|${item.row.payee}`)).length;
+  const adjustments = (account?.balanceAdjustments || []).slice(0, 5);
+  const days = bankCheck.from ? Math.max(1, Math.ceil((Date.now() - Date.parse(`${bankCheck.from}T00:00:00`)) / 86400000)) : 0;
+  const section = (title, items, note = "") => (items.length ? `<details class="bank-check-group"><summary>${title} (${items.length})</summary>${note ? `<small class="muted">${note}</small>` : ""}${bankCheckRowsHtml(items)}</details>` : "");
+  return `<details class="card bank-check" id="bankCheckDetails" ${bankCheck.open ? "open" : ""}>
+    <summary><b>Check against the bank</b> <span class="muted">make sure nothing is missing</span></summary>
+    <p class="muted">Compare what FamilyLoop has for an account with a statement you upload, or with the bank asked again. Nothing changes until you choose Add.</p>
+    <div class="bank-check-controls">
+      <label>Account<select id="bankCheckAccount"><option value="">Choose an account</option>${accountOptions(bankCheck.accountId)}</select></label>
+      <label class="documents-upload-button ${bankCheck.accountId ? "" : "disabled"}" title="A bank statement as CSV or PDF">Upload a statement<input type="file" id="bankCheckInput" accept=".csv,text/csv,.pdf,application/pdf" ${bankCheck.accountId && !bankCheck.busy ? "" : "disabled"}></label>
+      ${linked ? `<label class="linked-from"><span>From</span><input type="date" id="bankCheckFrom" value="${escapeHtml(bankCheck.from)}" max="${dateKey(new Date())}"></label><button type="button" id="bankCheckAsk" ${bankCheck.from && !bankCheck.busy ? "" : "disabled"}>${bankCheck.busy ? "Asking…" : "Ask the bank again"}</button>${bankCheck.from ? `<small class="muted">uses about ${Math.max(1, Math.ceil(days / 44))} of SimpleFIN's daily requests</small>` : ""}` : (bankCheck.accountId ? `<small class="muted">This account is not fed by a linked bank, so a statement is the way to check it.</small>` : "")}
+    </div>
+    ${bankCheck.error ? `<p class="muted" role="alert">${escapeHtml(bankCheck.error)}</p>` : ""}
+    ${result ? `<div class="bank-check-result ${result.complete ? "bank-check-ok" : "bank-check-gap"}" role="status">
+      <strong>${result.complete ? `✓ Every one of the ${result.counts.total - result.counts.pending} rows is accounted for` : `${missing.length} of ${result.counts.total - result.counts.pending} rows are missing`}</strong> <small class="muted">${escapeHtml(bankCheck.source === "bank" ? "from the bank" : bankCheck.fileName)}, ${escapeHtml(formatShortDate(result.range.from))} to ${escapeHtml(formatShortDate(result.range.to))}</small>
+      <small class="muted">In your ledger ${result.counts.ledger} · waiting in Bank stream ${result.counts.stream} · deleted by you ${result.counts.removed} · transfers ${result.counts.transfer}${result.counts.pending ? ` · still pending at the bank ${result.counts.pending}` : ""}</small>
+      ${missing.length ? `<div class="bank-check-missing"><strong>Missing from FamilyLoop</strong>${bankCheckRowsHtml(missing, { checkbox: true })}<div class="button-row"><button type="button" id="bankCheckAdd" ${picked ? "" : "disabled"}>Add ${picked} to Bank stream</button></div></div>` : ""}
+      ${section("Deleted by you", by("removed"), "These are on the statement but you deleted or skipped them, so they stay out.")}
+      ${section("In FamilyLoop but not on the statement", result.extras, "Added by hand, dated differently, or no longer listed by the bank. Worth a look.")}
+      ${section("Transfers", by("transfer"))}
+      ${section("Still pending at the bank", by("pending"), "Not counted until the bank posts them.")}
+    </div>` : ""}
+    ${adjustments.length ? `<div class="bank-check-adjustments"><strong>Balance adjustments for ${escapeHtml(account.name)}</strong><small class="muted">Each time the account's balance was nudged to match the bank, the ledger was off by that amount (the first entry is just the starting balance).</small><ul class="bank-check-rows">${adjustments.map((entry) => `<li>${escapeHtml(formatShortDate(entry.date))} · ${entry.amount > 0 ? "+" : "-"}${exactMoney.format(Math.abs(entry.amount))}</li>`).join("")}</ul></div>` : ""}
+  </details>`;
+}
+
 // Works the preview out again (the file's rows are kept; the account or the ledger may have changed).
 function replanPostDateFix() {
   if (!postDateFixPlan) return;
@@ -4360,6 +4418,7 @@ function renderTransactions() {
             ` : ""}
           </section>`;
         })()}
+        ${bankCheckCardHtml()}
         ${pendingAtBanksCard()}
         <section class="card">
           <div class="section-head">
@@ -13563,6 +13622,66 @@ function bindViewEvents() {
     event.target.value = "";
   });
 
+  // ---- Check against the bank ----
+  $("#bankCheckDetails")?.addEventListener("toggle", (event) => { bankCheck.open = event.currentTarget.open; });
+  $("#bankCheckAccount")?.addEventListener("change", (event) => {
+    bankCheck = { ...bankCheck, accountId: event.currentTarget.value, source: "", fileName: "", rows: [], error: "", unchecked: new Set(), open: true };
+    render();
+  });
+  $("#bankCheckFrom")?.addEventListener("change", (event) => { bankCheck.from = event.currentTarget.value; bankCheck.open = true; render(); });
+  $("#bankCheckInput")?.addEventListener("change", (event) => {
+    const file = event.target.files?.[0];
+    event.target.value = "";
+    if (!file || !bankCheck.accountId) return;
+    const fail = (message) => { bankCheck = { ...bankCheck, rows: [], source: "", error: message, open: true }; render(); };
+    const done = (rows) => {
+      if (!rows.length) return fail(`No transactions found in ${file.name}.`);
+      bankCheck = { ...bankCheck, source: "statement", fileName: file.name, rows, error: "", unchecked: new Set(), open: true };
+      render();
+    };
+    if (file.type === "application/pdf" || file.name.toLowerCase().endsWith(".pdf")) {
+      const reader = new FileReader();
+      reader.onload = async () => {
+        const dataUrl = String(reader.result || "");
+        try { done((await api("/api/bank-statement/parse-pdf", { method: "POST", body: JSON.stringify({ fileBase64: dataUrl.slice(dataUrl.indexOf(",") + 1) }) })).rows || []); } catch (error) { fail(error.message || `Could not read ${file.name}.`); }
+      };
+      reader.readAsDataURL(file);
+      return;
+    }
+    const reader = new FileReader();
+    reader.onload = () => done(parseBankCsvTransactions(String(reader.result || "")));
+    reader.readAsText(file);
+  });
+  $("#bankCheckAsk")?.addEventListener("click", async () => {
+    const linked = bankCheckLink(bankCheck.accountId);
+    if (!linked || !/^\d{4}-\d{2}-\d{2}$/.test(bankCheck.from) || bankCheck.busy) return;
+    bankCheck = { ...bankCheck, busy: true, error: "", open: true };
+    render();
+    try {
+      const payload = await api(`/api/linked-accounts/${linked.link.id}/sync`, { method: "POST", body: JSON.stringify({ sinceDate: bankCheck.from, accountIds: [linked.remoteId], dryRun: true }) });
+      const rows = (payload.transactions || []).filter((row) => row.remoteAccountId === linked.remoteId);
+      const note = payload.limitHit ? `SimpleFIN's daily request limit was reached part-way, so this only covers up to ${formatShortDate(String(payload.fetchedThrough || "").slice(0, 10))}. Check again later for the rest.` : "";
+      bankCheck = { ...bankCheck, busy: false, source: "bank", fileName: "", rows, error: rows.length ? note : (note || "The bank returned no transactions for that period."), unchecked: new Set() };
+    } catch (error) {
+      bankCheck = { ...bankCheck, busy: false, error: error.message || "The bank could not be reached." };
+    }
+    render();
+  });
+  document.querySelectorAll("[data-bank-check-pick]").forEach((box) => box.addEventListener("change", () => {
+    const missing = (bankCheckResult()?.items || []).filter((item) => item.status === "missing");
+    const row = missing[Number(box.dataset.bankCheckPick)]?.row;
+    if (!row) return;
+    const key = `${row.date}|${row.amount}|${row.payee}`;
+    if (box.checked) bankCheck.unchecked.delete(key); else bankCheck.unchecked.add(key);
+    render();
+  }));
+  $("#bankCheckAdd")?.addEventListener("click", () => {
+    const missing = (bankCheckResult()?.items || []).filter((item) => item.status === "missing" && !bankCheck.unchecked.has(`${item.row.date}|${item.row.amount}|${item.row.payee}`)).map((item) => item.row);
+    if (!missing.length) return;
+    const bank = bankCheck.source === "bank";
+    addBankStreamRows(missing, { name: bank ? "the bank check" : bankCheck.fileName || "statement" }, bank ? "linked-import" : "csv-import", "", { accountId: bankCheck.accountId });
+  });
+
   document.querySelectorAll("[data-sort-transactions]").forEach((button) => {
     button.addEventListener("click", () => {
       const field = button.dataset.sortTransactions;
@@ -18215,7 +18334,14 @@ function applySimplefinSync(link, payload, addRows, { ignoreRemembered = false }
       return;
     }
     const opening = reconcileOpeningBalance(account, currentAccountBalance(account.id), remote.balance);
-    if (opening !== Number(account.openingBalance || 0)) { account.openingBalance = opening; balancesUpdated += 1; }
+    if (opening !== Number(account.openingBalance || 0)) {
+      // Kept (newest first, 20) so a ledger that was missing or double-counting something is visible instead of silently absorbed: the first entry is just the
+      // starting balance, any later one is the amount the ledger was off by.
+      const delta = Math.round((opening - Number(account.openingBalance || 0)) * 100) / 100;
+      if (Math.abs(delta) >= 0.005) account.balanceAdjustments = [{ date: dateKey(new Date()), amount: delta }, ...(account.balanceAdjustments || [])].slice(0, 20);
+      account.openingBalance = opening;
+      balancesUpdated += 1;
+    }
   });
   // Accounts mapped to a holdings group: match the group's total to the bank balance (individual holdings keep their own detail).
   let groupsMatched = 0;

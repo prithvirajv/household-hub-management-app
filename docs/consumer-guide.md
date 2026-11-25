@@ -1249,6 +1249,19 @@ are extra.
   same row; it takes effect on their very next action. The owner's own
   access is always **Can edit** and can't be changed.
 
+### Check against the bank (making sure nothing is missing)
+
+On **Transactions**, the collapsed **Check against the bank** card compares what FamilyLoop holds for one account with a source of truth, and accounts for
+every row: **in your ledger**, **waiting in Bank stream**, **deleted by you**, **a transfer**, **still pending at the bank**, or **missing**. Choose the account, then
+either **Upload a statement** (CSV or PDF; this does not depend on SimpleFIN's history at all) or, for a bank-linked account, pick a **From** date and press
+**Ask the bank again** (it shows how many of SimpleFIN's daily requests that uses; nothing is staged or imported by the check). The result says "Every one of the
+N rows is accounted for" or lists the missing rows with **Add N to Bank stream**. Rows you deleted or skipped are listed so you can see them, and stay out. Rows
+FamilyLoop holds inside the dates that the source does not list ("In FamilyLoop but not on the statement") are listed too: added by hand, dated differently, or no
+longer listed by the bank. Matching is by the bank's own id when there is one, otherwise by amount within four days, preferring the same day and a payee that
+reads alike; one record accounts for one row. The same card lists the account's **balance adjustments**: each time its balance was nudged to match the bank, the
+ledger was off by that amount (the first entry is only the starting balance). "Complete" always means complete as far as the source goes: a bank feed only
+returns what the bank has sent it, so check a statement for anything old.
+
 ## Reports and Export
 
 ![The Category report card: a horizontal bar with an icon and dollar amount per category, sorted largest first](../assets/mockup-reports-category.svg)
