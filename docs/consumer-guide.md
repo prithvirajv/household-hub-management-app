@@ -847,7 +847,14 @@ the Accounts part - and counts toward the net worth total from there.
 ### Linked accounts (automatic balances, transactions and holdings)
 
 On the Wealth page, **Linked accounts** keeps things current without manual
-entry. It is read-only: FamilyLoop can never move money or place trades.
+entry. It is read-only: FamilyLoop can never move money or place trades. Each
+connection shows just **Sync now** and a **More** menu; **More** holds **Choose
+which accounts to link**, **Accounts to sync**, **Import older transactions
+from** with **Import history**, and **Remove this connection** (**Choose
+accounts** also appears next to Sync now when new accounts are found).
+If a night's sync reports that the household data is past the size that can be
+saved, nothing is lost: the bank's rows wait and arrive on the next run once the
+limit is raised (it is now 4 MB, and the activity log keeps its newest 300 entries).
 
 - **Link a bank or card (SimpleFIN Bridge):** create a setup token at
   bridge.simplefin.org (about $15/year; each token works once), paste it
@@ -962,7 +969,7 @@ entry. It is read-only: FamilyLoop can never move money or place trades.
   (Clean up) come back. If you're replacing hand-entered history, clean it up
   first so the two don't double up.
 - **Sync or import just some accounts:** when a bank link has more than one
-  account, a **Sync** dropdown next to Import history lets you tick **All
+  account, an **Accounts to sync** dropdown (under **More**) lets you tick **All
   accounts**, a whole group (**Checking accounts**, **Credit cards**, and
   Savings or Cash if the link has them), or any individual accounts listed under
   each group. A group shows partly ticked when only some of its accounts are

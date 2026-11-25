@@ -27,7 +27,7 @@ const { applyTemplate, templateFromState, describeTemplate, sanitizeTemplate } =
 const { fetchRecipeCaption } = require("./recipe-caption");
 const { uploadGeminiVideo, deleteGeminiFile } = require("./gemini-files");
 const { RECIPE_IMPORT_SYSTEM, RECIPE_VIDEO_TYPES, RECIPE_VIDEO_MAX_BYTES, buildRecipeImportParts, validateRecipeImportRequest, parseRecipeDraft, createImportLimiter } = require("../lib/recipe-import");
-const { validateJournalPayload, buildDocumentObjectPath, sanitizeFilename, wouldCreateFolderCycle, collectDescendantFolderIds, SMS_CARRIERS, smsGatewayAddress, rollAnnualNotifyAtForward, choreNotifyAt, parseBankStatementPdfText, extractAccountActivityLabel, isValidEmail, parseImageReminderDraft, parseBatchSuggestions, parseHomeBriefing, parseAssistantPlan, pgDumpArgs } = require("../lib/shared-logic");
+const { HOUSEHOLD_STATE_BODY_LIMIT_BYTES, capActivityLog, validateJournalPayload, buildDocumentObjectPath, sanitizeFilename, wouldCreateFolderCycle, collectDescendantFolderIds, SMS_CARRIERS, smsGatewayAddress, rollAnnualNotifyAtForward, choreNotifyAt, parseBankStatementPdfText, extractAccountActivityLabel, isValidEmail, parseImageReminderDraft, parseBatchSuggestions, parseHomeBriefing, parseAssistantPlan, pgDumpArgs } = require("../lib/shared-logic");
 const pdfParse = require("pdf-parse");
 const ExcelJS = require("exceljs");
 // archiver@8 is an ESM-only rewrite: require("archiver") returns the module
@@ -163,6 +163,8 @@ app.use("/api/recipes/import", express.json({ limit: "24mb" }));
 app.use("/api/recipes/import-video", express.raw({ type: "video/*", limit: RECIPE_VIDEO_MAX_BYTES }));
 app.use("/api/receipts", express.json({ limit: "40mb" }));
 app.use("/api/internal/receipt-mail", express.json({ limit: "4mb" })); // a forwarded order email (its text and HTML) from a provider
+// The whole household is one PUT; every other route stays at 1 MB.
+app.use("/api/state", express.json({ limit: HOUSEHOLD_STATE_BODY_LIMIT_BYTES }));
 app.use(express.json({ limit: "1mb" }));
 app.use(cookieParser(SESSION_SECRET));
 app.use(express.static(path.join(__dirname, ".."), {
@@ -3995,6 +3997,7 @@ app.put("/api/state", requireSession, requireEditAccess, async (req, res, next) 
     // is the backstop against any client-side bug (a bad render(), a race
     // during a household switch, manual testing against the wrong tab)
     // that could otherwise silently wipe real data with no way to recover.
+    capActivityLog(req.body);
     const REQUIRED_STATE_KEYS = Object.keys(defaultState);
     const missingKeys = REQUIRED_STATE_KEYS.filter((key) => !req.body || !(key in req.body));
     if (missingKeys.length > 0) {
@@ -5428,7 +5431,7 @@ registerLinkedAccountRoutes({
 app.use((error, _req, res, _next) => {
   // body-parser rejections are the client's problem, not a server fault: an oversized body (the whole household state is
   // one PUT, capped at 1 MB) gets a 413 the apps can explain, and unparseable JSON a 400.
-  if (error?.type === "entity.too.large") return res.status(413).json({ error: "That is too much data to save - household data is limited to about 1 MB. Remove some large items and try again." });
+  if (error?.type === "entity.too.large") return res.status(413).json({ error: "That is too much data to save - household data is limited to about 4 MB. Remove some large items and try again." });
   if (error?.type === "entity.parse.failed") return res.status(400).json({ error: "Invalid request body" });
   console.error(error);
   res.status(500).json({ error: "Something went wrong" });

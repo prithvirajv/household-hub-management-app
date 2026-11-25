@@ -194,6 +194,7 @@ let linkedHistoryFrom = `${new Date().getFullYear()}-01-01`;
 // Which of a connection's accounts Sync now and Import history work on: linkId -> remote ids ([] or missing = every account), plus which picker is open.
 const linkedAccountPick = {};
 let linkedPickerOpenId = "";
+let linkedMoreOpenId = "";
 // Clean up old transactions card (Transactions page): the options last chosen.
 let cleanupOptions = { before: "", all: false, ledger: true, stream: true, backup: true };
 let ledgerAcceptFeedback = "";
@@ -6597,7 +6598,7 @@ const DECISION_ATTACHMENT_MAX_COUNT = 5;
 
 // Attachments are real Documents rows (uploaded to storage like any other file) and the decision keeps only a small
 // { id, name, contentType, sizeBytes, documentId } reference. They used to be inline data URLs, but the whole household
-// state is saved in one request that the server caps at 1 MB, so a single attachment made every save fail. Documents are
+// state is saved in one request that the server caps at 4 MB, so a single attachment made every save fail. Documents are
 // scoped by the household's primary owner, so they read the same from each of the owner's households, just like decisions.
 // Older inline attachments (with a dataUrl) still render and are moved to storage by migrateInlineDecisionAttachments.
 async function filesToDecisionAttachments(fileList, existingCount, decisionTitle) {
@@ -15515,6 +15516,9 @@ function bindViewEvents() {
     button.addEventListener("click", () => syncLinkedAccount(button.dataset.linkedSync, addBankStreamRows, { accountIds: linkedPickedIds({ id: button.dataset.linkedSync, mappings: (linkedAccounts?.links || []).find((item) => item.id === button.dataset.linkedSync)?.mappings }) }));
   });
 
+  document.querySelectorAll("[data-linked-more]").forEach((details) => {
+    details.addEventListener("toggle", () => { linkedMoreOpenId = details.open ? details.dataset.linkedMore : (linkedMoreOpenId === details.dataset.linkedMore ? "" : linkedMoreOpenId); });
+  });
   document.querySelectorAll("[data-linked-picker]").forEach((details) => {
     details.addEventListener("toggle", () => { linkedPickerOpenId = details.open ? details.dataset.linkedPicker : (linkedPickerOpenId === details.dataset.linkedPicker ? "" : linkedPickerOpenId); });
   });
@@ -17980,7 +17984,7 @@ function renderLinkedAccountPicker(link) {
   const picked = linkedPickedIds(link);
   const disabled = linkedBusyId ? "disabled" : "";
   return `<details class="linked-account-picker" data-linked-picker="${link.id}" ${linkedPickerOpenId === link.id ? "open" : ""}>
-    <summary>Sync: ${escapeHtml(linkedPickedLabel(link.id, { short: true }))}</summary>
+    <summary>Accounts to sync: ${escapeHtml(linkedPickedLabel(link.id, { short: true }))}</summary>
     <div class="linked-picker-list">
       <label><input type="checkbox" data-linked-pick-all="${link.id}" ${!picked.length ? "checked" : ""} ${disabled}> All accounts</label>
       ${kinds.map((kind) => {
@@ -18007,17 +18011,23 @@ function renderLinkedAccountsCard() {
     ${links.map((link) => `<div class="linked-account-row">
       <div><strong>${escapeHtml(link.label)}</strong><small>${linkedProviderLabel(link)} · ${escapeHtml(linkedStatusText(link))}</small>${(link.newAccounts || []).length ? `<small class="linked-new-accounts"><b>${link.newAccounts.length} new account${link.newAccounts.length === 1 ? "" : "s"} found</b> (${escapeHtml(link.newAccounts.map((account) => account.name).join(", "))}) - choose where ${link.newAccounts.length === 1 ? "it goes" : "they go"}.</small>` : ""}</div>
       <div class="button-row">
-        <button type="button" class="ghost" data-linked-sync="${link.id}" ${linkedBusyId ? "disabled" : ""}>${linkedBusyId === link.id ? "Working…" : "Sync now"}</button>
-        <button type="button" class="${(link.newAccounts || []).length ? "" : "ghost"}" data-linked-map="${link.id}" ${linkedBusyId ? "disabled" : ""}>Choose accounts</button>
+        <button type="button" data-linked-sync="${link.id}" ${linkedBusyId ? "disabled" : ""}>${linkedBusyId === link.id ? "Working…" : "Sync now"}</button>
+        ${(link.newAccounts || []).length ? `<button type="button" data-linked-map="${link.id}" ${linkedBusyId ? "disabled" : ""}>Choose accounts</button>` : ""}
         ${link.provider === "snaptrade" ? `<button type="button" class="ghost" data-linked-portal="${link.id}">Add brokerage</button>` : ""}
-        <button type="button" class="icon-button danger-button" data-linked-remove="${link.id}" aria-label="Remove ${escapeHtml(link.label)}">×</button>
+        <details class="linked-more" data-linked-more="${link.id}" ${linkedMoreOpenId === link.id || linkedPickerOpenId === link.id ? "open" : ""}>
+          <summary>More</summary>
+          <div class="linked-more-body">
+            ${(link.newAccounts || []).length ? "" : `<button type="button" class="ghost" data-linked-map="${link.id}" ${linkedBusyId ? "disabled" : ""}>Choose which accounts to link</button>`}
+            ${link.provider === "simplefin" && Object.keys(link.mappings || {}).length ? `<div class="linked-history-row">
+              ${renderLinkedAccountPicker(link)}
+              <label>Import older transactions from<input type="date" data-linked-history-date value="${escapeHtml(linkedHistoryFrom)}" ${linkedBusyId ? "disabled" : ""}></label>
+              <button type="button" class="ghost" data-linked-history="${link.id}" ${linkedBusyId ? "disabled" : ""}>${linkedBusyId === link.id ? "Working…" : "Import history"}</button>
+              <small>How far back it goes depends on the bank (often 3-12 months). Rows you already have or removed with Clean up are brought in again; pending rows wait.</small>
+            </div>` : ""}
+            <button type="button" class="ghost danger-button" data-linked-remove="${link.id}">Remove this connection</button>
+          </div>
+        </details>
       </div>
-      ${link.provider === "simplefin" && Object.keys(link.mappings || {}).length ? `<div class="linked-history-row">
-        ${renderLinkedAccountPicker(link)}
-        <label>Import older transactions from<input type="date" data-linked-history-date value="${escapeHtml(linkedHistoryFrom)}" ${linkedBusyId ? "disabled" : ""}></label>
-        <button type="button" class="ghost" data-linked-history="${link.id}" ${linkedBusyId ? "disabled" : ""}>${linkedBusyId === link.id ? "Working…" : "Import history"}</button>
-        <small>How far back it goes depends on the bank (often 3-12 months). Rows you already have or removed with Clean up are brought in again; pending rows wait.</small>
-      </div>` : ""}
     </div>`).join("")}
     ${links.length ? `<label class="ai-import-toggle"><input type="checkbox" id="linkedAutoApplyToggle" ${state.linkedAutoApply === false ? "" : "checked"}> <span>Add new bank transactions to the ledger overnight, without opening the app (categorized with AI; anything doubtful waits in Bank stream, and the day's summary is sent to your phone)</span></label>` : ""}
     ${mappingPanel}
@@ -18099,9 +18109,10 @@ function applySimplefinSync(link, payload, addRows, { ignoreRemembered = false }
     feedByAccount.set(accountId, entry);
   });
   const pendingDetail = [...feedByAccount].filter(([, entry]) => entry.pending).slice(0, 6).map(([accountId, entry]) => `${state.accounts.find((account) => account.id === accountId)?.name || "Account"}: ${entry.pending} pending (newest ${formatShortDate(entry.newestPending)}), newest posted row sent ${entry.newestPosted ? formatShortDate(entry.newestPosted) : "none"}`);
-  // The whole household is saved in one request the server caps at about 1 MB; refuse a pull that would push it over rather than make
+  // The whole household is saved in one request the server caps at 4 MB; refuse a pull that would push it over rather than make
   // every later save fail.
-  if (JSON.stringify(state).length + allPosted.length * 400 > 900000) throw new Error(`Importing ${posted.length} transactions would push your household data past the size the server can save. Import a shorter range (a later start date), or clean up old transactions first.`);
+  capActivityLog(state);
+  if (JSON.stringify(state).length + allPosted.length * 400 > HOUSEHOLD_STATE_LIMIT) throw new Error(`Importing ${posted.length} transactions would push your household data past the size the server can save. Import a shorter range (a later start date), or clean up old transactions first.`);
   const byAccount = new Map();
   posted.forEach((transaction) => { byAccount.set(transaction.accountId, [...(byAccount.get(transaction.accountId) || []), transaction]); });
   byAccount.forEach((rows, accountId) => addRows(rows, { name: `${link.label}` }, "linked-import", "", { accountId }));

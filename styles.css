@@ -10094,3 +10094,12 @@ body {
 .template-banner { margin: 0 0 10px; padding: 10px 12px; border-radius: 10px; border: 2px solid var(--coral); background: color-mix(in srgb, var(--coral) 10%, var(--surface, #fff)); }
 .template-reminder-card, .auto-link-card, .statement-gap-card { border-color: var(--blue); }
 .statement-gap-card .compact-row small, .auto-link-card .compact-row small { overflow-wrap: anywhere; }
+
+.linked-more { position: relative; }
+.linked-more > summary { cursor: pointer; list-style: none; display: inline-flex; align-items: center; min-height: 38px; padding: 0 0.95rem; border: 1px solid var(--line, #d8d2c8); border-radius: 8px; background: var(--panel); font-size: 0.9rem; font-weight: 700; }
+.linked-more > summary::-webkit-details-marker { display: none; }
+.linked-more > summary::after { content: " ▾"; margin-left: 0.3rem; }
+.linked-more[open] > summary::after { content: " ▴"; }
+.linked-more-body { display: grid; gap: 0.7rem; justify-items: start; margin-top: 0.5rem; padding: 0.75rem; border: 1px solid var(--line, #d8d2c8); border-radius: 10px; background: var(--panel); flex-basis: 100%; }
+.linked-account-row .button-row { align-items: flex-start; }
+.linked-account-row .button-row .linked-more[open] { flex-basis: 100%; }

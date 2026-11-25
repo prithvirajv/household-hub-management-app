@@ -97,11 +97,21 @@ test("a salary that shows in the overnight deposits becomes a paycheck and its r
   assert.equal(Math.round(balance(state, "chk") * 100) / 100, 5000, "the account still matches the bank");
 });
 
-test("an apply that would outgrow the 1 MB save limit is refused before it changes anything", async () => {
-  const state = baseState({ notes: { entries: [{ id: "n", body: "x".repeat(899000) }] } });
+test("an apply that would outgrow the save limit is refused before it changes anything", async () => {
+  const state = baseState({ notes: { entries: [{ id: "n", body: "x".repeat(3499000) }] } });
   const payload = { provider: "simplefin", accounts: [], transactions: [row("1", "A", 1, "2026-10-21")] };
   await assert.rejects(() => applyLinkedPayload(state, link, payload, { createId: ids(), todayKey: TODAY }), /size/);
   assert.equal(state.transactionInboxDrafts.length, 0);
+});
+
+test("a household past the old 1 MB limit, with a long activity log, is still synced; the log is trimmed first", async () => {
+  // 2026-11-24: a year of bank history (1.02 MB, 1,981 activity entries) failed every night with "past the size that can be saved".
+  const activity = Array.from({ length: 1981 }, (_, i) => `Assigned row ${i} to Food - Groceries`);
+  const state = baseState({ household: { name: "H", country: "US", currency: "USD", activity }, notes: { entries: [{ id: "n", body: "x".repeat(1100000) }] } });
+  const payload = { provider: "simplefin", accounts: [], transactions: [row("1", "A", 1, "2026-10-21")] };
+  await applyLinkedPayload(state, link, payload, { suggest: null, createId: ids(), todayKey: TODAY });
+  assert.ok(state.household.activity.length <= 300 + 5, `the log was trimmed (${state.household.activity.length})`);
+  assert.equal(state.transactionInboxDrafts.length + state.transactions.length, 1, "and the new row arrived");
 });
 
 test("every night whatever is still waiting from the bank gets another chance, and the AI is not asked about the same row twice", async () => {

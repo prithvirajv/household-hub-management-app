@@ -501,6 +501,14 @@ the ledger, budget or balances, and each leaves the list when the bank posts it.
 `"imported"`: `imported 0` with `pending > 0` means the bank sent the rows but they have not posted yet; `imported 0` with `pending 0` means
 the bank sent nothing (check the SimpleFIN Bridge messages for an "Auth required" connection).
 
+### Overnight sync stops with "past the size that can be saved" (household too big)
+Seen 2026-11-22..24: one household with a year of bank history (1,166 ledger rows, 1.02 MB of JSON) failed every night (`linked_accounts.last_run`: `ok:false, stage:"apply", error:"Importing N transactions would push the household data past the size that can be saved"`), so
+its fetched rows sat staged (153 of them, nothing lost) while the Costco Citi account in the app fell days behind the bank's own site. Two limits caused it: the apply guard (`STATE_SIZE_LIMIT`, 900,000 characters, measured on the whole state) and
+the 1 MB body cap on `PUT /api/state`, which the household was already at. The biggest single item was `household.activity`, never trimmed (1,981 entries, 200 KB). Now: `HOUSEHOLD_STATE_BODY_LIMIT_BYTES` (4 MB, `/api/state` only) and
+`HOUSEHOLD_STATE_LIMIT` (3.5 MB, the import guard) in `lib/shared-logic.js`; `capActivityLog` keeps the newest 300 activity entries on every `PUT /api/state` and before every import. Diagnose: read the link's `last_run` from the newest dump
+(`pg_restore -a -t linked_accounts`), then size the household's top-level keys in node. After a deploy the 06:30 retry job (or opening the app) applies what is staged. The mobile app still has its own 1 MB / 900,000 checks
+(`exceedsStateLimit`, `historyImportFits` in famelo-mobile) which only make it more cautious; raise them to match when convenient. Growth is about 130 ledger rows a month for this household, about 40 KB: 3.5 MB lasts years.
+
 ### Database data transfer (Neon, or any host that bills egress)
 
 The worker's 30-minute refresh (`refreshAllHouseholdNotificationJobs`) runs for every household, so it reads only what the reminders use
