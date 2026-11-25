@@ -521,6 +521,8 @@ exact wording - check a real refusal in the logs and tighten it). `syncSimplefin
 `limit.throughUnix`; with nothing fetched it throws, and a 403 that is not about a limit is still "remove it and link again". The payload carries `limitHit`/`fetchedThrough`, the staged data's `fullAt` is `fetchedThrough` (so the
 manual ack moves `lastSyncAt` only that far), the nightly run records `lastRun.limited = { through }`, sets `lastSyncAt` to `through` (never backwards), and the 06:30 retry and 14:30 catch-up runs treat a limited run as not fresh. A history
 import (allowPartial) reports the rest as a failed window, i.e. the usual "history is missing" gap. Home shows a plain Bank sync problem for a limited run.
+Every refusal (429, 401/403, an empty answer with messages) is logged as `SimpleFIN refused a request: HTTP <status> <first 200 chars, links stripped>` (`logRefusal`): when a real daily-limit refusal appears, read its wording there and tighten `RATE_LIMIT_WORDS`.
+The per-account result list under the card (`linkedResultHtml`, from `applySimplefinSync`'s `perAccount`) and the one-line `linkedFeedback` (`shortSummary`) replaced the long summary sentence; the long one still goes to the activity log.
 The "from" date beside Sync now replaced the separate Import history button: empty = ordinary sync, a date = `sinceDate` history import after a confirm (`linkedHistoryFrom`, cleared when it starts).
 
 ### Database data transfer (Neon, or any host that bills egress)

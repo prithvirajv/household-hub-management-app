@@ -72,3 +72,18 @@ test("the nightly job records a limited run, moves lastSyncAt only to where it g
   const app = fs.readFileSync(path.join(__dirname, "..", "app.js"), "utf8");
   assert.ok(app.includes("else if (run.limited)") && app.includes("payload.limitHit"));
 });
+
+test("a refusal is logged with its status and the start of its reply, never a link", async () => {
+  const lines = [];
+  const original = console.warn;
+  console.warn = (...args) => lines.push(args.join(" "));
+  try {
+    await assert.rejects(() => syncSimplefin(URL_, { startUnix: start, endUnix: start + 10 * day, allowPartial: false }, { fetchImpl: async () => ({ ok: false, status: 403, json: async () => ({}), text: async () => "Forbidden. See https://u:secret@bridge.simplefin.org/simplefin for details" }) }), /remove it and link again/);
+    await assert.rejects(() => syncSimplefin(URL_, { startUnix: start, endUnix: start + 10 * day, allowPartial: false }, { fetchImpl: async () => ({ ok: false, status: 429, json: async () => ({}), text: async () => "Too many requests" }) }), /daily request limit/);
+  } finally { console.warn = original; }
+  const refusals = lines.filter((line) => line.startsWith("SimpleFIN refused a request"));
+  assert.equal(refusals.length, 2);
+  assert.match(refusals[0], /HTTP 403 Forbidden\. See <link> for details/);
+  assert.ok(!refusals.join(" ").includes("secret"), "no credentials in the log");
+  assert.match(refusals[1], /HTTP 429 Too many requests/);
+});

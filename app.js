@@ -186,6 +186,8 @@ let bankImportFeedback = "";
 // account goes" panel: { linkId, remote: [...], choices: { remoteId: "skip" | "new" | <local account/group id> }, types?: { remoteId: Type picked for a "new" account } }.
 let linkedAccounts = null;
 let linkedFeedback = "";
+// The last sync's per-account result: { linkId, rows: [{ name, imported, pending }], note }.
+let linkedResult = null;
 let linkedBusyId = "";
 let linkedMapping = null;
 let linkedPortalLinkId = "";
@@ -17968,8 +17970,9 @@ function currentHouseholdBreakdown() {
 
 function householdSizeLineHtml() {
   const size = currentHouseholdSize();
-  return `<p class="household-size household-size-${size.level}" role="status"><span>Household data: ${escapeHtml(size.label)} (${size.pct}%)</span><progress max="100" value="${Math.min(100, size.pct)}" aria-label="Household data used"></progress>${size.level === "ok" ? "" : `<small>${size.level === "full" ? "Nearly full: new bank transactions will soon be refused." : "Getting full."} Clean up (Transactions) or remove old rows and attachments you no longer need.</small>`}
-    <details class="household-size-detail"><summary>What uses the space</summary><ul>${currentHouseholdBreakdown().map((entry) => `<li><strong>${escapeHtml(entry.label)}</strong> ${entry.pct}% (${(entry.bytes / 1000).toFixed(0)} KB)${entry.hint ? ` <small>${escapeHtml(entry.hint)}</small>` : ""}</li>`).join("")}</ul></details></p>`;
+  const detail = `<details class="household-size-detail"><summary>${size.pct >= 50 ? "What uses the space" : `Storage: ${escapeHtml(size.label)}`}</summary><ul>${currentHouseholdBreakdown().map((entry) => `<li><strong>${escapeHtml(entry.label)}</strong> ${entry.pct}% (${(entry.bytes / 1000).toFixed(0)} KB)${entry.hint ? ` <small>${escapeHtml(entry.hint)}</small>` : ""}</li>`).join("")}</ul></details>`;
+  if (size.pct < 50) return `<div class="household-size household-size-ok">${detail}</div>`;
+  return `<p class="household-size household-size-${size.level}" role="status"><span>Household data: ${escapeHtml(size.label)} (${size.pct}%)</span><progress max="100" value="${Math.min(100, size.pct)}" aria-label="Household data used"></progress>${size.level === "ok" ? "" : `<small>${size.level === "full" ? "Nearly full: new bank transactions will soon be refused." : "Getting full."} Clean up (Transactions) or remove old rows and attachments you no longer need.</small>`}${detail}</p>`;
 }
 
 function renderDataSizeCard() {
@@ -18059,6 +18062,12 @@ function renderLinkedAccountPicker(link) {
   </details>`;
 }
 
+// The short per-account result of the last sync: what arrived, what is still pending at the bank, and what was skipped.
+function linkedResultHtml() {
+  if (!linkedResult || !linkedResult.rows.length) return "";
+  return `<ul class="linked-result" aria-label="Result of the last sync">${linkedResult.rows.map((row) => `<li><strong>${escapeHtml(row.name)}</strong> ${row.imported ? `${row.imported} new` : "nothing new"}${row.pending ? ` · ${row.pending} still pending at the bank` : ""}</li>`).join("")}${linkedResult.note ? `<li class="muted">${escapeHtml(linkedResult.note)}</li>` : ""}</ul>`;
+}
+
 function linkedSyncButtonLabel() {
   return /^\d{4}-\d{2}-\d{2}$/.test(linkedHistoryFrom) ? `Sync from ${linkedHistoryFrom}` : "Sync now";
 }
@@ -18073,6 +18082,7 @@ function renderLinkedAccountsCard() {
     <div class="section-head"><div><span class="card-label">Linked accounts</span><h3>Keep Wealth up to date automatically</h3></div></div>
     <p class="muted">Link a bank or card through SimpleFIN Bridge to pull balances and new transactions into Bank stream, or a brokerage through SnapTrade to keep your holdings current. Read-only - FamilyLoop can never move money or place trades.</p>
     ${linkedFeedback ? `<p class="muted" role="status">${escapeHtml(linkedFeedback)}</p>` : ""}
+    ${linkedResultHtml()}
     ${householdSizeLineHtml()}
     ${links.map((link) => `<div class="linked-account-row">
       <div><strong>${escapeHtml(link.label)}</strong><small>${linkedProviderLabel(link)} · ${escapeHtml(linkedStatusText(link))}</small>${(link.newAccounts || []).length ? `<small class="linked-new-accounts"><b>${link.newAccounts.length} new account${link.newAccounts.length === 1 ? "" : "s"} found</b> (${escapeHtml(link.newAccounts.map((account) => account.name).join(", "))}) - choose where ${link.newAccounts.length === 1 ? "it goes" : "they go"}.</small>` : ""}</div>
@@ -18091,14 +18101,14 @@ function renderLinkedAccountsCard() {
       </div>
       ${link.provider === "simplefin" && Object.keys(link.mappings || {}).length ? `<small class="muted linked-from-hint" data-empty="Syncs what is new since each account's last sync${link.lastSyncAt ? ` (${escapeHtml(new Date(link.lastSyncAt).toLocaleDateString(undefined, { month: "short", day: "numeric" }))})` : ""}. Pick a From date to fetch older transactions too.">${linkedHistoryFrom ? "Fetches everything from that date on, for the accounts chosen in the ▾." : `Syncs what is new since each account's last sync${link.lastSyncAt ? ` (${escapeHtml(new Date(link.lastSyncAt).toLocaleDateString(undefined, { month: "short", day: "numeric" }))})` : ""}. Pick a From date to fetch older transactions too.`}</small>` : ""}
     </div>`).join("")}
-    ${links.length ? `<label class="ai-import-toggle"><input type="checkbox" id="linkedAutoApplyToggle" ${state.linkedAutoApply === false ? "" : "checked"}> <span>Add new bank transactions to the ledger overnight, without opening the app (categorized with AI; anything doubtful waits in Bank stream, and the day's summary is sent to your phone)</span></label>` : ""}
+    ${links.length ? `<label class="ai-import-toggle"><input type="checkbox" id="linkedAutoApplyToggle" ${state.linkedAutoApply === false ? "" : "checked"}> <span title="Categorized with AI; anything doubtful waits in Bank stream, and the day's summary is sent to your phone.">Add new bank transactions to the ledger overnight</span></label>` : ""}
     ${mappingPanel}
-    ${providers.simplefin ? `<form id="linkedSimplefinForm" class="linked-link-form">
+    ${providers.simplefin ? `<details class="linked-add-bank" ${links.length ? "" : "open"}><summary>${links.length ? "+ Link another bank" : "Link a bank"}</summary><form id="linkedSimplefinForm" class="linked-link-form">
       <label>SimpleFIN setup token<input name="setupToken" placeholder="Paste the token from bridge.simplefin.org" autocomplete="off" required></label>
       <label>Name<input name="label" placeholder="My bank (optional)"></label>
       <button type="submit">Link a bank</button>
       <small class="muted">Create a token at <a href="https://bridge.simplefin.org" target="_blank" rel="noopener noreferrer">bridge.simplefin.org</a> (about $15/year). Each token works once.</small>
-    </form>` : ""}
+    </form></details>` : ""}
     ${providers.snaptrade ? `<div class="linked-link-form"><button type="button" id="linkedSnaptradeButton" class="ghost">Connect a brokerage</button><small class="muted">Opens SnapTrade's secure sign-in in a new tab; come back and choose its accounts.</small></div>` : ""}
   </section>`;
 }
@@ -18226,7 +18236,9 @@ function applySimplefinSync(link, payload, addRows, { ignoreRemembered = false }
     state.goals.netWorth.liabilities = result.liabilities;
     debtsMatched += 1;
   });
-  return { imported: posted.length + partnerRows.length, pendingSkipped, pendingDetail, unmapped, alreadyImported, balancesUpdated, groupsMatched, debtsMatched };
+  // Per account: how many new rows arrived and how many charges the bank still lists as pending, for the short result list under Sync now.
+  const perAccount = [...new Set([...byAccount.keys(), ...feedByAccount.keys()])].map((accountId) => ({ name: state.accounts.find((account) => account.id === accountId)?.name || "Account", imported: (byAccount.get(accountId) || []).length, pending: feedByAccount.get(accountId)?.pending || 0 })).sort((a, b) => a.name.localeCompare(b.name));
+  return { imported: posted.length + partnerRows.length, pendingSkipped, pendingDetail, unmapped, alreadyImported, balancesUpdated, groupsMatched, debtsMatched, perAccount };
 }
 
 function applySnaptradeSync(link, payload) {
@@ -18424,6 +18436,7 @@ async function syncLinkedAccount(linkId, addRows, { quiet = false, sinceDate = "
   try {
     const payload = await api(`/api/linked-accounts/${linkId}/sync`, { method: "POST", body: JSON.stringify({ ...(sinceDate ? { sinceDate } : {}), ...(accountIds.length ? { accountIds } : {}) }) });
     let summary;
+    let shortSummary = "";
     if (link.provider === "simplefin" && payload.historyGaps?.length) {
       linkedBusyId = "";
       render();
@@ -18440,10 +18453,14 @@ async function syncLinkedAccount(linkId, addRows, { quiet = false, sinceDate = "
     }
     if (link.provider === "simplefin") {
       const result = applySimplefinSync(link, payload, addRows, { ignoreRemembered: Boolean(sinceDate) });
+      linkedResult = { linkId, at: Date.now(), rows: result.perAccount || [], note: result.unmapped ? `${result.unmapped} row${result.unmapped === 1 ? "" : "s"} skipped from accounts you chose not to import.` : "" };
       summary = `${link.label}: ${result.imported} new transaction${result.imported === 1 ? "" : "s"} sent to Bank stream${result.balancesUpdated ? `, ${result.balancesUpdated} balance${result.balancesUpdated === 1 ? "" : "s"} updated` : ""}${result.groupsMatched ? `, ${result.groupsMatched} investment account${result.groupsMatched === 1 ? "" : "s"} matched to the bank balance` : ""}${result.debtsMatched ? `, ${result.debtsMatched} loan${result.debtsMatched === 1 ? "" : "s"} matched to the amount owed` : ""}${result.pendingSkipped ? `; ${result.pendingSkipped} pending skipped until they post${result.pendingDetail.length ? ` (${result.pendingDetail.join("; ")})` : ""}` : ""}${result.unmapped ? `; ${result.unmapped} from accounts you chose not to import` : ""}.`;
-      if (payload.historyGaps?.length) summary += " Some months were left out because the bank did not return them - see Home for what to import from a statement.";
-      if (payload.limitHit) summary += ` SimpleFIN's daily request limit was reached part-way: everything up to ${formatShortDate(String(payload.fetchedThrough || "").slice(0, 10))} is loaded, and Sync now again later (or tonight's run) carries on from there.`;
-      if (payload.errors?.length) summary += ` The bank reported: ${payload.errors.join("; ")}`;
+      let tail = "";
+      if (payload.historyGaps?.length) tail += " Some months were left out because the bank did not return them - see Home for what to import from a statement.";
+      if (payload.limitHit) tail += ` SimpleFIN's daily request limit was reached part-way: everything up to ${formatShortDate(String(payload.fetchedThrough || "").slice(0, 10))} is loaded, and Sync now again later (or tonight's run) carries on from there.`;
+      if (payload.errors?.length) tail += ` The bank reported: ${payload.errors.join("; ")}`;
+      summary += tail;
+      shortSummary = `${link.label}: ${result.imported} new transaction${result.imported === 1 ? "" : "s"}${result.balancesUpdated ? `, ${result.balancesUpdated} balance${result.balancesUpdated === 1 ? "" : "s"} updated` : ""}.${tail}`;
       // A history import that comes back short while the bank is complaining is not a quiet success: say so in a window, with the bank's own words.
       if (sinceDate && payload.errors?.length && result.imported < 25) {
         await showConfirm(`Only ${result.imported} transaction${result.imported === 1 ? "" : "s"} came back for that history import, and the bank said:\n\n${payload.errors.map((message) => `• ${message}`).join("\n")}\n\nSimpleFIN limits how many requests one connection can make per day (a history import uses several), and banks differ in how much history they hold. If the limit is the cause, try again tomorrow; otherwise import the missing months from a statement.`, { title: "The import came back short", confirmLabel: "OK", cancelLabel: "Close", danger: false });
@@ -18453,7 +18470,7 @@ async function syncLinkedAccount(linkId, addRows, { quiet = false, sinceDate = "
       summary = `${link.label}: ${result.added} holding${result.added === 1 ? "" : "s"} added, ${result.updated} updated, ${result.removed} removed.`;
     }
     state.household.activity.unshift(summary);
-    if (!quiet || /new transaction|added|updated|removed/.test(summary)) linkedFeedback = summary;
+    if (!quiet || /new transaction|added|updated|removed/.test(summary)) linkedFeedback = shortSummary || summary;
     // The server keeps fetched data staged until the result is safely saved, so a failed save cannot lose it; acknowledge only afterwards.
     await saveStateNow();
     if (payload.stagedAt) await api(`/api/linked-accounts/${linkId}/ack`, { method: "POST", body: JSON.stringify({ stagedAt: payload.stagedAt }) });

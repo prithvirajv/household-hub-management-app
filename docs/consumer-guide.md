@@ -853,7 +853,7 @@ accounts to sync; leave it alone to sync them all), an optional **from** date
 (leave it empty to sync what is new; pick a date and the button becomes **Sync
 from <date>**, which also fetches older transactions) and a **More** menu holding
 **Choose which accounts to link** and **Remove this connection** (**Choose
-accounts** also appears next to Sync now when new accounts are found).
+accounts** also appears next to Sync now when new accounts are found). After a sync, a short list under the card says what each account got (for example "Costco Citi 5 new · 2 still pending at the bank"). **+ Link another bank** (below the connections) opens the token form; the storage line shows one line until your data passes half full.
 When SimpleFIN's daily request limit runs out part-way through a sync, what was
 already fetched is kept and loaded, Home says how far it got, and the next run
 (tonight's, the 6:30 retry, or Sync now) carries on from exactly there without

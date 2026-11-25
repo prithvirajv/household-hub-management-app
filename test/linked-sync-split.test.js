@@ -30,3 +30,11 @@ test("with no date picked a manual sync catches up each account from its own las
   assert.match(server, /fetchLinkPayload\(link, \{ sinceDate: req\.body\?\.sinceDate, catchUpFrom,/);
   assert.ok(app.includes("Syncs what is new since each account's last sync") && app.includes("· through "), "the screen says what the empty date means, and the picker shows each account's date");
 });
+
+test("the Linked accounts card is tidier: link-another-bank is collapsed, the overnight line is short, storage shows one line until it matters, and a sync lists what each account got", () => {
+  assert.ok(app.includes('<details class="linked-add-bank" ${links.length ? "" : "open"}><summary>${links.length ? "+ Link another bank" : "Link a bank"}</summary>'));
+  assert.ok(app.includes('>Add new bank transactions to the ledger overnight</span>') && !app.includes("without opening the app (categorized with AI; anything doubtful waits in Bank stream, and the day's summary is sent to your phone)</span>"));
+  assert.match(app, /if \(size\.pct < 50\) return `<div class="household-size household-size-ok">/);
+  assert.ok(app.includes("${linkedResultHtml()}") && app.includes("perAccount") && app.includes(" still pending at the bank`"), "the per-account result list");
+  assert.match(app, /linkedFeedback = shortSummary \|\| summary;/, "the one-line feedback replaces the long sentence");
+});

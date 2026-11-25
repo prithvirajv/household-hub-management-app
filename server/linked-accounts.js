@@ -113,6 +113,12 @@ function simplefinRequest(accessUrl, path, params) {
 // SimpleFIN allows a limited number of requests a day. The exact wording of its refusal is not documented where I could find it, so a 429, or a refusal
 // or an empty answer whose text talks about a limit, is treated as the quota running out.
 const RATE_LIMIT_WORDS = /rate.?limit|too many (requests|calls)|quota|(request|daily|usage) limit|limit (was )?(reached|exceeded)|exceeded/i;
+// What SimpleFIN actually says when it refuses a request (status and the start of its reply, any link removed), so a real daily-limit refusal can be read in
+// the logs and RATE_LIMIT_WORDS tightened to match. Never logs credentials: the reply is the Bridge's own text, and URLs are stripped anyway.
+function logRefusal(status, text) {
+  console.warn(`SimpleFIN refused a request: HTTP ${status} ${String(text || "").replace(/https?:\/\/\S+/g, "<link>").replace(/\s+/g, " ").slice(0, 200)}`);
+}
+
 function rateLimitError() {
   const error = clientError("SimpleFIN's daily request limit was reached.", 429);
   error.rateLimited = true;
@@ -135,11 +141,12 @@ async function fetchSimplefinAccounts(accessUrl, params, { fetchImpl = fetch, al
     failure.dropped = !timedOut;
     throw failure;
   }
-  if (response.status === 429) throw rateLimitError();
+  if (response.status === 429) { logRefusal(429, typeof response.text === "function" ? await response.text().catch(() => "") : ""); throw rateLimitError(); }
   if (response.status === 401 || response.status === 403) {
     // The Bridge may say "too many requests" with a 403: that is today's quota running out, not a connection that stopped working, so it must
     // never tell the person to remove the link.
     const text = typeof response.text === "function" ? await response.text().catch(() => "") : "";
+    logRefusal(response.status, text);
     if (RATE_LIMIT_WORDS.test(text)) throw rateLimitError();
     throw clientError("SimpleFIN no longer accepts this connection - remove it and link again.", 409);
   }
@@ -148,7 +155,8 @@ async function fetchSimplefinAccounts(accessUrl, params, { fetchImpl = fetch, al
   const errors = Array.isArray(body.errors) ? body.errors.map(String) : [];
   const accounts = Array.isArray(body.accounts) ? body.accounts : [];
   // An answer with no accounts whose only messages talk about a limit is the quota running out too.
-  if (!accounts.length && errors.some((message) => RATE_LIMIT_WORDS.test(message))) throw rateLimitError();
+  if (!accounts.length && errors.some((message) => RATE_LIMIT_WORDS.test(message))) { logRefusal(200, errors.join(" | ")); throw rateLimitError(); }
+  if (!accounts.length && errors.length) logRefusal(200, errors.join(" | "));
   return { errors, accounts };
 }
 
