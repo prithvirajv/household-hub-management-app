@@ -11,6 +11,7 @@
 // are never returned to the client. Without the key the whole feature reports "not configured" rather than storing anything in clear.
 const crypto = require("node:crypto");
 const { applyLinkedPayload, fillUncategorizedLedgerRows, retryWaitingDrafts, uniqueIdFactory } = require("../lib/linked-apply");
+const { explainSyncFailure } = require("../lib/shared-logic");
 
 const SIMPLEFIN_WINDOW_DAYS = 44; // the Bridge recommends at most 45 days per request and has started returning nothing for longer ranges (a 65-day history import came back empty); every request counts against its daily limit, so use few
 // A link's first sync (and the first after its accounts are changed) starts at the first day of last month, not "30 days ago": whole months
@@ -833,7 +834,7 @@ function registerLinkedAccountRoutes({ forwardPartnerRows = null, app, requireSe
               // The link's last-sync date (where the next fetch starts from) moves only when the new rows are really loaded: a night whose fetch worked
               // but whose loading did not finish is fetched again, from the same place, the next time.
               await store.update(householdId, link.id, { lastRun: finished, ...(finished.ok && finished.stage === "applied" ? { lastSyncAt: finished.at } : {}) });
-              if (!finished.ok) entry.failed.push(`${link.label}: ${finished.error}`);
+              if (!finished.ok) entry.failed.push(`${link.label}: ${explainSyncFailure(finished.error).summary}`);
             }
           } catch (error) {
             console.warn("Automatic apply of linked transactions failed", error.message);

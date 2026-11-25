@@ -40,3 +40,40 @@ test("a household over the old 1 MB limit saves, comes back whole, has its activ
     assert.match(tooBig.body.error, /about 4 MB/);
   } finally { await server.stop(); }
 });
+
+const fs = require("node:fs");
+const path = require("node:path");
+const { capHouseholdState, householdSizeInfo, explainSyncFailure, DONE_IDS_KEEP } = require("../lib/shared-logic");
+
+test("housekeeping keeps the newest Bank stream ids and the newest activity, and tolerates odd input", () => {
+  const state = { household: { activity: Array.from({ length: 500 }, (_, i) => `a${i}`) }, transactionInboxDone: Array.from({ length: DONE_IDS_KEEP + 50 }, (_, i) => `id${i}`) };
+  capHouseholdState(state);
+  assert.equal(state.household.activity.length, ACTIVITY_LOG_KEEP);
+  assert.equal(state.transactionInboxDone.length, DONE_IDS_KEEP);
+  assert.equal(state.transactionInboxDone[DONE_IDS_KEEP - 1], `id${DONE_IDS_KEEP + 49}`, "newest last, oldest dropped");
+  assert.doesNotThrow(() => { capHouseholdState({}); capHouseholdState(null); });
+});
+
+test("the size meter reports how full the household is", () => {
+  assert.equal(householdSizeInfo({ x: "a".repeat(1_000_000) }).level, "ok");
+  assert.equal(householdSizeInfo({ x: "a".repeat(2_700_000) }).level, "warn");
+  assert.equal(householdSizeInfo({ x: "a".repeat(3_300_000) }).level, "full");
+  assert.match(householdSizeInfo({ x: "a".repeat(1_000_000) }).label, /^1\.0 of 3\.5 MB$/);
+});
+
+test("a failed overnight run is explained in plain words with what to do", () => {
+  assert.match(explainSyncFailure("Could not load the new transactions: Importing 4 transactions would push the household data past the size that can be saved").summary, /too big/);
+  assert.match(explainSyncFailure("Your household was being edited while it loaded, so loading it was postponed.").fix, /by itself/);
+  assert.match(explainSyncFailure("Auth required").summary, /sign in/);
+  assert.match(explainSyncFailure("").summary, /did not report/);
+  assert.ok(explainSyncFailure("x".repeat(400)).summary.length <= 161);
+});
+
+test("the app shows the plain failure on Home, the meter, and a receipt that says the bank sync is the reason", () => {
+  const app = fs.readFileSync(path.join(__dirname, "..", "app.js"), "utf8");
+  assert.match(app, /explainSyncFailure\(run\.error\)/);
+  assert.ok(app.includes("Try again now") && app.includes("${renderDataSizeCard()}") && app.includes("householdSizeLineHtml()"));
+  assert.ok(app.includes("receiptSyncNote(receipt)") && app.includes("receiptSyncNote(receiptData)"));
+  const linked = fs.readFileSync(path.join(__dirname, "..", "server", "linked-accounts.js"), "utf8");
+  assert.ok(linked.includes("explainSyncFailure(finished.error).summary"), "the phone notification is plain too");
+});

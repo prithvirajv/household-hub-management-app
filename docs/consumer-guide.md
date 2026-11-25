@@ -854,7 +854,7 @@ from** with **Import history**, and **Remove this connection** (**Choose
 accounts** also appears next to Sync now when new accounts are found).
 If a night's sync reports that the household data is past the size that can be
 saved, nothing is lost: the bank's rows wait and arrive on the next run once the
-limit is raised (it is now 4 MB, and the activity log keeps its newest 300 entries).
+limit is raised (it is now 4 MB, and the activity log keeps its newest 300 entries). Home's **Bank sync** card now says in plain words why a night failed and offers **Try again now**; the Linked accounts card shows how full your household data is (for example **1.1 of 3.5 MB**), and Home warns at 75% and 90%. A receipt waiting for its charge says so when the bank sync is the reason it has not arrived.
 
 - **Link a bank or card (SimpleFIN Bridge):** create a setup token at
   bridge.simplefin.org (about $15/year; each token works once), paste it

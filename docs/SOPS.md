@@ -508,6 +508,10 @@ the 1 MB body cap on `PUT /api/state`, which the household was already at. The b
 `HOUSEHOLD_STATE_LIMIT` (3.5 MB, the import guard) in `lib/shared-logic.js`; `capActivityLog` keeps the newest 300 activity entries on every `PUT /api/state` and before every import. Diagnose: read the link's `last_run` from the newest dump
 (`pg_restore -a -t linked_accounts`), then size the household's top-level keys in node. After a deploy the 06:30 retry job (or opening the app) applies what is staged. The mobile app still has its own 1 MB / 900,000 checks
 (`exceedsStateLimit`, `historyImportFits` in famelo-mobile) which only make it more cautious; raise them to match when convenient. Growth is about 130 ledger rows a month for this household, about 40 KB: 3.5 MB lasts years.
+Also added the same day: `explainSyncFailure` turns a failed run's error into plain words (Home's red card, the Try again now button, and the overnight phone notification); `householdSizeInfo` drives a
+"Household data: 1.1 of 3.5 MB" meter on the Linked accounts card and a Home card at 75% and 90%; `capHouseholdState` also keeps the newest 3,000 `transactionInboxDone` ids (a guard against unbounded growth, not a saving today);
+`receiptSyncNote` makes a waiting receipt say the bank sync is behind (a failed or unloaded run, or `syncedThrough` before the receipt's date) instead of "Waiting for its charge." Mobile: limits raised to match, plain failure text and
+`householdSizeInfo` ported to `linkedAccountsLogic.ts`; mobile still lacks repayment linking and long-list paging.
 
 ### Database data transfer (Neon, or any host that bills egress)
 

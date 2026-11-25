@@ -27,7 +27,7 @@ const { applyTemplate, templateFromState, describeTemplate, sanitizeTemplate } =
 const { fetchRecipeCaption } = require("./recipe-caption");
 const { uploadGeminiVideo, deleteGeminiFile } = require("./gemini-files");
 const { RECIPE_IMPORT_SYSTEM, RECIPE_VIDEO_TYPES, RECIPE_VIDEO_MAX_BYTES, buildRecipeImportParts, validateRecipeImportRequest, parseRecipeDraft, createImportLimiter } = require("../lib/recipe-import");
-const { HOUSEHOLD_STATE_BODY_LIMIT_BYTES, capActivityLog, validateJournalPayload, buildDocumentObjectPath, sanitizeFilename, wouldCreateFolderCycle, collectDescendantFolderIds, SMS_CARRIERS, smsGatewayAddress, rollAnnualNotifyAtForward, choreNotifyAt, parseBankStatementPdfText, extractAccountActivityLabel, isValidEmail, parseImageReminderDraft, parseBatchSuggestions, parseHomeBriefing, parseAssistantPlan, pgDumpArgs } = require("../lib/shared-logic");
+const { HOUSEHOLD_STATE_BODY_LIMIT_BYTES, capHouseholdState, validateJournalPayload, buildDocumentObjectPath, sanitizeFilename, wouldCreateFolderCycle, collectDescendantFolderIds, SMS_CARRIERS, smsGatewayAddress, rollAnnualNotifyAtForward, choreNotifyAt, parseBankStatementPdfText, extractAccountActivityLabel, isValidEmail, parseImageReminderDraft, parseBatchSuggestions, parseHomeBriefing, parseAssistantPlan, pgDumpArgs } = require("../lib/shared-logic");
 const pdfParse = require("pdf-parse");
 const ExcelJS = require("exceljs");
 // archiver@8 is an ESM-only rewrite: require("archiver") returns the module
@@ -3997,7 +3997,7 @@ app.put("/api/state", requireSession, requireEditAccess, async (req, res, next) 
     // is the backstop against any client-side bug (a bad render(), a race
     // during a household switch, manual testing against the wrong tab)
     // that could otherwise silently wipe real data with no way to recover.
-    capActivityLog(req.body);
+    capHouseholdState(req.body);
     const REQUIRED_STATE_KEYS = Object.keys(defaultState);
     const missingKeys = REQUIRED_STATE_KEYS.filter((key) => !req.body || !(key in req.body));
     if (missingKeys.length > 0) {

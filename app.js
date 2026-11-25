@@ -2854,6 +2854,7 @@ function renderHome() {
         ${renderWhatsNewCard()}
         ${renderHomeBriefingCard()}
         ${renderBankSyncHealthCard()}
+        ${renderDataSizeCard()}
         ${renderTemplateReminderCard()}
         ${renderAutoLinkedPaybackCard()}
         ${renderHistoryGapCard()}
@@ -3359,6 +3360,7 @@ function receiptLinkHtml() {
   const hasTotal = receiptData.total !== null && receiptData.total !== undefined && Number(receiptData.total) > 0;
   return `<div class="receipt-link">
     <h3>Which transaction is this?</h3>
+    ${!suggestions.length && !pending ? (receiptSyncNote(receiptData) ? `<p class="muted receipt-sync-note">${escapeHtml(receiptSyncNote(receiptData))}</p>` : "") : ""}
     ${suggestions.length ? suggestions.map((candidate) => {
       const row = state.transactions[candidate.index];
       return `<div class="receipt-link-row"><span>${escapeHtml(row.payee)} · ${exactMoney.format(Math.abs(Number(row.amount)))} · ${escapeHtml(formatShortDate(row.date))}${candidate.merchantMatch ? "" : ` <small class="muted">(a different name, the same total)</small>`}</span><button type="button" data-receipt-link="${candidate.index}">Attach to this</button></div>`;
@@ -3450,7 +3452,7 @@ function receiptInboxHtml() {
           <button type="button" class="receipt-waiting-open" data-open-waiting-receipt="${escapeHtml(receipt.id)}"><span>${receipt.source === "email" ? "✉️" : "🧾"} ${escapeHtml(receipt.merchant || "Receipt")}</span><small class="muted">${receipt.source === "email" ? "by email · " : ""}${receipt.date ? `${escapeHtml(formatShortDate(receipt.date))} · ` : ""}${total}</small></button>
           ${row ? `<span class="receipt-waiting-hint">Looks like ${escapeHtml(row.payee)} · ${exactMoney.format(Math.abs(Number(row.amount)))} · ${escapeHtml(formatShortDate(row.date))}</span><button type="button" class="ghost" data-inbox-link="${escapeHtml(receipt.id)}|${suggestion.index}">Attach</button>`
             : pending ? `<span class="receipt-waiting-hint">Its charge is still pending at ${escapeHtml(pending.accountName)}.</span>`
-            : `<span class="receipt-waiting-hint muted">Waiting for its charge.</span>`}
+            : `<span class="receipt-waiting-hint muted">${escapeHtml(receiptSyncNote(receipt) || "Waiting for its charge.")}</span>`}
         </div>`;
       }).join("")}
     </div>` : ""}
@@ -17917,7 +17919,7 @@ function bankSyncProblems() {
   (linkedAccounts?.links || []).forEach((link) => {
     const run = link.lastRun || {};
     if (link.status === "needs_reconnect") problems.push({ title: link.label, detail: "needs signing in again - remove it and link it again under Wealth" });
-    else if (run.ok === false) problems.push({ title: link.label, detail: `did not finish overnight: ${run.error || "unknown problem"}`, sync: link.id });
+    else if (run.ok === false) { const why = explainSyncFailure(run.error); problems.push({ title: link.label, detail: `last night's sync did not finish. ${why.summary} ${why.fix} Nothing is lost: the bank's rows wait and load on the next run.`, sync: link.id, label: "Try again now" }); }
     else if (run.stage === "waiting") problems.push({ title: link.label, detail: run.reason || "new transactions are waiting for you to open the app", sync: link.id });
     else if (link.hasStaged && link.status === "active") problems.push({ title: link.label, detail: "has fetched transactions that are not loaded yet", sync: link.id });
     else if (linkRunIsStale(link)) problems.push({ title: link.label, detail: `no overnight sync has run since ${new Date(link.lastRun?.at || link.lastSyncAt).toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric" })}. The next run catches up from the last successful sync on its own - or press Sync now.`, sync: link.id });
@@ -17931,12 +17933,44 @@ function bankSyncProblems() {
   return problems;
 }
 
+// How full the household's saved data is. Working it out serialises the whole household, so it is reused for half a minute.
+let householdSizeCache = { at: 0, info: null };
+function currentHouseholdSize() {
+  if (!householdSizeCache.info || Date.now() - householdSizeCache.at > 30000) householdSizeCache = { at: Date.now(), info: householdSizeInfo(state) };
+  return householdSizeCache.info;
+}
+
+function householdSizeLineHtml() {
+  const size = currentHouseholdSize();
+  return `<p class="household-size household-size-${size.level}" role="status"><span>Household data: ${escapeHtml(size.label)} (${size.pct}%)</span><progress max="100" value="${Math.min(100, size.pct)}" aria-label="Household data used"></progress>${size.level === "ok" ? "" : `<small>${size.level === "full" ? "Nearly full: new bank transactions will soon be refused." : "Getting full."} Clean up (Transactions) or remove old rows and attachments you no longer need.</small>`}</p>`;
+}
+
+function renderDataSizeCard() {
+  const size = currentHouseholdSize();
+  if (size.level === "ok") return "";
+  return `<section class="card history-gap-card" role="alert">
+    <div class="card-label">Storage</div><h3>Your household data is ${size.level === "full" ? "nearly full" : "getting full"}</h3>
+    <p class="muted">It uses ${escapeHtml(size.label)} (${size.pct}%). When it is full, new bank transactions cannot be added. Clean up (Transactions) or remove old rows and attachments you no longer need.</p>
+    <div class="button-row"><button class="pill-button" data-goto-view="transactions" type="button">Open Transactions</button></div>
+  </section>`;
+}
+
+// Why a receipt's charge may not be here yet when the cause is the bank feed rather than the receipt: a sync that did not finish, or bank data that stops before
+// the receipt's date. "" when neither applies.
+function receiptSyncNote(receipt) {
+  const trouble = (linkedAccounts?.links || []).find((link) => link.status === "active" && Object.keys(link.mappings || {}).length && (link.lastRun?.ok === false || link.hasStaged || linkRunIsStale(link)));
+  if (trouble) return "Waiting on a bank sync that has not finished loading (see Home), so its charge may not have arrived yet.";
+  const behind = (state.accounts || []).filter((account) => account.syncedThrough && !account.closedAt && receipt?.date && account.syncedThrough < String(receipt.date).slice(0, 10));
+  if (behind.length) return `Your bank data only goes through ${new Date(`${behind[0].syncedThrough}T00:00:00`).toLocaleDateString(undefined, { month: "short", day: "numeric" })}, so its charge may not have arrived yet.`;
+  return "";
+}
+
 function renderBankSyncHealthCard() {
   const problems = bankSyncProblems();
   if (!problems.length) return "";
   return `<section class="card history-gap-card" role="alert">
     <div class="card-label">Bank sync</div><h3>The overnight sync needs a look</h3>
-    ${problems.map((problem) => `<div class="compact-row"><div><strong>${escapeHtml(problem.title)}</strong><small>${escapeHtml(problem.detail)}</small></div>${problem.sync ? `<button class="pill-button" data-home-sync-link="${escapeHtml(problem.sync)}" type="button">Sync now</button>` : ""}</div>`).join("")}
+    ${problems.map((problem) => `<div class="compact-row"><div><strong>${escapeHtml(problem.title)}</strong><small>${escapeHtml(problem.detail)}</small></div>${problem.sync ? `<button class="pill-button" data-home-sync-link="${escapeHtml(problem.sync)}" type="button">${escapeHtml(problem.label || "Sync now")}</button>` : ""}</div>`).join("")}
   </section>`;
 }
 
@@ -18008,6 +18042,7 @@ function renderLinkedAccountsCard() {
     <div class="section-head"><div><span class="card-label">Linked accounts</span><h3>Keep Wealth up to date automatically</h3></div></div>
     <p class="muted">Link a bank or card through SimpleFIN Bridge to pull balances and new transactions into Bank stream, or a brokerage through SnapTrade to keep your holdings current. Read-only - FamilyLoop can never move money or place trades.</p>
     ${linkedFeedback ? `<p class="muted" role="status">${escapeHtml(linkedFeedback)}</p>` : ""}
+    ${householdSizeLineHtml()}
     ${links.map((link) => `<div class="linked-account-row">
       <div><strong>${escapeHtml(link.label)}</strong><small>${linkedProviderLabel(link)} · ${escapeHtml(linkedStatusText(link))}</small>${(link.newAccounts || []).length ? `<small class="linked-new-accounts"><b>${link.newAccounts.length} new account${link.newAccounts.length === 1 ? "" : "s"} found</b> (${escapeHtml(link.newAccounts.map((account) => account.name).join(", "))}) - choose where ${link.newAccounts.length === 1 ? "it goes" : "they go"}.</small>` : ""}</div>
       <div class="button-row">
@@ -18111,7 +18146,7 @@ function applySimplefinSync(link, payload, addRows, { ignoreRemembered = false }
   const pendingDetail = [...feedByAccount].filter(([, entry]) => entry.pending).slice(0, 6).map(([accountId, entry]) => `${state.accounts.find((account) => account.id === accountId)?.name || "Account"}: ${entry.pending} pending (newest ${formatShortDate(entry.newestPending)}), newest posted row sent ${entry.newestPosted ? formatShortDate(entry.newestPosted) : "none"}`);
   // The whole household is saved in one request the server caps at 4 MB; refuse a pull that would push it over rather than make
   // every later save fail.
-  capActivityLog(state);
+  capHouseholdState(state);
   if (JSON.stringify(state).length + allPosted.length * 400 > HOUSEHOLD_STATE_LIMIT) throw new Error(`Importing ${posted.length} transactions would push your household data past the size the server can save. Import a shorter range (a later start date), or clean up old transactions first.`);
   const byAccount = new Map();
   posted.forEach((transaction) => { byAccount.set(transaction.accountId, [...(byAccount.get(transaction.accountId) || []), transaction]); });
