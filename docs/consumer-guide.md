@@ -849,12 +849,15 @@ the Accounts part - and counts toward the net worth total from there.
 On the Wealth page, **Linked accounts** keeps things current without manual
 entry. It is read-only: FamilyLoop can never move money or place trades. Each
 connection shows **Sync now** with a small **▾** attached (it picks which
-accounts to sync; leave it alone to sync them all) and a **More** menu holding
-**Choose which accounts to link**, **Import older transactions from** with
-**Import history** (it uses the same accounts as Sync now), and **Remove this
-connection** (**Choose accounts** also appears next to Sync now when new
-accounts are found).
-If a night's sync reports that the household data is past the size that can be
+accounts to sync; leave it alone to sync them all), an optional **from** date
+(leave it empty to sync what is new; pick a date and the button becomes **Sync
+from <date>**, which also fetches older transactions) and a **More** menu holding
+**Choose which accounts to link** and **Remove this connection** (**Choose
+accounts** also appears next to Sync now when new accounts are found).
+When SimpleFIN's daily request limit runs out part-way through a sync, what was
+already fetched is kept and loaded, Home says how far it got, and the next run
+(tonight's, the 6:30 retry, or Sync now) carries on from exactly there without
+repeating requests. If a night's sync reports that the household data is past the size that can be
 saved, nothing is lost: the bank's rows wait and arrive on the next run once the
 limit is raised (it is now 4 MB, and the activity log keeps its newest 300 entries). Home's **Bank sync** card now says in plain words why a night failed and offers **Try again now**; the Linked accounts card shows how full your household data is (for example **1.1 of 3.5 MB**), and Home warns at 75% and 90%. A receipt waiting for its charge says so when the bank sync is the reason it has not arrived. When the bank sync is healthy, Home shows one calm line ("Bank sync: last ran Tue 3:30 AM, 4 new transactions added, all loaded"), so a quiet app is not mistaken for a broken one. If a bank has listed charges as pending for three days or more, Home says the bank's feed is probably behind. **Repayments I found** (Home) lists deposits already in your ledger whose notes clearly name one charge, with **Link** per charge or **Link all**, and **not a repayment** to hide one; the deposits are filed under the charge's budget line exactly as if you had linked them yourself. Under **More** on the Linked accounts card, **What uses the space** lists what fills your household data and how to shrink it. The phone app shows the same Home cards.
 
@@ -963,8 +966,9 @@ limit is raised (it is now 4 MB, and the activity log keeps its newest 300 entri
   out with it, so neither is left behind. If a second copy was already left
   behind (it matches a Shared Expenses record), Transactions names it and
   offers **Remove it from the ledger**.
-- **Import history:** under a bank link, **Import older transactions from**
-  a date (for example January 1) fetches everything from then on for the
+- **Import history:** under a bank link, type a date (for example January 1)
+  in the optional **from** box beside **Sync now** and press **Sync from <date>**
+  (it asks first); it fetches everything from then on for the
   accounts you chose; it goes to Bank stream like any import. How far back
   it reaches depends on the bank (often 3-12 months). If a bank returns only part of the period for an account that has regular activity, a window appears naming the account, the months it did not return and the date its rows really start; those whole months are **not** imported for that account (half a month would make the ledger wrong), and nothing is imported until you choose **Import the rest** (or **Cancel - import nothing**). Home then keeps a red **Some bank history is missing** card until you import those months from a statement (Transactions, then Import a statement, picking the account); the notice goes away by itself once your records have at least one row in every month it names, or you can select **I've imported it**. Home also lists **Statements to import**: accounts (checking, savings, cards) with nothing recorded in a month that falls between their first and last records (within the last twelve months), with **Import a statement** and **Nothing happened then** for months that really were idle. That list needs no action to clear: it empties as the months fill in, and the current month is never listed. When part of the range is already covered, the notice lists the months that are still empty (for example "still empty: Feb, Mar, May, Jun 2026"), so you import only those statements. Rows already in the
   ledger or waiting in Bank stream are skipped, and rows you removed earlier
@@ -975,7 +979,7 @@ limit is raised (it is now 4 MB, and the activity log keeps its newest 300 entri
   accounts**, a whole group (**Checking accounts**, **Credit cards**, and
   Savings or Cash if the link has them), or any individual accounts listed under
   each group. A group shows partly ticked when only some of its accounts are
-  ticked. **Sync now** and **Import history** then work on only the ticked
+  ticked. **Sync now** (with or without a **from** date) then works on only the ticked
   accounts: the bank is asked for just them, so the other accounts are not
   re-fetched and their records are not touched. SimpleFIN limits requests per day,
   not accounts, so syncing a whole group costs no more than syncing one account.
@@ -983,7 +987,7 @@ limit is raised (it is now 4 MB, and the activity log keeps its newest 300 entri
   does not move the connection's "last synced" date (the others were not
   fetched), and adding a new account to a connection that already syncs no
   longer restarts the others: the new account alone is brought in from the first
-  of last month, and you can pull more with the dropdown and Import history. The
+  of last month, and you can pull more with the ▾ and a **from** date. The
   mobile app has the same chooser (tap **Pick individual accounts**).
 - **Nothing in the ledger disappears on its own.** Once a transaction is in
   the ledger it stays until you remove it yourself (delete it, move it to

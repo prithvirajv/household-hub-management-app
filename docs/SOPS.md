@@ -515,6 +515,14 @@ Bank sync problem), `bankSyncOkText` (the calm Home line, only when every link's
 `src/paybackLogic.ts` (a `@ts-nocheck` port of the web functions; keep in step) and drawn on its Home; mobile still lacks auto-link at import time and long-list paging. Mobile: limits raised to match, plain failure text and
 `householdSizeInfo` ported to `linkedAccountsLogic.ts`; mobile still lacks repayment linking and long-list paging.
 
+### SimpleFIN daily request limit (partial syncs)
+`fetchSimplefinAccounts` raises `rateLimited` (HTTP 429, a 403 whose body talks about a limit, or an empty 200 whose only messages do; `RATE_LIMIT_WORDS` is a guess because I could not find SimpleFIN's
+exact wording - check a real refusal in the logs and tighten it). `syncSimplefin` then stops asking (no retries, no window splitting), keeps the windows already fetched (they run oldest first) and returns
+`limit.throughUnix`; with nothing fetched it throws, and a 403 that is not about a limit is still "remove it and link again". The payload carries `limitHit`/`fetchedThrough`, the staged data's `fullAt` is `fetchedThrough` (so the
+manual ack moves `lastSyncAt` only that far), the nightly run records `lastRun.limited = { through }`, sets `lastSyncAt` to `through` (never backwards), and the 06:30 retry and 14:30 catch-up runs treat a limited run as not fresh. A history
+import (allowPartial) reports the rest as a failed window, i.e. the usual "history is missing" gap. Home shows a plain Bank sync problem for a limited run.
+The "from" date beside Sync now replaced the separate Import history button: empty = ordinary sync, a date = `sinceDate` history import after a confirm (`linkedHistoryFrom`, cleared when it starts).
+
 ### Database data transfer (Neon, or any host that bills egress)
 
 The worker's 30-minute refresh (`refreshAllHouseholdNotificationJobs`) runs for every household, so it reads only what the reminders use

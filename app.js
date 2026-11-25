@@ -190,7 +190,8 @@ let linkedBusyId = "";
 let linkedMapping = null;
 let linkedPortalLinkId = "";
 let linkedAutoSyncDone = false;
-let linkedHistoryFrom = `${new Date().getFullYear()}-01-01`;
+// Optional "from" date beside Sync now: empty = sync what is new since the last sync; a date = also fetch everything from then (a history import).
+let linkedHistoryFrom = "";
 // Which of a connection's accounts Sync now and Import history work on: linkId -> remote ids ([] or missing = every account), plus which picker is open.
 const linkedAccountPick = {};
 let linkedPickerOpenId = "";
@@ -15525,7 +15526,18 @@ function bindViewEvents() {
   });
 
   document.querySelectorAll("[data-linked-sync]").forEach((button) => {
-    button.addEventListener("click", () => syncLinkedAccount(button.dataset.linkedSync, addBankStreamRows, { accountIds: linkedPickedIds({ id: button.dataset.linkedSync, mappings: (linkedAccounts?.links || []).find((item) => item.id === button.dataset.linkedSync)?.mappings }) }));
+    button.addEventListener("click", async () => {
+      const link = (linkedAccounts?.links || []).find((item) => item.id === button.dataset.linkedSync);
+      const accountIds = linkedPickedIds({ id: button.dataset.linkedSync, mappings: link?.mappings });
+      // A date beside the button makes this a history import from that date (it asks first); no date is the ordinary sync.
+      const from = link?.provider === "simplefin" ? linkedHistoryFrom : "";
+      if (!from) return syncLinkedAccount(button.dataset.linkedSync, addBankStreamRows, { accountIds });
+      if (linkedBusyId) { showToast("A bank sync is already running - wait for it to finish.", { type: "info" }); return; }
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(from)) { showToast("Pick a valid date, or clear it to sync what is new."); return; }
+      if (!(await showConfirm(`Fetch every transaction from ${from} onward for ${linkedPickedLabel(button.dataset.linkedSync)}? New rows go to Bank stream (the AI categorization and safe auto-add apply). Rows you removed earlier come back.`, { title: "Import from a date", confirmLabel: "Import", danger: false }))) return;
+      linkedHistoryFrom = "";
+      await syncLinkedAccount(button.dataset.linkedSync, addBankStreamRows, { sinceDate: from, accountIds });
+    });
   });
 
   document.querySelectorAll("[data-linked-more]").forEach((details) => {
@@ -15563,19 +15575,13 @@ function bindViewEvents() {
     });
   });
   document.querySelectorAll("[data-linked-history-date]").forEach((input) => {
-    input.addEventListener("change", () => { linkedHistoryFrom = input.value; });
-  });
-  document.querySelectorAll("[data-linked-history]").forEach((button) => {
-    button.addEventListener("click", async () => {
-      if (linkedBusyId) { showToast("A bank sync is already running - wait for it to finish.", { type: "info" }); return; }
-      const from = linkedHistoryFrom;
-      if (!/^\d{4}-\d{2}-\d{2}$/.test(from)) { showToast("Pick the date to import from."); return; }
-      if (!(await showConfirm(`Fetch every transaction from ${from} onward for ${linkedPickedLabel(button.dataset.linkedHistory)}? New rows go to Bank stream (the AI categorization and safe auto-add apply). Rows you removed earlier come back.`, { title: "Import history", confirmLabel: "Import", danger: false }))) return;
-      const link = (linkedAccounts?.links || []).find((item) => item.id === button.dataset.linkedHistory);
-      await syncLinkedAccount(button.dataset.linkedHistory, addBankStreamRows, { sinceDate: from, accountIds: link ? linkedPickedIds(link) : [] });
+    input.addEventListener("change", () => {
+      linkedHistoryFrom = input.value;
+      const hint = input.closest(".linked-account-row")?.querySelector(".linked-from-hint");
+      if (hint) hint.textContent = input.value ? "Fetches everything from that date on, for the accounts chosen in the ▾." : hint.dataset.empty;
+      document.querySelectorAll("[data-linked-sync]").forEach((button) => { if (!button.disabled) button.textContent = linkedSyncButtonLabel(); });
     });
   });
-
   document.querySelectorAll("[data-linked-map]").forEach((button) => {
     button.addEventListener("click", () => openLinkedMapping(button.dataset.linkedMap));
   });
@@ -17877,6 +17883,7 @@ function linkedRunSummary(link) {
   const time = new Date(run.at).toLocaleString();
   if (run.ok === false) return `Overnight sync ${time} did not finish: ${run.error || "unknown problem"}`;
   if (run.stage === "waiting") return `Overnight sync ${time}: ${run.reason || "new transactions are waiting for you to open the app."}`;
+  if (run.limited) return `Overnight sync ${time}: stopped early at SimpleFIN's daily request limit - loaded up to ${new Date(run.limited.through).toLocaleDateString()}, the rest follows on the next run.`;
   if (run.stage === "applied") return `Overnight sync ${time}: complete${linkedCaughtUpNote(run)} - ${run.imported || 0} new from the bank, ${run.added || 0} added to the ledger${run.left ? `, ${run.left} need a look` : ""}.`;
   return `Overnight sync ${time}: fetched${run.newRows ? ` ${run.newRows} new` : ""} - not loaded yet.`;
 }
@@ -17930,6 +17937,7 @@ function bankSyncProblems() {
     const run = link.lastRun || {};
     if (link.status === "needs_reconnect") problems.push({ title: link.label, detail: "needs signing in again - remove it and link it again under Wealth" });
     else if (run.ok === false) { const why = explainSyncFailure(run.error); problems.push({ title: link.label, detail: `last night's sync did not finish. ${why.summary} ${why.fix} Nothing is lost: the bank's rows wait and load on the next run.`, sync: link.id, label: "Try again now" }); }
+    else if (run.limited) problems.push({ title: link.label, detail: `SimpleFIN's daily request limit was reached part-way. Everything up to ${new Date(run.limited.through).toLocaleDateString(undefined, { month: "short", day: "numeric" })} is loaded; the rest follows by itself on the next run (SimpleFIN allows a limited number of requests a day), or press Sync now later.`, sync: link.id });
     else if (run.stage === "waiting") problems.push({ title: link.label, detail: run.reason || "new transactions are waiting for you to open the app", sync: link.id });
     else if (link.hasStaged && link.status === "active") problems.push({ title: link.label, detail: "has fetched transactions that are not loaded yet", sync: link.id });
     else if (linkRunIsStale(link)) problems.push({ title: link.label, detail: `no overnight sync has run since ${new Date(link.lastRun?.at || link.lastSyncAt).toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric" })}. The next run catches up from the last successful sync on its own - or press Sync now.`, sync: link.id });
@@ -17993,7 +18001,7 @@ function renderBankSyncHealthCard() {
   </section>`;
 }
 
-// What Sync now and Import history can be limited to on one connection: a kind of account (all checking accounts, all credit cards, ...) or any
+// What Sync now (with or without a from date) can be limited to on one connection: a kind of account (all checking accounts, all credit cards, ...) or any
 // individual accounts under it. linkedAccountPick[linkId] holds the ticked remote account ids; none ticked (or every one ticked) = every account.
 // SimpleFIN counts requests, not accounts, so ticking a whole group costs the same as ticking one account.
 const LINKED_ACCOUNT_KINDS = [["checking", "Checking accounts"], ["savings", "Savings accounts"], ["credit_card", "Credit cards"], ["cash", "Cash accounts"], ["investment", "Investment accounts"], ["other", "Other accounts"], ["partners", "Partners page"]];
@@ -18007,7 +18015,7 @@ function linkedPickableKinds(link) {
     const account = isPool ? null : (state.accounts || []).find((item) => item.id === mapping.accountId);
     const type = isPool ? "partners" : (account?.type || "other");
     const kind = LINKED_ACCOUNT_KINDS.some(([key]) => key === type) ? type : "other";
-    byKind.set(kind, [...(byKind.get(kind) || []), { remoteId, name: isPool ? (state.partnerPoolBalance?.name || "Shared account") : (account?.name || "Account") }]);
+    byKind.set(kind, [...(byKind.get(kind) || []), { remoteId, name: isPool ? (state.partnerPoolBalance?.name || "Shared account") : (account?.name || "Account"), syncedThrough: isPool ? (state.partnerPoolBalance?.date || "") : (account?.syncedThrough || "") }]);
   });
   return LINKED_ACCOUNT_KINDS.filter(([key]) => byKind.has(key)).map(([key, label]) => ({ key, label, accounts: byKind.get(key).sort((a, b) => a.name.localeCompare(b.name)), remoteIds: byKind.get(key).map((entry) => entry.remoteId) }));
 }
@@ -18044,11 +18052,15 @@ function renderLinkedAccountPicker(link) {
         const on = kind.remoteIds.filter((id) => picked.includes(id)).length;
         const state = !picked.length ? "none" : on === kind.remoteIds.length ? "all" : on ? "some" : "none";
         return `<label class="linked-picker-kind"><input type="checkbox" data-linked-pick-kind="${link.id}" value="${kind.key}" data-indeterminate="${state === "some"}" ${state === "all" ? "checked" : ""} ${disabled}> <strong>${kind.label} (${kind.remoteIds.length})</strong></label>
-          ${kind.accounts.map((entry) => `<label class="linked-picker-account"><input type="checkbox" data-linked-pick="${link.id}" value="${escapeHtml(entry.remoteId)}" ${picked.includes(entry.remoteId) ? "checked" : ""} ${disabled}> ${escapeHtml(entry.name)}</label>`).join("")}`;
+          ${kind.accounts.map((entry) => `<label class="linked-picker-account"><input type="checkbox" data-linked-pick="${link.id}" value="${escapeHtml(entry.remoteId)}" ${picked.includes(entry.remoteId) ? "checked" : ""} ${disabled}> ${escapeHtml(entry.name)}${entry.syncedThrough ? ` <small class="muted">· through ${escapeHtml(new Date(`${entry.syncedThrough}T00:00:00`).toLocaleDateString(undefined, { month: "short", day: "numeric" }))}</small>` : ""}</label>`).join("")}`;
       }).join("")}
-      <small>Sync now and Import history use this selection.</small>
+      <small>Sync now (and a sync from a date) uses this selection.</small>
     </div>
   </details>`;
+}
+
+function linkedSyncButtonLabel() {
+  return /^\d{4}-\d{2}-\d{2}$/.test(linkedHistoryFrom) ? `Sync from ${linkedHistoryFrom}` : "Sync now";
 }
 
 function renderLinkedAccountsCard() {
@@ -18064,23 +18076,20 @@ function renderLinkedAccountsCard() {
     ${householdSizeLineHtml()}
     ${links.map((link) => `<div class="linked-account-row">
       <div><strong>${escapeHtml(link.label)}</strong><small>${linkedProviderLabel(link)} · ${escapeHtml(linkedStatusText(link))}</small>${(link.newAccounts || []).length ? `<small class="linked-new-accounts"><b>${link.newAccounts.length} new account${link.newAccounts.length === 1 ? "" : "s"} found</b> (${escapeHtml(link.newAccounts.map((account) => account.name).join(", "))}) - choose where ${link.newAccounts.length === 1 ? "it goes" : "they go"}.</small>` : ""}</div>
-      <div class="button-row">
-        <span class="linked-sync-split"><button type="button" data-linked-sync="${link.id}" ${linkedBusyId ? "disabled" : ""}>${linkedBusyId === link.id ? "Working…" : "Sync now"}</button>${renderLinkedAccountPicker(link)}</span>
+      <div class="linked-actions">
+        <span class="linked-sync-split"><button type="button" data-linked-sync="${link.id}" ${linkedBusyId ? "disabled" : ""}>${linkedBusyId === link.id ? "Working…" : linkedSyncButtonLabel()}</button>${renderLinkedAccountPicker(link)}</span>
+        ${link.provider === "simplefin" && Object.keys(link.mappings || {}).length ? `<label class="linked-from" title="Optional. Leave empty to sync what is new since each account's last sync. Pick a date to also fetch older transactions from then on: how far back depends on the bank (often 3-12 months), rows you already have are skipped, and rows you removed with Clean up come back."><span>From</span><input type="date" data-linked-history-date value="${escapeHtml(linkedHistoryFrom)}" max="${dateKey(new Date())}" ${linkedBusyId ? "disabled" : ""}></label>` : ""}
         ${(link.newAccounts || []).length ? `<button type="button" data-linked-map="${link.id}" ${linkedBusyId ? "disabled" : ""}>Choose accounts</button>` : ""}
         ${link.provider === "snaptrade" ? `<button type="button" class="ghost" data-linked-portal="${link.id}">Add brokerage</button>` : ""}
         <details class="linked-more" data-linked-more="${link.id}" ${linkedMoreOpenId === link.id || linkedPickerOpenId === link.id ? "open" : ""}>
-          <summary>More</summary>
+          <summary aria-label="More options" title="More options">⋯</summary>
           <div class="linked-more-body">
             ${(link.newAccounts || []).length ? "" : `<button type="button" class="ghost" data-linked-map="${link.id}" ${linkedBusyId ? "disabled" : ""}>Choose which accounts to link</button>`}
-            ${link.provider === "simplefin" && Object.keys(link.mappings || {}).length ? `<div class="linked-history-row">
-              <label>Import older transactions from<input type="date" data-linked-history-date value="${escapeHtml(linkedHistoryFrom)}" ${linkedBusyId ? "disabled" : ""}></label>
-              <button type="button" class="ghost" data-linked-history="${link.id}" ${linkedBusyId ? "disabled" : ""}>${linkedBusyId === link.id ? "Working…" : "Import history"}</button>
-              <small>How far back it goes depends on the bank (often 3-12 months). It uses the same accounts as Sync now (the ▾ beside it). Rows you already have or removed with Clean up are brought in again; pending rows wait.</small>
-            </div>` : ""}
             <button type="button" class="ghost danger-button" data-linked-remove="${link.id}">Remove this connection</button>
           </div>
         </details>
       </div>
+      ${link.provider === "simplefin" && Object.keys(link.mappings || {}).length ? `<small class="muted linked-from-hint" data-empty="Syncs what is new since each account's last sync${link.lastSyncAt ? ` (${escapeHtml(new Date(link.lastSyncAt).toLocaleDateString(undefined, { month: "short", day: "numeric" }))})` : ""}. Pick a From date to fetch older transactions too.">${linkedHistoryFrom ? "Fetches everything from that date on, for the accounts chosen in the ▾." : `Syncs what is new since each account's last sync${link.lastSyncAt ? ` (${escapeHtml(new Date(link.lastSyncAt).toLocaleDateString(undefined, { month: "short", day: "numeric" }))})` : ""}. Pick a From date to fetch older transactions too.`}</small>` : ""}
     </div>`).join("")}
     ${links.length ? `<label class="ai-import-toggle"><input type="checkbox" id="linkedAutoApplyToggle" ${state.linkedAutoApply === false ? "" : "checked"}> <span>Add new bank transactions to the ledger overnight, without opening the app (categorized with AI; anything doubtful waits in Bank stream, and the day's summary is sent to your phone)</span></label>` : ""}
     ${mappingPanel}
@@ -18433,6 +18442,7 @@ async function syncLinkedAccount(linkId, addRows, { quiet = false, sinceDate = "
       const result = applySimplefinSync(link, payload, addRows, { ignoreRemembered: Boolean(sinceDate) });
       summary = `${link.label}: ${result.imported} new transaction${result.imported === 1 ? "" : "s"} sent to Bank stream${result.balancesUpdated ? `, ${result.balancesUpdated} balance${result.balancesUpdated === 1 ? "" : "s"} updated` : ""}${result.groupsMatched ? `, ${result.groupsMatched} investment account${result.groupsMatched === 1 ? "" : "s"} matched to the bank balance` : ""}${result.debtsMatched ? `, ${result.debtsMatched} loan${result.debtsMatched === 1 ? "" : "s"} matched to the amount owed` : ""}${result.pendingSkipped ? `; ${result.pendingSkipped} pending skipped until they post${result.pendingDetail.length ? ` (${result.pendingDetail.join("; ")})` : ""}` : ""}${result.unmapped ? `; ${result.unmapped} from accounts you chose not to import` : ""}.`;
       if (payload.historyGaps?.length) summary += " Some months were left out because the bank did not return them - see Home for what to import from a statement.";
+      if (payload.limitHit) summary += ` SimpleFIN's daily request limit was reached part-way: everything up to ${formatShortDate(String(payload.fetchedThrough || "").slice(0, 10))} is loaded, and Sync now again later (or tonight's run) carries on from there.`;
       if (payload.errors?.length) summary += ` The bank reported: ${payload.errors.join("; ")}`;
       // A history import that comes back short while the bank is complaining is not a quiet success: say so in a window, with the bank's own words.
       if (sinceDate && payload.errors?.length && result.imported < 25) {

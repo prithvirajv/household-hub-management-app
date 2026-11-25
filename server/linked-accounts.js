@@ -110,6 +110,15 @@ function simplefinRequest(accessUrl, path, params) {
   return { url: url.toString(), headers: { Authorization: auth, Accept: "application/json" } };
 }
 
+// SimpleFIN allows a limited number of requests a day. The exact wording of its refusal is not documented where I could find it, so a 429, or a refusal
+// or an empty answer whose text talks about a limit, is treated as the quota running out.
+const RATE_LIMIT_WORDS = /rate.?limit|too many (requests|calls)|quota|(request|daily|usage) limit|limit (was )?(reached|exceeded)|exceeded/i;
+function rateLimitError() {
+  const error = clientError("SimpleFIN's daily request limit was reached.", 429);
+  error.rateLimited = true;
+  return error;
+}
+
 async function fetchSimplefinAccounts(accessUrl, params, { fetchImpl = fetch, allowInsecureHosts = false } = {}) {
   assertSimplefinUrl(accessUrl, allowInsecureHosts);
   const request = simplefinRequest(accessUrl, "/accounts", params);
@@ -126,10 +135,21 @@ async function fetchSimplefinAccounts(accessUrl, params, { fetchImpl = fetch, al
     failure.dropped = !timedOut;
     throw failure;
   }
-  if (response.status === 401 || response.status === 403) throw clientError("SimpleFIN no longer accepts this connection - remove it and link again.", 409);
+  if (response.status === 429) throw rateLimitError();
+  if (response.status === 401 || response.status === 403) {
+    // The Bridge may say "too many requests" with a 403: that is today's quota running out, not a connection that stopped working, so it must
+    // never tell the person to remove the link.
+    const text = typeof response.text === "function" ? await response.text().catch(() => "") : "";
+    if (RATE_LIMIT_WORDS.test(text)) throw rateLimitError();
+    throw clientError("SimpleFIN no longer accepts this connection - remove it and link again.", 409);
+  }
   if (!response.ok) throw clientError(`SimpleFIN is unavailable right now (HTTP ${response.status}).`, 502);
   const body = await response.json().catch(() => ({}));
-  return { errors: Array.isArray(body.errors) ? body.errors.map(String) : [], accounts: Array.isArray(body.accounts) ? body.accounts : [] };
+  const errors = Array.isArray(body.errors) ? body.errors.map(String) : [];
+  const accounts = Array.isArray(body.accounts) ? body.accounts : [];
+  // An answer with no accounts whose only messages talk about a limit is the quota running out too.
+  if (!accounts.length && errors.some((message) => RATE_LIMIT_WORDS.test(message))) throw rateLimitError();
+  return { errors, accounts };
 }
 
 function numberOrNull(value) {
@@ -196,6 +216,7 @@ async function syncSimplefin(accessUrl, { startUnix, endUnix, allowPartial = fal
   const retriedDrop = new Set();
   let succeeded = 0;
   let lastFailure = null;
+  let limit = null;
   while (queue.length) {
     const { start, end, depth } = queue.shift();
     let result;
@@ -203,6 +224,14 @@ async function syncSimplefin(accessUrl, { startUnix, endUnix, allowPartial = fal
       result = await fetchSimplefinAccounts(accessUrl, { "start-date": start, "end-date": end, pending: 1, ...(accountIds.length ? { account: accountIds } : {}) }, options);
     } catch (error) {
       if (error.statusCode === 409) throw error;
+      if (error.rateLimited) {
+        // Splitting or asking again would only spend more of the quota that just ran out. What earlier windows returned is kept: they run oldest first, so
+        // everything before this window is complete, and the next run starts from here.
+        if (!succeeded) throw error;
+        limit = { throughUnix: start };
+        if (allowPartial) failedWindows.push({ from: new Date(start * 1000).toISOString().slice(0, 10), to: new Date(endUnix * 1000).toISOString().slice(0, 10), error: "SimpleFIN's daily request limit was reached" });
+        break;
+      }
       lastFailure = error;
       console.warn(`SimpleFIN window ${new Date(start * 1000).toISOString().slice(0, 10)}..${new Date(end * 1000).toISOString().slice(0, 10)} failed: ${error.message}`);
       if (allowPartial && error.dropped && !retriedDrop.has(`${start}-${end}`)) {
@@ -244,7 +273,8 @@ async function syncSimplefin(accessUrl, { startUnix, endUnix, allowPartial = fal
       return { ...normalizeSimplefinAccount(account), transactionCount: rowsByAccount[index].length, oldestTransactionDate: dates[0] || "" };
     }),
     transactions: rowsByAccount.flat(),
-    failedWindows
+    failedWindows,
+    ...(limit ? { limit } : {})
   };
 }
 
@@ -448,7 +478,7 @@ function mergeStagedPayload(staged, payload, nowIso, { sinceDate } = {}) {
   const accountsById = new Map();
   if (payload.subset) (staged?.accounts || []).forEach((account) => accountsById.set(String(account.remoteId), account));
   (payload.accounts || []).forEach((account) => accountsById.set(String(account.remoteId), account));
-  return { merged: { provider: "simplefin", accounts: payload.subset ? [...accountsById.values()] : payload.accounts, transactions, errors: payload.errors || [], stagedAt: nowIso, fullAt: payload.subset ? (staged?.fullAt || null) : nowIso }, newTransactionCount };
+  return { merged: { provider: "simplefin", accounts: payload.subset ? [...accountsById.values()] : payload.accounts, transactions, errors: payload.errors || [], stagedAt: nowIso, fullAt: payload.subset ? (staged?.fullAt || null) : (payload.limitHit ? payload.fetchedThrough : nowIso), ...(payload.limitHit ? { limitHit: true, fetchedThrough: payload.fetchedThrough } : {}) }, newTransactionCount };
 }
 
 // Every linked-feed row id the household already imported: remembered ids, ledger rows and drafts still waiting.
@@ -639,7 +669,7 @@ function registerLinkedAccountRoutes({ forwardPartnerRows = null, app, requireSe
       // Only accounts sent to a Wealth account import transactions (investment and loan accounts follow their balance only), so only those are staged.
       const wanted = new Set(Object.entries(link.mappings || {}).filter(([remoteId, mapping]) => mapping && mapping.accountId && (!accountIds.length || accountIds.includes(remoteId))).map(([remoteId]) => remoteId));
       // sinceDate is where this fetch started: the last successful sync (minus a few days of overlap), so a missed night is picked up by the next run.
-      return { provider: "simplefin", sinceDate: new Date(startUnix * 1000).toISOString().slice(0, 10), ...(accountIds.length ? { subset: true } : {}), accounts: accountIds.length ? result.accounts.filter((account) => accountIds.includes(String(account.remoteId))) : result.accounts, transactions: result.transactions.filter((transaction) => wanted.has(transaction.remoteAccountId)), errors: result.errors, failedWindows: result.failedWindows || [] };
+      return { provider: "simplefin", sinceDate: new Date(startUnix * 1000).toISOString().slice(0, 10), ...(accountIds.length ? { subset: true } : {}), accounts: accountIds.length ? result.accounts.filter((account) => accountIds.includes(String(account.remoteId))) : result.accounts, transactions: result.transactions.filter((transaction) => wanted.has(transaction.remoteAccountId)), errors: result.errors, failedWindows: result.failedWindows || [], ...(result.limit ? { limitHit: true, fetchedThrough: new Date(result.limit.throughUnix * 1000).toISOString() } : {}) };
     }
     const accounts = await getAdapter().listAccounts(credentials);
     const mapped = accounts.filter((account) => link.mappings[account.remoteId] && !link.mappings[account.remoteId].skipped);
@@ -663,7 +693,11 @@ function registerLinkedAccountRoutes({ forwardPartnerRows = null, app, requireSe
       const mappedIds = Object.entries(link.mappings || {}).filter(([, mapping]) => mapping && mapping.accountId).map(([remoteId]) => remoteId);
       const asked = Array.isArray(req.body?.accountIds) ? [...new Set(req.body.accountIds.map(String))].filter((id) => mappedIds.includes(id)) : [];
       const accountIds = link.provider === "simplefin" && asked.length && asked.length < mappedIds.length ? asked : [];
-      const fetched = await fetchLinkPayload(link, { sinceDate: req.body?.sinceDate, allowPartial: Boolean(since), accountIds });
+      // With no date picked, each account is brought up from where it last got to, as the nightly run does: an account whose bank connection stopped
+      // refreshing is made up from its own "synced through" date, not just from the link's last sync.
+      const wantedMappings = Object.fromEntries(Object.entries(link.mappings || {}).filter(([remoteId]) => !accountIds.length || accountIds.includes(remoteId)));
+      const catchUpFrom = link.provider === "simplefin" && !req.body?.sinceDate && link.lastSyncAt && loadHouseholdState ? behindAccountsSince(await loadHouseholdState(sessionHouseholdId(req)), wantedMappings, new Date().toISOString().slice(0, 10)) : "";
+      const fetched = await fetchLinkPayload(link, { sinceDate: req.body?.sinceDate, catchUpFrom, allowPartial: Boolean(since), accountIds });
       const failed = gapsFromFailedWindows(fetched, fetched.failedWindows, link.mappings);
       const trimmed = trimPartialHistory(failed.payload, since);
       const payload = trimmed.payload;
@@ -775,7 +809,7 @@ function registerLinkedAccountRoutes({ forwardPartnerRows = null, app, requireSe
         // How recent a clean run has to be for the retry to leave a link alone: 8 hours by default (the run a few hours after the main one), or
         // what the catch-up run asks for (about a day, so a night that never ran at all is made up the same afternoon).
         const maxAgeHours = Math.min(72, Math.max(1, Number(req.body?.maxAgeHours) || 8));
-        const freshEnough = (link) => link.lastRun?.ok === true && link.lastRun.at && Date.now() - new Date(link.lastRun.at).getTime() < maxAgeHours * 3600 * 1000;
+        const freshEnough = (link) => link.lastRun?.ok === true && !link.lastRun.limited && link.lastRun.at && Date.now() - new Date(link.lastRun.at).getTime() < maxAgeHours * 3600 * 1000;
         // A link that has never synced (or whose accounts were just changed) waits for its first sync in the app, where a bank that returns less
         // history than asked for is explained and has to be acknowledged before anything is imported.
         const links = (await store.listAll()).filter((link) => link.status === "active" && Object.keys(link.mappings || {}).length && !(link.provider === "snaptrade" && !snaptrade) && (link.provider !== "simplefin" || link.lastSyncAt) && !(retry && freshEnough(link)));
@@ -800,7 +834,7 @@ function registerLinkedAccountRoutes({ forwardPartnerRows = null, app, requireSe
               const previouslyStaged = new Set((link.staged?.transactions || []).map((transaction) => transaction.externalId));
               newTransactionCount = (payload.transactions || []).filter((transaction) => !previouslyStaged.has(transaction.externalId) && !known.has(transaction.externalId)).length;
             }
-            runs.set(link.id, { at, ok: true, stage: "fetched", accounts: (payload.accounts || []).length, newRows: newTransactionCount, ...(payload.sinceDate ? { sinceDate: payload.sinceDate } : {}), ...(bridgeNotices(payload.errors).length ? { notices: bridgeNotices(payload.errors) } : {}), ...(retry ? { retry: true } : {}) });
+            runs.set(link.id, { at, ok: true, stage: "fetched", accounts: (payload.accounts || []).length, newRows: newTransactionCount, ...(payload.limitHit ? { limited: { through: payload.fetchedThrough } } : {}), ...(payload.sinceDate ? { sinceDate: payload.sinceDate } : {}), ...(bridgeNotices(payload.errors).length ? { notices: bridgeNotices(payload.errors) } : {}), ...(retry ? { retry: true } : {}) });
             await store.update(link.householdId, link.id, { staged: merged, stagedAt: merged.stagedAt, lastError: "", status: "active", newAccounts: findNewAccounts(payload.accounts, link.mappings), lastRun: runs.get(link.id) });
             entry.newTransactions += newTransactionCount;
             summary.synced += 1;
@@ -833,7 +867,7 @@ function registerLinkedAccountRoutes({ forwardPartnerRows = null, app, requireSe
               runs.set(link.id, finished);
               // The link's last-sync date (where the next fetch starts from) moves only when the new rows are really loaded: a night whose fetch worked
               // but whose loading did not finish is fetched again, from the same place, the next time.
-              await store.update(householdId, link.id, { lastRun: finished, ...(finished.ok && finished.stage === "applied" ? { lastSyncAt: finished.at } : {}) });
+              await store.update(householdId, link.id, { lastRun: finished, ...(finished.ok && finished.stage === "applied" ? { lastSyncAt: finished.limited ? (new Date(finished.limited.through) > new Date(link.lastSyncAt || 0) ? finished.limited.through : link.lastSyncAt) : finished.at } : {}) });
               if (!finished.ok) entry.failed.push(`${link.label}: ${explainSyncFailure(finished.error).summary}`);
             }
           } catch (error) {

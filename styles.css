@@ -10123,3 +10123,28 @@ body {
 .linked-sync-split .linked-account-picker > summary::-webkit-details-marker { display: none; }
 .linked-sync-split .linked-account-picker { position: static; }
 .linked-sync-split .linked-picker-list { left: 0; right: auto; max-width: calc(100vw - 32px); }
+
+.linked-from { display: inline-flex; align-items: center; gap: 0.4rem; margin: 0; font-size: 0.85rem; font-weight: 700; white-space: nowrap; }
+.linked-from input[type="date"] { width: auto; min-height: 38px; height: 38px; }
+.linked-from small { color: var(--muted); font-weight: 400; }
+.linked-from-help { display: block; margin-top: 0.4rem; }
+
+/* Linked accounts: one tidy toolbar per connection - Sync now (split), an optional From date, and a ⋯ menu. */
+.linked-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 10px; position: relative; margin-top: 0.5rem; }
+.linked-actions > button, .linked-actions .linked-sync-split > button { min-height: 40px; padding: 0.35rem 1rem; font-size: 0.92rem; }
+.linked-actions .linked-sync-split .linked-account-picker > summary { min-height: 40px; }
+.linked-actions .linked-from { display: inline-flex; align-items: center; gap: 0.5rem; height: 40px; margin: 0; padding: 0 6px 0 12px; border: 1px solid var(--line, #d8d2c8); border-radius: 8px; background: var(--panel); font-size: 0.8rem; font-weight: 700; color: var(--muted); }
+.linked-actions .linked-from:focus-within { border-color: var(--green); }
+.linked-actions .linked-from input[type="date"] { border: 0; background: transparent; box-shadow: none; height: 36px; min-height: 0; padding: 0 4px; width: auto; font-size: 0.9rem; color: inherit; }
+.linked-actions .linked-more { position: static; margin-left: auto; }
+.linked-actions .linked-more > summary { justify-content: center; width: 40px; min-height: 40px; padding: 0; font-size: 1.2rem; line-height: 1; border-radius: 8px; }
+.linked-actions .linked-more > summary::after { content: none; }
+.linked-actions .linked-more-body { position: absolute; right: 0; top: calc(100% + 6px); z-index: 6; min-width: 220px; max-width: calc(100vw - 32px); margin: 0; box-shadow: 0 10px 28px rgba(0, 0, 0, 0.18); flex-basis: auto; }
+.linked-actions .linked-more-body button { width: 100%; justify-content: flex-start; text-align: left; }
+.linked-from-hint { display: block; margin-top: 0.45rem; }
+@media (max-width: 560px) {
+  .linked-actions .linked-sync-split { flex: 1 1 100%; }
+  .linked-actions .linked-sync-split > button { flex: 1; }
+  .linked-actions .linked-from { flex: 1 1 auto; }
+  .linked-actions .linked-from input[type="date"] { flex: 1; }
+}
