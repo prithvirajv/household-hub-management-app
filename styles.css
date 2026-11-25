@@ -10110,3 +10110,9 @@ body {
 .household-size-full progress { accent-color: var(--coral); }
 .household-size small { grid-column: 1 / -1; color: var(--coral); }
 .receipt-sync-note { margin: 0 0 8px; }
+
+.sync-ok { margin: 0; padding: 6px 12px; font-size: 0.85rem; color: var(--muted); }
+.found-repayments-card { border-color: var(--blue); }
+.household-size-detail { grid-column: 1 / -1; }
+.household-size-detail ul { margin: 4px 0 0; padding-left: 1.1rem; display: grid; gap: 3px; }
+.household-size-detail small { color: var(--muted); }

@@ -2819,12 +2819,12 @@ function undoAssistantChange() {
 // ---- "What's new": a dismissible card at the top of Home after a release, once per device (see whatsNewVisible). To announce a release, change `id`,
 // `releasedAt` and `items` here; people who signed up after `releasedAt` never see it.
 const WHATS_NEW = {
-  id: "2026-11-25",
-  releasedAt: "2026-11-26T00:00:00",
+  id: "2026-11-26",
+  releasedAt: "2026-11-27T00:00:00",
   items: [
-    "<strong>Repayments link themselves.</strong> When a Zelle or Venmo deposit's note names exactly one charge it fits, it is linked to that charge as it arrives. Home lists each one with an Undo.",
-    "<strong>Missing statements are listed on Home.</strong> Accounts with months that have nothing recorded show up with a shortcut to import, and the list clears as the months fill in.",
-    "<strong>Owner reminder.</strong> Home and Admin say so while new households are still getting the built-in budget instead of yours."
+    "<strong>Repayments I found.</strong> Deposits already in your ledger that clearly repay one charge are listed on Home with a one-tap Link.",
+    "<strong>Bank sync you can trust.</strong> Home shows a calm line when the last run was fine, says in plain words why a night failed, and warns when a bank has left charges pending for days.",
+    "<strong>Storage meter.</strong> The Linked accounts card shows how full your household data is and what uses the space."
   ]
 };
 const WHATS_NEW_KEY = "familyloop-whats-new-seen";
@@ -2852,10 +2852,12 @@ function renderHome() {
     <section class="work-grid">
       <div class="main-stack">
         ${renderWhatsNewCard()}
+        ${renderBankSyncOkLine()}
         ${renderHomeBriefingCard()}
         ${renderBankSyncHealthCard()}
         ${renderDataSizeCard()}
         ${renderTemplateReminderCard()}
+        ${renderFoundRepaymentsCard()}
         ${renderAutoLinkedPaybackCard()}
         ${renderHistoryGapCard()}
         ${renderStatementGapCard()}
@@ -11596,6 +11598,14 @@ function bindViewEvents() {
     autosaveState();
     render();
   }));
+  document.querySelectorAll("[data-found-link]").forEach((button) => button.addEventListener("click", () => linkFoundRepayments(button.dataset.foundLink)));
+  document.querySelectorAll("[data-found-skip]").forEach((button) => button.addEventListener("click", () => {
+    const row = state.transactions[Number(button.dataset.foundSkip)];
+    if (!row) return;
+    row.paybackAutoDeclined = true;
+    autosaveState();
+    render();
+  }));
   document.querySelectorAll("[data-undo-auto-payback]").forEach((button) => button.addEventListener("click", () => undoAutoPayback(button.dataset.undoAutoPayback)));
   document.querySelectorAll("[data-keep-auto-payback]").forEach((button) => button.addEventListener("click", () => keepAutoPayback(button.dataset.keepAutoPayback)));
   document.querySelectorAll("[data-statement-gap-import]").forEach((button) => button.addEventListener("click", () => {
@@ -17924,6 +17934,8 @@ function bankSyncProblems() {
     else if (link.hasStaged && link.status === "active") problems.push({ title: link.label, detail: "has fetched transactions that are not loaded yet", sync: link.id });
     else if (linkRunIsStale(link)) problems.push({ title: link.label, detail: `no overnight sync has run since ${new Date(link.lastRun?.at || link.lastSyncAt).toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric" })}. The next run catches up from the last successful sync on its own - or press Sync now.`, sync: link.id });
   });
+  // Charges a bank has listed as pending for days: the feed is behind, not the household.
+  stuckPendingAccounts(state.accounts, dateKey(new Date())).forEach((stuck) => problems.push({ title: stuck.name, detail: `${stuck.count} charge${stuck.count === 1 ? "" : "s"} the bank still lists as pending, the oldest from ${new Date(`${stuck.oldest}T00:00:00`).toLocaleDateString(undefined, { month: "short", day: "numeric" })}. Banks normally post within a day or three, so the bank's feed is probably behind; they load by themselves once it posts.` }));
   // What the bank connection itself reported (the Bridge's own words), e.g. a bank that needs signing in again.
   (linkedAccounts?.links || []).forEach((link) => (link.lastRun?.notices || []).forEach((notice) => problems.push({ title: link.label, detail: bridgeNoticeText(notice) })));
   const stale = dateKey(new Date(Date.now() - 2 * 86400000));
@@ -17936,13 +17948,20 @@ function bankSyncProblems() {
 // How full the household's saved data is. Working it out serialises the whole household, so it is reused for half a minute.
 let householdSizeCache = { at: 0, info: null };
 function currentHouseholdSize() {
-  if (!householdSizeCache.info || Date.now() - householdSizeCache.at > 30000) householdSizeCache = { at: Date.now(), info: householdSizeInfo(state) };
+  if (!householdSizeCache.info || Date.now() - householdSizeCache.at > 30000) householdSizeCache = { at: Date.now(), info: householdSizeInfo(state), breakdown: null };
   return householdSizeCache.info;
+}
+
+function currentHouseholdBreakdown() {
+  currentHouseholdSize();
+  householdSizeCache.breakdown ||= householdSizeBreakdown(state);
+  return householdSizeCache.breakdown;
 }
 
 function householdSizeLineHtml() {
   const size = currentHouseholdSize();
-  return `<p class="household-size household-size-${size.level}" role="status"><span>Household data: ${escapeHtml(size.label)} (${size.pct}%)</span><progress max="100" value="${Math.min(100, size.pct)}" aria-label="Household data used"></progress>${size.level === "ok" ? "" : `<small>${size.level === "full" ? "Nearly full: new bank transactions will soon be refused." : "Getting full."} Clean up (Transactions) or remove old rows and attachments you no longer need.</small>`}</p>`;
+  return `<p class="household-size household-size-${size.level}" role="status"><span>Household data: ${escapeHtml(size.label)} (${size.pct}%)</span><progress max="100" value="${Math.min(100, size.pct)}" aria-label="Household data used"></progress>${size.level === "ok" ? "" : `<small>${size.level === "full" ? "Nearly full: new bank transactions will soon be refused." : "Getting full."} Clean up (Transactions) or remove old rows and attachments you no longer need.</small>`}
+    <details class="household-size-detail"><summary>What uses the space</summary><ul>${currentHouseholdBreakdown().map((entry) => `<li><strong>${escapeHtml(entry.label)}</strong> ${entry.pct}% (${(entry.bytes / 1000).toFixed(0)} KB)${entry.hint ? ` <small>${escapeHtml(entry.hint)}</small>` : ""}</li>`).join("")}</ul></details></p>`;
 }
 
 function renderDataSizeCard() {
@@ -18269,6 +18288,48 @@ function renderAutoLinkedPaybackCard() {
     }).join("")}
     ${items.length > 10 ? `<small class="muted">…and ${items.length - 10} more.</small>` : ""}
   </section>`;
+}
+
+// Deposits already in the ledger that clearly repay one charge, for a one-tap link (auto-link only handles rows as they arrive).
+function currentFoundRepayments() {
+  return foundRepayments(state.transactions, dateKey(new Date()));
+}
+
+function renderFoundRepaymentsCard() {
+  const groups = currentFoundRepayments();
+  if (!groups.length) return "";
+  const rows = groups.reduce((sum, group) => sum + group.rows.length, 0);
+  return `<section class="card found-repayments-card" role="status">
+    <div class="card-label">Repayments I found</div><h3>${rows} deposit${rows === 1 ? "" : "s"} in your ledger ${rows === 1 ? "looks" : "look"} like friends paying you back</h3>
+    <p class="muted">Each note names one charge it fits. Linking files the deposits under that charge's budget line, so the line shows only your share. You can undo any link from the Ledger.</p>
+    ${groups.map((group) => `<div class="compact-row"><div><strong>${escapeHtml(group.charge.payee)} · ${exactMoney.format(Number(group.charge.amount))} · ${escapeHtml(group.charge.date)}</strong><small>${group.rows.length} deposit${group.rows.length === 1 ? "" : "s"} (${exactMoney.format(group.total)}) → your share would be ${exactMoney.format(group.share)}</small>
+      <small>${group.rows.map((row) => `${escapeHtml(row.date)} ${exactMoney.format(Math.abs(Number(row.amount)))} <button class="link-button" data-found-skip="${state.transactions.indexOf(row)}" type="button">not a repayment</button>`).join(" · ")}</small></div>
+      <div class="button-row"><button class="pill-button" data-found-link="${state.transactions.indexOf(group.charge)}" type="button">Link</button></div></div>`).join("")}
+    ${groups.length > 1 ? `<div class="button-row"><button class="pill-button" data-found-link="all" type="button">Link all ${rows}</button></div>` : ""}
+  </section>`;
+}
+
+function linkFoundRepayments(which) {
+  const groups = currentFoundRepayments().filter((group) => which === "all" || String(state.transactions.indexOf(group.charge)) === which);
+  let linked = 0;
+  groups.forEach((group) => {
+    const result = applyPayback(group.charge, group.rows);
+    if (!result.ok) { showToast(result.error); return; }
+    group.rows.forEach((row) => { Object.assign(row, lineSnapshot(row.lineId)); });
+    linked += result.linked;
+    state.household.activity.unshift(`Linked ${result.linked} deposit${result.linked === 1 ? "" : "s"} to ${group.charge.payee}: your share is ${exactMoney.format(paybackSummary(group.charge, state.transactions).share)}`);
+  });
+  if (linked) { autosaveState(); showToast(`Linked ${linked} repayment${linked === 1 ? "" : "s"}.`, { type: "success" }); }
+  render();
+}
+
+// One calm line on Home while the bank sync is healthy, so a quiet app is not mistaken for a broken one.
+function renderBankSyncOkLine() {
+  const links = linkedAccounts?.links || [];
+  if (!links.length || bankSyncProblems().length) return "";
+  const pending = links.reduce((sum, link) => sum + linkedPendingCount(link), 0);
+  const text = bankSyncOkText(links, pending, (iso) => new Date(iso).toLocaleString(undefined, { weekday: "short", hour: "numeric", minute: "2-digit" }));
+  return text ? `<p class="sync-ok" role="status">✓ ${escapeHtml(text)}</p>` : "";
 }
 
 function undoAutoPayback(rowId) {

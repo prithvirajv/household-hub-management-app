@@ -47,7 +47,7 @@ test("a Bank stream deposit whose note names a charge's merchant offers Accept a
 
 test("Home shows a dismissible What's new card, kept per device", () => {
   assert.match(app, /const WHATS_NEW = \{\s*id: "[\d-]+",\s*releasedAt: "[\dT:-]+"/);
-  assert.match(app, /\$\{renderWhatsNewCard\(\)\}\s*\$\{renderHomeBriefingCard\(\)\}/);
+  assert.match(app, /\$\{renderWhatsNewCard\(\)\}\s*\$\{renderBankSyncOkLine\(\)\}\s*\$\{renderHomeBriefingCard\(\)\}/);
   assert.match(app, /localStorage\.setItem\(WHATS_NEW_KEY, WHATS_NEW\.id\)/);
 });
 

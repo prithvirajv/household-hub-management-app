@@ -510,7 +510,9 @@ the 1 MB body cap on `PUT /api/state`, which the household was already at. The b
 (`exceedsStateLimit`, `historyImportFits` in famelo-mobile) which only make it more cautious; raise them to match when convenient. Growth is about 130 ledger rows a month for this household, about 40 KB: 3.5 MB lasts years.
 Also added the same day: `explainSyncFailure` turns a failed run's error into plain words (Home's red card, the Try again now button, and the overnight phone notification); `householdSizeInfo` drives a
 "Household data: 1.1 of 3.5 MB" meter on the Linked accounts card and a Home card at 75% and 90%; `capHouseholdState` also keeps the newest 3,000 `transactionInboxDone` ids (a guard against unbounded growth, not a saving today);
-`receiptSyncNote` makes a waiting receipt say the bank sync is behind (a failed or unloaded run, or `syncedThrough` before the receipt's date) instead of "Waiting for its charge." Mobile: limits raised to match, plain failure text and
+`receiptSyncNote` makes a waiting receipt say the bank sync is behind (a failed or unloaded run, or `syncedThrough` before the receipt's date) instead of "Waiting for its charge." Next day: `foundRepayments` (Home "Repayments I found": `paybackAutoMatch` over deposits already in the ledger, grouped by charge, fitting what is unpaid, 270 days), `stuckPendingAccounts` (pending rows 3+ days old appear as a
+Bank sync problem), `bankSyncOkText` (the calm Home line, only when every link's last run was `applied` and `ok`), `householdSizeBreakdown` ("What uses the space"). `WHATS_NEW` announces them (id 2026-11-26). Mobile: all of these are ported to
+`src/paybackLogic.ts` (a `@ts-nocheck` port of the web functions; keep in step) and drawn on its Home; mobile still lacks auto-link at import time and long-list paging. Mobile: limits raised to match, plain failure text and
 `householdSizeInfo` ported to `linkedAccountsLogic.ts`; mobile still lacks repayment linking and long-list paging.
 
 ### Database data transfer (Neon, or any host that bills egress)
