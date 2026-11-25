@@ -10116,3 +10116,10 @@ body {
 .household-size-detail { grid-column: 1 / -1; }
 .household-size-detail ul { margin: 4px 0 0; padding-left: 1.1rem; display: grid; gap: 3px; }
 .household-size-detail small { color: var(--muted); }
+
+.linked-sync-split { display: inline-flex; align-items: stretch; position: relative; }
+.linked-sync-split > button { border-top-right-radius: 0; border-bottom-right-radius: 0; }
+.linked-sync-split .linked-account-picker > summary { display: inline-flex; align-items: center; height: 100%; min-height: 38px; padding: 0 0.7rem; border-left: 1px solid rgba(255, 255, 255, 0.45); border-radius: 0 8px 8px 0; background: var(--green); color: #fff; font-weight: 700; white-space: nowrap; }
+.linked-sync-split .linked-account-picker > summary::-webkit-details-marker { display: none; }
+.linked-sync-split .linked-account-picker { position: static; }
+.linked-sync-split .linked-picker-list { left: 0; right: auto; max-width: calc(100vw - 32px); }

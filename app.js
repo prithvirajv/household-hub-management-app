@@ -18037,7 +18037,7 @@ function renderLinkedAccountPicker(link) {
   const picked = linkedPickedIds(link);
   const disabled = linkedBusyId ? "disabled" : "";
   return `<details class="linked-account-picker" data-linked-picker="${link.id}" ${linkedPickerOpenId === link.id ? "open" : ""}>
-    <summary>Accounts to sync: ${escapeHtml(linkedPickedLabel(link.id, { short: true }))}</summary>
+    <summary title="Choose which accounts to sync" aria-label="Choose which accounts to sync. Now: ${escapeHtml(linkedPickedLabel(link.id, { short: true }))}">${picked.length ? `${escapeHtml(linkedPickedLabel(link.id, { short: true }))} ` : ""}▾</summary>
     <div class="linked-picker-list">
       <label><input type="checkbox" data-linked-pick-all="${link.id}" ${!picked.length ? "checked" : ""} ${disabled}> All accounts</label>
       ${kinds.map((kind) => {
@@ -18065,7 +18065,7 @@ function renderLinkedAccountsCard() {
     ${links.map((link) => `<div class="linked-account-row">
       <div><strong>${escapeHtml(link.label)}</strong><small>${linkedProviderLabel(link)} · ${escapeHtml(linkedStatusText(link))}</small>${(link.newAccounts || []).length ? `<small class="linked-new-accounts"><b>${link.newAccounts.length} new account${link.newAccounts.length === 1 ? "" : "s"} found</b> (${escapeHtml(link.newAccounts.map((account) => account.name).join(", "))}) - choose where ${link.newAccounts.length === 1 ? "it goes" : "they go"}.</small>` : ""}</div>
       <div class="button-row">
-        <button type="button" data-linked-sync="${link.id}" ${linkedBusyId ? "disabled" : ""}>${linkedBusyId === link.id ? "Working…" : "Sync now"}</button>
+        <span class="linked-sync-split"><button type="button" data-linked-sync="${link.id}" ${linkedBusyId ? "disabled" : ""}>${linkedBusyId === link.id ? "Working…" : "Sync now"}</button>${renderLinkedAccountPicker(link)}</span>
         ${(link.newAccounts || []).length ? `<button type="button" data-linked-map="${link.id}" ${linkedBusyId ? "disabled" : ""}>Choose accounts</button>` : ""}
         ${link.provider === "snaptrade" ? `<button type="button" class="ghost" data-linked-portal="${link.id}">Add brokerage</button>` : ""}
         <details class="linked-more" data-linked-more="${link.id}" ${linkedMoreOpenId === link.id || linkedPickerOpenId === link.id ? "open" : ""}>
@@ -18073,10 +18073,9 @@ function renderLinkedAccountsCard() {
           <div class="linked-more-body">
             ${(link.newAccounts || []).length ? "" : `<button type="button" class="ghost" data-linked-map="${link.id}" ${linkedBusyId ? "disabled" : ""}>Choose which accounts to link</button>`}
             ${link.provider === "simplefin" && Object.keys(link.mappings || {}).length ? `<div class="linked-history-row">
-              ${renderLinkedAccountPicker(link)}
               <label>Import older transactions from<input type="date" data-linked-history-date value="${escapeHtml(linkedHistoryFrom)}" ${linkedBusyId ? "disabled" : ""}></label>
               <button type="button" class="ghost" data-linked-history="${link.id}" ${linkedBusyId ? "disabled" : ""}>${linkedBusyId === link.id ? "Working…" : "Import history"}</button>
-              <small>How far back it goes depends on the bank (often 3-12 months). Rows you already have or removed with Clean up are brought in again; pending rows wait.</small>
+              <small>How far back it goes depends on the bank (often 3-12 months). It uses the same accounts as Sync now (the ▾ beside it). Rows you already have or removed with Clean up are brought in again; pending rows wait.</small>
             </div>` : ""}
             <button type="button" class="ghost danger-button" data-linked-remove="${link.id}">Remove this connection</button>
           </div>
