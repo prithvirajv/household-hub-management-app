@@ -1615,8 +1615,6 @@ main {
 }
 
 .budget-ledger-card {
-  max-width: 1040px;
-  margin-inline: auto;
   width: 100%;
 }
 
@@ -10336,3 +10334,46 @@ div.household-size-ok > .household-size-detail > summary { cursor: pointer; }
 /* On an iPhone the clock and battery are drawn over the page, so scrolled content showed through them ("D12:55nner"). A solid strip the height of the status bar sits under them
    (zero height wherever there is no status bar). */
 body::before { content: ""; position: fixed; top: 0; left: 0; right: 0; height: env(safe-area-inset-top, 0px); background: var(--bg); z-index: 60; pointer-events: none; }
+
+/* ---- Budget rows: every value carries its own caption (hidden on a wide screen, where the column header does the job), so a row can stack on a phone ---- */
+.budget-cell > small { display: none; }
+label.budget-cell { display: contents; }
+span.budget-cell { display: block; }
+@media (max-width: 760px) {
+  .budget-line-head, .budget-ledger-head, .budget-ledger-head.has-accounts { display: none; }
+  .budget-cell > small { display: block; font-size: 0.66rem; font-weight: 900; letter-spacing: 0.03em; text-transform: uppercase; color: var(--muted); }
+  label.budget-cell, span.budget-cell { display: grid; gap: 2px; min-width: 0; align-content: start; }
+  /* Subcategory rows: name and actions, then Planned / Spent / Remaining, then Due date and Owner. */
+  .budget-line { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px 8px; padding: 0.65rem 0.3rem; align-items: start; }
+  .budget-line > .line-name-input, .budget-line > .budget-line-actions { align-self: center; }
+  .budget-line > .line-name-input { grid-column: 1 / 3; grid-row: 1; }
+  .budget-line > .budget-line-actions { grid-column: 3; grid-row: 1; }
+  .budget-line > .budget-cell-planned { grid-column: 1; grid-row: 2; }
+  .budget-line > .budget-cell-spent { grid-column: 2; grid-row: 2; }
+  .budget-line > .budget-cell-remaining { grid-column: 3; grid-row: 2; }
+  .budget-line > .budget-cell-due { grid-column: 1 / 3; grid-row: 3; }
+  .budget-line > .budget-cell-owner { grid-column: 3; grid-row: 3; }
+  .budget-line > .budget-line-bar { grid-row: 4; }
+  .budget-line > .recurring-budget-panel { grid-column: 1 / -1; }
+  .budget-line .money-input { text-align: left; }
+  /* Income rows: name and delete, then Planned / Remaining, then Repeats / Deposit to. */
+  .budget-money-row, .budget-money-row.has-accounts { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px 8px; padding: 0.65rem 0.3rem; align-items: start; }
+  .budget-money-row > .line-name-input, .budget-money-row > .icon-button { align-self: center; }
+  .budget-money-row > .line-name-input { grid-column: 1 / 3; grid-row: 1; }
+  .budget-money-row > .icon-button { grid-column: 3; grid-row: 1; justify-self: end; }
+  .budget-money-row > .budget-cell-planned { grid-column: 1; grid-row: 2; }
+  .budget-money-row > .budget-cell-remaining { grid-column: 2; grid-row: 2; }
+  .budget-money-row > .budget-cell-repeats { grid-column: 1; grid-row: 3; }
+  .budget-money-row > .budget-cell-deposit { grid-column: 2 / 4; grid-row: 3; }
+  .budget-money-row .money-input { text-align: left; }
+}
+
+/* The remove (x) on a paycheck's subcategory chips was 8px wide; it is now a proper tap target (bigger still on a touch screen). */
+.mini-tags span { padding: 0.15rem 0.2rem 0.15rem 0.6rem; }
+.mini-tag-remove { display: inline-grid; place-items: center; min-width: 24px; min-height: 24px; border-radius: 999px; }
+.mini-tag-remove:hover { background: rgba(0, 0, 0, 0.1); }
+@media (pointer: coarse) { .mini-tag-remove { min-width: 32px; min-height: 32px; } }
+
+/* "Use in Meals": the recipe waits while a slot is chosen. */
+.meal-placing-bar { display: flex; align-items: center; gap: 0.6rem; flex-wrap: wrap; padding: 0.6rem 0.8rem; border: 2px solid var(--green); border-radius: 10px; background: var(--green-soft); }
+@media (max-width: 760px) { .budget-cell input[type="date"] { width: 100%; } }

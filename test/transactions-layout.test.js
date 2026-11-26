@@ -77,3 +77,15 @@ test("recipe chips in the meal planner have a readable text colour, and a long l
   assert.match(css, /\.meal-picker-chips-many \{ max-height: 14rem; overflow-y: auto;/);
   assert.match(css, /body::before \{ content: ""; position: fixed; top: 0; left: 0; right: 0; height: env\(safe-area-inset-top, 0px\);/, "a solid strip under the phone's status bar");
 });
+
+test("Budget rows carry captioned cells and stack on a phone; 'left to budget' is shown once; paycheck chips have a real remove target; Use in Meals waits for a slot", () => {
+  ["budget-cell budget-cell-due", "budget-cell budget-cell-planned", "budget-cell budget-cell-spent", "budget-cell budget-cell-remaining", "budget-cell budget-cell-owner", "budget-cell budget-cell-repeats", "budget-cell budget-cell-deposit"].forEach((cls) => assert.ok(app.includes(cls), cls));
+  assert.match(css, /@media \(max-width: 760px\) \{\s*\.budget-line-head, \.budget-ledger-head, \.budget-ledger-head\.has-accounts \{ display: none; \}/);
+  assert.match(css, /\.budget-line > \.budget-cell-planned \{ grid-column: 1; grid-row: 2; \}/);
+  assert.ok(!app.includes('class="net-worth-strip budget-left-strip"'), "the big duplicate 'Left to budget' strip is gone (the Available figure at the top is the one)");
+  assert.doesNotMatch(css, /\.budget-ledger-card \{[^}]*max-width/, "the Income card is as wide as the cards around it");
+  assert.match(css, /\.mini-tag-remove \{ display: inline-grid; place-items: center; min-width: 24px; min-height: 24px;/);
+  assert.match(css, /@media \(pointer: coarse\) \{ \.mini-tag-remove \{ min-width: 32px; min-height: 32px; \} \}/);
+  assert.ok(app.includes("let mealsPlacingRecipeId = \"\";") && app.includes("mealsPickerSelectedRecipeId = planned?.recipeId || mealsPlacingRecipeId || \"\";") && app.includes("data-cancel-placing"));
+  assert.ok(!app.includes('activeMealSlot = "Monday:Dinner";'), "no hard-coded Monday Dinner");
+});

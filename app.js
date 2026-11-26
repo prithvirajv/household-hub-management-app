@@ -186,6 +186,8 @@ let activeMealSlot = null;
 // re-renders since typing in its free-text field doesn't re-render, but a
 // chip click does) - cleared alongside activeMealSlot.
 let mealsPickerSelectedRecipeId = "";
+// "Use in Meals" from a recipe: the recipe waits here while the person taps the slot they want (it used to open Monday Dinner whatever week was showing).
+let mealsPlacingRecipeId = "";
 // Snacks default hidden (the fourth, lowest-priority meal slot) so the grid
 // reads as three real meals instead of 28 equal-weight cells.
 let mealsShowSnacks = false;
@@ -3150,10 +3152,6 @@ function renderBudget() {
       <div class="main-stack">
         ${budgetEnvelopeFlowHtml()}
         <section class="budget-ledger-card card">
-          <div class="net-worth-strip budget-left-strip">
-            <strong data-income-left>${money.format(state.budget.income - plannedTotal())}</strong>
-            <span>Left to budget</span>
-          </div>
           <div class="budget-ledger-head ${state.accounts.length ? "has-accounts" : ""}">
             <div><h3>Income</h3></div>
             <span>Planned</span>
@@ -3167,10 +3165,10 @@ function renderBudget() {
             .map(({ paycheck, index }) => `
             <div class="budget-money-row ${state.accounts.length ? "has-accounts" : ""}">
               <input class="line-name-input" data-income-name="${index}" value="${paycheck.name}">
-              <input class="money-input" data-income-amount="${index}" type="number" step="0.01" value="${paycheck.amount}">
-              <strong data-income-remaining="${index}">${exactMoney.format(Number(paycheck.amount || 0) - paycheckAssignedAmount(paycheck))}</strong>
-              <select class="income-recurrence-select" data-income-recurrence="${index}" aria-label="How often ${escapeHtml(paycheck.name)} repeats">${Object.entries(paycheckRecurrenceLabels).map(([value, label]) => `<option value="${value}" ${paycheck.recurrence === value ? "selected" : ""}>${label}</option>`).join("")}</select>
-              ${state.accounts.length ? `<select class="income-recurrence-select" data-paycheck-deposit-account="${index}" aria-label="Deposit account for ${escapeHtml(paycheck.name)}"><option value="">Not linked</option>${accountOptions(paycheck.depositAccountId || "", { excludeType: "credit_card" })}</select>` : ""}
+              <label class="budget-cell budget-cell-planned"><small>Planned</small><input class="money-input" data-income-amount="${index}" type="number" step="0.01" value="${paycheck.amount}"></label>
+              <span class="budget-cell budget-cell-remaining"><small>Remaining</small><strong data-income-remaining="${index}">${exactMoney.format(Number(paycheck.amount || 0) - paycheckAssignedAmount(paycheck))}</strong></span>
+              <label class="budget-cell budget-cell-repeats"><small>Repeats</small><select class="income-recurrence-select" data-income-recurrence="${index}" aria-label="How often ${escapeHtml(paycheck.name)} repeats">${Object.entries(paycheckRecurrenceLabels).map(([value, label]) => `<option value="${value}" ${paycheck.recurrence === value ? "selected" : ""}>${label}</option>`).join("")}</select></label>
+              ${state.accounts.length ? `<label class="budget-cell budget-cell-deposit"><small>Deposit to</small><select class="income-recurrence-select" data-paycheck-deposit-account="${index}" aria-label="Deposit account for ${escapeHtml(paycheck.name)}"><option value="">Not linked</option>${accountOptions(paycheck.depositAccountId || "", { excludeType: "credit_card" })}</select></label>` : ""}
               <button class="icon-button danger-button" data-delete-paycheck="${index}" type="button" aria-label="Delete ${escapeHtml(paycheck.name)}">×</button>
             </div>
           `).join("")}
@@ -3233,16 +3231,16 @@ function renderBudget() {
                 const remaining = Number(line.planned) - spent;
                 return `<div class="budget-line">
                   <input class="line-name-input" data-budget-line-name="${categoryIndex}:${lineIndex}" value="${line.name}" aria-label="Subcategory name">
-                  ${recurring
+                  <label class="budget-cell budget-cell-due"><small>Due date</small>${recurring
                     ? `<input data-budget-recurring-due-date="${categoryIndex}:${lineIndex}" type="date" value="${recurring.nextDueDate}" aria-label="Next due date for ${line.name}">`
-                    : `<input data-budget-due-date="${categoryIndex}:${lineIndex}" type="date" min="${monthDateMin()}" max="${monthDateMax()}" value="${dueDateValue(line.dueDay)}" aria-label="Due date for ${line.name}">`}
-                  <input class="money-input" data-budget-line="${categoryIndex}:${lineIndex}" type="number" step="0.01" value="${line.planned}" min="0" ${recurring ? "readonly" : ""} aria-label="Planned amount for ${line.name}">
-                  <span>${exactMoney.format(spent)}</span>
-                  <b data-line-remaining="${categoryIndex}:${lineIndex}" class="${remaining < 0 ? "danger" : ""}">${exactMoney.format(remaining)}${line.rolloverAmount > 0 ? `<small class="budget-rollover-badge" title="Unspent from last month, carried into this month's planned amount">+${exactMoney.format(line.rolloverAmount)} rolled over</small>` : ""}</b>
-                  <select class="budget-line-owner-select" data-budget-line-owner="${categoryIndex}:${lineIndex}" aria-label="Owner for ${line.name}">
+                    : `<input data-budget-due-date="${categoryIndex}:${lineIndex}" type="date" min="${monthDateMin()}" max="${monthDateMax()}" value="${dueDateValue(line.dueDay)}" aria-label="Due date for ${line.name}">`}</label>
+                  <label class="budget-cell budget-cell-planned"><small>Planned</small><input class="money-input" data-budget-line="${categoryIndex}:${lineIndex}" type="number" step="0.01" value="${line.planned}" min="0" ${recurring ? "readonly" : ""} aria-label="Planned amount for ${line.name}"></label>
+                  <span class="budget-cell budget-cell-spent"><small>Spent</small>${exactMoney.format(spent)}</span>
+                  <span class="budget-cell budget-cell-remaining"><small>Remaining</small><b data-line-remaining="${categoryIndex}:${lineIndex}" class="${remaining < 0 ? "danger" : ""}">${exactMoney.format(remaining)}${line.rolloverAmount > 0 ? `<small class="budget-rollover-badge" title="Unspent from last month, carried into this month's planned amount">+${exactMoney.format(line.rolloverAmount)} rolled over</small>` : ""}</b></span>
+                  <label class="budget-cell budget-cell-owner"><small>Owner</small><select class="budget-line-owner-select" data-budget-line-owner="${categoryIndex}:${lineIndex}" aria-label="Owner for ${line.name}">
                     <option value="">Household</option>
                     ${budgetMembers.map((member) => `<option value="${escapeHtml(assigneeKey(member))}" ${(line.ownerId || "") === assigneeKey(member) ? "selected" : ""}>${escapeHtml(member.name)}</option>`).join("")}
-                  </select>
+                  </select></label>
                   <div class="budget-line-actions">
                     <button class="icon-button rollover-toggle ${line.rolloverEnabled ? "active" : ""}" data-toggle-rollover="${categoryIndex}:${lineIndex}" type="button" title="${line.rolloverEnabled ? "Rollover on: next month's leftover carries forward" : "Carry next month's unspent balance into this line automatically"}" aria-pressed="${Boolean(line.rolloverEnabled)}" aria-label="${line.rolloverEnabled ? "Turn off rollover" : "Turn on rollover"} for ${line.name}">⤴</button>
                     ${recurring ? "" : `<button class="icon-button recurring-budget-toggle" data-enable-recurring-budget="${categoryIndex}:${lineIndex}" type="button" title="Automatically set aside savings each month for bills like HOA, insurance, property tax, subscriptions, or memberships." aria-label="Make ${line.name} recurring">↻</button>`}
@@ -8061,6 +8059,7 @@ function renderMeals() {
                 <button id="postGroceriesButton" class="ghost" type="button">Post groceries</button>
               </div>
             </div>
+            ${mealsPlacingRecipeId && recipeById(mealsPlacingRecipeId) ? `<div class="meal-placing-bar" role="status"><span>Planning <strong>${escapeHtml(recipeById(mealsPlacingRecipeId).name)}</strong>: tap an open slot below, then Plan.</span><button type="button" class="ghost" data-cancel-placing>Cancel</button></div>` : ""}
             <p class="meal-feedback" role="status">${escapeHtml(mealsFeedback || "")}</p>
             <div class="meal-week-caption"><strong>Week ${selectedWeek}</strong><span>${selectedWeekInfo.label} · ${monthLabel()}</span></div>
             ${dayGrid}
@@ -9837,7 +9836,7 @@ function renderHelp() {
       ],
       tips: [
         "Build out every category before you start assigning transactions — an unassigned transaction can't tell you if you're over or under budget in that area.",
-        "\"Left to budget\" at the top should reach $0 once every dollar of income has a job — that's zero-based budgeting.",
+        "\"Available\" at the top should reach $0 once every dollar of income has a job — that's zero-based budgeting.",
         "Recurring bills (HOA, insurance, property tax, subscriptions) are worth marking as recurring so FamilyLoop sets aside savings for them every month instead of one big hit when the bill lands."
       ] },
     { icon: "🧾", title: "Bills", id: "bills",
@@ -14802,9 +14801,11 @@ function bindViewEvents() {
     const [day, meal] = slotKey.split(":");
     const planned = plannedMeals(day, meal)[0];
     activeMealSlot = slotKey;
-    mealsPickerSelectedRecipeId = planned?.recipeId || "";
+    mealsPickerSelectedRecipeId = planned?.recipeId || mealsPlacingRecipeId || "";
     render();
   };
+
+  $("[data-cancel-placing]")?.addEventListener("click", () => { mealsPlacingRecipeId = ""; mealsPickerSelectedRecipeId = ""; render(); });
 
   document.querySelectorAll("[data-open-meal-slot]").forEach((button) => {
     button.addEventListener("click", () => openMealSlotPicker(button.dataset.openMealSlot));
@@ -14900,6 +14901,7 @@ function bindViewEvents() {
       mealsFeedback = `${mealName} planned for ${day} ${meal}.`;
       activeMealSlot = null;
       mealsPickerSelectedRecipeId = "";
+      if (recipe && recipe.id === mealsPlacingRecipeId) mealsPlacingRecipeId = "";
       autosaveState();
       render();
     });
@@ -15147,9 +15149,11 @@ function bindViewEvents() {
   document.querySelectorAll("[data-select-recipe]").forEach((button) => {
     button.addEventListener("click", () => {
       currentView = "meals";
-      mealsPickerSelectedRecipeId = button.dataset.selectRecipe;
-      activeMealSlot = "Monday:Dinner";
+      mealsPlacingRecipeId = button.dataset.selectRecipe;
+      mealsPickerSelectedRecipeId = mealsPlacingRecipeId;
+      activeMealSlot = null;
       render();
+      window.scrollTo(0, 0);
     });
   });
 
