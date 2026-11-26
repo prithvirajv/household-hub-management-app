@@ -179,7 +179,7 @@ test("checkboxes are always small squares, and the Linked accounts rows share on
 });
 
 test("Transactions shows what the banks list as pending, read-only and apart from every total, and the Linked accounts line counts them", () => {
-  assert.match(app, /\$\{pendingAtBanksCard\(\)\}\s*<section class="card">\s*<div class="section-head">\s*<div><span class="card-label">Bank expense<\/span><h3>Bank stream<\/h3>/, "the card sits just above Bank stream");
+  assert.match(app, /\$\{pendingAtBanksCard\(\)\}\s*<section class="card"(?: id="bankStreamCard")?>\s*<div class="section-head">\s*<div><span class="card-label">Bank expense<\/span><h3>Bank stream<\/h3>/, "the card sits just above Bank stream");
   assert.match(app, /<details class="card pending-banks" id="pendingBanksDetails" \$\{pendingBanksOpen \? "open" : ""\}>/);
   assert.match(app, /\$\("#pendingBanksDetails"\)\?\.addEventListener\("toggle", \(event\) => \{ pendingBanksOpen = event\.currentTarget\.open; \}\)/, "its open state survives a re-render");
   assert.match(app, /not in your ledger, budget or balances; each one comes in by itself once the bank posts it/);

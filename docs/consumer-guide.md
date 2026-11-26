@@ -166,6 +166,18 @@ button on every screen. People with view-only access don't see it.
 
 ![A Bank Stream refund row with a Refund match pill and Subcategory pre-filled to the matched purchase's budget line](../assets/mockup-bank-stream.svg)
 
+**The page is laid out around the ledger.** Under the title, one slim line shows
+this month's **Spent**, **Money in**, **Transactions** and how many rows are
+**Waiting** in Bank stream (a **N waiting in Bank stream ↓** button next to
+**Ledger** jumps to them). **Manage subcategories** is folded away until you
+need it. **Add a receipt** and **+ New transaction** sit side by side with the **Account** filter on one line above the list, and "Receipts waiting for a transaction (N)" is folded into one line you can open (it says how many are ready to attach). The ledger is one full-width table, one line per
+transaction (Payee, Tags, Amount, Date, Subcategory, Account and the row
+actions) with its column headings staying in view as you scroll; Tags, Bank
+stream, Pending, Check against the bank and Clean up sit below it. On a narrow
+window or a phone each row is two short lines (payee and amount; date and
+subcategory) and a **⋯** button opens the rest of that row: account, split,
+split with a friend, move to Transfers, receipt, delete and tags.
+
 1. Select **+ New transaction** (folded away so the list gets the page) for
    something you're entering by hand, or
    **+ Import CSV/PDF** to bring in a bank or credit-card statement.

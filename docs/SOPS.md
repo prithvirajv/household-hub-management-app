@@ -618,6 +618,13 @@ with no ledger or Bank stream row (leading gaps are not guessed: the card may no
 card (`homeTemplateInfo`, dismissal in `localStorage` key `familyloop-template-reminder-off`) and the Admin card's red "Not saved yet" banner; its Save button calls the same
 `PUT /api/admin/new-user-template` after `saveStateNow()`.
 
+### Transactions page layout
+`renderTransactions` uses `work-grid transactions-grid`: a single column (ledger first, `side-stack` cards in an auto-fit grid below). `metricsForView()` returns ledger figures for this view and `#metrics.metrics-compact` renders them
+as one slim line. The ledger table is a CSS grid (`.transactions-grid .ledger-entry-row`: checkbox, payee, tags, amount, date, subcategory, [account], five 30px actions) with the tag cell pinned to column 3 so a row is one line;
+header and rows must keep the same column count (a test checks it), the header is `position: sticky`, and the list no longer has its own `max-height` scroll box (the page scrolls; paging still caps rows at 200). At 1000px and
+below (`@media`) a row becomes a flex wrap of payee/amount and date/subcategory, and account, actions and tags show only when `row-expanded` is set by the row's `⋯` (`ledgerExpandedRows`, keyed by date|payee|amount|account so a
+re-render keeps it open). Measured on 60 rows: 2 rows on a 1440x900 screen before, 13 after; 10 at 1100px; 7 on a phone (0 before).
+
 ### Check against the bank
 `checkRowsAgainstRecords` (`lib/shared-logic.js`) takes rows from a statement (`parseBankCsvTransactions` / the PDF parser) or from the bank asked again, and classifies each: by bank id into ledger / Bank stream; a bank id in `linkedImportedIds` but nowhere now = removed; otherwise by cents + direction within 4 days (same day, or `payeesFuzzyMatch`); then `rowsAlreadyRemoved` (the counted `removedRowSignatures`) and `rowsCoveredByTransfers`; the rest is missing. Rows FamilyLoop holds for the account inside the source's dates that nothing claimed are `extras`. "Ask the bank again" is `POST /:id/sync` with `dryRun: true` (the rows come straight back; no staging, no last-sync or last-run change; a failed check is not recorded against the link unless the bank refused the connection). "Add" goes through `addBankStreamRows`. `applySimplefinSync` keeps `account.balanceAdjustments` (newest first, 20): the opening balance is nudged to the bank's figure on every sync, which can hide a missing transaction, so the nudges are the evidence. Not on mobile yet.
 

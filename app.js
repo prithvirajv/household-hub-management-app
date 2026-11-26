@@ -79,6 +79,11 @@ let ledgerAccountFilter = "";
 // "Re-date from a CSV": { fileName, rows (the statement's rows with both dates), accountId, fixes, notFound, picked: Set of fix indexes } - the preview
 // of moving rows imported earlier (on their purchase day) to the post date; nothing changes until Apply. Session-local.
 let postDateFixPlan = null;
+// On narrow screens a ledger row shows payee, amount, date and subcategory; its other controls open with the row's ⋯ button. Kept by row so a re-render keeps them open.
+const ledgerExpandedRows = new Set();
+// The receipts waiting for a transaction fold into one line; the person's choice is kept across re-renders.
+let receiptWaitingOpen = false;
+function ledgerRowKey(transaction) { return `${transaction.date}|${transaction.payee}|${transaction.amount}|${transaction.accountId || ""}`; }
 // "Check against the bank": the source's rows are kept so changing the account re-runs the check without asking the bank again.
 let bankCheck = { open: false, accountId: "", source: "", fileName: "", rows: [], from: "", busy: false, error: "", unchecked: new Set() };
 let ledgerAllMonths = false;
@@ -1103,6 +1108,7 @@ function refreshNetWorthTotals() {
 
   const metrics = $("#metrics");
   if (metrics) {
+    metrics.classList.toggle("metrics-compact", currentView === "transactions");
     metrics.innerHTML = metricsForView().map(([label, value, note]) => `
       <article class="metric">
         <span>${label}</span>
@@ -2152,6 +2158,7 @@ function renderShell() {
   renderNotificationBell();
   const metrics = metricsForView();
   $("#metrics").hidden = metrics.length === 0;
+  $("#metrics").classList.toggle("metrics-compact", currentView === "transactions");
   $("#metrics").innerHTML = metrics.map(([label, value, note, state]) => `
     <article class="metric${state ? ` metric-${state}` : ""}">
       <span>${label}</span>
@@ -2230,6 +2237,14 @@ function metricsForView() {
   if (currentView === "goals") return [["Active goals", String(state.goals.sinkingFunds.length), "sinking funds"], ["Saved", money.format(state.goals.sinkingFunds.reduce((sum, fund) => sum + fund.saved, 0)), "across goals"], ["Remaining", money.format(state.goals.sinkingFunds.reduce((sum, fund) => sum + fund.target - fund.saved, 0)), "to targets"]];
   if (currentView === "wealth") return [["Assets", money.format(netWorth().assets), "tracked"], ["Liabilities", money.format(netWorth().liabilities), "tracked"], ["Net worth", money.format(netWorth().total), "current estimate"], ["Debt accounts", String(state.goals.debts.length), "payoff plan"]];
   if (currentView === "admin") return [];
+  if (currentView === "transactions") {
+    // What the page is about, not the budget's income and plan: this month's ledger, and what is waiting to be reviewed.
+    const monthRows = state.transactions.filter((transaction) => String(transaction.date || "").slice(0, 7) === state.budget.month);
+    const out = monthRows.reduce((sum, transaction) => sum + Math.max(0, Number(transaction.amount) || 0), 0);
+    const into = monthRows.reduce((sum, transaction) => sum + Math.max(0, -(Number(transaction.amount) || 0)), 0);
+    const waiting = (state.transactionInboxDrafts || []).length;
+    return [["Spent", money.format(out), "this month"], ["Money in", money.format(into), "this month"], ["Transactions", String(monthRows.length), "this month"], ["Waiting", String(waiting), "in Bank stream", waiting ? "warning" : "neutral"]];
+  }
   // The Partners page has its own figures, and the household budget tiles (Income, Assigned...) are not about the partnership.
   if (currentView === "calculators") return [];
   if (currentView === "prices") return [];
@@ -3503,9 +3518,9 @@ function receiptInboxHtml() {
   const waiting = receiptsWaiting();
   const plan = receiptMatchPlan(waiting, state.transactions);
   return `<div class="receipt-inbox">
-    <div class="receipt-inbox-head"><button type="button" class="ghost" id="addReceiptButton">🧾 Add a receipt</button><small class="muted">Upload it as soon as you spend. It links to its transaction when the charge arrives.</small></div>
+    <div class="receipt-inbox-head"><button type="button" class="ghost" id="addReceiptButton" title="Upload it as soon as you spend. It links to its transaction when the charge arrives.">🧾 Add a receipt</button><small class="muted">Upload it as soon as you spend. It links to its transaction when the charge arrives.</small></div>
     ${receiptMailBoxHtml()}
-    ${waiting.length ? `<div class="receipt-waiting"><h4>Receipts waiting for a transaction (${waiting.length})</h4>
+    ${waiting.length ? `<details class="receipt-waiting" id="receiptWaitingDetails" ${receiptWaitingOpen ? "open" : ""}><summary>Receipts waiting for a transaction (${waiting.length})${waiting.filter((receipt) => (plan.suggestions[receipt.id] || [])[0]).length ? ` · <b>${waiting.filter((receipt) => (plan.suggestions[receipt.id] || [])[0]).length} ready to attach</b>` : ""}</summary>
       ${waiting.map((receipt) => {
         const suggestion = (plan.suggestions[receipt.id] || [])[0];
         const row = suggestion ? state.transactions[suggestion.index] : null;
@@ -3518,7 +3533,7 @@ function receiptInboxHtml() {
             : `<span class="receipt-waiting-hint muted">${escapeHtml(receiptSyncNote(receipt) || "Waiting for its charge.")}</span>`}
         </div>`;
       }).join("")}
-    </div>` : ""}
+    </details>` : ""}
   </div>`;
 }
 
@@ -3936,7 +3951,7 @@ function ledgerEntryRow(transaction, index, transferMatch, refundPair = null) {
   // unflipped charge) but is still spending, so it must stay red like a
   // checking expense's "-" does, not green just because the digit is positive.
   return `
-    <div class="ledger-entry-row ${state.accounts.length ? "has-accounts" : ""}">
+    <div class="ledger-entry-row ${state.accounts.length ? "has-accounts" : ""} ${ledgerExpandedRows.has(ledgerRowKey(transaction)) ? "row-expanded" : ""}">
       <input type="checkbox" aria-label="Select ${escapeHtml(transaction.payee)} for bulk categorize" data-ledger-entry-select="${index}" ${ledgerSelectedIndices.has(index) ? "checked" : ""}>
       <input class="line-name-input" aria-label="Payee" data-ledger-entry-payee="${index}" value="${escapeHtml(transaction.payee)}">
       <input class="money-input ${Number(transaction.amount || 0) < 0 ? "amount-in" : "amount-out"}" aria-label="Amount" type="number" step="0.01" data-ledger-entry-amount="${index}" value="${displayAmount}">
@@ -3950,6 +3965,7 @@ function ledgerEntryRow(transaction, index, transferMatch, refundPair = null) {
       <button class="icon-button ${transferMatch ? "has-transfer-match" : ""}" data-move-to-transfer-ledger="${index}" type="button" aria-label="Move ${escapeHtml(transaction.payee)} to Transfers" title="${transferMatch ? `Matches ${escapeHtml(accountName(transferMatch.accountId))}'s ${exactMoney.format(Math.abs(transferMatch.amount))} on ${formatShortDate(transferMatch.date)}` : "Move to Transfers (account-to-account movement)"}">${rowIconHtml("transfer")}</button>
       <button class="icon-button ${(transaction.receiptIds || []).length ? "has-receipt" : ""}" data-receipt-ledger="${index}" type="button" aria-label="${(transaction.receiptIds || []).length ? "View the receipt for" : "Attach a receipt to"} ${escapeHtml(transaction.payee)}" title="${(transaction.receiptIds || []).length ? "View the receipt and its items" : "Attach a receipt (photo or PDF)"}">${rowIconHtml("receipt")}</button>
       <button class="icon-button danger-button" data-delete-transaction="${index}" type="button" aria-label="Delete ${escapeHtml(transaction.payee)}">${rowIconHtml("close")}</button>
+      <button class="icon-button ledger-row-more" data-ledger-row-more="${index}" type="button" aria-label="More options for ${escapeHtml(transaction.payee)}" aria-expanded="${ledgerExpandedRows.has(ledgerRowKey(transaction))}" title="Account, split, receipt, tags, delete">⋯</button>
       ${ledgerRefundPill(refundPair)}
       ${paybackLineHtml(transaction, index)}
       ${!transaction.lineId && !isSplit ? `<span class="pill pill-warning ledger-needs-category" title="No subcategory yet - this counts toward your balance but not toward any budget line. Choose one on this row.">Needs a category</span>` : ""}
@@ -4261,10 +4277,10 @@ function renderTransactions() {
   const lineOptions = (selectedLineId) => (selectedLineId ? "" : `<option value="" disabled selected>Choose a subcategory…</option>`) + allLines().map((line) => `<option value="${line.id}" ${line.id === selectedLineId ? "selected" : ""}>${line.category} - ${line.name}</option>`).join("");
   const firstCategory = state.budget.categories[0];
   return `
-    <section class="work-grid">
+    <section class="work-grid transactions-grid">
       <div class="main-stack">
-        <section class="card">
-          <div class="section-head"><div><span class="card-label">Budget setup</span><h3>Manage subcategories from Transactions</h3></div></div>
+        <details class="card manage-subcategories">
+          <summary><b>Manage subcategories</b> <span class="muted">add or delete budget lines</span></summary>
           <div class="transaction-subcategory-adder">
             <label>Category<select id="transactionParentCategory">${state.budget.categories.map((category, index) => ({ category, index })).sort((a, b) => a.category.name.localeCompare(b.category.name)).map(({ category, index }) => `<option value="${index}">${category.name}</option>`).join("")}</select></label>
             <label class="custom-combobox">Subcategory
@@ -4276,9 +4292,9 @@ function renderTransactions() {
             <button id="addTransactionSubcategoryButton" class="ghost" type="button">Add subcategory</button>
             <button id="deleteTransactionSubcategoryButton" class="danger-button" type="button">Delete selected</button>
           </div>
-        </section>
-        <section class="card">
-          <div class="card-label">Entries</div><h3>Ledger</h3>
+        </details>
+        <section class="card ledger-card">
+          <h3 class="ledger-title">Ledger${(state.transactionInboxDrafts || []).length ? ` <button type="button" class="pill-button" data-scroll-to="bankStreamCard">${(state.transactionInboxDrafts || []).length} waiting in Bank stream ↓</button>` : ""}</h3>
           ${transactionValidationFeedback ? `<p class="muted" role="status">${escapeHtml(transactionValidationFeedback)}</p>` : ""}
           ${(() => {
             const shared = findRowsAlreadyShared(state.transactions, state.ious);
@@ -4339,7 +4355,6 @@ function renderTransactions() {
             </select></label>
             ${ledgerAccountFilter ? `<label class="ai-import-toggle"><input type="checkbox" id="ledgerAllMonths" ${ledgerAllMonths ? "checked" : ""}> <span>All months</span></label>` : ""}
           </div>` : ""}
-          <div class="card-label">Recent transactions</div>
           ${ledgerAcceptFeedback ? `<p class="muted" role="status">${escapeHtml(ledgerAcceptFeedback)}</p>` : ""}
           ${(() => {
             const monthTransactions = state.transactions
@@ -4377,11 +4392,12 @@ function renderTransactions() {
               <div class="ledger-entry-head ${state.accounts.length ? "has-accounts" : ""}">
                 <input type="checkbox" aria-label="Select all transactions" id="ledgerSelectAllCheckbox" ${allVisibleSelected ? "checked" : ""}>
                 <button type="button" data-sort-transactions="payee">Payee${transactionSortIndicator("payee")}</button>
+                <span>Tags</span>
                 <button type="button" data-sort-transactions="amount">Amount${transactionSortIndicator("amount")}</button>
                 <button type="button" data-sort-transactions="date">Date${transactionSortIndicator("date")}</button>
                 <button type="button" data-sort-transactions="subcategory">Subcategory${transactionSortIndicator("subcategory")}</button>
                 ${state.accounts.length ? `<button type="button" data-sort-transactions="account">Account${transactionSortIndicator("account")}</button>` : ""}
-                <span></span><span></span><span></span>
+                <span></span><span></span><span></span><span></span><span></span>
               </div>
               <div class="ledger-entry-list">${(() => {
                 const refundPairs = ledgerRefundPairs();
@@ -4420,7 +4436,7 @@ function renderTransactions() {
         })()}
         ${bankCheckCardHtml()}
         ${pendingAtBanksCard()}
-        <section class="card">
+        <section class="card" id="bankStreamCard">
           <div class="section-head">
             <div><span class="card-label">Bank expense</span><h3>Bank stream</h3></div>
             <div class="button-row">
@@ -11620,6 +11636,17 @@ function bindViewEvents() {
     render();
   });
 
+  $("#receiptWaitingDetails")?.addEventListener("toggle", (event) => { receiptWaitingOpen = event.currentTarget.open; });
+  document.querySelectorAll("[data-ledger-row-more]").forEach((button) => button.addEventListener("click", () => {
+    const transaction = state.transactions[Number(button.dataset.ledgerRowMore)];
+    const row = button.closest(".ledger-entry-row");
+    if (!transaction || !row) return;
+    const key = ledgerRowKey(transaction);
+    if (ledgerExpandedRows.has(key)) ledgerExpandedRows.delete(key); else ledgerExpandedRows.add(key);
+    row.classList.toggle("row-expanded", ledgerExpandedRows.has(key));
+    button.setAttribute("aria-expanded", String(ledgerExpandedRows.has(key)));
+  }));
+  document.querySelectorAll("[data-scroll-to]").forEach((button) => button.addEventListener("click", () => document.getElementById(button.dataset.scrollTo)?.scrollIntoView({ behavior: "smooth", block: "start" })));
   document.querySelectorAll("[data-goto-view]").forEach((button) => {
     button.addEventListener("click", () => {
       currentView = button.dataset.gotoView;
@@ -17685,6 +17712,7 @@ function refreshIncomeTotals() {
 
   const metrics = $("#metrics");
   if (metrics) {
+    metrics.classList.toggle("metrics-compact", currentView === "transactions");
     metrics.innerHTML = metricsForView().map(([label, value, note]) => `
       <article class="metric">
         <span>${label}</span>

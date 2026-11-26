@@ -17,10 +17,11 @@ test("every ledger row has a receipt button, highlighted when a receipt is attac
 });
 
 test("the ledger grid has one column for each of its five icon buttons, in rows and header alike", () => {
-  const rows = css.match(/\.ledger-entry-row(?:\.has-accounts)? \{[^}]*grid-template-columns:[^;]*;/g) || [];
+  // The page-wide rules; the Transactions page's own, tighter table is checked in transactions-layout.test.js.
+  const rows = css.match(/(?<!\.transactions-grid )\.ledger-entry-row(?:\.has-accounts)? \{[^}]*grid-template-columns:[^;]*;/g) || [];
   assert.equal(rows.length, 2);
   rows.forEach((rule) => assert.match(rule, /(?:40px ){4}40px;$/, "five 40px icon columns: split, friend, transfer, receipt, delete"));
-  const heads = css.match(/\.ledger-entry-head(?:\.has-accounts)? \{[^}]*grid-template-columns:[^;]*;/g) || [];
+  const heads = css.match(/(?<!\.transactions-grid )\.ledger-entry-head(?:\.has-accounts)? \{[^}]*grid-template-columns:[^;]*;/g) || [];
   assert.equal(heads.length, 2);
   heads.forEach((rule) => assert.match(rule, /(?:40px ){3}40px;$/, "the header keeps its one-column difference from the rows"));
 });
@@ -62,7 +63,7 @@ test("receipts are kept in their own table, scoped to the household, and the rou
 test("a receipt can be added on its own, waits in an inbox, and is linked when its transaction arrives", () => {
   const html = read("index.html");
   assert.match(app, /\$\{receiptInboxHtml\(\)\}\s*<details class="new-transaction" id="newTransactionDetails"/, "the inbox and its Add a receipt button sit above New transaction");
-  assert.match(app, /id="addReceiptButton">🧾 Add a receipt<\/button>/);
+  assert.match(app, /id="addReceiptButton"[^>]*>🧾 Add a receipt<\/button>/);
   assert.match(app, /Receipts waiting for a transaction \(\$\{waiting\.length\}\)/);
   assert.ok(html.indexOf("/lib/receipt-match.js") > html.indexOf("/lib/shared-logic.js") && html.indexOf("/lib/receipt-match.js") < html.indexOf("/app.js?v="), "the matcher loads before the page code");
   // Waiting means no transaction points at the receipt, so deleting a transaction simply returns its receipt to the inbox.
