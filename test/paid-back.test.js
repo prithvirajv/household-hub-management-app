@@ -139,3 +139,45 @@ test("a repayment whose note names the charge's merchant is matched to it; timin
   assert.equal(paybackMemoHint(zelle("big", 900, "2026-11-08", 'Zelle for "IXL"'), [c]), null, "bigger than the charge");
   assert.equal(paybackMemoHint(named, []), null);
 });
+
+test("the picker follows the usual pattern: a card purchase, the money comes back into another account; money sent to people and bills that cannot be split are left out", () => {
+  const accounts = [{ id: "card", name: "Costco Citi", type: "credit_card" }, { id: "bofa", name: "BOFA 6769", type: "checking" }];
+  const deposit = { id: "dep", date: "2026-10-05", payee: "Zelle payment from Priya", amount: -18.25, accountId: "bofa", lineId: "gifts" };
+  const rows = [
+    deposit,
+    { id: "dinner", date: "2026-10-03", payee: "SPICY DESI", amount: 54.75, accountId: "card", lineId: "food" },         // 3 x 18.25, on the card, two days before
+    { id: "ebay", date: "2026-10-05", payee: "eBay O*21-15234", amount: 24.36, accountId: "bofa", lineId: "shopping" },  // same account as the deposit, no even split
+    { id: "zelleout", date: "2026-09-08", payee: "Zelle payment to Dharma Parameswaran", amount: 1500, accountId: "bofa", lineId: "gifts" },
+    { id: "bigzelle", date: "2026-08-28", payee: "Zelle payment to SUDHARSAN for repay", amount: 2000, accountId: "bofa", lineId: "gifts" },
+    { id: "amazon", date: "2026-10-05", payee: "Amazon.com*590AR0MH1", amount: 191.53, accountId: "card", lineId: "shopping" },
+    { id: "paid", date: "2026-10-02", payee: "ALREADY SHARED", amount: 36.5, accountId: "card", lineId: "food" },
+    { id: "r1", date: "2026-10-04", payee: "Zelle payment from Sam", amount: -18.25, paidBackFor: "paid" },
+    { id: "r2", date: "2026-10-04", payee: "Zelle payment from Dee", amount: -18.25, paidBackFor: "paid" }
+  ];
+  const picked = paybackChargesFor(deposit, rows, { accounts });
+  assert.deepEqual(picked.map((item) => item.row.id), ["dinner", "amazon", "ebay"], "the card dinner first, then the other card purchase; the Zelles you sent and the fully shared bill are gone");
+  assert.ok(picked[0].reasons.includes("card purchase") && picked[0].reasons.includes("splits 3 ways"), picked[0].reasons.join(", "));
+  assert.deepEqual(paybackChargesFor(deposit, rows, { accounts, includePeer: true }).map((item) => item.row.id).filter((id) => id.includes("zelle")), ["zelleout", "bigzelle"], "Show other charges brings the Zelles back");
+  assert.equal(paybackChargesFor(deposit, rows, { accounts, limit: 1 }).length, 1);
+  assert.ok(paybackChargesFor(deposit, rows, { accounts, limit: Infinity }).length >= 3);
+});
+
+test("a charge named in the note ranks first even when it is not on a card, and the memo hint sees every candidate, not just the top few", () => {
+  const deposit = { id: "dep", date: "2026-10-05", payee: "Zelle payment from Alex IXL share", amount: -42, accountId: "bofa" };
+  const noise = Array.from({ length: 12 }, (_, i) => ({ id: `n${i}`, date: "2026-10-04", payee: `STORE ${i}`, amount: 84, accountId: "card" }));
+  const ixl = { id: "ixl", date: "2026-09-20", payee: "IXL FAMILY SUBSCRIPT", amount: 419.25, accountId: "bofa" };
+  const rows = [deposit, ...noise, ixl];
+  const accounts = [{ id: "card", type: "credit_card" }, { id: "bofa", type: "checking" }];
+  assert.equal(paybackChargesFor(deposit, rows, { accounts })[0].row.id, "ixl");
+  assert.equal(paybackMemoHint(deposit, rows).id, "ixl", "twelve better-looking charges do not hide it");
+});
+
+test("the screen passes the accounts, shows where and why each charge is suggested, and offers Show other charges", () => {
+  const fs = require("node:fs");
+  const path = require("node:path");
+  const app = fs.readFileSync(path.join(__dirname, "..", "app.js"), "utf8");
+  const css = fs.readFileSync(path.join(__dirname, "..", "styles.css"), "utf8");
+  assert.ok(app.includes("paybackChargesFor(transaction, state.transactions, { accounts: state.accounts, ...(paybackFindMore ? { limit: 40, includePeer: true } : {}) })"));
+  assert.ok(app.includes("item.reasons.slice(0, 2).join") && app.includes("accountName(item.row.accountId)") && app.includes("data-payback-more") && app.includes("let paybackFindMore = false;"));
+  assert.match(css, /\.payback-charge-choice \{ background: var\(--panel\); color: var\(--text\);/, "light buttons, readable text");
+});

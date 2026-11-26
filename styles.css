@@ -10269,3 +10269,9 @@ div.household-size-ok > .household-size-detail > summary { cursor: pointer; }
 .transactions-grid .ledger-card #ledgerAccountFilter { padding-top: 0; padding-bottom: 0; }
 .transactions-grid .ledger-card > .new-transaction > summary { padding-top: 0; padding-bottom: 0; }
 @media (max-width: 1000px) { .transactions-grid .ledger-entry-row .ledger-row-more { height: 32px; } }
+
+/* The "which charge?" choices are light buttons with readable text (they were solid green with dark-red small print). */
+.payback-charge-choice { background: var(--panel); color: var(--text); border: 1px solid var(--line); box-shadow: none; text-align: left; }
+.payback-charge-choice:hover { border-color: var(--green); background: var(--green-soft); }
+.payback-charge-choice small { color: var(--muted); }
+.payback-charge-choice b { color: var(--text); }

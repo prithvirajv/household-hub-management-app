@@ -272,7 +272,13 @@ split with a friend, move to Transfers, receipt, delete and tags.
   weeks); an undone deposit is never linked automatically again. Two charges
   from the same merchant, or a note that names none, a transfer, a charge that was itself a Zelle, or a merchant's own refund, are left for you.
   Deposits you already filed
-  under the charge's budget line are listed first. The charge needs a
+  under the charge's budget line are listed first. When you choose **Pays back a charge?** on a deposit, the list puts the likely
+  charges first: purchases on a **card** (the usual case is spending on a card
+  and the money coming back into another account), charges the deposit splits
+  evenly (an $18.25 deposit against a $54.75 dinner is "splits 3 ways"), and ones
+  a few days before it. Each shows its account and why it was suggested. Money you
+  sent to people (Zelle, Venmo) and charges already repaid in full are left out;
+  **Show other charges** brings the rest back. The charge needs a
   subcategory first; if you later change it, the linked deposits follow. If a
   deposit lands in a later month than the charge, it reduces that later
   month's line. Prefer **Split with a friend** (👥) when you want the friends'

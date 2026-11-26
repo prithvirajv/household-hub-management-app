@@ -578,6 +578,11 @@ against a real year of data every heuristic tried (a nearby Zelle, a group of eq
 `payback` deposits (`refreshPaybackLines`); a deposit the person re-filed by hand (another `lineSource`) is left alone. This is separate from Shared
 Expenses' IOU split, which shrinks the ledger row to the household's share; use one or the other per charge.
 
+Ranking of the "Pays back a charge?" picker (`paybackChargesFor(deposit, transactions, { accounts, limit, includePeer })`): candidates are unrepaid charges at least as big as the deposit, 3 days after to 60 before; charges that are
+themselves Zelle/Venmo-style payments out are excluded (`includePeer` brings them back) and so are charges with less left unpaid than the deposit. Score: +200 the deposit's note names the charge's merchant (`paybackNameToken`), +40 a credit-card account, +10 a different
+account from the deposit (-15 the same), +50 the charge is 2-8 equal shares of the deposit (within 2%, min $0.75), +10 charge/deposit <= 10 (-40 above 25), +30 charged 0-14 days before (+12 up to 30), +25 same budget line. The reasons are shown on each choice. `paybackMemoHits`
+asks for every candidate (`limit: Infinity`), so a named charge is found even when many others look better. Found on 2026-11-30: an $18.25 deposit was offered $1,500 and $2,000 Zelles it could not be repaying, because "at least as big, newest first" fitted nearly everything.
+
 ### History-gap notices clear themselves
 `historyGapCovered` / `openHistoryGapNotices` (`lib/shared-logic.js`) hide a notice once the account has at least one ledger or Bank stream row in every
 month from `fromMonth` to `toMonth`. It is derived at render time (`openGapNotices` in `app.js`), never saved, so deleting those rows brings it back; the

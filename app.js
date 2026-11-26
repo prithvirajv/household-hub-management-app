@@ -4009,6 +4009,7 @@ let paybackPicked = new Set(); // ledger indexes of the deposits ticked in the o
 // bar offers "Paid back by others..." when exactly one charge is ticked. Showing a button on every charge was tried against real data and would have
 // lit up hundreds of ordinary purchases, so nothing is suggested on a charge by itself.
 let paybackFindIndex = null; // ledger index of the repayment whose "which charge?" picker is open
+let paybackFindMore = false; // "Show other charges": more of them, and the Zelles and Venmos sent to people too
 
 function paybackLineHtml(transaction, index) {
   if (transaction.paidBackFor) {
@@ -4030,11 +4031,11 @@ function paybackLineHtml(transaction, index) {
 // The picker under a repayment: the charges it could be paying back; choosing one opens that charge's editor with this deposit (and any look-alikes) ticked.
 function paybackFindHtml(transaction, index) {
   if (paybackFindIndex !== index) return "";
-  const charges = paybackChargesFor(transaction, state.transactions);
+  const charges = paybackChargesFor(transaction, state.transactions, { accounts: state.accounts, ...(paybackFindMore ? { limit: 40, includePeer: true } : {}) });
   return `<div class="payback-editor">
-    <p class="muted">Which charge did this ${exactMoney.format(-Number(transaction.amount))} repay? Choose it and you can tick the other deposits for the same charge before linking.</p>
-    ${charges.length ? charges.map((item) => `<button type="button" class="payback-candidate payback-charge-choice" data-payback-choose="${state.transactions.indexOf(item.row)}" data-payback-from="${index}"><span>${escapeHtml(item.row.payee)}</span><small>${formatShortDate(item.row.date)}${item.sameLine ? " · same budget line" : ""}</small><b>${exactMoney.format(Number(item.row.amount))}</b></button>`).join("") : `<p class="muted">No charge at least this big within two months of this deposit.</p>`}
-    <div class="split-editor-actions"><button type="button" class="ghost" data-payback-cancel>Cancel</button></div>
+    <p class="muted">Which charge did this ${exactMoney.format(-Number(transaction.amount))} repay? Choose it and you can tick the other deposits for the same charge before linking. Card purchases and charges the amount splits evenly come first${paybackFindMore ? "" : "; money you sent to people is left out"}.</p>
+    ${charges.length ? charges.map((item) => `<button type="button" class="payback-candidate payback-charge-choice" data-payback-choose="${state.transactions.indexOf(item.row)}" data-payback-from="${index}"><span>${escapeHtml(item.row.payee)}</span><small>${formatShortDate(item.row.date)}${item.row.accountId ? ` · ${escapeHtml(accountName(item.row.accountId))}` : ""}${item.reasons.length ? ` · ${escapeHtml(item.reasons.slice(0, 2).join(" · "))}` : ""}</small><b>${exactMoney.format(Number(item.row.amount))}</b></button>`).join("") : `<p class="muted">No likely charge within two months of this deposit: a charge has to be at least this big and not already repaid in full.</p>`}
+    <div class="split-editor-actions">${paybackFindMore ? "" : `<button type="button" class="ghost" data-payback-more>Show other charges</button>`}<button type="button" class="ghost" data-payback-cancel>Cancel</button></div>
   </div>`;
 }
 
@@ -14316,6 +14317,7 @@ function bindViewEvents() {
   document.querySelectorAll("[data-payback-find]").forEach((button) => {
     button.addEventListener("click", () => {
       paybackFindIndex = Number(button.dataset.paybackFind);
+      paybackFindMore = false;
       paybackEditorIndex = null;
       paybackPicked = new Set();
       render();
@@ -14335,6 +14337,7 @@ function bindViewEvents() {
     });
   });
 
+  document.querySelector("[data-payback-more]")?.addEventListener("click", () => { paybackFindMore = true; render(); });
   document.querySelector("[data-payback-cancel]")?.addEventListener("click", () => {
     paybackEditorIndex = null;
     paybackFindIndex = null;

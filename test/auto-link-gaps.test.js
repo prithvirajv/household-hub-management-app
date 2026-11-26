@@ -35,7 +35,7 @@ test("what is already repaid counts against the charge", () => {
   assert.equal(paybackAutoMatch(rows[1], rows), rows[0]);
   applyPayback(rows[0], [rows[1]]);
   assert.equal(paybackAutoMatch(rows[2], rows), null, "the second deposit no longer fits in what is left");
-  assert.equal(paybackMemoHits(rows[2], rows).length, 1);
+  assert.equal(paybackMemoHits(rows[2], rows).length, 0, "a charge with less left unpaid than the deposit is not offered at all");
 });
 
 test("an automatic link is listed for two weeks with its Undo, then drops away; acknowledging clears it", () => {
