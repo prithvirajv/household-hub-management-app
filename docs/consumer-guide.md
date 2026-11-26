@@ -773,7 +773,7 @@ If two people change the setup at the same moment, the second change is refused 
 All of this lives in one **Net worth** card: your **Accounts** (grouped as
 Checking, Savings, Investment, Credit cards, ...) with their type, opening
 balance, close date, balance chart and "synced from/through" tags (Investment
-accounts sit in the **Investments** group instead, see below), then your
+accounts sit in the **Investments** group instead, see below; accounts you have closed are folded into one **Closed accounts** section at the end of the list, collapsed until you open it, and your choice is kept while you use the app), then your
 holdings, property and loans, then **Transfers** between accounts. One **+ Add** button at
 the top of the card offers **Bank account or card**, **Investment account**
 and **Property or other asset**. An account is listed once - in

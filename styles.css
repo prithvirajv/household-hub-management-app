@@ -10282,3 +10282,45 @@ div.household-size-ok > .household-size-detail > summary { cursor: pointer; }
 .transactions-grid .ledger-card .receipt-inbox > .receipt-mail:not([open]) { flex: 0 0 auto; margin: 0; padding: 0; border: 0; background: transparent; }
 .transactions-grid .ledger-card .receipt-mail:not([open]) > summary { box-sizing: border-box; height: 36px; display: inline-flex; align-items: center; padding: 0 0.8rem; border: 1px solid var(--line); border-radius: 6px; background: var(--panel); font-weight: 800; font-size: 0.85rem; list-style: none; cursor: pointer; }
 .transactions-grid .ledger-card .receipt-mail > summary::-webkit-details-marker { display: none; }
+
+/* ---- The top of every page: a slim header and a slim strip of figures, so content starts near the top ---- */
+.topbar { margin-bottom: 0.55rem; }
+.topbar h2 { font-size: 1.55rem; }
+.topbar-actions .icon-button { width: 40px; min-width: 40px; height: 40px; min-height: 40px; }
+.topbar-actions .month-control input, .topbar-actions .week-control select { height: 40px; }
+.topbar-actions .user-chip, .topbar-actions #signOutButton { min-height: 40px; }
+#metrics.metrics-compact { margin-bottom: 0.2rem; }
+
+@media (max-width: 760px) {
+  /* Row 1: the page title and Sign out. Row 2: the month and four icon buttons. The user chip and the export button are left out here (the name is in Profile). */
+  .topbar { display: grid; grid-template-columns: minmax(0, 1fr) 40px 40px 40px 40px; grid-auto-rows: auto; gap: 0.4rem 0.4rem; align-items: center; margin-bottom: 0.4rem; }
+  .topbar-actions { display: contents; }
+  .topbar > div:first-child { grid-column: 1 / 4; grid-row: 1; min-width: 0; }
+  .topbar .eyebrow { display: none; }
+  .topbar h2 { font-size: 1.25rem; line-height: 1.15; }
+  .topbar-actions #signOutButton { grid-column: 4 / 6; grid-row: 1; justify-self: end; width: auto; min-height: 36px; height: 36px; padding: 0 0.8rem; margin: 0; }
+  .topbar-actions .month-control { grid-column: 1; grid-row: 2; width: auto; }
+  .topbar-actions .month-control, .topbar-actions .week-control { flex: none; }
+  .topbar-actions .week-control { grid-column: 1 / 6; grid-row: 3; width: auto; }
+  .topbar-actions #syncButton { grid-column: 2; grid-row: 2; }
+  .topbar-actions #themeToggleButton { grid-column: 3; grid-row: 2; }
+  .topbar-actions #globalSearchButton { grid-column: 4; grid-row: 2; }
+  .topbar-actions .notification-bell-wrap { grid-column: 5; grid-row: 2; }
+  .topbar-actions .notification-bell-wrap .icon-button { width: 40px; }
+  .topbar-actions #downloadCsvButton, .topbar-actions .user-chip { display: none; }
+  .topbar-actions .icon-button { width: 40px; min-width: 40px; height: 40px; min-height: 40px; }
+  .topbar-actions .month-control { font-size: 0; }
+  .topbar-actions .month-control input[type="month"] { font-size: 0.9rem; height: 40px; }
+  /* The figures: a 2 x 2 grid of small tiles instead of four tall ones in a column. */
+  #metrics.metrics-compact { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0.35rem 0.5rem; }
+  #metrics.metrics-compact .metric { display: grid; grid-template-columns: minmax(0, 1fr); gap: 0; padding: 0.25rem 0.2rem 0.25rem 0.6rem; }
+  #metrics.metrics-compact .metric span { font-size: 0.66rem; }
+  #metrics.metrics-compact .metric strong { font-size: 1.05rem; }
+  #metrics.metrics-compact .metric small { display: none; }
+}
+#metrics.metrics-compact .metric { border-radius: 2px; }
+/* A figure's small note stays on the same line (long ones, like the list of bills due, are cut with an ellipsis; the full text is the tile's tooltip). */
+#metrics.metrics-compact .metric small { max-width: 26ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+.account-type-group.closed-accounts > summary { color: var(--muted); }
+.account-type-group.closed-accounts > summary b { color: var(--muted); }

@@ -144,7 +144,8 @@ let expandedDecisionId = null;
 // added account type just starts absent (expanded) with nothing to
 // initialize. Session-local like the flags above; not persisted to state
 // since it's just a display preference, not household data.
-let wealthCollapsedGroups = new Set();
+// Closed accounts start folded away into their own "Closed accounts" section (the person can open it; the choice is kept for the session).
+let wealthCollapsedGroups = new Set(["closed-accounts"]);
 // Whether the Wealth page's whole transfer history is collapsed - one flag
 // for the entire list (not per-transfer) since it's shown as a single
 // disclosure. Starts collapsed so a household with a long transfer history
@@ -1108,7 +1109,7 @@ function refreshNetWorthTotals() {
 
   const metrics = $("#metrics");
   if (metrics) {
-    metrics.classList.toggle("metrics-compact", currentView === "transactions");
+    metrics.classList.add("metrics-compact");
     metrics.innerHTML = metricsForView().map(([label, value, note]) => `
       <article class="metric">
         <span>${label}</span>
@@ -2158,9 +2159,9 @@ function renderShell() {
   renderNotificationBell();
   const metrics = metricsForView();
   $("#metrics").hidden = metrics.length === 0;
-  $("#metrics").classList.toggle("metrics-compact", currentView === "transactions");
+  $("#metrics").classList.add("metrics-compact");
   $("#metrics").innerHTML = metrics.map(([label, value, note, state]) => `
-    <article class="metric${state ? ` metric-${state}` : ""}">
+    <article class="metric${state ? ` metric-${state}` : ""}" ${note ? `title="${String(note).replace(/"/g, "&quot;")}"` : ""}>
       <span>${label}</span>
       <strong>${value}</strong>
       ${note ? `<small>${note}</small>` : ""}
@@ -9045,12 +9046,27 @@ function accountsLookingLikeInvestments() {
   return state.accounts.filter((account) => account.type === "other" && !account.closedAt && guessAccountType({ name: account.name }) === "investment");
 }
 
+// Accounts that have been closed, folded into one collapsed section so they do not crowd the live ones (each keeps its row: balance, "Closed <date>" tag, reopen).
+function closedAccountsGroupHtml() {
+  const closed = state.accounts.filter((account) => account.closedAt && !isInvestmentAccount(account));
+  if (!closed.length) return "";
+  const total = closed.reduce((sum, account) => sum + currentAccountBalance(account.id), 0);
+  return `<details class="account-type-group closed-accounts" data-account-group="closed-accounts" ${wealthCollapsedGroups.has("closed-accounts") ? "" : "open"}>
+    <summary>
+      <span>Closed accounts</span>
+      <small class="muted">${closed.length} account${closed.length === 1 ? "" : "s"}</small>
+      <b>${money.format(total)}</b>
+    </summary>
+    ${closed.map((account) => accountItemRow(account, state.accounts.indexOf(account))).join("")}
+  </details>`;
+}
+
 function wealthAccountsHtml() {
   const lookalikes = accountsLookingLikeInvestments();
   return `
           ${lookalikes.length ? `<div class="empty-inline account-type-suggestion"><span>${lookalikes.length === 1 ? "This account looks" : `These ${lookalikes.length} accounts look`} like an Investment account, but ${lookalikes.length === 1 ? "is" : "are"} saved as Other: ${lookalikes.map((account) => escapeHtml(account.name)).join("; ")}.</span> <button type="button" class="ghost" data-retype-investment>Change to Investment</button></div>` : ""}
           ${state.accounts.length
-            ? groupAccountsByType(state.accounts.filter((account) => !isInvestmentAccount(account))).map((group) => {
+            ? groupAccountsByType(state.accounts.filter((account) => !isInvestmentAccount(account) && !account.closedAt)).map((group) => {
                 const isLiabilityGroup = group.type === "credit_card";
                 const groupTotal = group.accounts.reduce((sum, account) => sum + currentAccountBalance(account.id), 0);
                 return `<details class="account-type-group" data-account-group="${group.type}" ${wealthCollapsedGroups.has(group.type) ? "" : "open"}>
@@ -9061,7 +9077,7 @@ function wealthAccountsHtml() {
                   </summary>
                   ${group.accounts.map((account) => accountItemRow(account, state.accounts.indexOf(account))).join("")}
                 </details>`;
-              }).join("")
+              }).join("") + closedAccountsGroupHtml()
             : `<div class="onboarding-empty compact-onboarding"><div class="empty-symbol" aria-hidden="true">▥</div><h3>Add your first account</h3><p>Track a checking account your paycheck deposits into, and a credit card whose purchases it pays off.</p></div>`}
         `;
 }
@@ -17715,7 +17731,7 @@ function refreshIncomeTotals() {
 
   const metrics = $("#metrics");
   if (metrics) {
-    metrics.classList.toggle("metrics-compact", currentView === "transactions");
+    metrics.classList.add("metrics-compact");
     metrics.innerHTML = metricsForView().map(([label, value, note]) => `
       <article class="metric">
         <span>${label}</span>

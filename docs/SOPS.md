@@ -630,6 +630,11 @@ header and rows must keep the same column count (a test checks it), the header i
 below (`@media`) a row becomes a flex wrap of payee/amount and date/subcategory, and account, actions and tags show only when `row-expanded` is set by the row's `⋯` (`ledgerExpandedRows`, keyed by date|payee|amount|account so a
 re-render keeps it open). Measured on 60 rows: 2 rows on a 1440x900 screen before, 13 after; 10 at 1100px; 7 on a phone (0 before).
 
+### The top of every page
+`#metrics` always carries `metrics-compact` (set in both places `metricsForView()` is rendered): the figures are one slim line, each with its small note kept on one line (ellipsis, full text in the tile's `title`). The header controls are 40px (`.topbar-actions`). At 760px and below the
+`.topbar` becomes a grid (`.topbar-actions { display: contents }`): row 1 the page title and Sign out, row 2 the month field and the refresh / theme / search / notification buttons; the user chip and the export button are hidden there (the name is in Profile, Reports has exports);
+the figures are a 2 x 2 grid. Measured on the demo household: the first card starts at 116-154px on a 1440x900 screen (178-241px before) and 209-250px on a phone (541-699px before, on an 812px screen).
+
 ### Check against the bank
 `checkRowsAgainstRecords` (`lib/shared-logic.js`) takes rows from a statement (`parseBankCsvTransactions` / the PDF parser) or from the bank asked again, and classifies each: by bank id into ledger / Bank stream; a bank id in `linkedImportedIds` but nowhere now = removed; otherwise by cents + direction within 4 days (same day, or `payeesFuzzyMatch`); then `rowsAlreadyRemoved` (the counted `removedRowSignatures`) and `rowsCoveredByTransfers`; the rest is missing. Rows FamilyLoop holds for the account inside the source's dates that nothing claimed are `extras`. "Ask the bank again" is `POST /:id/sync` with `dryRun: true` (the rows come straight back; no staging, no last-sync or last-run change; a failed check is not recorded against the link unless the bank refused the connection). "Add" goes through `addBankStreamRows`. `applySimplefinSync` keeps `account.balanceAdjustments` (newest first, 20): the opening balance is nudged to the bank's figure on every sync, which can hide a missing transaction, so the nudges are the evidence. Not on mobile yet.
 

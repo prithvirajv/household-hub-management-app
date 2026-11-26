@@ -9,7 +9,7 @@ const css = fs.readFileSync(path.join(__dirname, "..", "styles.css"), "utf8");
 test("the Transactions page puts the ledger first: relevant slim figures, subcategories collapsed, one slim header", () => {
   const branch = app.slice(app.indexOf('if (currentView === "transactions") {'), app.indexOf("// The Partners page has its own figures"));
   ["monthRows", '["Spent"', '["Money in"', '["Transactions"', '["Waiting"'].forEach((piece) => assert.ok(branch.includes(piece), piece));
-  assert.ok(app.includes('classList.toggle("metrics-compact", currentView === "transactions")'));
+  assert.ok(app.includes('$("#metrics").classList.add("metrics-compact")') && app.includes('metrics.classList.add("metrics-compact")'), "every page gets the slim figures strip");
   assert.ok(app.includes('<details class="card manage-subcategories">') && app.includes('<h3 class="ledger-title">Ledger'));
   assert.ok(!app.includes("Manage subcategories from Transactions</h3>") && !app.includes('<div class="card-label">Recent transactions</div>'), "the extra headings are gone");
   assert.ok(app.includes('data-scroll-to="bankStreamCard"') && app.includes('id="bankStreamCard"'), "waiting Bank stream rows are one tap away");
@@ -49,4 +49,22 @@ test("Add a receipt and + New transaction sit side by side, and the receipts wai
 
 test("the toolbar controls share one height so they sit on one centre line", () => {
   assert.match(css, /#addReceiptButton,\s*\.transactions-grid \.ledger-card > \.new-transaction > summary,\s*\.transactions-grid \.ledger-card #ledgerAccountFilter \{[^}]*height: 36px; min-height: 36px;/);
+});
+
+test("every page opens with a slim header and slim figures; on a phone the header is two short rows and the figures a 2 x 2 grid", () => {
+  assert.match(css, /#metrics\.metrics-compact \{ margin-bottom: 0\.2rem; \}/);
+  assert.match(css, /@media \(max-width: 760px\) \{\s*\/\* Row 1: the page title and Sign out\./);
+  assert.match(css, /\.topbar-actions \{ display: contents; \}/, "the actions become grid items of the header");
+  assert.match(css, /#metrics\.metrics-compact \{ display: grid; grid-template-columns: repeat\(2, minmax\(0, 1fr\)\);/);
+  assert.match(css, /#signOutButton \{ grid-column: 4 \/ 6; grid-row: 1;/, "Sign out stays one tap away, on the title row");
+  assert.match(css, /#metrics\.metrics-compact \.metric small \{ max-width: 26ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; \}/);
+  assert.ok(app.includes('title="${String(note).replace(/"/g, "&quot;")}"'), "the full note is the tile's tooltip");
+});
+
+test("Wealth folds closed accounts away: live accounts stay in their type groups, closed ones go to one collapsed 'Closed accounts' section", () => {
+  assert.match(app, /let wealthCollapsedGroups = new Set\(\["closed-accounts"\]\);/, "collapsed to start with");
+  assert.ok(app.includes("!isInvestmentAccount(account) && !account.closedAt)).map((group) =>"), "the type groups hold open accounts only");
+  assert.ok(app.includes("}).join(\"\") + closedAccountsGroupHtml()"));
+  assert.match(app, /function closedAccountsGroupHtml\(\) \{\s*const closed = state\.accounts\.filter\(\(account\) => account\.closedAt && !isInvestmentAccount\(account\)\);\s*if \(!closed\.length\) return "";/);
+  assert.ok(app.includes('data-account-group="closed-accounts"'), "its open state is kept like the other groups");
 });

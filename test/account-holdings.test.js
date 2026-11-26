@@ -102,7 +102,7 @@ test("Net worth has one Add menu (bank or card, investment account, property or 
 
 test("Investment accounts are listed under Investments with the holdings card; their account fields fold under Edit account", () => {
   const app = fs.readFileSync(path.join(__dirname, "..", "app.js"), "utf8");
-  assert.match(app, /groupAccountsByType\(state\.accounts\.filter\(\(account\) => !isInvestmentAccount\(account\)\)\)/, "the by-type account list leaves them out");
+  assert.match(app, /groupAccountsByType\(state\.accounts\.filter\(\(account\) => !isInvestmentAccount\(account\) && !account\.closedAt\)\)/, "the by-type account list leaves them out (and closed accounts, which have their own section)");
   assert.match(app, /key: "nw-investments"[^\n]*isInvestmentAccount\(account\)[^\n]*investmentAccountCard/, "the Investments group lists them");
   assert.match(app, /function isInvestmentAccount\(account\) \{\s*return account\.type === "investment" \|\| Boolean\(account\.holdingsGroupId\);/);
   const card = app.slice(app.indexOf("function netWorthStockGroupCard"), app.indexOf("const accountTypeColors"));
