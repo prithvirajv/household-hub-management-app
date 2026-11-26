@@ -41,7 +41,8 @@ test("the table's header and rows have the same number of columns, with and with
 
 test("Add a receipt and + New transaction sit side by side, and the receipts waiting fold into one collapsible line", () => {
   assert.match(css, /\.transactions-grid \.ledger-card \.receipt-inbox-head \{ order: 1; \}/);
-  assert.match(css, /\.transactions-grid \.ledger-card > \.new-transaction:not\(\[open\]\) \{ order: 1; \}/);
+  assert.match(css, /\.transactions-grid \.ledger-card > \.new-transaction:not\(\[open\]\) \{ order: 2; \}/);
+  assert.match(css, /\.receipt-inbox > \.receipt-mail:not\(\[open\]\) \{ order: 3; \}/, "Get receipts by email is next to them too");
   assert.ok(app.includes('<details class="receipt-waiting" id="receiptWaitingDetails" ${receiptWaitingOpen ? "open" : ""}><summary>Receipts waiting for a transaction'));
   assert.ok(app.includes("ready to attach</b>") && app.includes("let receiptWaitingOpen = false;") && app.includes('$("#receiptWaitingDetails")?.addEventListener("toggle"'));
 });

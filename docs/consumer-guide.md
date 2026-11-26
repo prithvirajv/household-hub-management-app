@@ -170,7 +170,7 @@ button on every screen. People with view-only access don't see it.
 this month's **Spent**, **Money in**, **Transactions** and how many rows are
 **Waiting** in Bank stream (a **N waiting in Bank stream ↓** button next to
 **Ledger** jumps to them). **Manage subcategories** is folded away until you
-need it. **Add a receipt** and **+ New transaction** sit side by side with the **Account** filter on one line above the list, and "Receipts waiting for a transaction (N)" is folded into one line you can open (it says how many are ready to attach). The ledger is one full-width table, one line per
+need it. **Add a receipt**, **+ New transaction** and **Get receipts by email** sit side by side with the **Account** filter on one line above the list (the email box opens full width below them), and "Receipts waiting for a transaction (N)" is folded into one line you can open (it says how many are ready to attach). The ledger is one full-width table, one line per
 transaction (Payee, Tags, Amount, Date, Subcategory, Account and the row
 actions) with its column headings staying in view as you scroll; Tags, Bank
 stream, Pending, Check against the bank and Clean up sit below it. On a narrow

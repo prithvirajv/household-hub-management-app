@@ -10250,15 +10250,17 @@ div.household-size-ok > .household-size-detail > summary { cursor: pointer; }
 }
 
 /* Add a receipt and + New transaction sit side by side (with the account filter) right under the title, whatever else the card holds. */
-.transactions-grid .ledger-card > * { order: 2; }
+.transactions-grid .ledger-card > * { order: 9; }
 .transactions-grid .ledger-card > .ledger-title { order: 0; }
 .transactions-grid .ledger-card .receipt-inbox-head { order: 1; }
-.transactions-grid .ledger-card > .new-transaction:not([open]) { order: 1; }
-.transactions-grid .ledger-card > .ledger-filter-row { order: 1; }
+.transactions-grid .ledger-card > .new-transaction:not([open]) { order: 2; }
+.transactions-grid .ledger-card .receipt-inbox > .receipt-mail:not([open]) { order: 3; }
+.transactions-grid .ledger-card > .ledger-filter-row { order: 4; }
 .receipt-waiting > summary { cursor: pointer; font-weight: 700; padding: 0.35rem 0; }
 .receipt-waiting > summary b { color: var(--green); }
-.transactions-grid .ledger-card .receipt-inbox > * { order: 2; }
+.transactions-grid .ledger-card .receipt-inbox > * { order: 9; }
 .transactions-grid .ledger-card .receipt-inbox > .receipt-inbox-head { order: 1; }
+.transactions-grid .ledger-card .receipt-inbox > .receipt-mail:not([open]) { order: 3; }
 /* The toolbar controls share one height and one centre line (they were 37px, 32px and 34px). */
 .transactions-grid .ledger-card .receipt-inbox-head,
 .transactions-grid .ledger-card > .new-transaction:not([open]),
@@ -10275,3 +10277,8 @@ div.household-size-ok > .household-size-detail > summary { cursor: pointer; }
 .payback-charge-choice:hover { border-color: var(--green); background: var(--green-soft); }
 .payback-charge-choice small { color: var(--muted); }
 .payback-charge-choice b { color: var(--text); }
+
+/* "Get receipts by email" is a toolbar button like its neighbours while closed (it opens full width below the toolbar). */
+.transactions-grid .ledger-card .receipt-inbox > .receipt-mail:not([open]) { flex: 0 0 auto; margin: 0; padding: 0; border: 0; background: transparent; }
+.transactions-grid .ledger-card .receipt-mail:not([open]) > summary { box-sizing: border-box; height: 36px; display: inline-flex; align-items: center; padding: 0 0.8rem; border: 1px solid var(--line); border-radius: 6px; background: var(--panel); font-weight: 800; font-size: 0.85rem; list-style: none; cursor: pointer; }
+.transactions-grid .ledger-card .receipt-mail > summary::-webkit-details-marker { display: none; }
