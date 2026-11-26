@@ -68,3 +68,12 @@ test("Wealth folds closed accounts away: live accounts stay in their type groups
   assert.match(app, /function closedAccountsGroupHtml\(\) \{\s*const closed = state\.accounts\.filter\(\(account\) => account\.closedAt && !isInvestmentAccount\(account\)\);\s*if \(!closed\.length\) return "";/);
   assert.ok(app.includes('data-account-group="closed-accounts"'), "its open state is kept like the other groups");
 });
+
+test("recipe chips in the meal planner have a readable text colour, and a long list is searchable and scrolls", () => {
+  const chip = css.match(/\.meal-picker-chip \{[^}]*\}/)[0];
+  assert.match(chip, /background: var\(--panel\);/);
+  assert.match(chip, /color: var\(--text\);/, "a button's white text on this light chip made the recipe name invisible");
+  assert.ok(app.includes("data-meal-picker-search") && app.includes("meal-picker-chips-many") && app.includes("chip.hidden = !words.every("));
+  assert.match(css, /\.meal-picker-chips-many \{ max-height: 14rem; overflow-y: auto;/);
+  assert.match(css, /body::before \{ content: ""; position: fixed; top: 0; left: 0; right: 0; height: env\(safe-area-inset-top, 0px\);/, "a solid strip under the phone's status bar");
+});

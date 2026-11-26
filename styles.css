@@ -6031,7 +6031,10 @@ html[data-theme="dark"] .note-color-coral { background: color-mix(in srgb, #fff0
   border-radius: 8px;
   border: 1px solid var(--line);
   background: var(--panel);
-  font-size: 0.72rem;
+  /* A button takes the global white text; on this light chip the recipe name was invisible and only the kcal line showed. */
+  color: var(--text);
+  text-align: left;
+  font-size: 0.8rem;
   font-weight: 700;
 }
 
@@ -10324,3 +10327,12 @@ div.household-size-ok > .household-size-detail > summary { cursor: pointer; }
 
 .account-type-group.closed-accounts > summary { color: var(--muted); }
 .account-type-group.closed-accounts > summary b { color: var(--muted); }
+
+/* A long recipe list scrolls inside the picker and can be searched (it used to run for several screens). */
+.meal-picker-chips-many { max-height: 14rem; overflow-y: auto; padding-right: 2px; }
+.meal-picker-search { width: 100%; min-height: 36px; border: 1px solid var(--line); border-radius: 6px; padding: 0 0.6rem; font-size: 0.85rem; background: var(--panel); }
+.meal-picker-chip[hidden] { display: none; }
+
+/* On an iPhone the clock and battery are drawn over the page, so scrolled content showed through them ("D12:55nner"). A solid strip the height of the status bar sits under them
+   (zero height wherever there is no status bar). */
+body::before { content: ""; position: fixed; top: 0; left: 0; right: 0; height: env(safe-area-inset-top, 0px); background: var(--bg); z-index: 60; pointer-events: none; }

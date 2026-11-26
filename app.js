@@ -8002,7 +8002,8 @@ function mealSlotPickerHtml(day, meal, planned) {
   const customValue = planned && !planned.recipeId ? planned.meal : "";
   return `<div class="meal-slot meal-slot-picker">
     <div class="meal-slot-head"><small>${meal}</small><button class="meal-remove-button" data-cancel-meal-slot type="button" aria-label="Cancel">×</button></div>
-    <div class="meal-picker-chips">${state.meals.recipes.length
+    ${state.meals.recipes.length > 8 ? `<input type="search" class="meal-picker-search" placeholder="Search your ${state.meals.recipes.length} recipes" aria-label="Search recipes" data-meal-picker-search>` : ""}
+    <div class="meal-picker-chips ${state.meals.recipes.length > 8 ? "meal-picker-chips-many" : ""}">${state.meals.recipes.length
       ? state.meals.recipes.map((recipe) => `<button type="button" class="meal-picker-chip ${recipe.id === mealsPickerSelectedRecipeId ? "selected" : ""}" data-meal-picker-recipe="${recipe.id}">${escapeHtml(recipe.name)}<small>${Number(recipe.calories || 0)} kcal</small></button>`).join("")
       : `<small class="muted">No saved recipes yet — type a meal name below.</small>`}</div>
     <input type="text" class="meal-picker-custom" placeholder="Or type any meal" value="${escapeHtml(customValue)}" data-meal-picker-name>
@@ -14853,6 +14854,17 @@ function bindViewEvents() {
       if (!mealsPickerSelectedRecipeId) return;
       mealsPickerSelectedRecipeId = "";
       document.querySelectorAll(".meal-picker-chip.selected").forEach((chip) => chip.classList.remove("selected"));
+    });
+  });
+
+  // A long recipe list is searched in place (it only hides chips, so it does not re-render and lose the cursor).
+  document.querySelectorAll("[data-meal-picker-search]").forEach((input) => {
+    input.addEventListener("input", () => {
+      const words = input.value.toLowerCase().split(/\s+/).filter(Boolean);
+      input.closest(".meal-slot-picker")?.querySelectorAll(".meal-picker-chip").forEach((chip) => {
+        const text = chip.textContent.toLowerCase();
+        chip.hidden = !words.every((word) => text.includes(word));
+      });
     });
   });
 

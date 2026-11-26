@@ -648,7 +648,8 @@ split with a friend, move to Transfers, receipt, delete and tags.
 1. Save a reusable recipe under **Recipes** with its ingredients and
    nutrition info.
 2. In **Meals**, drop a saved recipe into a day and slot on the weekly
-   planner.
+   planner. With more than eight recipes the picker has a **Search** box and
+   scrolls inside a short list instead of running for several screens.
 3. Use the grocery list built automatically from that week's planned
    ingredients.
 4. Post the grocery list straight to a budget line when you're ready to
