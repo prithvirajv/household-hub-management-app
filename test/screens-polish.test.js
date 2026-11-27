@@ -38,8 +38,8 @@ test("the ledger card can never be wider than the screen (a long account name in
 });
 
 test("dark mode: green text on green tints uses the lighter green, scoped so buttons keep their white text on the darker green", () => {
-  assert.match(css, /html\[data-theme="dark"\] :is\(\.pill, \.pill-button, \.stock-chip, \.event,[^)]*\.stock-market-value, \.gain-loss\) \{ --green: #55d6ab; \}/);
-  assert.ok(!/html\[data-theme="dark"\] \{[^}]*--green: #55d6ab/.test(css), "--green itself is not changed for the whole page");
+  assert.match(css, /html\[data-theme="dark"\] :is\(\.pill, \.pill-button, \.stock-chip, \.event,[^)]*\.stock-market-value, \.gain-loss\) \{ --green: #6ee5be; \}/);
+  assert.ok(!/html\[data-theme="dark"\] \{[^}]*--green: #6ee5be/.test(css), "--green itself is not changed for the whole page");
 });
 
 test("Budget's 'N unassigned transactions' Assign opens Transactions showing only the rows that need a category, from every month, in the ledger and Bank stream", () => {
@@ -162,4 +162,33 @@ test("Paycheck/Income: each entry keeps name, amount and its lines in view, with
   assert.ok(app.includes('<details class="paycheck-more" data-keep-open data-paycheck-more='));
   assert.ok(app.includes("const paycheckMoreOpen = new Set();") && app.includes("[data-paycheck-more]"));
   assert.match(css, /\.paycheck-more > summary \{ cursor: pointer;/);
+});
+
+test("Plan: unfinished tasks offer a Move to today with Undo, and an empty day offers yesterday's tasks or a Notes checklist", () => {
+  assert.ok(app.includes("data-plan-roll-over") && app.includes("unfinishedEarlierTasks(privateData.plans.tasks, planToday)"));
+  assert.ok(app.includes('actionLabel: "Undo", duration: 10000'));
+  assert.ok(app.includes("data-plan-copy-yesterday") && app.includes("data-plan-from-note"));
+});
+
+test("a delete can be taken back: the toast carries a real Undo button, wired for checklist items, paychecks, debts, goals and Plan tasks", () => {
+  assert.ok(app.includes("function offerUndo(message, restore, save)"));
+  assert.ok(app.includes('action.className = "toast-action"') && app.includes('action.type = "button"'));
+  ["Deleted the checklist item.", "Deleted ${paycheck.name || \"the paycheck\"}.", "Deleted ${debt.name || \"the debt\"}.", "Deleted ${removedGoal.name || \"the goal\"}.", "Deleted \"${(removedPlanTask.title"].forEach((piece) => assert.ok(app.includes(piece), piece));
+  assert.equal((app.match(/offerUndo\(/g) || []).length >= 6, true);
+});
+
+test("Notes search shows a match count and is not kept between visits; Goals fold like accounts and debts", () => {
+  assert.ok(app.includes('id="notesSearchCount"') && app.includes('state.notes.search = "";'));
+  assert.ok(app.includes("const goalKey = `goal:${index}`;") && app.includes('<div class="account-summary-head goal-summary-head">'));
+  assert.ok(app.includes("wealthEditingAccounts.add(`goal:${state.goals.sinkingFunds.length - 1}`)"));
+});
+
+test("keyboard focus is visible on buttons and fold-away summaries, and the quick-add task field has a name", () => {
+  assert.match(css, /:is\(button, summary, \[role="button"\]\):focus-visible \{ outline: 2px solid var\(--blue\); outline-offset: 2px; \}/);
+  assert.ok(app.includes('aria-label="Add a task for ${dayLabel}"'));
+});
+
+test("dark mode: tag chips, note labels and delete crosses clear 4.5:1 with the lighter green and coral", () => {
+  assert.match(css, /\.mini-tags span, \.note-labels span, [^)]*\) \{ --green: #6ee5be; \}/);
+  assert.match(css, /html\[data-theme="dark"\] :is\(\.icon-button\.danger-button, \.mini-tag-remove, \.note-check-delete\) \{ color: #ff9a9a; \}/);
 });

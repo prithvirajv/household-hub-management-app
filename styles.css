@@ -10468,7 +10468,7 @@ button.ghost { min-height: 26px; }
 @media (max-width: 760px) { #view button.ghost, #view .live-price-pill { min-height: 34px; } }
 
 /* Dark mode: the darker light-mode green (for white button text) is too dim as text on the dark green tints (about 2.9:1). Elements that show green text on a tint get the lighter green for their own text only. */
-html[data-theme="dark"] :is(.pill, .pill-button, .stock-chip, .event, .event-recurring-badge, .event-overdue-badge, .mini-tags span, .member-chip, .recipe-meta-pill, .journal-tag-chip, .stock-market-value, .gain-loss) { --green: #55d6ab; }
+html[data-theme="dark"] :is(.pill, .pill-button, .stock-chip, .event, .event-recurring-badge, .event-overdue-badge, .mini-tags span, .note-labels span, .member-chip, .recipe-meta-pill, .journal-tag-chip, .stock-market-value, .gain-loss) { --green: #6ee5be; }
 
 .ledger-needs-filter { display: flex; align-items: center; gap: 0.5rem; }
 .pill-button.active { background: var(--green); color: #fff; }
@@ -10562,3 +10562,21 @@ html[data-theme="dark"] :is(.pill, .pill-button, .stock-chip, .event, .event-rec
 .paycheck-more > summary .muted { font-weight: 400; font-size: 0.8rem; }
 .paycheck-more[open] { display: grid; gap: 0.5rem; }
 .paycheck-more[open] > summary { margin-bottom: 0.2rem; }
+
+/* Dark mode: the small x on a tag chip and the delete buttons read at 4.1:1 on their tinted backgrounds; a lighter coral clears 4.5:1. */
+html[data-theme="dark"] :is(.icon-button.danger-button, .mini-tag-remove, .note-check-delete) { color: #ff9a9a; }
+.toast { display: flex; align-items: center; gap: 0.8rem; }
+.toast .toast-action { min-height: 28px; padding: 0 0.7rem; border: 1px solid rgba(255,255,255,0.5); border-radius: 6px; background: transparent; color: #fff; font-weight: 800; font-size: 0.8rem; cursor: pointer; }
+.toast .toast-action:hover, .toast .toast-action:focus-visible { background: rgba(255,255,255,0.18); }
+.plan-rollover { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 0.5rem; padding: 0.55rem 0.8rem; border-radius: 8px; background: color-mix(in srgb, var(--gold) 18%, var(--panel)); font-size: 0.88rem; }
+.plan-first-use { display: grid; justify-items: start; gap: 0.45rem; padding: 0.4rem 0; }
+.plan-first-use p { margin: 0; }
+.notes-search { display: flex; align-items: center; gap: 0.5rem; }
+.notes-search .notes-search-count { flex: 0 0 auto; padding-right: 0.8rem; white-space: nowrap; }
+.notes-search > span[aria-hidden] { flex: 0 0 28px; }
+.notes-search > input { flex: 1 1 auto; min-width: 0; }
+/* A visible ring for keyboard focus on buttons and fold-away summaries (the new fold-aways are summaries, so they need one). */
+:is(button, summary, [role="button"]):focus-visible { outline: 2px solid var(--blue); outline-offset: 2px; }
+.goal-summary-head { padding-right: 0; margin-bottom: 0.4rem; }
+.goal-summary-head .account-summary-name { font-weight: 800; }
+.goal-summary-head .danger-button { margin-left: 0.2rem; }

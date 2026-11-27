@@ -540,6 +540,8 @@ Each entry shows its name, amount and the budget lines it feeds. Its date, repea
   chore stands out more than one from yesterday.
 
 ## Notes
+The search box shows how many notes match, and starts empty each time you open Notes.
+
 Notes are a board of cards that pack by height, with your views and labels as a row of pills above it. A card's colour, reminder, labels, photo and archive buttons, and a checklist row's sub-item, add-to-Plan and delete buttons, appear when you point at it or tab into it.
 
 
@@ -576,6 +578,8 @@ Notes are a board of cards that pack by height, with your views and labels as a 
   through every month.
 
 ## Plan
+Tasks you did not finish on an earlier day (one-time tasks from the last two weeks) are offered under the quick add as **Move to today**, with an **Undo**. On an empty day you can start from **Repeat yesterday's tasks** or from the open items of your newest Notes checklist.
+
 The page leads with **To do** for the day: type a task and press Add (open **Time, length and repeat** to give it a start time, a length or a repeat), and the day's tasks sit right below, timed ones first. **Log what actually happened** is folded away until you need it; the Planned/Actual timeline follows.
 
 
@@ -741,6 +745,8 @@ The page leads with **To do** for the day: type a task and press Add (open **Tim
   at a stub week from the start or end of the month by default.
 
 ## Goals
+Each goal is one line (saved of target, and the date) with an **Edit** button for its name, target, saved amount, date and auto-contribute; adding a contribution is always one field away.
+
 
 1. Add a sinking fund with a name, a target amount, and optionally a target
    date.

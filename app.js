@@ -619,21 +619,37 @@ async function saveStateNow({ allowShrink = false } = {}) {
   await putState(householdIdAtCall, { allowShrink });
 }
 
-function showToast(message, { type = "error" } = {}) {
+function showToast(message, { type = "error", actionLabel = "", onAction = null, duration = 6000 } = {}) {
   const container = $("#toastContainer");
   if (!container) return;
   const toast = document.createElement("div");
   toast.className = `toast toast-${type}`;
   toast.setAttribute("role", "status");
-  toast.textContent = message;
+  const text = document.createElement("span");
+  text.textContent = message;
+  toast.appendChild(text);
   const dismiss = () => {
     toast.classList.remove("toast-visible");
     toast.addEventListener("transitionend", () => toast.remove(), { once: true });
   };
+  // An action (Undo) is a real button, so it works from the keyboard too; it runs once and closes the toast.
+  if (actionLabel && typeof onAction === "function") {
+    const action = document.createElement("button");
+    action.type = "button";
+    action.className = "toast-action";
+    action.textContent = actionLabel;
+    action.addEventListener("click", (event) => { event.stopPropagation(); onAction(); dismiss(); });
+    toast.appendChild(action);
+  }
   toast.addEventListener("click", dismiss);
   container.appendChild(toast);
   requestAnimationFrame(() => toast.classList.add("toast-visible"));
-  setTimeout(dismiss, 6000);
+  setTimeout(dismiss, duration);
+}
+
+// A delete that can be taken back: the change has already happened (and been saved); the toast's Undo runs `restore`, saves and redraws.
+function offerUndo(message, restore, save) {
+  showToast(message, { type: "success", actionLabel: "Undo", duration: 8000, onAction: () => { restore(); save(); render(); } });
 }
 
 // Promise-based replacement for window.confirm() using the shared
@@ -5075,7 +5091,8 @@ function renderNotes() {
       <div class="notes-workspace">
         <div class="notes-search">
           <span aria-hidden="true">⌕</span>
-          <input id="notesSearch" placeholder="Search household notes" value="${state.notes.search || ""}">
+          <input id="notesSearch" placeholder="Search household notes" aria-label="Search household notes" value="${state.notes.search || ""}">
+          <small class="notes-search-count muted" id="notesSearchCount" role="status" aria-live="polite">${String(state.notes.search || "").trim() ? `${notes.length} match${notes.length === 1 ? "" : "es"}` : ""}</small>
         </div>
         ${state.notes.activeView === "notes" && sharedWithMeNotes?.length ? `
           <section class="notes-result-section">
@@ -5750,6 +5767,9 @@ function renderDailyPlan() {
   const daySummaryStats = planDaySummaryStats(dailyTasks, scheduled, logsToday);
   // The to-do list leads the page: timed tasks in time order, then the unscheduled ones.
   const planTodoRows = [...scheduled, ...unscheduled];
+  const planToday = dateKey(new Date());
+  const planUnfinished = planSelectedDate === planToday ? unfinishedEarlierTasks(privateData.plans.tasks, planToday) : [];
+  const planSuggest = planSelectedDate === planToday && !planTodoRows.length ? planDaySuggestions({ tasks: privateData.plans.tasks, notes: state.notes?.entries || [], todayKey: planToday }) : null;
   const planTodoDone = planTodoRows.filter((task) => (task.bucket === "daily" ? isDailyTaskDoneOnDate(task, planSelectedDate) : Boolean(task.done))).length;
 
   return `
@@ -5768,7 +5788,7 @@ function renderDailyPlan() {
           <section class="card plan-todo-card">
             <div class="plan-todo-head"><div><span class="card-label">To do</span><h3>${dayLabel}</h3></div><span class="pill">${planTodoDone}/${planTodoRows.length} done</span></div>
             <form id="planTaskForm" class="plan-task-form plan-task-form-daily plan-quick-add">
-              <input name="title" placeholder="Add a task for ${dayLabel}…" value="${escapeHtml(editingTask?.title || "")}" required>
+              <input name="title" aria-label="Add a task for ${dayLabel}" placeholder="Add a task for ${dayLabel}…" value="${escapeHtml(editingTask?.title || "")}" required>
               <button type="submit">${editingTask ? "Save changes" : "Add"}</button>
               <details class="plan-more-options" ${editingTask ? "open" : ""}>
                 <summary>Time, length and repeat</summary>
@@ -5779,7 +5799,8 @@ function renderDailyPlan() {
               </details>
               ${editingTask ? `<button class="ghost" id="cancelPlanTaskEditButton" type="button">Cancel</button>` : ""}
             </form>
-            ${planTodoRows.length ? `<div class="plan-todo-list">${planTodoRows.map((task) => renderPlanTaskDaily(task)).join("")}</div>` : `<div class="empty-inline">Nothing planned for this day yet. Add a task above.</div>`}
+            ${planUnfinished.length ? `<div class="plan-rollover" role="status"><span><b>${planUnfinished.length} unfinished</b> from earlier days: ${escapeHtml(planUnfinished.slice(0, 3).map((task) => task.title).join(", "))}${planUnfinished.length > 3 ? "…" : ""}</span><button type="button" class="pill-button" data-plan-roll-over>Move to today</button></div>` : ""}
+            ${planTodoRows.length ? `<div class="plan-todo-list">${planTodoRows.map((task) => renderPlanTaskDaily(task)).join("")}</div>` : `<div class="plan-first-use"><p class="muted">Nothing planned for this day yet. Add a task above${planSuggest && (planSuggest.yesterday.length || planSuggest.note) ? ", or start from:" : "."}</p>${planSuggest && planSuggest.yesterday.length ? `<button type="button" class="ghost" data-plan-copy-yesterday>Repeat yesterday's ${planSuggest.yesterday.length} task${planSuggest.yesterday.length === 1 ? "" : "s"}</button>` : ""}${planSuggest && planSuggest.note ? `<button type="button" class="ghost" data-plan-from-note="${escapeHtml(planSuggest.note.id)}">Add the ${planSuggest.note.items.length} open item${planSuggest.note.items.length === 1 ? "" : "s"} from "${escapeHtml(planSuggest.note.title)}"</button>` : ""}</div>`}
           </section>
           <details class="card plan-log-panel" id="planLogPanel" data-keep-open ${editingLog || planLogOpen ? "open" : ""}>
             <summary><b>${editingLog ? "Edit what actually happened" : "Log what actually happened"}</b> <span class="muted">${logsToday.length ? `${logsToday.length} logged · ` : ""}${dayLabel}</span></summary>
@@ -8374,15 +8395,22 @@ function renderGoals() {
         <div class="section-head"><div><span class="card-label">Funding</span><h3>Sinking funds and goals</h3></div><button id="addGoalButton" type="button">+ Add goal</button></div>
         ${state.goals.sinkingFunds.length ? state.goals.sinkingFunds.map((fund, index) => {
           const pct = Math.min(100, Math.round((Number(fund.saved || 0) / Math.max(Number(fund.target || 0), 1)) * 100));
+          const goalKey = `goal:${index}`;
+          const goalEditing = wealthEditingAccounts.has(goalKey);
           return `
           <article class="goal-card">
-            <div class="goal-edit-grid">
+            <div class="account-summary-head goal-summary-head">
+              <span class="account-summary-name">${escapeHtml(fund.name || "Untitled goal")}</span>
+              <span class="muted">${money.format(Number(fund.saved || 0))} of ${money.format(Number(fund.target || 0))}${fund.targetDate ? ` · by ${escapeHtml(formatShortDate(fund.targetDate))}` : ""}</span>
+              <button type="button" class="ghost account-edit-toggle" data-toggle-account-edit="${goalKey}" aria-expanded="${goalEditing ? "true" : "false"}">${goalEditing ? "Hide details" : "Edit"}</button>
+              <button class="icon-button danger-button" data-delete-goal="${index}" type="button" aria-label="Remove ${escapeHtml(fund.name || "goal")}">×</button>
+            </div>
+            ${goalEditing ? `<div class="goal-edit-grid">
               <label class="goal-name-field">Goal name<input data-goal-name="${index}" value="${escapeHtml(fund.name || "")}" placeholder="Emergency fund"></label>
               <label>Target amount<input data-goal-target="${index}" type="number" min="0" step="0.01" value="${Number(fund.target || 0)}"></label>
               <label>Saved so far<input data-goal-saved="${index}" type="number" min="0" step="0.01" value="${Number(fund.saved || 0)}"></label>
               <label>Target date<input data-goal-date="${index}" type="date" value="${fund.targetDate || ""}"></label>
-              <button class="icon-button danger-button" data-delete-goal="${index}" type="button" aria-label="Remove ${escapeHtml(fund.name || "goal")}">×</button>
-            </div>
+            </div>` : ""}
             <div class="goal-ring-row">
               <div class="goal-ring" style="background:conic-gradient(var(--green) ${pct}%, var(--soft-blue) ${pct}% 100%)"><div class="goal-ring-inner"><span aria-hidden="true">🎯</span></div></div>
               <div class="goal-ring-stats">
@@ -8395,7 +8423,7 @@ function renderGoals() {
               <input type="number" min="0" step="0.01" placeholder="Add a contribution" data-goal-contribution-input="${index}" aria-label="Contribution amount for ${escapeHtml(fund.name || "this goal")}">
               <button type="button" class="ghost" data-goal-contribution-add="${index}">+ Add</button>
             </div>
-            <div class="goal-auto-contribute-row">
+            ${goalEditing || fund.autoContribute?.enabled ? `<div class="goal-auto-contribute-row">
               <label class="row-field row-select"><small>Auto-contribute</small>
                 <select data-goal-auto-mode="${index}">
                   <option value="off" ${!fund.autoContribute?.enabled ? "selected" : ""}>Off</option>
@@ -8405,7 +8433,7 @@ function renderGoals() {
               </label>
               ${fund.autoContribute?.enabled && fund.autoContribute.mode === "percent" ? `<label class="row-field row-select"><small>Percent</small><input type="number" min="0" max="100" step="1" value="${Number(fund.autoContribute.percent || 0)}" data-goal-auto-percent="${index}" aria-label="Percent of each paycheck for ${escapeHtml(fund.name || "this goal")}"></label>` : ""}
               ${fund.autoContribute?.enabled ? `<small class="muted">${fund.autoContribute.mode === "roundup" ? "Rounds every purchase up to the next dollar" : `Sets aside ${Number(fund.autoContribute.percent || 0)}% of every paycheck`} automatically.</small>` : ""}
-            </div>
+            </div>` : ""}
           </article>
         `;
         }).join("") : `<div class="onboarding-empty compact-onboarding"><div class="empty-symbol" aria-hidden="true">◎</div><h3>Create your first goal</h3><p>Give it a target amount and date, then update the saved balance as you make progress.</p><button id="emptyAddGoalButton" type="button">Add a goal</button></div>`}
@@ -11850,6 +11878,11 @@ function bindViewEvents() {
     document.querySelectorAll(".notes-result-section").forEach((section) => {
       section.hidden = ![...section.querySelectorAll(".note-card")].some((card) => !card.hidden);
     });
+    const searchCount = $("#notesSearchCount");
+    if (searchCount) {
+      const shown = [...document.querySelectorAll(".note-card[data-note-id]")].filter((card) => !card.hidden).length;
+      searchCount.textContent = query ? `${shown} match${shown === 1 ? "" : "es"}` : "";
+    }
     autosaveState();
   });
 
@@ -12218,12 +12251,15 @@ function bindViewEvents() {
       const [noteId, itemId] = button.dataset.deleteNoteItem.split(":");
       const note = state.notes.entries.find((item) => item.id === noteId);
       if (!note) return;
+      const checklistBefore = note.checklist.map((item) => ({ ...item }));
+      const removedText = (note.checklist.find((item) => item.id === itemId)?.text || "").trim();
       note.checklist = note.checklist.filter((item) => item.id !== itemId);
       note.checklist.forEach((item) => {
         if (item.parentId === itemId) item.parentId = "";
       });
       autosaveState();
       render();
+      offerUndo(removedText ? `Deleted "${removedText.slice(0, 40)}".` : "Deleted the checklist item.", () => { note.checklist = checklistBefore; }, autosaveState);
     });
   });
 
@@ -12727,6 +12763,36 @@ function bindViewEvents() {
     }
   });
 
+  $("[data-plan-roll-over]")?.addEventListener("click", () => {
+    const today = dateKey(new Date());
+    const ids = unfinishedEarlierTasks(privateData.plans.tasks, today).map((task) => task.id);
+    if (!ids.length) return;
+    const moved = rollTasksToDate(privateData.plans.tasks, ids, today);
+    autosavePlans();
+    render();
+    showToast(`Moved ${moved.length} unfinished task${moved.length === 1 ? "" : "s"} to today.`, {
+      type: "success", actionLabel: "Undo", duration: 10000,
+      onAction: () => { undoRollTasks(privateData.plans.tasks, moved); autosavePlans(); render(); }
+    });
+  });
+  const addPlanTasksForToday = (items) => {
+    const today = dateKey(new Date());
+    items.forEach((item) => privateData.plans.tasks.push({
+      id: uniqueId("plan"), title: item.title, notes: "", bucket: "daily", anchorDate: today, createdAt: new Date().toISOString(),
+      subtasks: [], startTime: item.startTime || "", durationMinutes: item.durationMinutes || 30, recurrence: "none", completedDates: []
+    }));
+    autosavePlans();
+    render();
+  };
+  $("[data-plan-copy-yesterday]")?.addEventListener("click", () => {
+    const { yesterday } = planDaySuggestions({ tasks: privateData.plans.tasks, notes: [], todayKey: dateKey(new Date()) });
+    addPlanTasksForToday(yesterday);
+  });
+  $("[data-plan-from-note]")?.addEventListener("click", (event) => {
+    const note = (state.notes?.entries || []).find((item) => item.id === event.currentTarget.dataset.planFromNote);
+    const open = (note?.checklist || []).filter((entry) => !entry.done && String(entry.text || "").trim());
+    addPlanTasksForToday(open.map((entry) => ({ title: entry.text.trim() })));
+  });
   $("#planLogPanel")?.addEventListener("toggle", (event) => { planLogOpen = event.currentTarget.open; });
   document.querySelectorAll("[data-plan-day]").forEach((button) => {
     button.addEventListener("click", () => {
@@ -13004,10 +13070,15 @@ function bindViewEvents() {
 
   document.querySelectorAll("[data-delete-plan-task]").forEach((button) => {
     button.addEventListener("click", () => {
+      const planTaskIndex = privateData.plans.tasks.findIndex((task) => task.id === button.dataset.deletePlanTask);
+      const removedPlanTask = planTaskIndex >= 0 ? privateData.plans.tasks[planTaskIndex] : null;
       privateData.plans.tasks = privateData.plans.tasks.filter((task) => task.id !== button.dataset.deletePlanTask);
       if (planEditingDailyTaskId === button.dataset.deletePlanTask) planEditingDailyTaskId = null;
       autosavePlans();
       render();
+      if (removedPlanTask) offerUndo(`Deleted "${(removedPlanTask.title || "the task").slice(0, 40)}".`, () => {
+        privateData.plans.tasks.splice(Math.min(planTaskIndex, privateData.plans.tasks.length), 0, removedPlanTask);
+      }, autosavePlans);
     });
   });
 
@@ -14673,13 +14744,20 @@ function bindViewEvents() {
 
   document.querySelectorAll("[data-delete-paycheck]").forEach((button) => {
     button.addEventListener("click", () => {
-      const [paycheck] = state.paychecks.splice(Number(button.dataset.deletePaycheck), 1);
+      const paycheckIndex = Number(button.dataset.deletePaycheck);
+      const occurrencesBefore = (state.paycheckOccurrences || []).map((occurrence) => ({ ...occurrence }));
+      const [paycheck] = state.paychecks.splice(paycheckIndex, 1);
       if (paycheck?.id) {
         state.paycheckOccurrences = (state.paycheckOccurrences || []).filter((occurrence) => occurrence.seriesId !== paycheck.id);
       }
       state.budget.income = budgetIncomeFromPaychecks();
       autosaveState();
       render();
+      if (paycheck) offerUndo(`Deleted ${paycheck.name || "the paycheck"}.`, () => {
+        state.paychecks.splice(Math.min(paycheckIndex, state.paychecks.length), 0, paycheck);
+        state.paycheckOccurrences = occurrencesBefore;
+        state.budget.income = budgetIncomeFromPaychecks();
+      }, autosaveState);
     });
   });
 
@@ -15246,6 +15324,7 @@ function bindViewEvents() {
 
   const addGoal = () => {
     state.goals.sinkingFunds.push({ name: "", target: 0, saved: 0, targetDate: "" });
+    wealthEditingAccounts.add(`goal:${state.goals.sinkingFunds.length - 1}`);
     autosaveState();
     render();
     document.querySelector(`[data-goal-name="${state.goals.sinkingFunds.length - 1}"]`)?.focus();
@@ -15270,9 +15349,13 @@ function bindViewEvents() {
 
   document.querySelectorAll("[data-delete-goal]").forEach((button) => {
     button.addEventListener("click", () => {
-      state.goals.sinkingFunds.splice(Number(button.dataset.deleteGoal), 1);
+      const goalIndex = Number(button.dataset.deleteGoal);
+      const [removedGoal] = state.goals.sinkingFunds.splice(goalIndex, 1);
+      // Goals are keyed by position, so open Edit panels would point at the wrong goal after a delete.
+      [...wealthEditingAccounts].filter((key) => key.startsWith("goal:")).forEach((key) => wealthEditingAccounts.delete(key));
       autosaveState();
       render();
+      if (removedGoal) offerUndo(`Deleted ${removedGoal.name || "the goal"}.`, () => { state.goals.sinkingFunds.splice(Math.min(goalIndex, state.goals.sinkingFunds.length), 0, removedGoal); }, autosaveState);
     });
   });
 
@@ -15455,10 +15538,16 @@ function bindViewEvents() {
 
   document.querySelectorAll("[data-delete-debt]").forEach((button) => {
     button.addEventListener("click", () => {
-      const [debt] = state.goals.debts.splice(Number(button.dataset.deleteDebt), 1);
+      const debtIndex = Number(button.dataset.deleteDebt);
+      const liabilitiesBefore = state.goals.netWorth.liabilities.map((liability) => ({ ...liability }));
+      const [debt] = state.goals.debts.splice(debtIndex, 1);
       if (debt) state.goals.netWorth.liabilities = state.goals.netWorth.liabilities.filter((liability) => liability.id !== debt.id);
       autosaveState();
       render();
+      if (debt) offerUndo(`Deleted ${debt.name || "the debt"}.`, () => {
+        state.goals.debts.splice(Math.min(debtIndex, state.goals.debts.length), 0, debt);
+        state.goals.netWorth.liabilities = liabilitiesBefore;
+      }, autosaveState);
     });
   });
 
@@ -21026,6 +21115,8 @@ async function loadApp() {
     }
   }
   if (migrated || shouldForceCurrentMonth || shouldForceCurrentWeek) autosaveState();
+  // A search typed into Notes last time is not kept: opening the page should show your notes, not an old search's few matches.
+  if (state.notes) state.notes.search = "";
   const hashView = location.hash.slice(1);
   if (hashView && renderers[hashView]) currentView = hashView;
   const sharedLink = takeSharedLink();
