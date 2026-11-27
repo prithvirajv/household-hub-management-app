@@ -338,6 +338,8 @@ let newTransactionOpen = false;
 let pendingBanksOpen = false;
 let cleanupPanelOpen = false;
 let manageSubcategoriesOpen = false;
+let planLogOpen = false;
+const paycheckMoreOpen = new Set();
 let wealthDocsExpandedKey = null;
 // Investment accounts whose account fields (name, type, opening balance, close date) are open for editing; they stay folded away otherwise.
 const wealthEditingAccounts = new Set();
@@ -4595,11 +4597,13 @@ function renderPaychecks() {
                     <button class="icon-button danger-button" data-delete-paycheck="${index}" type="button" aria-label="Delete ${escapeHtml(paycheck.name)}">×</button>
                   </div>
                 </div>
+                <div class="mini-tags">${paycheck.assignedLineIds.map((id) => `<span>${escapeHtml(lineName(id))}<button type="button" class="mini-tag-remove" data-remove-paycheck-line="${index}:${id}" aria-label="Remove ${escapeHtml(lineName(id))} from ${escapeHtml(paycheck.name)}">×</button></span>`).join("")}</div>
+                <details class="paycheck-more" data-keep-open data-paycheck-more="${paycheck.id || index}" ${paycheckMoreOpen.has(paycheck.id || String(index)) ? "open" : ""}>
+                  <summary>${formatShortDate(paycheck.date)} · ${escapeHtml(paycheckRecurrenceLabels[paycheck.recurrence || "once"] || "")}${occurrencesThisMonth.length > 1 ? ` · ${occurrencesThisMonth.length} pay dates this month` : ""} <span class="muted">change date, repeat, deposit account</span></summary>
                 <label class="paycheck-recurrence-field">Date<input type="date" data-paycheck-date="${index}" value="${paycheck.date}" aria-label="Date for ${escapeHtml(paycheck.name)}"></label>
                 <label class="paycheck-recurrence-field">Repeat<select data-paycheck-recurrence="${index}" aria-label="How often ${escapeHtml(paycheck.name)} repeats">${Object.entries(paycheckRecurrenceLabels).map(([value, label]) => `<option value="${value}" ${paycheck.recurrence === value ? "selected" : ""}>${label}</option>`).join("")}</select></label>
                 ${isRecurring ? `<label class="paycheck-recurrence-field">End date (optional)<input type="date" data-paycheck-end-date="${index}" value="${paycheck.endDate || ""}" aria-label="Stop ${escapeHtml(paycheck.name)} from repeating after this date"></label>` : ""}
                 ${state.accounts.length ? `<label class="paycheck-recurrence-field">Deposit to<select data-paycheck-deposit-account="${index}" aria-label="Deposit account for ${escapeHtml(paycheck.name)}"><option value="">Not linked</option>${accountOptions(paycheck.depositAccountId || "", { excludeType: "credit_card" })}</select></label>` : ""}
-                <div class="mini-tags">${paycheck.assignedLineIds.map((id) => `<span>${escapeHtml(lineName(id))}<button type="button" class="mini-tag-remove" data-remove-paycheck-line="${index}:${id}" aria-label="Remove ${escapeHtml(lineName(id))} from ${escapeHtml(paycheck.name)}">×</button></span>`).join("")}</div>
                 ${occurrencesThisMonth.length ? `<div class="pay-dates-this-month">
                   <small>Pay dates in ${formatMonth(state.budget.month)} (edit or delete individually)</small>
                   ${occurrencesThisMonth.map((occurrence) => `
@@ -4610,6 +4614,7 @@ function renderPaychecks() {
                     </div>
                   `).join("")}
                 </div>` : ""}
+                </details>
                 <div class="split-stat" data-paycheck-split="${index}"><span>Income ${money.format(monthlyIncome)}</span><b>Assigned ${money.format(assigned)}</b></div>
               </article>`;
             }).join("")}
@@ -5250,7 +5255,7 @@ function renderNoteCard(note) {
   return `<article class="note-card ${noteColorClass(note.color)}" data-note-id="${note.id}">
     <div class="note-card-head">
       <input class="note-title-input" data-note-title="${note.id}" value="${escapeHtml(note.title || "")}" placeholder="Untitled note" aria-label="Note title">
-      <button class="note-icon-button ${note.pinned ? "active" : ""}" data-pin-note="${note.id}" type="button" aria-label="${note.pinned ? "Unpin note" : "Pin note"}">⌖</button>
+      <button class="note-icon-button ${note.pinned ? "active" : ""}" data-pin-note="${note.id}" type="button" aria-label="${note.pinned ? "Unpin note" : "Pin note"}" title="${note.pinned ? "Unpin note" : "Pin note"}" aria-pressed="${note.pinned ? "true" : "false"}">⌖</button>
     </div>
     <textarea class="note-body-input" data-note-body="${note.id}" rows="${note.body ? "2" : "1"}" placeholder="Take a note..." aria-label="Note body">${escapeHtml(note.body || "")}</textarea>
     ${note.reminder ? `<div class="note-reminder">Reminder · ${formatDateTime(note.reminder)}</div>` : ""}
@@ -5743,6 +5748,9 @@ function renderDailyPlan() {
   if (!editingLog) planEditingActualLogId = null;
 
   const daySummaryStats = planDaySummaryStats(dailyTasks, scheduled, logsToday);
+  // The to-do list leads the page: timed tasks in time order, then the unscheduled ones.
+  const planTodoRows = [...scheduled, ...unscheduled];
+  const planTodoDone = planTodoRows.filter((task) => (task.bucket === "daily" ? isDailyTaskDoneOnDate(task, planSelectedDate) : Boolean(task.done))).length;
 
   return `
     <section class="plan-layout plan-layout-daily">
@@ -5757,18 +5765,25 @@ function renderDailyPlan() {
           </div>
           ${renderPlanWeekStrip()}
           ${renderPlanNextTaskBanner(scheduled)}
-          <div class="plan-form-row">
-            <form id="planTaskForm" class="plan-task-form plan-task-form-daily card">
-              <input name="title" placeholder="Add a task for this day" value="${escapeHtml(editingTask?.title || "")}" required>
+          <section class="card plan-todo-card">
+            <div class="plan-todo-head"><div><span class="card-label">To do</span><h3>${dayLabel}</h3></div><span class="pill">${planTodoDone}/${planTodoRows.length} done</span></div>
+            <form id="planTaskForm" class="plan-task-form plan-task-form-daily plan-quick-add">
+              <input name="title" placeholder="Add a task for ${dayLabel}…" value="${escapeHtml(editingTask?.title || "")}" required>
+              <button type="submit">${editingTask ? "Save changes" : "Add"}</button>
+              <details class="plan-more-options" ${editingTask ? "open" : ""}>
+                <summary>Time, length and repeat</summary>
               <label>Start time (optional)<input name="startTime" type="text" inputmode="numeric" class="time24-input" placeholder="HH:MM" maxlength="5" value="${escapeHtml(editingTask?.startTime || "")}"></label>
               <label>Duration (min)<input name="durationMinutes" type="number" min="5" step="5" value="${formDuration}"></label>
               <label>End time<input name="endTimeDisplay" type="text" class="time24-input" value="${escapeHtml(formEndTime)}" readonly tabindex="-1"></label>
               <label>Repeat<select name="recurrence">${Object.entries(planRecurrenceLabels).map(([value, label]) => `<option value="${value}" ${editingTask && editingTask.recurrence === value ? "selected" : ""}>${label}</option>`).join("")}</select></label>
-              <button type="submit">${editingTask ? "Save changes" : "Add"}</button>
+              </details>
               ${editingTask ? `<button class="ghost" id="cancelPlanTaskEditButton" type="button">Cancel</button>` : ""}
             </form>
-            <form id="actualLogForm" class="plan-task-form plan-task-form-daily card plan-actual-log-form">
-              <span class="plan-form-col-label">${editingLog ? "Edit what actually happened" : "Log what actually happened"} (${dayLabel})</span>
+            ${planTodoRows.length ? `<div class="plan-todo-list">${planTodoRows.map((task) => renderPlanTaskDaily(task)).join("")}</div>` : `<div class="empty-inline">Nothing planned for this day yet. Add a task above.</div>`}
+          </section>
+          <details class="card plan-log-panel" id="planLogPanel" data-keep-open ${editingLog || planLogOpen ? "open" : ""}>
+            <summary><b>${editingLog ? "Edit what actually happened" : "Log what actually happened"}</b> <span class="muted">${logsToday.length ? `${logsToday.length} logged · ` : ""}${dayLabel}</span></summary>
+            <form id="actualLogForm" class="plan-task-form plan-task-form-daily plan-actual-log-form">
               <label>Start time<input name="logStartTime" type="text" inputmode="numeric" class="time24-input" placeholder="HH:MM" maxlength="5" value="${escapeHtml(editingLog?.startTime || "")}" required></label>
               <label>End time<input name="logEndTime" type="text" inputmode="numeric" class="time24-input" placeholder="HH:MM" maxlength="5" value="${escapeHtml(editingLog?.endTime || "")}" required></label>
               <input name="logNote" placeholder="What did you actually do?" value="${escapeHtml(editingLog?.note || "")}" required>
@@ -5782,8 +5797,7 @@ function renderDailyPlan() {
                 ${editingLog ? `<button class="ghost" id="cancelActualLogEditButton" type="button">Cancel</button><button class="danger-button" id="deleteActualLogButton" type="button">Delete</button>` : ""}
               </div>
             </form>
-          </div>
-          ${unscheduled.length ? `<div class="plan-unscheduled"><h4>Unscheduled</h4>${unscheduled.map((task) => renderPlanTaskDaily(task)).join("")}</div>` : ""}
+          </details>
           <div class="plan-timeline" style="height:${timelineHeight + 28}px">
             <div class="plan-timeline-hours-label"></div>
             <div class="plan-timeline-col-label plan-timeline-col-label-planned">Planned</div>
@@ -6111,6 +6125,7 @@ function renderPlanTaskDaily(task) {
   const subtasks = task.subtasks || [];
   const subtaskDone = subtasks.filter((item) => item.done).length;
   const metaChips = [];
+  if (isDaily && task.startTime) metaChips.push(`${task.startTime}–${minutesToTime(timeToMinutes(task.startTime) + Number(task.durationMinutes || 30))}`);
   if (isDaily && task.recurrence && task.recurrence !== "none") metaChips.push(planRecurrenceLabels[task.recurrence]);
   if (!isDaily) metaChips.push(`${planBucketLabels[task.bucket]} · ${formatPlanAnchorDate(task)}`);
   if (actualLabel) metaChips.push(actualLabel);
@@ -9173,6 +9188,8 @@ function renderWealth() {
   ensureAccountsData();
   const wealthTrend = netWorthTrend(trailingMonthKeys(6));
   const wealthNetWorthChange = wealthTrend.length ? netWorth().total - (wealthTrend[0]?.value || 0) : 0;
+  // Every month the same (nothing recorded back then): a flat line says nothing, so a short note takes its place.
+  const wealthTrendIsFlat = !wealthTrend.length || wealthTrend.every((point) => Math.abs(point.value - wealthTrend[0].value) < 0.005);
   const allocation = assetAllocationBreakdown();
   return `
     <section class="work-grid wealth-layout">
@@ -9180,8 +9197,8 @@ function renderWealth() {
         ${renderLinkedAccountsCard()}
         <section class="card">
           <div class="section-head"><div><span class="card-label">Trend</span><h3>Net worth history</h3></div><b class="${wealthNetWorthChange < 0 ? "danger" : ""}">${wealthNetWorthChange >= 0 ? "+" : ""}${money.format(wealthNetWorthChange)} over ${wealthTrend.length} months</b></div>
-          ${netWorthTrendSvg(wealthTrend)}
-          <div class="networth-chart-labels">${wealthTrend.map((point) => `<span>${formatMonth(point.month).split(" ")[0].slice(0, 3)}</span>`).join("")}</div>
+          ${wealthTrendIsFlat ? `<div class="empty-inline">The history draws itself as your balances change from month to month. Today you are at ${money.format(netWorth().total)}.</div>` : `${netWorthTrendSvg(wealthTrend)}
+          <div class="networth-chart-labels">${wealthTrend.map((point) => `<span>${formatMonth(point.month).split(" ")[0].slice(0, 3)}</span>`).join("")}</div>`}
         </section>
         ${allocation.length ? `<section class="card">
           <div class="section-head"><div><span class="card-label">Breakdown</span><h3>Asset allocation</h3></div></div>
@@ -9209,9 +9226,11 @@ function renderWealth() {
               <label class="debt-asset-field">Secured by asset<select data-debt-asset="${index}" aria-label="Asset assigned to ${escapeHtml(debt.name)}">${debtAssetOptions(debt)}</select></label>
               <label class="debt-asset-field">Subcategory<select data-debt-line="${index}" aria-label="Subcategory for ${escapeHtml(debt.name)} payments">${debtLineOptions(debt)}</select></label>
             </div>` : ""}
-            <div class="debt-payoff-summary"><span><b>Estimated payoff</b>${termLabel(payoffMonths(debt))}</span><span><b>Suggested EMI</b>${debt.termMonths ? money.format(suggestedEmi(debt)) : "Set a loan term"}</span>${debt.termMonths ? `<button class="ghost" data-use-suggested-emi="${index}" type="button">Use suggested EMI</button>` : ""}</div>
             <div class="debt-progress-bar"><span style="width:${debtPayoffProgressPercent(debt)}%"></span></div>
             <p class="debt-progress-caption">${debtPayoffProgressPercent(debt)}% paid off · ${money.format(debt.balance)} remaining</p>
+            <details class="debt-more" data-keep-open data-debt-more="${debt.id || index}" ${wealthEditingAccounts.has(`debtmore:${debt.id || index}`) ? "open" : ""}>
+              <summary>Payoff and payments</summary>
+            <div class="debt-payoff-summary"><span><b>Estimated payoff</b>${termLabel(payoffMonths(debt))}</span><span><b>Suggested EMI</b>${debt.termMonths ? money.format(suggestedEmi(debt)) : "Set a loan term"}</span>${debt.termMonths ? `<button class="ghost" data-use-suggested-emi="${index}" type="button">Use suggested EMI</button>` : ""}</div>
             <div class="payment-row"><label>Additional payment<input data-debt-payment="${index}" value="0" type="number" min="0" step="0.01"></label><button class="ghost" data-apply-debt-payment="${index}" type="button" ${Number(debt.minimum || 0) <= 0 ? "disabled" : ""}>Record EMI payment</button><button class="icon-button danger-button" data-delete-debt="${index}" type="button" aria-label="Delete ${escapeHtml(debt.name)}">×</button></div>
             ${debt.payments?.length ? `<details class="payment-history"><summary>Payment history (${debt.payments.length})</summary>${debt.payments
               .map((payment, paymentIndex) => ({ payment, paymentIndex }))
@@ -9223,6 +9242,7 @@ function renderWealth() {
               .slice(0, 8)
               .map(({ payment, paymentIndex }) => `<div><input type="date" data-debt-payment-date="${index}:${paymentIndex}" value="${payment.date}" aria-label="Date for this ${escapeHtml(debt.name)} payment"><span>${money.format(payment.amount)} paid</span><span>${money.format(payment.principal)} principal</span><span>${money.format(payment.interest)} interest</span><button class="icon-button danger-button" data-delete-debt-payment="${index}:${paymentIndex}" type="button" aria-label="Remove this ${escapeHtml(debt.name)} payment and restore its balance">×</button></div>`)
               .join("")}</details>` : ""}
+            </details>
           </article>`; }).join("") : `<div class="onboarding-empty compact-onboarding"><div class="empty-symbol" aria-hidden="true">↓</div><h3>Add a debt when you are ready</h3><p>Track its balance, rate, payment, and the asset it secures.</p></div>`}
         </section>
       </div>
@@ -12707,6 +12727,7 @@ function bindViewEvents() {
     }
   });
 
+  $("#planLogPanel")?.addEventListener("toggle", (event) => { planLogOpen = event.currentTarget.open; });
   document.querySelectorAll("[data-plan-day]").forEach((button) => {
     button.addEventListener("click", () => {
       const date = new Date(`${planSelectedDate}T00:00:00`);
@@ -16074,6 +16095,22 @@ function bindViewEvents() {
       });
       autosaveState();
       render();
+    });
+  });
+
+  document.querySelectorAll("[data-paycheck-more]").forEach((details) => {
+    details.addEventListener("toggle", () => {
+      const key = details.dataset.paycheckMore;
+      if (details.open) paycheckMoreOpen.add(key);
+      else paycheckMoreOpen.delete(key);
+    });
+  });
+
+  document.querySelectorAll("[data-debt-more]").forEach((details) => {
+    details.addEventListener("toggle", () => {
+      const key = `debtmore:${details.dataset.debtMore}`;
+      if (details.open) wealthEditingAccounts.add(key);
+      else wealthEditingAccounts.delete(key);
     });
   });
 
@@ -21489,7 +21526,8 @@ setInterval(() => {
 }, 5 * 60 * 1000);
 
 window.addEventListener("popstate", (event) => {
-  const view = event.state?.view;
+  // Back/Forward carry the view in the history entry; a typed or pasted "#page" change has no state, so the address itself names the page.
+  const view = event.state?.view || location.hash.slice(1);
   if (!view || view === currentView || !renderers[view]) return;
   currentView = view;
   render();

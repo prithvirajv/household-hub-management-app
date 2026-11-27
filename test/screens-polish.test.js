@@ -125,3 +125,41 @@ test("test servers get a free port from the OS, never a guessed one another serv
   assert.ok(helpers.includes("Test server exited early") && helpers.includes('server.kill("SIGKILL")'));
   assert.ok(!read("test/auth.integration.test.js").includes("Math.random"));
 });
+
+test("a typed or pasted #page in the address bar switches the page (Back/Forward still use the history entry's view)", () => {
+  assert.ok(app.includes("const view = event.state?.view || location.hash.slice(1);"));
+});
+
+test("Plan leads with the to-do list: quick add, the day's tasks (timed first), Time/length/repeat and the log folded away", () => {
+  assert.ok(app.includes('<section class="card plan-todo-card">'));
+  assert.ok(app.includes("const planTodoRows = [...scheduled, ...unscheduled];"));
+  assert.ok(app.includes('<details class="plan-more-options" ${editingTask ? "open" : ""}>'));
+  assert.ok(app.includes('<details class="card plan-log-panel" id="planLogPanel" data-keep-open ${editingLog || planLogOpen ? "open" : ""}>'));
+  assert.ok(app.includes('$("#planLogPanel")?.addEventListener("toggle"'));
+  assert.ok(app.indexOf('class="card plan-todo-card"') < app.indexOf('id="planLogPanel"') && app.indexOf('id="planLogPanel"') < app.indexOf('<div class="plan-timeline" style='), "to-do, then the log, then the timeline");
+  assert.ok(!app.includes('<div class="plan-unscheduled">'), "unscheduled tasks are part of the one list now");
+  assert.ok(app.includes("metaChips.push(`${task.startTime}–${minutesToTime("), "a timed task shows its time");
+});
+
+test("Notes: filters are a row of pills, the board is a masonry, row actions show on hover/focus, the composer is centred", () => {
+  const notes = css.slice(css.indexOf("Notes redesign:"));
+  assert.match(notes, /\.notes-layout \{ grid-template-columns: minmax\(0, 1fr\);/);
+  assert.match(notes, /\.notes-board \{ display: block; column-width: 270px;/);
+  assert.match(notes, /\.notes-board > \.note-card \{ break-inside: avoid;/);
+  assert.match(notes, /\.notes-search, \.note-composer, \.note-composer-compact \{ max-width: 680px; margin-inline: auto; \}/);
+  assert.match(notes, /@media \(hover: hover\) \{\s*\.note-check-row \.note-check-level/);
+  assert.match(notes, /:focus-within \.note-check-delete/, "keyboard users see the row actions too");
+  assert.ok(app.includes('title="${note.pinned ? "Unpin note" : "Pin note"}" aria-pressed='));
+});
+
+test("Wealth: debts fold their payoff and payment boxes, and a flat net-worth history is a sentence, not a flat line", () => {
+  assert.ok(app.includes('<details class="debt-more" data-keep-open data-debt-more='));
+  assert.ok(app.includes("const wealthTrendIsFlat ="));
+  assert.ok(app.includes("The history draws itself as your balances change"));
+});
+
+test("Paycheck/Income: each entry keeps name, amount and its lines in view, with date, repeat and deposit account behind one summary line", () => {
+  assert.ok(app.includes('<details class="paycheck-more" data-keep-open data-paycheck-more='));
+  assert.ok(app.includes("const paycheckMoreOpen = new Set();") && app.includes("[data-paycheck-more]"));
+  assert.match(css, /\.paycheck-more > summary \{ cursor: pointer;/);
+});

@@ -10512,3 +10512,53 @@ html[data-theme="dark"] :is(.pill, .pill-button, .stock-chip, .event, .event-rec
 #bankStreamCard .ai-import-toggle small { font-weight: 400; }
 .debt-summary-head { padding-right: 0; margin-bottom: 0.4rem; }
 .debt-summary-head .account-summary-name { font-weight: 800; }
+
+/* Plan: the to-do list leads (quick add, then the day's tasks); the extra fields and the "what actually happened" log fold away. */
+.plan-todo-card { display: grid; gap: 0.7rem; }
+.plan-todo-head { display: flex; align-items: center; justify-content: space-between; gap: 0.6rem; }
+.plan-todo-head h3 { margin: 0; }
+.plan-quick-add { display: flex; flex-wrap: wrap; align-items: center; gap: 0.5rem; }
+.plan-quick-add > input[name="title"] { flex: 1 1 220px; min-width: 0; }
+.plan-more-options { flex: 1 0 100%; order: 3; }
+.plan-more-options > summary { cursor: pointer; color: var(--muted); font-size: 0.82rem; font-weight: 700; }
+.plan-more-options[open] { display: flex; flex-wrap: wrap; align-items: end; gap: 0.6rem; }
+.plan-more-options[open] > summary { flex: 1 0 100%; }
+.plan-quick-add > button, .plan-quick-add > .ghost { order: 2; }
+.plan-todo-list { display: grid; gap: 0.35rem; }
+.plan-log-panel > summary { cursor: pointer; display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px 12px; }
+.plan-log-panel[open] > summary { margin-bottom: 0.7rem; }
+.plan-log-panel .plan-actual-log-form { padding: 0; border: 0; box-shadow: none; background: none; }
+
+/* Notes redesign: the filters become one row of pills above the board (the board gets the full width), the board is a masonry of
+   cards that pack by height (a lone pinned note is no longer a full-width slab), the composer and search sit centred at a
+   readable width, and a card's small controls stay quiet until the pointer or keyboard is on it. */
+.notes-layout { grid-template-columns: minmax(0, 1fr); gap: 0.9rem; }
+.notes-filter-panel { position: static; display: flex; flex-wrap: wrap; align-items: center; gap: 0.4rem; padding: 0; border: 0; background: none; border-radius: 0; }
+.notes-filter-panel > button { width: auto; min-height: 34px; padding: 0 0.9rem; border: 1px solid var(--line); border-radius: 999px; background: var(--panel); font-size: 0.86rem; font-weight: 700; text-align: center; }
+.notes-filter-panel > button.active { background: color-mix(in srgb, var(--gold) 26%, var(--panel)); border-color: color-mix(in srgb, var(--gold) 50%, var(--line)); }
+.notes-filter-panel .notes-filter-label { padding: 0 0.2rem 0 0.6rem; border-left: 1px solid var(--line); line-height: 34px; }
+.notes-filter-panel .notes-edit-labels { margin: 0; border-style: dashed; color: var(--muted); }
+.notes-workspace { max-width: none; }
+.notes-search, .note-composer, .note-composer-compact { max-width: 680px; margin-inline: auto; }
+.notes-board { display: block; column-width: 270px; column-gap: 0.9rem; }
+.notes-board > .note-card { break-inside: avoid; margin: 0 0 0.9rem; }
+.note-body-input { resize: none; }
+.note-body-input:placeholder-shown:not(:focus) { min-height: 0; height: 1.3rem; }
+.note-card-toolbar { border-top-color: transparent; opacity: 0.55; }
+.note-card:hover .note-card-toolbar, .note-card:focus-within .note-card-toolbar { border-top-color: var(--line); }
+@media (hover: hover) {
+  .note-check-row .note-check-level, .note-check-row .note-check-plan, .note-check-row .note-check-delete { opacity: 0; transition: opacity 120ms ease; }
+  .note-check-row:hover .note-check-level, .note-check-row:hover .note-check-plan, .note-check-row:hover .note-check-delete,
+  .note-check-row:focus-within .note-check-level, .note-check-row:focus-within .note-check-plan, .note-check-row:focus-within .note-check-delete { opacity: 1; }
+  .note-check-row .note-check-drag-handle { opacity: 0.35; }
+}
+@media (max-width: 760px) {
+  .notes-filter-panel { flex-wrap: nowrap; overflow-x: auto; padding-bottom: 0.2rem; scrollbar-width: none; }
+  .notes-filter-panel > button, .notes-filter-panel .notes-filter-label { flex: 0 0 auto; white-space: nowrap; }
+  .notes-board { column-width: auto; column-count: 1; }
+}
+.debt-more > summary { cursor: pointer; color: var(--muted); font-size: 0.82rem; font-weight: 700; margin: 0.3rem 0; }
+.paycheck-more > summary { cursor: pointer; display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 10px; font-weight: 700; font-size: 0.9rem; margin: 0.2rem 0; }
+.paycheck-more > summary .muted { font-weight: 400; font-size: 0.8rem; }
+.paycheck-more[open] { display: grid; gap: 0.5rem; }
+.paycheck-more[open] > summary { margin-bottom: 0.2rem; }

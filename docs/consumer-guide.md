@@ -464,6 +464,8 @@ split with a friend, move to Transfers, receipt, delete and tags.
   account to everything in a single action instead of picking it row by row.
 
 ## Paycheck/Income
+Each entry shows its name, amount and the budget lines it feeds. Its date, repeat, end date, deposit account and this month's pay dates sit behind one line (for example "May 3 · Monthly") that opens when you select it.
+
 
 1. In Budget, select **Add income** and name the paycheck (e.g. "Jordan's
    salary").
@@ -538,6 +540,8 @@ split with a friend, move to Transfers, receipt, delete and tags.
   chore stands out more than one from yesterday.
 
 ## Notes
+Notes are a board of cards that pack by height, with your views and labels as a row of pills above it. A card's colour, reminder, labels, photo and archive buttons, and a checklist row's sub-item, add-to-Plan and delete buttons, appear when you point at it or tab into it.
+
 
 1. Create a note, give it a label and color, and add a checklist if it
    needs one.
@@ -572,6 +576,8 @@ split with a friend, move to Transfers, receipt, delete and tags.
   through every month.
 
 ## Plan
+The page leads with **To do** for the day: type a task and press Add (open **Time, length and repeat** to give it a start time, a length or a repeat), and the day's tasks sit right below, timed ones first. **Log what actually happened** is folded away until you need it; the Planned/Actual timeline follows.
+
 
 1. Add a task with a start time and duration on the daily timeline.
 2. Drag or resize a task block to adjust when it happens.
