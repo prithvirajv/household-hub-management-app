@@ -8,11 +8,11 @@ const app = fs.readFileSync(path.join(__dirname, "..", "app.js"), "utf8");
 const css = fs.readFileSync(path.join(__dirname, "..", "styles.css"), "utf8");
 
 // The two small helpers are pure apart from the page's own filter variables, so they are run here exactly as written in app.js.
-function helpers(filter, allMonths, month) {
+function helpers(filter, allMonths, month, needsCategoryOnly = false) {
   const source = [
     app.slice(app.indexOf("function ledgerAccountFilterMatches"), app.indexOf("function accountOptions")),
   ].join("\n");
-  const context = { ledgerAccountFilter: filter, ledgerAllMonths: allMonths, state: { budget: { month } } };
+  const context = { ledgerAccountFilter: filter, ledgerAllMonths: allMonths, ledgerNeedsCategoryOnly: needsCategoryOnly, state: { budget: { month } } };
   vm.createContext(context);
   vm.runInContext(`${source}\nthis.matches = ledgerAccountFilterMatches; this.monthOk = ledgerMonthMatches;`, context);
   return context;
@@ -37,6 +37,11 @@ test("choosing an account keeps only its rows; 'none' keeps the rows with no acc
   assert.equal(none.matches({ accountId: "card-1" }), false);
 });
 
+test("'Needs a category' looks across every month, whatever the account filter says", () => {
+  assert.equal(helpers("", false, "2026-11", true).monthOk({ date: "2026-01-15" }), true);
+  assert.equal(helpers("", false, "2026-11", false).monthOk({ date: "2026-01-15" }), false);
+});
+
 test("'All months' lifts the month limit only while an account is chosen", () => {
   assert.equal(helpers("card-1", true, "2026-11").monthOk({ date: "2026-01-15" }), true);
   assert.equal(helpers("card-1", false, "2026-11").monthOk({ date: "2026-01-15" }), false);
@@ -44,8 +49,8 @@ test("'All months' lifts the month limit only while an account is chosen", () =>
 });
 
 test("Recent transactions and Bank stream both use the filter, and the page has the controls", () => {
-  assert.match(app, /allImported\.filter\(\(transaction\) => ledgerMonthMatches\(transaction\) && ledgerAccountFilterMatches\(transaction\)\)/, "Bank stream is filtered");
-  assert.match(app, /\.filter\(\(\{ transaction \}\) => ledgerMonthMatches\(transaction\) && ledgerAccountFilterMatches\(transaction\)\)/, "the Ledger is filtered");
+  assert.match(app, /allImported\.filter\(\(transaction\) => ledgerMonthMatches\(transaction\) && ledgerAccountFilterMatches\(transaction\)(?: && \(!ledgerNeedsCategoryOnly \|\| needsCategory\(transaction\)\))?\)/, "Bank stream is filtered");
+  assert.match(app, /\.filter\(\(\{ transaction \}\) => ledgerMonthMatches\(transaction\) && ledgerAccountFilterMatches\(transaction\)(?: && \(!ledgerNeedsCategoryOnly \|\| needsCategory\(transaction\)\))?\)/, "the Ledger is filtered");
   assert.match(app, /id="ledgerAccountFilter"[\s\S]*?All accounts[\s\S]*?accountOptions\(ledgerAccountFilter\)[\s\S]*?Not linked to an account/);
   assert.match(app, /id="ledgerAllMonths"/);
   assert.match(app, /\$\("#ledgerAccountFilter"\)\?\.addEventListener\("change"[\s\S]*?ledgerSelectedIndices\.clear\(\)/, "changing the filter drops the selection");

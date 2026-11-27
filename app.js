@@ -87,6 +87,8 @@ function ledgerRowKey(transaction) { return `${transaction.date}|${transaction.p
 // "Check against the bank": the source's rows are kept so changing the account re-runs the check without asking the bank again.
 let bankCheck = { open: false, accountId: "", source: "", fileName: "", rows: [], from: "", busy: false, error: "", unchecked: new Set() };
 let ledgerAllMonths = false;
+// "Needs a category": only the ledger rows and Bank stream rows still without a subcategory, from every month (what Budget's "N unassigned transactions" counts).
+let ledgerNeedsCategoryOnly = false;
 const LEDGER_PAGE_SIZE = 200;
 const BANK_STREAM_PAGE_SIZE = 100;
 const NOTES_PAGE_SIZE = 30;
@@ -1497,7 +1499,8 @@ function ledgerAccountFilterMatches(row) {
   return ledgerAccountFilter === "none" ? !row.accountId : row.accountId === ledgerAccountFilter;
 }
 // The month limit of Recent transactions and Bank stream; it is lifted only when an account is chosen and "All months" is ticked.
-const ledgerMonthMatches = (row) => (ledgerAccountFilter && ledgerAllMonths) || row.date?.slice(0, 7) === state.budget.month;
+const ledgerMonthMatches = (row) => ledgerNeedsCategoryOnly || (ledgerAccountFilter && ledgerAllMonths) || row.date?.slice(0, 7) === state.budget.month;
+const needsCategory = (row) => !row.lineId && !(row.splits || []).length;
 
 // The preview card of "Re-date from a CSV": the rows that would move to their post dates, each with a tick, and the account the file is for.
 function postDateFixPanelHtml() {
@@ -2272,6 +2275,8 @@ let lastInnerScrollKey = "";
 
 function render() {
   if (!state) return;
+  // "Needs a category" only lasts while the person is on Transactions.
+  if (currentView !== "transactions") ledgerNeedsCategoryOnly = false;
   // Captured once per household so the server can format reminder-email due
   // times in the household's own timezone instead of the server container's
   // (see notificationCandidates/formatDueLabel in server/index.js).
@@ -2942,25 +2947,15 @@ function renderHome() {
         ${renderStatementGapCard()}
         ${renderDetectedSalaryCard()}
         ${renderPlanSuggestionsCard()}
-        <section class="card">
-          <div class="card-label">Quick add</div><h3>Jump straight to adding something</h3>
-          <div class="quick-add-groups">
-            <div class="quick-add-group">
-              <div class="card-label">Household</div>
-              <div class="button-row">
-                <button id="homeAddChoreButton" class="ghost" type="button">+ Add chore</button>
-                <button id="homeAddReminderButton" class="ghost" type="button">+ Add reminder</button>
-                <button id="homeAddBirthdayButton" class="ghost" type="button">+ Add birthday</button>
-                <button id="homeAddAnniversaryButton" class="ghost" type="button">+ Add anniversary</button>
-              </div>
-            </div>
-            <div class="quick-add-group">
-              <div class="card-label">Money</div>
-              <div class="button-row">
-                <button id="homeAddTransactionButton" class="ghost ghost-accent" type="button">+ Add transaction</button>
-                <button id="homeAddIncomeButton" class="ghost ghost-accent" type="button">+ Add income</button>
-              </div>
-            </div>
+        <section class="card quick-add-card">
+          <div class="quick-add-row">
+            <span class="card-label">Quick add</span>
+            <button id="homeAddChoreButton" class="ghost" type="button">+ Add chore</button>
+            <button id="homeAddReminderButton" class="ghost" type="button">+ Add reminder</button>
+            <button id="homeAddBirthdayButton" class="ghost" type="button">+ Add birthday</button>
+            <button id="homeAddAnniversaryButton" class="ghost" type="button">+ Add anniversary</button>
+            <button id="homeAddTransactionButton" class="ghost ghost-accent" type="button">+ Add transaction</button>
+            <button id="homeAddIncomeButton" class="ghost ghost-accent" type="button">+ Add income</button>
           </div>
         </section>
         <section class="card home-week-strip-card">
@@ -2996,7 +2991,11 @@ function renderHome() {
         <section class="card home-side-panel">
           <div class="home-panel-section">
             <div class="card-label">Bills &amp; goals</div><h3>Needs funding or payment</h3>
-            ${billsAndGoals.length ? billsAndGoals.map((reminder) => `<div class="compact-row"><div><strong>${escapeHtml(reminder.title)}</strong><small>${escapeHtml(reminder.detail)}</small></div><button class="pill-button" data-dismiss-reminder="${escapeHtml(reminder.id)}" type="button">Done</button></div>`).join("") : `<div class="empty-inline">No open bills or goals right now.</div>`}
+            ${billsAndGoals.length ? (() => {
+              const row = (reminder) => `<div class="compact-row"><div><strong>${escapeHtml(reminder.title)}</strong><small>${escapeHtml(reminder.detail)}</small></div><button class="pill-button" data-dismiss-reminder="${escapeHtml(reminder.id)}" type="button">Done</button></div>`;
+              // The first five show; a longer list folds the rest under one line instead of running down the page.
+              return billsAndGoals.slice(0, 5).map(row).join("") + (billsAndGoals.length > 5 ? `<details class="home-more"><summary>${billsAndGoals.length - 5} more</summary>${billsAndGoals.slice(5).map(row).join("")}</details>` : "");
+            })() : `<div class="empty-inline">No open bills or goals right now.</div>`}
           </div>
           <div class="home-panel-section">
             <div class="section-head"><div><span class="card-label">Notes</span><h3>Reminders due</h3></div><button id="homeOpenNoteRemindersButton" class="ghost" type="button">Open Notes</button></div>
@@ -3284,7 +3283,7 @@ function renderBudget() {
           ${(() => {
             const { count, payees } = unassignedTransactionSummary();
             if (!count) return compactRow("No unassigned transactions", "You're all caught up", "Done");
-            return `<div class="compact-row"><div><strong>${count} unassigned transaction${count === 1 ? "" : "s"}</strong><small>${escapeHtml(payees.join(", "))}</small></div><button class="pill-button" data-goto-view="transactions" type="button">Assign</button></div>`;
+            return `<div class="compact-row"><div><strong>${count} unassigned transaction${count === 1 ? "" : "s"}</strong><small>${escapeHtml(payees.join(", "))}</small></div><button class="pill-button" data-assign-unassigned type="button" title="Open Transactions showing only these">Assign</button></div>`;
           })()}
         </section>
       </aside>
@@ -3952,7 +3951,7 @@ function ledgerEntryRow(transaction, index, transferMatch, refundPair = null) {
   return `
     <div class="ledger-entry-row ${state.accounts.length ? "has-accounts" : ""} ${ledgerExpandedRows.has(ledgerRowKey(transaction)) ? "row-expanded" : ""}">
       <input type="checkbox" aria-label="Select ${escapeHtml(transaction.payee)} for bulk categorize" data-ledger-entry-select="${index}" ${ledgerSelectedIndices.has(index) ? "checked" : ""}>
-      <input class="line-name-input" aria-label="Payee" data-ledger-entry-payee="${index}" value="${escapeHtml(transaction.payee)}">
+      <input class="line-name-input" aria-label="Payee" data-ledger-entry-payee="${index}" value="${escapeHtml(payeeDisplay(transaction.payee))}" title="${escapeHtml(payeeDisplay(transaction.payee))}">
       <input class="money-input ${Number(transaction.amount || 0) < 0 ? "amount-in" : "amount-out"}" aria-label="Amount" type="number" step="0.01" data-ledger-entry-amount="${index}" value="${displayAmount}">
       <input aria-label="Date" type="date" data-ledger-entry-date="${index}" value="${transaction.date}">
       ${isSplit
@@ -3976,6 +3975,11 @@ function ledgerEntryRow(transaction, index, transferMatch, refundPair = null) {
 
 // The Ledger draws two menus per row, each listing every subcategory or account: most of a long list's markup. Until one is touched, a row's menu holds
 // only the current choice; touching it (pointer or keyboard focus) fills in the full list first, keeping the choice, so it behaves like any other menu.
+// A bank pads some payees with runs of spaces ("Zelle payment from      NAME"): shown with single spaces. Display only - what is stored is not changed until the person edits the field.
+function payeeDisplay(payee) {
+  return String(payee || "").replace(/\s{2,}/g, " ").trim();
+}
+
 function lazyLineOptionsHtml(selectedId) {
   const current = selectedId ? allLines().find((line) => line.id === selectedId) : null;
   if (!selectedId) return `<option value="" disabled selected>Choose a subcategory…</option>`;
@@ -4226,12 +4230,12 @@ function renderTransactions() {
   // (whatever order the imported file's rows happened to be in), which
   // rarely matches any useful order on its own.
   const importedBase = sortTransactionsByField(
-    allImported.filter((transaction) => ledgerMonthMatches(transaction) && ledgerAccountFilterMatches(transaction)),
+    allImported.filter((transaction) => ledgerMonthMatches(transaction) && ledgerAccountFilterMatches(transaction) && (!ledgerNeedsCategoryOnly || needsCategory(transaction))),
     bankStreamSort.field,
     bankStreamSort.direction
   );
   const importedTotal = importedBase.length;
-  const bankLimitKey = [state.budget.month, ledgerAccountFilter, ledgerAllMonths, bankStreamSort.field, bankStreamSort.direction].join("|");
+  const bankLimitKey = [state.budget.month, ledgerAccountFilter, ledgerAllMonths, ledgerNeedsCategoryOnly, bankStreamSort.field, bankStreamSort.direction].join("|");
   if (bankLimitKey !== bankStreamRowLimitKey) { bankStreamRowLimitKey = bankLimitKey; bankStreamRowLimit = BANK_STREAM_PAGE_SIZE; }
   const imported = importedBase.slice(0, bankStreamRowLimit).map(enrichBankRow);
   const otherMonthCounts = {};
@@ -4347,6 +4351,11 @@ function renderTransactions() {
               <button data-assign-ledger="${transaction.id}:${transaction.payee}:${transaction.amount}:${transaction.date}" type="button">Assign</button>
             </div>
           `).join("")}
+          ${(() => {
+            const waiting = unassignedTransactionSummary().count;
+            if (!waiting && !ledgerNeedsCategoryOnly) return "";
+            return `<div class="ledger-needs-filter"><button type="button" class="pill-button ${ledgerNeedsCategoryOnly ? "active" : ""}" id="ledgerNeedsCategoryButton" aria-pressed="${ledgerNeedsCategoryOnly}" title="Show only the rows still waiting for a subcategory, from every month">${ledgerNeedsCategoryOnly ? "Showing only rows that need a category" : `Needs a category (${waiting})`}</button>${ledgerNeedsCategoryOnly ? `<button type="button" class="ghost" id="ledgerNeedsCategoryClear">Show all</button>` : ""}</div>`;
+          })()}
           ${state.accounts.length ? `<div class="ledger-filter-row">
             <label>Account<select id="ledgerAccountFilter" aria-label="Show only one account's transactions">
               <option value="">All accounts</option>
@@ -4359,8 +4368,9 @@ function renderTransactions() {
           ${(() => {
             const monthTransactions = state.transactions
               .map((transaction, index) => ({ transaction, index }))
-              .filter(({ transaction }) => ledgerMonthMatches(transaction) && ledgerAccountFilterMatches(transaction));
+              .filter(({ transaction }) => ledgerMonthMatches(transaction) && ledgerAccountFilterMatches(transaction) && (!ledgerNeedsCategoryOnly || needsCategory(transaction)));
             if (!monthTransactions.length) {
+              if (ledgerNeedsCategoryOnly) return `<div class="empty-inline">Every ledger row has a category now.</div>`;
               if (ledgerAccountFilter) return `<div class="empty-inline">No transactions for this account${ledgerAllMonths ? "" : " in this month"}.${ledgerAllMonths ? "" : " Tick All months to look across every month."}</div>`;
               // Rows the bank has sent for this month can be waiting in Bank stream (held for a look), so say so instead of looking like nothing synced.
               if (!importedTotal) return `<div class="empty-inline">No transactions yet</div>`;
@@ -4372,7 +4382,7 @@ function renderTransactions() {
             const allSorted = sortByTransactionField(monthTransactions, transactionSort.field, transactionSort.direction);
             // A whole year of one account is a thousand rows, each with two menus: several MB of markup that froze phones. Show a page at a time; the page
             // size starts over whenever the month, account or sort changes.
-            const limitKey = [state.budget.month, ledgerAccountFilter, ledgerAllMonths, transactionSort.field, transactionSort.direction].join("|");
+            const limitKey = [state.budget.month, ledgerAccountFilter, ledgerAllMonths, ledgerNeedsCategoryOnly, transactionSort.field, transactionSort.direction].join("|");
             if (limitKey !== ledgerRowLimitKey) { ledgerRowLimitKey = limitKey; ledgerRowLimit = LEDGER_PAGE_SIZE; }
             const sorted = allSorted.slice(0, ledgerRowLimit);
             const hiddenRows = allSorted.length - sorted.length;
@@ -4501,7 +4511,7 @@ function renderTransactions() {
               ${transaction.possibleDuplicate ? `<span class="pill pill-warning" title="Matches an existing transaction with the same amount within 2 days">Possible duplicate</span>` : ""}
               ${transaction.refundMatch ? `<span class="pill pill-info" title="Refund for the ${money.format(transaction.refundMatch.amount)} purchase on ${formatShortDate(transaction.refundMatch.date)}${transaction.orderNumber ? ` (order ${escapeHtml(transaction.orderNumber)})` : ""}">Refund match</span>` : ""}
               ${transaction.transferMatch && !transaction.refundMatch ? `<span class="pill pill-info" title="Matches ${escapeHtml(accountName(transaction.transferMatch.accountId))}'s ${exactMoney.format(Math.abs(transaction.transferMatch.amount))} on ${formatShortDate(transaction.transferMatch.date)}">Possible transfer</span>` : ""}
-              <label class="row-field row-payee"><small>Payee</small><input data-bank-stream-payee="${transaction.id}" value="${escapeHtml(transaction.payee)}"></label>
+              <label class="row-field row-payee"><small>Payee</small><input data-bank-stream-payee="${transaction.id}" value="${escapeHtml(payeeDisplay(transaction.payee))}" title="${escapeHtml(payeeDisplay(transaction.payee))}"></label>
               <label class="row-field row-date"><small>Date</small><input type="date" data-bank-stream-date="${transaction.id}" value="${transaction.date}"></label>
               <label class="row-field row-amount"><small>Amount</small><input class="money-input ${Number(transaction.amount || 0) < 0 ? "amount-in" : "amount-out"}" type="number" step="0.01" data-bank-stream-amount="${transaction.id}" value="${displayTransactionAmount(transaction)}"></label>
               <label class="row-field row-select"><small>Subcategory</small><select data-bank-stream-line="${transaction.id}" data-lazy-options="line">${lazyLineOptionsHtml(transaction.lineId)}</select></label>
@@ -13786,6 +13796,16 @@ function bindViewEvents() {
   $("#bankStreamShowMore")?.addEventListener("click", () => { bankStreamRowLimit += BANK_STREAM_PAGE_SIZE; render(); });
   $("#ledgerShowMore")?.addEventListener("click", () => { ledgerRowLimit += LEDGER_PAGE_SIZE; render(); });
   $("#ledgerShowAll")?.addEventListener("click", () => { ledgerRowLimit = Infinity; render(); });
+  $("#ledgerNeedsCategoryButton")?.addEventListener("click", () => { ledgerNeedsCategoryOnly = !ledgerNeedsCategoryOnly; render(); });
+  $("#ledgerNeedsCategoryClear")?.addEventListener("click", () => { ledgerNeedsCategoryOnly = false; render(); });
+  document.querySelectorAll("[data-assign-unassigned]").forEach((button) => button.addEventListener("click", () => {
+    ledgerNeedsCategoryOnly = true;
+    ledgerAccountFilter = "";
+    ledgerAllMonths = false;
+    currentView = "transactions";
+    render();
+    window.scrollTo(0, 0);
+  }));
   $("#ledgerAllMonths")?.addEventListener("change", (event) => {
     ledgerAllMonths = event.currentTarget.checked;
     ledgerSelectedIndices.clear();

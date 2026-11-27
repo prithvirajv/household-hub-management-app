@@ -1441,7 +1441,7 @@ test("suggestSubcategoryFromHistory: a shared generic prefix across unrelated pa
     { payee: "Zelle payment to NUR MOHAMMAD Conf# qznyvr4du", amount: 1100, date: "2026-07-30", lineId: "home-repair" },
     { payee: "Online transfer from CHK 6777 Confirmation# k7ufdtq0i; KRISHNAMURTHY, SUDHARSAN", amount: 1050, date: "2026-01-30", lineId: "cloudcost" }
   ];
-  assert.equal(suggestSubcategoryFromHistory("Zelle payment from SARITHA SHEELA for Backpack amount", transactions), null, "shares only the generic 'Zelle payment' prefix with the history entry - must not inherit its lineId");
+  assert.equal(suggestSubcategoryFromHistory("Zelle payment from PRIYA SAMPLE for Backpack amount", transactions), null, "shares only the generic 'Zelle payment' prefix with the history entry - must not inherit its lineId");
   assert.equal(suggestSubcategoryFromHistory("Online transfer from CHK 6777 Confirmation# o524gmpag; KRISHNAMURTHY, SUDHARSAN", transactions), null, "a different confirmation number is a different transaction, not the same payee");
 });
 
@@ -1469,7 +1469,7 @@ test("suggestAccountFromHistory: is exact-match only, deliberately never fuzzy -
   const transactions = [
     { payee: "Zelle payment to NUR MOHAMMAD Conf# qznyvr4du", amount: 1100, date: "2026-07-30", accountId: "checking" }
   ];
-  assert.equal(suggestAccountFromHistory("Zelle payment from SARITHA SHEELA for Backpack amount", transactions), null, "shares only the generic 'Zelle payment' prefix - must not inherit its accountId");
+  assert.equal(suggestAccountFromHistory("Zelle payment from PRIYA SAMPLE for Backpack amount", transactions), null, "shares only the generic 'Zelle payment' prefix - must not inherit its accountId");
   assert.equal(suggestAccountFromHistory("A Completely Unrelated Payee", transactions), null);
   assert.equal(suggestAccountFromHistory("", transactions), null, "an empty payee never matches anything");
 });

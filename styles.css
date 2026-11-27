@@ -10204,7 +10204,7 @@ div.household-size-ok > .household-size-detail > summary { cursor: pointer; }
 
 /* Narrower than a laptop, or on a phone: a row is two short lines (payee and amount; date and subcategory) and the other controls open with its ⋯ button. */
 .transactions-grid .ledger-entry-row .ledger-row-more { display: none; }
-@media (max-width: 1000px) {
+@media (max-width: 1080px) {
   .transactions-grid .ledger-entry-head { display: flex; flex-wrap: wrap; gap: 0.3rem 0.9rem; position: static; }
   .transactions-grid .ledger-entry-head > span { display: none; }
   .transactions-grid .ledger-entry-row,
@@ -10246,7 +10246,7 @@ div.household-size-ok > .household-size-detail > summary { cursor: pointer; }
 .transactions-grid .ledger-entry-row .tag-chip { max-width: 100%; overflow: hidden; text-overflow: ellipsis; flex: 0 1 auto; }
 .transactions-grid .ledger-entry-row .tag-chip-row:has(.tag-chip) .tag-chip-input { flex: 0 0 26px; min-width: 26px; width: 26px; }
 .transactions-grid .ledger-entry-row .tag-chip-row:has(.tag-chip) .tag-chip-input:focus { flex: 1 1 90px; width: auto; }
-@media (max-width: 1000px) {
+@media (max-width: 1080px) {
   .transactions-grid .ledger-entry-row .tag-chip-row { flex-wrap: wrap; overflow: visible; }
 }
 
@@ -10271,7 +10271,7 @@ div.household-size-ok > .household-size-detail > summary { cursor: pointer; }
 .transactions-grid .ledger-card #ledgerAccountFilter { box-sizing: border-box; height: 36px; min-height: 36px; margin: 0; display: inline-flex; align-items: center; }
 .transactions-grid .ledger-card #ledgerAccountFilter { padding-top: 0; padding-bottom: 0; }
 .transactions-grid .ledger-card > .new-transaction > summary { padding-top: 0; padding-bottom: 0; }
-@media (max-width: 1000px) { .transactions-grid .ledger-entry-row .ledger-row-more { height: 32px; } }
+@media (max-width: 1080px) { .transactions-grid .ledger-entry-row .ledger-row-more { height: 32px; } }
 
 /* The "which charge?" choices are light buttons with readable text (they were solid green with dark-red small print). */
 .payback-charge-choice { background: var(--panel); color: var(--text); border: 1px solid var(--line); box-shadow: none; text-align: left; }
@@ -10377,3 +10377,99 @@ span.budget-cell { display: block; }
 /* "Use in Meals": the recipe waits while a slot is chosen. */
 .meal-placing-bar { display: flex; align-items: center; gap: 0.6rem; flex-wrap: wrap; padding: 0.6rem 0.8rem; border: 2px solid var(--green); border-radius: 10px; background: var(--green-soft); }
 @media (max-width: 760px) { .budget-cell input[type="date"] { width: 100%; } }
+
+/* A floor of 12px for text that was 9.9-11.8px (found by measuring every screen): small print stays small but readable, on a phone especially. */
+#metrics .metric span,
+#view .card-label,
+#view .pill,
+#view .home-week-day-label,
+#view .home-week-item,
+#view .compact-row small,
+#view .pill-button,
+#view .envelope-label,
+#view .budget-cell small,
+#view .category-name small,
+#view .category-add-line,
+#view .mini-tags span,
+#view .pay-dates-this-month small,
+#view .member-chip,
+#view .calendar-weekday,
+#view .event,
+#view .event-recurring-badge,
+#view .event-overdue-badge,
+#view .calendar-manage-row-meta small,
+#view .notes-filter-label,
+#view .notes-section-label,
+#view .note-toolbar-popover-panel label,
+#view .journal-field-label,
+#view .journal-stats-row span,
+#view .plan-week-day-label,
+#view .plan-task-form label,
+#view .plan-form-col-label,
+#view .plan-timeline-col-label,
+#view .plan-timeline-hour,
+#view .plan-timeline-gap span,
+#view .meal-day-date,
+#view .recipe-sort-label,
+#view .journal-tag-chip,
+#view .recipe-meta-pill,
+#view .goal-name-field,
+#view .goal-edit-grid label,
+#view .row-field small,
+#view .networth-chart-labels span,
+#view .debt-name-field,
+#view .debt-edit-grid label,
+#view .debt-asset-field,
+#view .debt-payoff-summary b,
+#view .name-field span,
+#view .stock-group-stat span,
+#view .ghost,
+#view .stock-market-value span,
+#view .muted,
+#view .net-worth-name,
+#view .net-worth-item label,
+#view .reports-appearance-label,
+#view .cashflow-month small { font-size: 12px; }
+#view .event-overdue-badge, #view .event-recurring-badge { white-space: nowrap; }
+
+/* Home: Quick add is one row of buttons; the Bills & goals list is compact. */
+.quick-add-card { padding-top: 0.6rem; padding-bottom: 0.6rem; }
+.quick-add-row { display: flex; flex-wrap: wrap; align-items: center; gap: 0.4rem 0.5rem; }
+.quick-add-row .card-label { margin-right: 0.3rem; }
+.home-side-panel .compact-row { padding: 0.3rem 0; gap: 0.4rem; }
+.home-side-panel .compact-row .pill-button { min-height: 30px; padding: 0 0.7rem; }
+.home-more > summary { cursor: pointer; font-weight: 700; padding: 0.35rem 0; color: var(--green); }
+
+/* Found on a copy of the real household: a few more small headings, and buttons too small to tap. */
+#view .budget-line-head span, #view .budget-ledger-head span, #view .ledger-entry-head button, #view .ledger-entry-head span, #view .bills-due-good, #view .bills-due-danger, #view .bills-due-warning,
+#view .recurring-budget-summary small, #view .mood-chip small, #view .bank-stream-other-months small, #view .bank-stream-bulk-account small { font-size: 12px; }
+/* The tag chips' remove (x) was squeezed to 7px by the one-line tag cell: it keeps a real size, and the chip text gives way instead. */
+.tag-chip-remove { flex: 0 0 auto; min-width: 22px; width: 22px; height: 22px; min-height: 22px; }
+@media (pointer: coarse) { .tag-chip-remove { min-width: 30px; width: 30px; height: 30px; min-height: 30px; } }
+.transactions-grid .ledger-entry-row .tag-chip { min-width: 0; }
+.note-check-level, .note-check-plan, .note-check-delete { min-width: 28px; }
+.pill-button, .small-button { min-height: 28px; }
+.tag-chip-remove { min-width: 24px; width: 24px; height: 24px; min-height: 24px; }
+details > summary { min-height: 28px; }
+button.ghost { min-height: 26px; }
+
+/* The ledger card can never be wider than the screen: with a long account name in the filter and long payees, its flex items took their content's width (1,000px on a phone) and pushed amount,
+   date and subcategory off the right edge, out of reach (found on a copy of the real household). */
+.transactions-grid .ledger-card > * { min-width: 0; max-width: 100%; }
+.transactions-grid .ledger-card > .ledger-filter-row { flex: 1 1 auto; }
+.transactions-grid .ledger-card > .ledger-filter-row select { max-width: 100%; }
+.transactions-grid .ledger-entry-scroll, .transactions-grid .ledger-entry-list { min-width: 0; max-width: 100%; }
+@media (max-width: 1080px) {
+  .transactions-grid .ledger-card > .ledger-filter-row label { flex: 1 1 auto; min-width: 0; }
+  .transactions-grid .ledger-card > .ledger-filter-row select { min-width: 0; width: 100%; }
+}
+#view .stock-market-value small, #view .gain-loss { font-size: 12px; }
+@media (pointer: coarse) { .note-check-level, .note-check-plan, .note-check-delete { min-width: 36px; } }
+@media (max-width: 760px) { #view button.ghost, #view .live-price-pill { min-height: 34px; } }
+
+/* Dark mode: the darker light-mode green (for white button text) is too dim as text on the dark green tints (about 2.9:1). Elements that show green text on a tint get the lighter green for their own text only. */
+html[data-theme="dark"] :is(.pill, .pill-button, .stock-chip, .event, .event-recurring-badge, .event-overdue-badge, .mini-tags span, .member-chip, .recipe-meta-pill, .journal-tag-chip, .stock-market-value, .gain-loss) { --green: #55d6ab; }
+
+.ledger-needs-filter { display: flex; align-items: center; gap: 0.5rem; }
+.pill-button.active { background: var(--green); color: #fff; }
+.transactions-grid .ledger-card > .ledger-needs-filter { flex: 0 0 auto; order: 4; }

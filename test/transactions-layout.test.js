@@ -23,7 +23,7 @@ test("the ledger is one full-width table with a Tags column, a sticky header and
   assert.match(css, /\.tag-chip-row \{ grid-column: 3; grid-row: 1;/);
   assert.ok(app.includes("<span>Tags</span>"));
   assert.ok(app.includes('data-ledger-row-more="${index}"') && app.includes("ledgerExpandedRows") && app.includes("row-expanded"));
-  assert.match(css, /@media \(max-width: 1000px\) \{[^@]*\.ledger-entry-row:not\(\.row-expanded\) > select\[data-ledger-entry-account\]/);
+  assert.match(css, /@media \(max-width: 1080px\) \{[^@]*\.ledger-entry-row:not\(\.row-expanded\) > select\[data-ledger-entry-account\]/);
   assert.match(css, /\.ledger-row-more \{ display: none; \}/, "no ⋯ on a wide screen");
 });
 

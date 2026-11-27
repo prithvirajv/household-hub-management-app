@@ -1283,6 +1283,10 @@ reads alike; one record accounts for one row. The same card lists the account's 
 ledger was off by that amount (the first entry is only the starting balance). "Complete" always means complete as far as the source goes: a bank feed only
 returns what the bank has sent it, so check a statement for anything old.
 
+On **Budget**, the right-hand panel's **N unassigned transactions** has an **Assign** button: it opens **Transactions** showing only the rows still waiting for a subcategory, from every month, in the ledger and in Bank stream (a green **Showing only rows that need a category** button with **Show all** sits in the toolbar; the same filter is there as **Needs a category (N)** whenever some rows are waiting). Choose a subcategory on each row, or tick several and use the bulk bar; each row leaves the list as it is assigned.
+
+**Home** keeps **Quick add** to one row of buttons, and **Bills & goals** shows the first five items with the rest folded under "N more". Payees a bank pads with extra spaces are shown with single spaces. Small print is at least 12px and tap targets are at least 24px.
+
 ## Reports and Export
 
 ![The Category report card: a horizontal bar with an icon and dollar amount per category, sorted largest first](../assets/mockup-reports-category.svg)
