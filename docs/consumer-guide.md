@@ -104,6 +104,10 @@ button on every screen. People with view-only access don't see it.
 
 ![A Housing category with planned/spent totals and two subcategory rows with progress bars](../assets/mockup-budget.svg)
 
+*Owner* pills (Everyone, plus each member) show above the budget only once a
+line has an owner, set per line from your household members under Sharing;
+they filter the budget by owner.
+
 1. First time in a month? Select **Start planning**, then add each paycheck
    under **Add income**.
 2. Select **Add category** and type a name (e.g. Housing, Food, Debt).
@@ -498,6 +502,9 @@ split with a friend, move to Transfers, receipt, delete and tags.
 
 ![A week grid with a past-due chore card and a chore rotation panel showing who's up next](../assets/mockup-calendar.svg)
 
+0. The add/edit form stays folded away until you need it: **+ Add chore**,
+   **+ Add birthday**, a click on a day, or a click on an existing event opens
+   it, and **Hide the form** closes it again.
 1. Add a chore with a repeat schedule (weekly, every 2/3/4/6 months, or
    yearly) — it rotates through the **Chore rotation** panel automatically.
 2. Select **Complete** on a chore to reveal its next occurrence; anything

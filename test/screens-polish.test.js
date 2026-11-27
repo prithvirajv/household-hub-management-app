@@ -52,3 +52,38 @@ test("Budget's 'N unassigned transactions' Assign opens Transactions showing onl
   assert.match(app, /if \(currentView !== "transactions"\) ledgerNeedsCategoryOnly = false;/, "it lasts only while the person is on Transactions");
   assert.match(css, /\.transactions-grid \.ledger-card > \.ledger-needs-filter \{ flex: 0 0 auto; order: 4; \}/);
 });
+
+test("Notes grow their checklist boxes in one batch, and the ledger shows half a page on a phone", () => {
+  assert.ok(app.includes("function autoGrowNoteCheckTexts(elements)"));
+  assert.ok(app.includes('autoGrowNoteCheckTexts(document.querySelectorAll("[data-note-check-text]"))') || app.includes("autoGrowNoteCheckTexts("), "both lists call the batch version");
+  assert.match(app, /const ledgerPageSize = \(\) => \(window\.innerWidth <= 760 \? LEDGER_PAGE_SIZE \/ 2 : LEDGER_PAGE_SIZE\);/);
+});
+
+test("the Bank stream spans the full width, and Connected accounts is a live card under the ledger layout", () => {
+  assert.match(css, /\.transactions-grid > \.side-stack > #bankStreamCard \{[^}]*grid-column: 1 \/ -1;[^}]*order: -1;/);
+  assert.ok(app.includes("function connectedAccountsCardHtml()"));
+  assert.ok(app.includes("${connectedAccountsCardHtml()}"), "drawn in the Transactions side-stack");
+});
+
+test("Wealth accounts fold into a summary row with an Edit toggle; a new account opens already editing", () => {
+  assert.ok(app.includes('class="ghost account-edit-toggle" data-toggle-account-edit="${account.id}"'));
+  assert.ok(app.includes("wealthEditingAccounts.has(account.id)") && app.includes("account-edit-panel"));
+  assert.ok(app.includes("wealthEditingAccounts.add(newAccountId)"));
+  assert.match(css, /\.account-summary-head/);
+});
+
+test("Budget owner pills appear only once a line has an owner (or a filter is active)", () => {
+  assert.ok(app.includes('budgetMemberFilter !== "all" || state.budget.categories.some((category) => category.lines.some((line) => line.ownerId))'));
+});
+
+test("the Calendar add/edit form folds away, and its +Add buttons are exempt from the click-outside close", () => {
+  assert.ok(app.includes('<details id="calendarAddPanel" class="calendar-add-panel" data-keep-open'));
+  assert.ok(app.includes("function openCalendarForm()") && app.includes("data-calendar-hide-form"));
+  assert.match(css, /\.calendar-add-panel > summary \{ display: none; \}/);
+});
+
+test("Reports' Sankey has phone rules, and the table-to-stack breakpoint is 1080px", () => {
+  assert.ok(css.includes("@media (max-width: 1080px)"));
+  assert.ok(!css.includes("@media (max-width: 1000px)"), "the old breakpoint is gone");
+  assert.match(css, /sankey/i);
+});

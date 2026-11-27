@@ -705,3 +705,10 @@ Kinds `deposit_in`, `deposit_out`, `deposit_kept` (group `deposit`). Per propert
 ### Import parity (overnight vs in-app)
 
 The overnight pipeline (lib/linked-apply.js) and the in-app import (app.js `addBankStreamRows` + `runAiImportPassOnce`) apply the same rules in the same order: skip ids already imported or twins of a row from another remote account, skip rows covered by a recorded transfer (`rowsCoveredByTransfers`) or like ones deleted before (`rowsAlreadyRemoved`), skip rows a removal rule says to skip, then per row refund match, the household's category rule, history, salary detection, AI for the gaps (high confidence only), then `autoAcceptDecision` (duplicate, transfer, refund, removal-rule hold, closed account, paycheck match). `buildDrafts` previously lacked the transfer-covered and deleted-before checks; it has them now. Partners groups follow the same idea: rows the rules read count at once, and `assignNewRowsWithAi` (high confidence only, chunks of 60, up to 120 rows) runs for rows from the overnight forward and from a CSV import alike. Keep the two Bank stream pipelines in step when changing either.
+
+### Screens polish (layout notes)
+
+- Calendar's add/edit form is `<details id="calendarAddPanel" data-keep-open>`; the global click handler (app.js, "details[open]") closes any details without `data-keep-open`, so new persistent collapsibles must set it.
+- Wealth accounts render a summary row (`.account-summary-head`) with an Edit toggle (`data-toggle-account-edit`, `wealthEditingAccounts`); the edit grid exists only while editing.
+- Transactions: Bank stream spans the full width (`#bankStreamCard`), Connected accounts is `connectedAccountsCardHtml()`, and the ledger shows half a page (`ledgerPageSize()`) at 760px and below.
+- Table-to-stack breakpoint is 1080px. Notes checklist boxes auto-grow in one batch (`autoGrowNoteCheckTexts`) to avoid layout thrash.

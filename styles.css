@@ -10473,3 +10473,20 @@ html[data-theme="dark"] :is(.pill, .pill-button, .stock-chip, .event, .event-rec
 .ledger-needs-filter { display: flex; align-items: center; gap: 0.5rem; }
 .pill-button.active { background: var(--green); color: #fff; }
 .transactions-grid .ledger-card > .ledger-needs-filter { flex: 0 0 auto; order: 4; }
+
+/* Transactions: the Bank stream card is full width and first (its buttons were squeezed into a third of the page). */
+.transactions-grid > .side-stack > #bankStreamCard { grid-column: 1 / -1; order: -1; }
+/* Wealth: an account is one line until Edit opens its fields. */
+.account-summary-head { display: flex; align-items: baseline; gap: 0.6rem; flex-wrap: wrap; padding-right: 2.4rem; }
+.account-summary-name { font-size: 0.95rem; }
+.account-summary-head .account-edit-toggle { margin-left: auto; min-height: 28px; padding: 0 0.8rem; }
+
+/* Reports on a phone: the cash-flow diagram was squeezed to 42% of its drawing (labels about 4px tall). It keeps its full size and the card scrolls sideways instead. */
+@media (max-width: 760px) {
+  .card:has(> .cashflow-sankey-svg) { overflow-x: auto; }
+  .cashflow-sankey-svg { width: 760px; max-width: none; }
+}
+.cashflow-sankey-label { font-size: 12px; }
+
+.calendar-add-panel > summary { display: none; }
+.calendar-add-panel[open] { margin: 0.2rem 0 0.5rem; }

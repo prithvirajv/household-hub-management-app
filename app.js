@@ -86,10 +86,14 @@ let receiptWaitingOpen = false;
 function ledgerRowKey(transaction) { return `${transaction.date}|${transaction.payee}|${transaction.amount}|${transaction.accountId || ""}`; }
 // "Check against the bank": the source's rows are kept so changing the account re-runs the check without asking the bank again.
 let bankCheck = { open: false, accountId: "", source: "", fileName: "", rows: [], from: "", busy: false, error: "", unchecked: new Set() };
+// The calendar's add/edit form is folded away until a + Add button, a day, or an item's edit asks for it (it used to sit open above the grid).
+let calendarFormOpen = false;
 let ledgerAllMonths = false;
 // "Needs a category": only the ledger rows and Bank stream rows still without a subcategory, from every month (what Budget's "N unassigned transactions" counts).
 let ledgerNeedsCategoryOnly = false;
 const LEDGER_PAGE_SIZE = 200;
+// A phone draws half as many rows at a time (the redraw cost is per row, and a phone is several times slower than a laptop); "Show more" adds another page.
+const ledgerPageSize = () => (window.innerWidth <= 760 ? LEDGER_PAGE_SIZE / 2 : LEDGER_PAGE_SIZE);
 const BANK_STREAM_PAGE_SIZE = 100;
 const NOTES_PAGE_SIZE = 30;
 let notesRowLimit = NOTES_PAGE_SIZE;
@@ -3194,7 +3198,7 @@ function renderBudget() {
             <button id="deleteCategoryByNameButton" class="danger-button" type="button">Delete selected</button>
           </div>
           <p class="muted">Bills like HOA, insurance, property tax, subscriptions, or memberships can be made recurring to automatically set aside savings each month.</p>
-          ${budgetMembers.length ? `<div class="reports-scope-pills budget-member-pills" role="group" aria-label="Filter by member">
+          ${budgetMembers.length && (budgetMemberFilter !== "all" || state.budget.categories.some((category) => category.lines.some((line) => line.ownerId))) ? `<div class="reports-scope-pills budget-member-pills" role="group" aria-label="Filter by member">
             <button type="button" class="${budgetMemberFilter === "all" ? "active" : ""}" data-budget-member-filter="all">Everyone</button>
             ${budgetMembers.map((member) => `<button type="button" class="${budgetMemberFilter === assigneeKey(member) ? "active" : ""}" data-budget-member-filter="${escapeHtml(assigneeKey(member))}">${escapeHtml(member.name)}</button>`).join("")}
           </div>` : ""}
@@ -4383,7 +4387,7 @@ function renderTransactions() {
             // A whole year of one account is a thousand rows, each with two menus: several MB of markup that froze phones. Show a page at a time; the page
             // size starts over whenever the month, account or sort changes.
             const limitKey = [state.budget.month, ledgerAccountFilter, ledgerAllMonths, ledgerNeedsCategoryOnly, transactionSort.field, transactionSort.direction].join("|");
-            if (limitKey !== ledgerRowLimitKey) { ledgerRowLimitKey = limitKey; ledgerRowLimit = LEDGER_PAGE_SIZE; }
+            if (limitKey !== ledgerRowLimitKey) { ledgerRowLimitKey = limitKey; ledgerRowLimit = ledgerPageSize(); }
             const sorted = allSorted.slice(0, ledgerRowLimit);
             const hiddenRows = allSorted.length - sorted.length;
             const visibleIndices = sorted.map(({ index }) => index);
@@ -4416,13 +4420,13 @@ function renderTransactions() {
                   ...(state.transactionInboxDrafts || [])
                 ]), refundPairs.get(transaction))).join("");
               })()}</div>
-              ${hiddenRows > 0 ? `<div class="ledger-show-more"><span class="muted">Showing ${sorted.length} of ${allSorted.length}</span><button type="button" class="ghost" id="ledgerShowMore">Show ${Math.min(LEDGER_PAGE_SIZE, hiddenRows)} more</button>${hiddenRows > LEDGER_PAGE_SIZE ? `<button type="button" class="ghost" id="ledgerShowAll">Show all ${allSorted.length}</button>` : ""}</div>` : ""}
+              ${hiddenRows > 0 ? `<div class="ledger-show-more"><span class="muted">Showing ${sorted.length} of ${allSorted.length}</span><button type="button" class="ghost" id="ledgerShowMore">Show ${Math.min(ledgerPageSize(), hiddenRows)} more</button>${hiddenRows > ledgerPageSize() ? `<button type="button" class="ghost" id="ledgerShowAll">Show all ${allSorted.length}</button>` : ""}</div>` : ""}
             </div>`;
           })()}
         </section>
       </div>
       <aside class="side-stack">
-        <section class="card soft-card"><div class="card-label">Transactions</div><h3>Connected accounts</h3><div class="sync-empty">Connect a bank to import transactions</div></section>
+        ${connectedAccountsCardHtml()}
         ${(() => {
           const tagGroups = groupTransactionsByTag(state.transactions);
           const selectedGroup = tagGroups.find((group) => group.key === selectedTransactionTag) || null;
@@ -4774,6 +4778,7 @@ function renderCalendar() {
               return `<button type="button" class="member-chip ${calendarFilterOwner === key ? "active" : ""}" data-calendar-filter-owner="${escapeHtml(key)}"><span class="member-dot" style="background:${memberColor(key)}" aria-hidden="true"></span>${escapeHtml(member.name)}</button>`;
             }).join("")}
           </div>
+          <details id="calendarAddPanel" class="calendar-add-panel" data-keep-open ${calendarFormOpen ? "open" : ""}><summary>Add or edit an item</summary>
           <form id="calendarQuickAdd" class="calendar-quick-add">
             <input name="editingKind" type="hidden">
             <input name="editingId" type="hidden">
@@ -4804,6 +4809,8 @@ function renderCalendar() {
             <button data-calendar-cancel class="ghost" type="button" hidden>Cancel</button>
             <p class="calendar-form-status" role="status">${escapeHtml(calendarFeedback || "")}</p>
           </form>
+          <div class="button-row"><button type="button" class="ghost" data-calendar-hide-form>Hide the form</button></div>
+          </details>
           <div class="calendar-grid">
             ${["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"].map((day) => `<div class="calendar-weekday">${day}</div>`).join("")}
             ${calendarCells().map((cell) => `
@@ -5215,6 +5222,15 @@ function noteLinkedImages(noteId) {
 function autoGrowNoteCheckText(el) {
   el.style.height = "auto";
   el.style.height = `${el.scrollHeight}px`;
+}
+
+// Sizing many checklist lines one at a time (set, then read scrollHeight, 89 times over) made the browser re-lay-out the page for each: 294ms of a 207ms-to-redraw
+// Notes page on a laptop. All the writes, then one read of every height, then all the writes.
+function autoGrowNoteCheckTexts(elements) {
+  const list = [...elements];
+  list.forEach((el) => { el.style.height = "auto"; });
+  const heights = list.map((el) => el.scrollHeight);
+  list.forEach((el, index) => { el.style.height = `${heights[index]}px`; });
 }
 
 function renderNoteCard(note) {
@@ -9363,8 +9379,15 @@ function accountBalanceRowHtml(account, index, balance, { handle = true } = {}) 
 function accountItemRow(account, index) {
   const balance = currentAccountBalance(account.id);
   const isLiability = account.type === "credit_card";
+  const editing = wealthEditingAccounts.has(account.id);
+  // One line per account (name, type, Edit); the fields (name, type, opening balance, close date) open with Edit. An account that was only just added opens already.
   return `<article class="account-item ${isLiability ? "liability" : ""}" draggable="true" data-drag-account="${account.id}">
-    ${accountEditGridHtml(account, index)}
+    <div class="account-summary-head">
+      <strong class="account-summary-name">${escapeHtml(account.name)}</strong>
+      <small class="muted">${escapeHtml(ACCOUNT_TYPE_LABELS[account.type] || account.type)}</small>
+      <button type="button" class="ghost account-edit-toggle" data-toggle-account-edit="${account.id}" aria-expanded="${editing ? "true" : "false"}">${editing ? "Hide details" : "Edit"}</button>
+    </div>
+    ${editing ? `<div class="account-edit-panel">${accountEditGridHtml(account, index)}</div>` : ""}
     ${accountBalanceRowHtml(account, index, balance)}
     <button class="icon-button danger-button card-close-button" data-delete-account="${index}" type="button" aria-label="Remove ${escapeHtml(account.name)}">×</button>
   </article>`;
@@ -11945,8 +11968,8 @@ function bindViewEvents() {
     });
   });
 
+  autoGrowNoteCheckTexts(document.querySelectorAll("[data-note-check-text]"));
   document.querySelectorAll("[data-note-check-text]").forEach((input) => {
-    autoGrowNoteCheckText(input);
     input.addEventListener("input", () => {
       autoGrowNoteCheckText(input);
       const [noteId, itemId] = input.dataset.noteCheckText.split(":");
@@ -12046,8 +12069,8 @@ function bindViewEvents() {
     });
   });
 
+  autoGrowNoteCheckTexts(document.querySelectorAll("[data-shared-note-check-text]"));
   document.querySelectorAll("[data-shared-note-check-text]").forEach((input) => {
-    autoGrowNoteCheckText(input);
     input.addEventListener("input", () => autoGrowNoteCheckText(input));
     input.addEventListener("keydown", (event) => {
       if (event.key !== "Enter") return;
@@ -13794,7 +13817,7 @@ function bindViewEvents() {
   });
   $("#notesShowMore")?.addEventListener("click", () => { notesRowLimit += NOTES_PAGE_SIZE; render(); });
   $("#bankStreamShowMore")?.addEventListener("click", () => { bankStreamRowLimit += BANK_STREAM_PAGE_SIZE; render(); });
-  $("#ledgerShowMore")?.addEventListener("click", () => { ledgerRowLimit += LEDGER_PAGE_SIZE; render(); });
+  $("#ledgerShowMore")?.addEventListener("click", () => { ledgerRowLimit += ledgerPageSize(); render(); });
   $("#ledgerShowAll")?.addEventListener("click", () => { ledgerRowLimit = Infinity; render(); });
   $("#ledgerNeedsCategoryButton")?.addEventListener("click", () => { ledgerNeedsCategoryOnly = !ledgerNeedsCategoryOnly; render(); });
   $("#ledgerNeedsCategoryClear")?.addEventListener("click", () => { ledgerNeedsCategoryOnly = false; render(); });
@@ -15874,10 +15897,12 @@ function bindViewEvents() {
     const name = `New account ${state.accounts.length + 1}`;
     const netWorthId = uniqueId(name);
     state.goals.netWorth.assets.push({ id: netWorthId, name, value: 0, assetClass: "cash" });
+    const newAccountId = uniqueId(name);
     state.accounts.push({
-      id: uniqueId(name), name, type, openingBalance: 0,
+      id: newAccountId, name, type, openingBalance: 0,
       netWorthAssetId: netWorthId, netWorthLiabilityId: "", createdAt: dateKey(new Date())
     });
+    wealthEditingAccounts.add(newAccountId);
     autosaveState();
     render();
   };
@@ -16508,6 +16533,7 @@ function bindViewEvents() {
       if (event.target.closest(".event")) return;
       const dateInput = $("#calendarQuickAdd [name='date']");
       if (!dateInput) return;
+      openCalendarForm();
       // The date and time are always separate fields now, so clicking a
       // different day just updates the date - whatever time was already
       // typed (or the "annual" case, where there's no time field at all)
@@ -16521,6 +16547,8 @@ function bindViewEvents() {
     });
   });
 
+  $("#calendarAddPanel")?.addEventListener("toggle", (event) => { calendarFormOpen = event.currentTarget.open; });
+  $("[data-calendar-hide-form]")?.addEventListener("click", () => { calendarFormOpen = false; const panel = $("#calendarAddPanel"); if (panel) panel.open = false; });
   $("[data-calendar-cancel]")?.addEventListener("click", resetCalendarEditor);
 
   $("[data-calendar-delete]")?.addEventListener("click", () => {
@@ -17594,9 +17622,16 @@ async function goToViewAndRun(targetView, action) {
   action?.();
 }
 
+function openCalendarForm() {
+  calendarFormOpen = true;
+  const panel = $("#calendarAddPanel");
+  if (panel) panel.open = true;
+}
+
 function focusCalendarType(type) {
   const form = $("#calendarQuickAdd");
   if (!form) return;
+  openCalendarForm();
   resetCalendarEditor();
   form.type.value = type;
   updateCalendarQuickAddFields();
@@ -17606,6 +17641,7 @@ function focusCalendarType(type) {
 function editCalendarItem(reference) {
   const form = $("#calendarQuickAdd");
   if (!form || !reference) return;
+  openCalendarForm();
   const separator = reference.indexOf(":");
   const kind = reference.slice(0, separator);
   const id = reference.slice(separator + 1);
@@ -18103,6 +18139,22 @@ function pendingAtBanksAccounts() {
 }
 
 // Transactions page: what the banks list as pending, read-only and apart from every total. It shrinks by itself as the banks post the charges.
+// The Transactions page's "Connected accounts" card: what each linked bank last did, instead of always saying "Connect a bank".
+function connectedAccountsCardHtml() {
+  const links = (linkedAccounts?.links || []).filter((link) => link.status === "active" || link.status === "needs_reconnect");
+  if (!links.length) return `<section class="card soft-card"><div class="card-label">Transactions</div><h3>Connected accounts</h3><div class="sync-empty">Connect a bank to import transactions</div><div class="button-row"><button class="pill-button" data-goto-view="wealth" type="button">Link a bank</button></div></section>`;
+  return `<section class="card soft-card"><div class="card-label">Transactions</div><h3>Connected accounts</h3>
+    ${links.map((link) => {
+      const run = link.lastRun || {};
+      const when = link.lastSyncAt ? `last synced ${new Date(link.lastSyncAt).toLocaleDateString(undefined, { month: "short", day: "numeric" })}` : "not synced yet";
+      const problem = link.status === "needs_reconnect" ? "needs signing in again" : run.ok === false ? "last night's sync did not finish" : run.limited ? "stopped at SimpleFIN's daily limit" : "";
+      const mapped = Object.values(link.mappings || {}).filter((mapping) => mapping && mapping.accountId).length;
+      return `<div class="compact-row"><div><strong>${escapeHtml(link.label)}</strong><small>${mapped} account${mapped === 1 ? "" : "s"} · ${when}${problem ? ` · <span class="danger">${problem}</span>` : ""}</small></div></div>`;
+    }).join("")}
+    <div class="button-row"><button class="pill-button" data-goto-view="wealth" type="button">Sync or manage</button></div>
+  </section>`;
+}
+
 function pendingAtBanksCard() {
   const accounts = pendingAtBanksAccounts();
   if (!accounts.length) return "";

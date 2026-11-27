@@ -11,7 +11,7 @@ test("the ledger draws a page of rows at a time and starts over when the month, 
   assert.match(app, /const sorted = allSorted\.slice\(0, ledgerRowLimit\)/);
   assert.match(app, /id="ledgerShowMore"/);
   assert.match(app, /id="ledgerShowAll"/);
-  assert.match(app, /\$\("#ledgerShowMore"\)\?\.addEventListener\("click", \(\) => \{ ledgerRowLimit \+= LEDGER_PAGE_SIZE; render\(\); \}\)/);
+  assert.match(app, /\$\("#ledgerShowMore"\)\?\.addEventListener\("click", \(\) => \{ ledgerRowLimit \+= ledgerPageSize\(\); render\(\); \}\)/);
 });
 
 test("select-all only ticks the rows that are drawn, so a bulk change never reaches hidden rows", () => {
