@@ -794,7 +794,7 @@ the Accounts part - and counts toward the net worth total from there.
    linked transactions, paychecks, and transfers, never entered by hand.
 3. Link an account to a **Net worth** asset or liability so that entry
    updates automatically as the account does.
-4. For debt, check the **Debt payoff tracker** — it estimates a payoff date
+4. For debt, check the **Debt payoff tracker** — each debt is one line (balance, rate, monthly payment) with an **Edit** button for its details; it estimates a payoff date
    and suggested payment from the balance, rate, and term you enter, and
    shows a progress bar of the real percent paid off so far, computed from
    your logged payment history. Every debt here is paired with a line in

@@ -712,3 +712,6 @@ The overnight pipeline (lib/linked-apply.js) and the in-app import (app.js `addB
 - Wealth accounts render a summary row (`.account-summary-head`) with an Edit toggle (`data-toggle-account-edit`, `wealthEditingAccounts`); the edit grid exists only while editing.
 - Transactions: Bank stream spans the full width (`#bankStreamCard`), Connected accounts is `connectedAccountsCardHtml()`, and the ledger shows half a page (`ledgerPageSize()`) at 760px and below.
 - Table-to-stack breakpoint is 1080px. Notes checklist boxes auto-grow in one batch (`autoGrowNoteCheckTexts`) to avoid layout thrash.
+- Transactions side area: subcategory tools (`#manageSubcategories`) and Clean up old transactions (`#cleanupPanel`) are full-width fold-away bars below the cards, both `data-keep-open` with their open state remembered. An empty Bank stream renders with `bank-stream-idle`. There is one "+ New transaction" (the ledger's); the Bank stream keeps only the import tools.
+- Wealth debts share the accounts' Edit toggle (`data-toggle-account-edit="debt:<id>"`, `wealthEditingAccounts`).
+- Integration tests must take their port from `pickPort()` in test/helpers.js (the OS hands out a free one); a random guess let two test servers collide, which showed up as "other side closed" failures and a hung run.

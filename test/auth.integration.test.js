@@ -3,8 +3,16 @@ const { spawn } = require("node:child_process");
 const { once } = require("node:events");
 const test = require("node:test");
 
-const port = 43000 + Math.floor(Math.random() * 1000);
-const baseUrl = `http://127.0.0.1:${port}`;
+const net = require("node:net");
+
+// A free port from the OS, not a random guess that another test server could share.
+let port;
+let baseUrl;
+const freePort = () => new Promise((resolve, reject) => {
+  const probe = net.createServer();
+  probe.once("error", reject);
+  probe.listen(0, "127.0.0.1", () => { const { port: found } = probe.address(); probe.close(() => resolve(found)); });
+});
 const adminEmail = "private-admin@example.com";
 const initialPassword = "Initial-Admin-Password-123!";
 const resetPassword = "Reset-Admin-Password-456!";
@@ -51,6 +59,8 @@ function combineCookies(...cookieHeaders) {
 }
 
 test.before(async () => {
+  port = await freePort();
+  baseUrl = `http://127.0.0.1:${port}`;
   server = spawn(process.execPath, ["server/index.js"], {
     cwd: process.cwd(),
     env: {

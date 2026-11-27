@@ -1,12 +1,24 @@
 const { spawn } = require("node:child_process");
 const { once } = require("node:events");
+const net = require("node:net");
 
+// Ask the OS for a free port instead of guessing one at random: two test files starting at once (or a dev server) could land on the same
+// guessed port, and the readiness check would then succeed against the OTHER server - which a different test later stops, closing the
+// socket under this one ("other side closed") or leaving a run hanging.
 function pickPort() {
-  return 43000 + Math.floor(Math.random() * 5000);
+  return new Promise((resolve, reject) => {
+    const probe = net.createServer();
+    probe.once("error", reject);
+    probe.listen(0, "127.0.0.1", () => {
+      const { port } = probe.address();
+      probe.close(() => resolve(port));
+    });
+  });
 }
 
-async function waitForServer(baseUrl) {
+async function waitForServer(baseUrl, server) {
   for (let attempt = 0; attempt < 80; attempt += 1) {
+    if (server && server.exitCode !== null) throw new Error(`Test server exited early (code ${server.exitCode})`);
     try {
       const response = await fetch(`${baseUrl}/readyz`);
       if (response.ok) return;
@@ -19,7 +31,7 @@ async function waitForServer(baseUrl) {
 }
 
 async function startTestServer(env = {}) {
-  const port = pickPort();
+  const port = await pickPort();
   const baseUrl = `http://127.0.0.1:${port}`;
   const server = spawn(process.execPath, ["server/index.js"], {
     cwd: process.cwd(),
@@ -35,14 +47,17 @@ async function startTestServer(env = {}) {
     },
     stdio: ["ignore", "pipe", "pipe"]
   });
-  await waitForServer(baseUrl);
+  await waitForServer(baseUrl, server);
 
   return {
     baseUrl,
     async stop() {
       if (server.exitCode !== null) return;
       server.kill("SIGTERM");
+      // A server that ignores SIGTERM must not hang the whole run.
+      const forceKill = setTimeout(() => server.kill("SIGKILL"), 5000);
       await once(server, "exit");
+      clearTimeout(forceKill);
     },
     async request(path, options = {}) {
       const response = await fetch(`${baseUrl}${path}`, {

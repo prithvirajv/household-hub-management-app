@@ -10,7 +10,8 @@ test("the Transactions page puts the ledger first: relevant slim figures, subcat
   const branch = app.slice(app.indexOf('if (currentView === "transactions") {'), app.indexOf("// The Partners page has its own figures"));
   ["monthRows", '["Spent"', '["Money in"', '["Transactions"', '["Waiting"'].forEach((piece) => assert.ok(branch.includes(piece), piece));
   assert.ok(app.includes('$("#metrics").classList.add("metrics-compact")') && app.includes('metrics.classList.add("metrics-compact")'), "every page gets the slim figures strip");
-  assert.ok(app.includes('<details class="card manage-subcategories">') && app.includes('<h3 class="ledger-title">Ledger'));
+  assert.ok(app.includes('<details class="card manage-subcategories" id="manageSubcategories" data-keep-open') && app.includes('<h3 class="ledger-title">Ledger'));
+  assert.ok(app.indexOf('<h3 class="ledger-title">Ledger') < app.indexOf('id="manageSubcategories"'), "the ledger comes first; subcategory tools sit with the other housekeeping below");
   assert.ok(!app.includes("Manage subcategories from Transactions</h3>") && !app.includes('<div class="card-label">Recent transactions</div>'), "the extra headings are gone");
   assert.ok(app.includes('data-scroll-to="bankStreamCard"') && app.includes('id="bankStreamCard"'), "waiting Bank stream rows are one tap away");
   assert.match(app, /<section class="work-grid transactions-grid">/);

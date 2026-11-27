@@ -337,6 +337,7 @@ let documentsInfoExpandedId = null;
 let newTransactionOpen = false;
 let pendingBanksOpen = false;
 let cleanupPanelOpen = false;
+let manageSubcategoriesOpen = false;
 let wealthDocsExpandedKey = null;
 // Investment accounts whose account fields (name, type, opening balance, close date) are open for editing; they stay folded away otherwise.
 const wealthEditingAccounts = new Set();
@@ -1563,7 +1564,7 @@ function bankCheckCardHtml() {
   const days = bankCheck.from ? Math.max(1, Math.ceil((Date.now() - Date.parse(`${bankCheck.from}T00:00:00`)) / 86400000)) : 0;
   const section = (title, items, note = "") => (items.length ? `<details class="bank-check-group"><summary>${title} (${items.length})</summary>${note ? `<small class="muted">${note}</small>` : ""}${bankCheckRowsHtml(items)}</details>` : "");
   return `<details class="card bank-check" id="bankCheckDetails" ${bankCheck.open ? "open" : ""}>
-    <summary><b>Check against the bank</b> <span class="muted">make sure nothing is missing</span></summary>
+    <summary><b>Check against the bank</b> <span class="muted">${result ? (result.complete ? `✓ all ${result.counts.total - result.counts.pending} rows accounted for` : `${missing.length} missing${account ? ` from ${escapeHtml(account.name)}` : ""}`) : "make sure nothing is missing"}</span></summary>
     <p class="muted">Compare what FamilyLoop has for an account with a statement you upload, or with the bank asked again. Nothing changes until you choose Add.</p>
     <div class="bank-check-controls">
       <label>Account<select id="bankCheckAccount"><option value="">Choose an account</option>${accountOptions(bankCheck.accountId)}</select></label>
@@ -4288,20 +4289,6 @@ function renderTransactions() {
   return `
     <section class="work-grid transactions-grid">
       <div class="main-stack">
-        <details class="card manage-subcategories">
-          <summary><b>Manage subcategories</b> <span class="muted">add or delete budget lines</span></summary>
-          <div class="transaction-subcategory-adder">
-            <label>Category<select id="transactionParentCategory">${state.budget.categories.map((category, index) => ({ category, index })).sort((a, b) => a.category.name.localeCompare(b.category.name)).map(({ category, index }) => `<option value="${index}">${category.name}</option>`).join("")}</select></label>
-            <label class="custom-combobox">Subcategory
-              <input id="transactionSubcategoryName" autocomplete="off" placeholder="Type to search or add">
-              <div id="transactionSubcategoryMenu" class="combo-menu" hidden>
-                ${(firstCategory?.lines || []).map((line) => `<button type="button" data-subcategory-option="${line.name}">${line.name}</button>`).join("")}
-              </div>
-            </label>
-            <button id="addTransactionSubcategoryButton" class="ghost" type="button">Add subcategory</button>
-            <button id="deleteTransactionSubcategoryButton" class="danger-button" type="button">Delete selected</button>
-          </div>
-        </details>
         <section class="card ledger-card">
           <h3 class="ledger-title">Ledger${(state.transactionInboxDrafts || []).length ? ` <button type="button" class="pill-button" data-scroll-to="bankStreamCard">${(state.transactionInboxDrafts || []).length} waiting in Bank stream ↓</button>` : ""}</h3>
           ${transactionValidationFeedback ? `<p class="muted" role="status">${escapeHtml(transactionValidationFeedback)}</p>` : ""}
@@ -4451,7 +4438,7 @@ function renderTransactions() {
         })()}
         ${bankCheckCardHtml()}
         ${pendingAtBanksCard()}
-        <section class="card" id="bankStreamCard">
+        <section class="card ${allImported.length || bankImportFeedback ? "" : "bank-stream-idle"}" id="bankStreamCard">
           <div class="section-head">
             <div><span class="card-label">Bank expense</span><h3>Bank stream</h3></div>
             <div class="button-row">
@@ -4459,7 +4446,7 @@ function renderTransactions() {
               <label class="documents-upload-button secondary-upload" title="For rows you imported earlier from a card file that has both a Transaction Date and a Post Date: move them to the post date, as a linked bank dates them.">Re-date from a CSV<input type="file" id="postDateFixInput" accept=".csv,text/csv"></label>
             </div>
           </div>
-          <label class="ai-import-toggle"><input type="checkbox" id="aiImportToggle" ${aiImportEnabled() ? "checked" : ""}> <span>Use AI to categorize and tag imports and add them to the ledger; anything it is unsure about stays in Bank stream for review</span></label>
+          <label class="ai-import-toggle" title="Use AI to categorize and tag imports and add them to the ledger; anything it is unsure about stays in Bank stream for review"><input type="checkbox" id="aiImportToggle" ${aiImportEnabled() ? "checked" : ""}> <span>Let AI categorize and file imports <small class="muted">(unsure ones wait here for review)</small></span></label>
           ${(state.transactionInboxDrafts || []).length ? `<div class="button-row"><button type="button" class="ghost" id="bankStreamAiProcess" ${aiImportRunning ? "disabled" : ""}>${aiImportRunning ? "Working…" : `Let AI categorize and add the ${(state.transactionInboxDrafts || []).length} waiting row${(state.transactionInboxDrafts || []).length === 1 ? "" : "s"}`}</button><small class="muted">Confident rows go to the ledger with a category and tags; the rest stay here for review.</small></div>` : ""}
           ${bankImportFeedback ? `<p class="muted" role="status">${escapeHtml(bankImportFeedback)}</p>` : ""}
           ${postDateFixPanelHtml()}
@@ -4537,6 +4524,20 @@ function renderTransactions() {
           ${importedTotal > imported.length ? `<div class="ledger-show-more"><span class="muted">Showing ${imported.length} of ${importedTotal}</span><button type="button" class="ghost" id="bankStreamShowMore">Show ${Math.min(BANK_STREAM_PAGE_SIZE, importedTotal - imported.length)} more</button></div>` : ""}
         </section>
         ${categorizationRuleEntries().length || (state.removalRules || []).length ? `<section class="card learned-rules-pointer"><span class="card-label">Learning</span><p class="muted">FamilyLoop has learned ${categorizationRuleEntries().length} category rule${categorizationRuleEntries().length === 1 ? "" : "s"}${(state.removalRules || []).length ? ` and ${(state.removalRules || []).length} rule${(state.removalRules || []).length === 1 ? "" : "s"} from rows you removed` : ""}. </p><button type="button" class="ghost" data-open-learned-rules>Manage in Profile</button></section>` : ""}
+        <details class="card manage-subcategories" id="manageSubcategories" data-keep-open ${manageSubcategoriesOpen ? "open" : ""}>
+          <summary><b>Manage subcategories</b> <span class="muted">add or delete budget lines</span></summary>
+          <div class="transaction-subcategory-adder">
+            <label>Category<select id="transactionParentCategory">${state.budget.categories.map((category, index) => ({ category, index })).sort((a, b) => a.category.name.localeCompare(b.category.name)).map(({ category, index }) => `<option value="${index}">${category.name}</option>`).join("")}</select></label>
+            <label class="custom-combobox">Subcategory
+              <input id="transactionSubcategoryName" autocomplete="off" placeholder="Type to search or add">
+              <div id="transactionSubcategoryMenu" class="combo-menu" hidden>
+                ${(firstCategory?.lines || []).map((line) => `<button type="button" data-subcategory-option="${line.name}">${line.name}</button>`).join("")}
+              </div>
+            </label>
+            <button id="addTransactionSubcategoryButton" class="ghost" type="button">Add subcategory</button>
+            <button id="deleteTransactionSubcategoryButton" class="danger-button" type="button">Delete selected</button>
+          </div>
+        </details>
         <details class="card cleanup-card" id="cleanupPanel" data-keep-open ${cleanupPanelOpen ? "open" : ""}>
           <summary><span class="card-label">Housekeeping</span><b>Clean up old transactions</b><span class="muted">remove old rows for good</span></summary>
           <p class="muted">Permanently remove ledger transactions and/or waiting Bank stream rows from before a date. A CSV backup of exactly what is removed can download first. Linked accounts re-match their bank balance afterwards.</p>
@@ -9193,8 +9194,13 @@ function renderWealth() {
         </section>` : ""}
         <section class="card">
           <div class="section-head"><div><span class="card-label">Debt snowball</span><h3>Debt payoff tracker</h3></div><button id="addDebtButton" type="button">+ Add debt</button></div>
-          ${state.goals.debts.length ? state.goals.debts.map((debt, index) => `<article class="debt-card">
-            <div class="debt-edit-grid">
+          ${state.goals.debts.length ? state.goals.debts.map((debt, index) => { const debtEditKey = `debt:${debt.id || index}`; const debtEditing = wealthEditingAccounts.has(debtEditKey); return `<article class="debt-card">
+            <div class="account-summary-head debt-summary-head">
+              <span class="account-summary-name">${escapeHtml(debt.name)}</span>
+              <span class="muted">${money.format(Number(debt.balance || 0))} · ${Number(debt.rate || 0)}% APR${Number(debt.minimum || 0) ? ` · ${money.format(Number(debt.minimum))}/mo` : ""}</span>
+              <button type="button" class="ghost account-edit-toggle" data-toggle-account-edit="${debtEditKey}" aria-expanded="${debtEditing ? "true" : "false"}">${debtEditing ? "Hide details" : "Edit"}</button>
+            </div>
+            ${debtEditing ? `<div class="debt-edit-grid">
               <label class="debt-name-field">Debt name<input data-debt-name="${index}" value="${escapeHtml(debt.name)}" aria-label="Debt name"></label>
               <label>Current balance<input data-debt-balance="${index}" type="number" min="0" step="0.01" inputmode="decimal" value="${Number(debt.balance || 0)}" aria-label="Current balance for ${escapeHtml(debt.name)}"></label>
               <label>Interest rate (APR %)<input data-debt-rate="${index}" type="number" min="0" step="0.01" inputmode="decimal" value="${Number(debt.rate || 0)}" aria-label="Interest rate for ${escapeHtml(debt.name)}"></label>
@@ -9202,7 +9208,7 @@ function renderWealth() {
               <label>Loan term (months)<input data-debt-term="${index}" type="number" min="0" step="1" inputmode="numeric" value="${Number(debt.termMonths || 0)}" aria-label="Loan term for ${escapeHtml(debt.name)}"></label>
               <label class="debt-asset-field">Secured by asset<select data-debt-asset="${index}" aria-label="Asset assigned to ${escapeHtml(debt.name)}">${debtAssetOptions(debt)}</select></label>
               <label class="debt-asset-field">Subcategory<select data-debt-line="${index}" aria-label="Subcategory for ${escapeHtml(debt.name)} payments">${debtLineOptions(debt)}</select></label>
-            </div>
+            </div>` : ""}
             <div class="debt-payoff-summary"><span><b>Estimated payoff</b>${termLabel(payoffMonths(debt))}</span><span><b>Suggested EMI</b>${debt.termMonths ? money.format(suggestedEmi(debt)) : "Set a loan term"}</span>${debt.termMonths ? `<button class="ghost" data-use-suggested-emi="${index}" type="button">Use suggested EMI</button>` : ""}</div>
             <div class="debt-progress-bar"><span style="width:${debtPayoffProgressPercent(debt)}%"></span></div>
             <p class="debt-progress-caption">${debtPayoffProgressPercent(debt)}% paid off · ${money.format(debt.balance)} remaining</p>
@@ -9217,7 +9223,7 @@ function renderWealth() {
               .slice(0, 8)
               .map(({ payment, paymentIndex }) => `<div><input type="date" data-debt-payment-date="${index}:${paymentIndex}" value="${payment.date}" aria-label="Date for this ${escapeHtml(debt.name)} payment"><span>${money.format(payment.amount)} paid</span><span>${money.format(payment.principal)} principal</span><span>${money.format(payment.interest)} interest</span><button class="icon-button danger-button" data-delete-debt-payment="${index}:${paymentIndex}" type="button" aria-label="Remove this ${escapeHtml(debt.name)} payment and restore its balance">×</button></div>`)
               .join("")}</details>` : ""}
-          </article>`).join("") : `<div class="onboarding-empty compact-onboarding"><div class="empty-symbol" aria-hidden="true">↓</div><h3>Add a debt when you are ready</h3><p>Track its balance, rate, payment, and the asset it secures.</p></div>`}
+          </article>`; }).join("") : `<div class="onboarding-empty compact-onboarding"><div class="empty-symbol" aria-hidden="true">↓</div><h3>Add a debt when you are ready</h3><p>Track its balance, rate, payment, and the asset it secures.</p></div>`}
         </section>
       </div>
       <section class="card wealth-holdings"><div class="section-head"><div><span class="card-label">Net worth</span><h3>Assets, investments and liabilities</h3></div><div class="wealth-currency-row"><select id="wealthCurrencySelect" aria-label="Display currency">${[...new Set([state.household.currency || "USD", "USD", "EUR", "GBP", "INR"])].map((code) => `<option value="${code}" ${wealthDisplayCurrency() === code ? "selected" : ""}>${code}</option>`).join("")}</select><details class="add-menu" id="wealthAddMenu"><summary class="add-menu-button">+ Add</summary><div class="add-menu-list" role="menu"><button id="addAccountButton" type="button" role="menuitem"><strong>Bank account or card</strong><small>Checking, savings, cash or a credit card</small></button><button id="addInvestmentAccountButton" type="button" role="menuitem"><strong>Investment account</strong><small>Brokerage, retirement or 529 - track what it holds</small></button><button id="addNetWorthItemButton" type="button" role="menuitem"><strong>Property or other asset</strong><small>A home, a car, or a stock you hold outside an account</small></button></div></details></div></div><div class="net-worth-strip"><strong data-net-worth-total>${wealthMoney(netWorth().total)}</strong><span>Assets <b data-net-worth-assets>${wealthMoney(netWorth().assets)}</b> Liabilities <b data-net-worth-liabilities>${wealthMoney(netWorth().liabilities)}</b></span></div>${wealthDisplayCurrency() !== (state.household.currency || "USD") ? `<p class="muted wealth-currency-note">Converted from ${state.household.currency || "USD"} using real exchange rates${wealthFxRates ? "" : " — loading…"}. Individual accounts and holdings below still show ${state.household.currency || "USD"}.</p>` : ""}<div class="net-worth-accounts"><div class="net-worth-subhead">Accounts</div>${wealthAccountsHtml()}</div>${wealthItemGroupsHtml()}${state.goals.netWorth.assets.length || state.goals.netWorth.liabilities.length || state.accounts.length ? "" : `<div class="empty-inline">No assets, investments or liabilities yet</div>`}<div class="net-worth-transfers"><div class="net-worth-subhead">Transfers</div>${wealthTransfersHtml()}</div></section>
@@ -13200,6 +13206,7 @@ function bindViewEvents() {
   });
 
   $("#newTransactionDetails")?.addEventListener("toggle", (event) => { newTransactionOpen = event.currentTarget.open; });
+  $("#manageSubcategories")?.addEventListener("toggle", (event) => { manageSubcategoriesOpen = event.currentTarget.open; });
   $("#cleanupPanel")?.addEventListener("toggle", (event) => { cleanupPanelOpen = event.currentTarget.open; });
   $("#pendingBanksDetails")?.addEventListener("toggle", (event) => { pendingBanksOpen = event.currentTarget.open; });
 
@@ -15290,6 +15297,7 @@ function bindViewEvents() {
     const id = uniqueId(name);
     state.goals.debts.push({ id, name, balance: 1000, rate: 0, minimum: 0, termMonths: 12, assetId: "", payments: [] });
     state.goals.netWorth.liabilities.push({ id, name, value: 1000 });
+    wealthEditingAccounts.add(`debt:${id}`);
     autosaveState();
     render();
   });

@@ -102,3 +102,26 @@ test("the Bank stream no longer carries a second '+ Add transaction' (the ledger
   assert.ok(app.includes('class="documents-upload-button secondary-upload"'));
   assert.match(css, /\.documents-upload-button\.secondary-upload \{ background: transparent;/);
 });
+
+test("Transactions: subcategory tools sit with the housekeeping bars, an empty Bank stream is a slim card, and Check against the bank says what it found", () => {
+  assert.ok(app.includes('id="manageSubcategories" data-keep-open ${manageSubcategoriesOpen ? "open" : ""}') && app.includes('$("#manageSubcategories")?.addEventListener("toggle"'));
+  assert.match(css, /\.transactions-grid > \.side-stack > \.manage-subcategories \{ grid-column: 1 \/ -1; order: 98; \}/);
+  assert.ok(app.includes('${allImported.length || bankImportFeedback ? "" : "bank-stream-idle"}'));
+  assert.ok(app.includes("accounted for` : `${missing.length} missing"), "the collapsed summary reports the result");
+  assert.ok(app.includes("Let AI categorize and file imports"));
+});
+
+test("Wealth debts fold into a summary row (balance, APR, EMI) with an Edit toggle; a new debt opens already editing", () => {
+  assert.ok(app.includes('const debtEditKey = `debt:${debt.id || index}`;'));
+  assert.ok(app.includes("${debtEditing ? `<div class=\"debt-edit-grid\">"));
+  assert.ok(app.includes("wealthEditingAccounts.add(`debt:${id}`)"));
+  assert.match(css, /\.debt-summary-head \{ padding-right: 0;/);
+});
+
+test("test servers get a free port from the OS, never a guessed one another server could share", () => {
+  const read = (file) => fs.readFileSync(path.join(__dirname, "..", file), "utf8");
+  const helpers = read("test/helpers.js");
+  assert.ok(helpers.includes("probe.listen(0") && !helpers.includes("Math.random"));
+  assert.ok(helpers.includes("Test server exited early") && helpers.includes('server.kill("SIGKILL")'));
+  assert.ok(!read("test/auth.integration.test.js").includes("Math.random"));
+});

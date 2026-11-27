@@ -10506,3 +10506,9 @@ html[data-theme="dark"] :is(.pill, .pill-button, .stock-chip, .event, .event-rec
 /* One place to type a transaction (the ledger's "+ New transaction"); the Bank stream keeps only the import tools, the less common one quieter. */
 .documents-upload-button.secondary-upload { background: transparent; color: var(--text); border: 1px solid var(--line); }
 .documents-upload-button.secondary-upload:hover { background: var(--soft); }
+.transactions-grid > .side-stack > .manage-subcategories { grid-column: 1 / -1; order: 98; }
+#bankStreamCard.bank-stream-idle { gap: 0.4rem; padding-top: 0.7rem; padding-bottom: 0.7rem; }
+#bankStreamCard.bank-stream-idle .empty-inline { padding: 0; }
+#bankStreamCard .ai-import-toggle small { font-weight: 400; }
+.debt-summary-head { padding-right: 0; margin-bottom: 0.4rem; }
+.debt-summary-head .account-summary-name { font-weight: 800; }
