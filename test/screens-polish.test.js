@@ -192,3 +192,18 @@ test("dark mode: tag chips, note labels and delete crosses clear 4.5:1 with the 
   assert.match(css, /\.mini-tags span, \.note-labels span, [^)]*\) \{ --green: #6ee5be; \}/);
   assert.match(css, /html\[data-theme="dark"\] :is\(\.icon-button\.danger-button, \.mini-tag-remove, \.note-check-delete\) \{ color: #ff9a9a; \}/);
 });
+
+test("Notes can be reordered by dragging a card's handle onto another card, or with Move earlier / later; search hints say where a note matched", () => {
+  assert.ok(app.includes("}).sort(compareNotes);"));
+  assert.ok(app.includes('data-note-drag-handle="${note.id}" type="button" draggable="true"'));
+  assert.ok(app.includes('const NOTE_DRAG_TYPE = "application/x-familyloop-note";') && app.includes("reorderNotes(state.notes.entries, visibleNotes()"));
+  assert.ok(app.includes('data-move-note="${note.id}:-1"') && app.includes('data-move-note="${note.id}:1"'));
+  assert.ok(app.includes("sortOrder: undefined,"), "a copy lands on top");
+  assert.ok(app.includes("data-note-match-hint") && app.includes("noteMatchLocations(note, query)"));
+  assert.match(css, /\.note-drop-target \{ outline: 2px dashed var\(--blue\);/);
+  assert.match(css, /@media \(hover: none\) \{ \.note-drag-handle \{ display: none; \}/, "touch screens use the menu instead");
+});
+
+test("Reports' net-worth trend is a sentence, not a lone dot, when there is no history", () => {
+  assert.ok(app.includes("The history draws itself once your balances change from month to month."));
+});

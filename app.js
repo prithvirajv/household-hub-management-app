@@ -5014,7 +5014,7 @@ function visibleNotes() {
       .join(" ")
       .toLowerCase()
       .includes(query);
-  }).sort((a, b) => Number(b.pinned) - Number(a.pinned) || String(b.createdAt).localeCompare(String(a.createdAt)));
+  }).sort(compareNotes);
 }
 
 function noteChecklistSuggestions() {
@@ -5271,9 +5271,11 @@ function renderNoteCard(note) {
   </div>`;
   return `<article class="note-card ${noteColorClass(note.color)}" data-note-id="${note.id}">
     <div class="note-card-head">
+      ${note.trashed ? "<span></span>" : `<button class="note-drag-handle" data-note-drag-handle="${note.id}" type="button" draggable="true" aria-label="Drag to reorder ${escapeHtml(note.title || "note")}" title="Drag to reorder (or use Move earlier / later in the ⋮ menu)">⠿</button>`}
       <input class="note-title-input" data-note-title="${note.id}" value="${escapeHtml(note.title || "")}" placeholder="Untitled note" aria-label="Note title">
       <button class="note-icon-button ${note.pinned ? "active" : ""}" data-pin-note="${note.id}" type="button" aria-label="${note.pinned ? "Unpin note" : "Pin note"}" title="${note.pinned ? "Unpin note" : "Pin note"}" aria-pressed="${note.pinned ? "true" : "false"}">⌖</button>
     </div>
+    <div class="note-match-hint" data-note-match-hint="${note.id}" role="status" ${noteMatchLocations(note, state.notes.search).length ? "" : "hidden"}>${escapeHtml(noteMatchLocations(note, state.notes.search).length ? `Matches: ${noteMatchLocations(note, state.notes.search).join(", ")}` : "")}</div>
     <textarea class="note-body-input" data-note-body="${note.id}" rows="${note.body ? "2" : "1"}" placeholder="Take a note..." aria-label="Note body">${escapeHtml(note.body || "")}</textarea>
     ${note.reminder ? `<div class="note-reminder">Reminder · ${formatDateTime(note.reminder)}</div>` : ""}
     ${linkedBillName(note) ? `<div class="note-reminder note-linked-bill">🧾 Linked to ${escapeHtml(linkedBillName(note))}</div>` : ""}
@@ -5298,6 +5300,8 @@ function renderNoteCard(note) {
       <label class="note-icon-button note-photo-upload" title="Add a photo" aria-label="Add a photo to this note">📷<input type="file" accept="image/*" data-note-photo-upload="${note.id}" hidden></label>
       <button data-archive-note="${note.id}" type="button" title="${note.archived ? "Unarchive" : "Archive"}" aria-label="${note.archived ? "Unarchive note" : "Archive note"}">↓</button>
       <details class="note-more-menu"><summary title="More actions" aria-label="More actions">⋮</summary><div class="note-more-menu-panel">
+        <button data-move-note="${note.id}:-1" type="button">Move earlier</button>
+        <button data-move-note="${note.id}:1" type="button">Move later</button>
         <button data-duplicate-note="${note.id}" type="button">Make a copy</button>
         <button data-toggle-note-checklist="${note.id}" type="button">${note.showChecklist ? "Hide checkboxes" : "Show checkboxes"}</button>
         <button data-share-note="${note.id}" type="button">Share</button>
@@ -9721,8 +9725,10 @@ function renderReports() {
         ${showCard("networth") ? `<section class="card">
           <div class="section-head"><div><span class="card-label">Trend</span><h3>Net worth</h3></div><b class="${netWorthChange < 0 ? "danger" : ""}">${netWorthChange >= 0 ? "+" : ""}${money.format(netWorthChange)} over ${trend.length} months</b></div>
           ${reportsCompareLastYear ? yoyBadgeHtml(yoyDelta(currentNetWorth, priorNetWorth)) : ""}
-          ${netWorthTrendSvg(trend)}
-          <div class="networth-chart-labels">${trend.map((point) => `<span>${formatMonth(point.month).split(" ")[0].slice(0, 3)}</span>`).join("")}</div>
+          ${trend.length < 2 || trend.every((point) => Math.abs(point.value - trend[0].value) < 0.005)
+            ? `<div class="empty-inline">The history draws itself once your balances change from month to month. Today you are at ${money.format(currentNetWorth)}.</div>`
+            : `${netWorthTrendSvg(trend)}
+          <div class="networth-chart-labels">${trend.map((point) => `<span>${formatMonth(point.month).split(" ")[0].slice(0, 3)}</span>`).join("")}</div>`}
         </section>` : ""}
         ${showCard("cashflow") ? `<section class="card">
           <div class="section-head"><div><span class="card-label">Trend</span><h3>Cash flow</h3></div><span>${money.format(totalIncome - totalExpenses)} net over ${months.length} months</span></div>
@@ -11874,6 +11880,12 @@ function bindViewEvents() {
         ? [note.title, note.body, ...note.labels, ...note.checklist.map((item) => item.text)].join(" ").toLowerCase()
         : "";
       card.hidden = Boolean(query) && !searchable.includes(query);
+      const hint = card.querySelector("[data-note-match-hint]");
+      if (hint) {
+        const where = note ? noteMatchLocations(note, query) : [];
+        hint.textContent = where.length ? `Matches: ${where.join(", ")}` : "";
+        hint.hidden = !where.length;
+      }
     });
     document.querySelectorAll(".notes-result-section").forEach((section) => {
       section.hidden = ![...section.querySelectorAll(".note-card")].some((card) => !card.hidden);
@@ -12467,6 +12479,42 @@ function bindViewEvents() {
     });
   });
 
+  // Reordering: drag a card by its handle onto another card (it lands just before that one), or use Move earlier / later (keyboard and touch).
+  const NOTE_DRAG_TYPE = "application/x-familyloop-note";
+  const saveNoteOrder = () => { autosaveState(); render(); };
+  document.querySelectorAll("[data-note-drag-handle]").forEach((handle) => {
+    handle.addEventListener("dragstart", (event) => {
+      event.dataTransfer.setData(NOTE_DRAG_TYPE, handle.dataset.noteDragHandle);
+      event.dataTransfer.effectAllowed = "move";
+      handle.closest(".note-card")?.classList.add("note-dragging");
+    });
+    handle.addEventListener("dragend", () => {
+      document.querySelectorAll(".note-dragging, .note-drop-target").forEach((card) => card.classList.remove("note-dragging", "note-drop-target"));
+    });
+  });
+  document.querySelectorAll(".note-card[data-note-id]").forEach((card) => {
+    card.addEventListener("dragover", (event) => {
+      if (!event.dataTransfer?.types?.includes(NOTE_DRAG_TYPE)) return;
+      event.preventDefault();
+      card.classList.add("note-drop-target");
+    });
+    card.addEventListener("dragleave", () => card.classList.remove("note-drop-target"));
+    card.addEventListener("drop", (event) => {
+      const movedId = event.dataTransfer?.getData(NOTE_DRAG_TYPE);
+      if (!movedId) return;
+      event.preventDefault();
+      if (reorderNotes(state.notes.entries, visibleNotes().map((note) => note.id), movedId, card.dataset.noteId)) saveNoteOrder();
+      else render();
+    });
+  });
+  document.querySelectorAll("[data-move-note]").forEach((button) => {
+    button.addEventListener("click", () => {
+      const [noteId, delta] = button.dataset.moveNote.split(":");
+      if (moveNoteBy(state.notes.entries, visibleNotes().map((note) => note.id), noteId, Number(delta))) saveNoteOrder();
+      else showToast(Number(delta) < 0 ? "It is already first." : "It is already last.", { type: "success", duration: 2500 });
+    });
+  });
+
   document.querySelectorAll("[data-duplicate-note]").forEach((button) => {
     button.addEventListener("click", () => {
       const note = state.notes.entries.find((item) => item.id === button.dataset.duplicateNote);
@@ -12483,6 +12531,7 @@ function bindViewEvents() {
         })),
         labels: [...note.labels],
         pinned: false,
+        sortOrder: undefined,
         archived: false,
         trashed: false,
         trashedAt: "",

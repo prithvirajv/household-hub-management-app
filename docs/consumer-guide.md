@@ -540,6 +540,8 @@ Each entry shows its name, amount and the budget lines it feeds. Its date, repea
   chore stands out more than one from yesterday.
 
 ## Notes
+Drag a card by its ⠿ handle onto another card to put it just before that one (pinned and unpinned notes keep to their own group); on a phone, or from the keyboard, use **Move earlier** / **Move later** in the card's ⋮ menu. A note you have not placed by hand, such as a new one or a copy, shows at the top. While you search, each matching card says where the match is (title, note text, a label or a checklist item).
+
 The search box shows how many notes match, and starts empty each time you open Notes.
 
 Notes are a board of cards that pack by height, with your views and labels as a row of pills above it. A card's colour, reminder, labels, photo and archive buttons, and a checklist row's sub-item, add-to-Plan and delete buttons, appear when you point at it or tab into it.
