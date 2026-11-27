@@ -87,3 +87,18 @@ test("Reports' Sankey has phone rules, and the table-to-stack breakpoint is 1080
   assert.ok(!css.includes("@media (max-width: 1000px)"), "the old breakpoint is gone");
   assert.match(css, /sankey/i);
 });
+
+test("Transactions side cards: an even grid, housekeeping folded into a full-width bar that remembers it was open, and the learned-rules note is a card", () => {
+  assert.ok(app.includes('<details class="card cleanup-card" id="cleanupPanel" data-keep-open ${cleanupPanelOpen ? "open" : ""}>'));
+  assert.ok(app.includes('$("#cleanupPanel")?.addEventListener("toggle"'));
+  assert.ok(app.includes('<section class="card learned-rules-pointer">'));
+  assert.match(css, /\.transactions-grid > \.side-stack \{ align-items: stretch; \}/);
+  assert.match(css, /\.transactions-grid > \.side-stack > \.cleanup-card \{ grid-column: 1 \/ -1; order: 99; \}/);
+  assert.match(css, /\.transactions-grid > \.side-stack > details\.card \{ align-self: start; \}/);
+});
+
+test("the Bank stream no longer carries a second '+ Add transaction' (the ledger's '+ New transaction' is the one place to type one); Re-date is the quieter button", () => {
+  assert.ok(!app.includes('<button id="addTransactionButton" type="button">+ Add transaction</button>'));
+  assert.ok(app.includes('class="documents-upload-button secondary-upload"'));
+  assert.match(css, /\.documents-upload-button\.secondary-upload \{ background: transparent;/);
+});

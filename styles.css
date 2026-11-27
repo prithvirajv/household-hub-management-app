@@ -10490,3 +10490,19 @@ html[data-theme="dark"] :is(.pill, .pill-button, .stock-chip, .event, .event-rec
 
 .calendar-add-panel > summary { display: none; }
 .calendar-add-panel[open] { margin: 0.2rem 0 0.5rem; }
+
+/* Transactions side cards: an even grid, one slim card per job, housekeeping folded into a full-width bar. */
+.transactions-grid > .side-stack { align-items: stretch; }
+.transactions-grid > .side-stack > .card { margin: 0; }
+.transactions-grid > .side-stack > .learned-rules-pointer { display: flex; flex-direction: column; align-items: flex-start; justify-content: space-between; gap: 0.5rem; }
+.transactions-grid > .side-stack > .learned-rules-pointer p { margin: 0; }
+.transactions-grid > .side-stack > .cleanup-card { grid-column: 1 / -1; order: 99; }
+.cleanup-card > summary { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px 12px; cursor: pointer; }
+.cleanup-card > summary .muted { font-weight: 400; }
+.cleanup-card[open] > summary { margin-bottom: 0.7rem; }
+.cleanup-card[open] > :not(summary) { max-width: 520px; }
+#bankStreamCard .empty-inline { padding: 0.5rem 0; background: none; border: 0; text-align: left; font-weight: 600; color: var(--muted); }
+.transactions-grid > .side-stack > details.card { align-self: start; }
+/* One place to type a transaction (the ledger's "+ New transaction"); the Bank stream keeps only the import tools, the less common one quieter. */
+.documents-upload-button.secondary-upload { background: transparent; color: var(--text); border: 1px solid var(--line); }
+.documents-upload-button.secondary-upload:hover { background: var(--soft); }

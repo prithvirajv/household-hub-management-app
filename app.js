@@ -336,6 +336,7 @@ let documentsInfoExpandedId = null;
 // The new-transaction form on Transactions is folded away until asked for (it is rarely used and took most of the page).
 let newTransactionOpen = false;
 let pendingBanksOpen = false;
+let cleanupPanelOpen = false;
 let wealthDocsExpandedKey = null;
 // Investment accounts whose account fields (name, type, opening balance, close date) are open for editing; they stay folded away otherwise.
 const wealthEditingAccounts = new Set();
@@ -4455,8 +4456,7 @@ function renderTransactions() {
             <div><span class="card-label">Bank expense</span><h3>Bank stream</h3></div>
             <div class="button-row">
               <label class="documents-upload-button">+ Import CSV/PDF<input type="file" id="bankStreamCsvInput" accept=".csv,text/csv,.pdf,application/pdf"></label>
-              <label class="documents-upload-button" title="For rows you imported earlier from a card file that has both a Transaction Date and a Post Date: move them to the post date, as a linked bank dates them.">Re-date from a CSV<input type="file" id="postDateFixInput" accept=".csv,text/csv"></label>
-              <button id="addTransactionButton" type="button">+ Add transaction</button>
+              <label class="documents-upload-button secondary-upload" title="For rows you imported earlier from a card file that has both a Transaction Date and a Post Date: move them to the post date, as a linked bank dates them.">Re-date from a CSV<input type="file" id="postDateFixInput" accept=".csv,text/csv"></label>
             </div>
           </div>
           <label class="ai-import-toggle"><input type="checkbox" id="aiImportToggle" ${aiImportEnabled() ? "checked" : ""}> <span>Use AI to categorize and tag imports and add them to the ledger; anything it is unsure about stays in Bank stream for review</span></label>
@@ -4536,9 +4536,9 @@ function renderTransactions() {
           `).join("") || `<div class="empty-inline">No bank stream items waiting</div>`}
           ${importedTotal > imported.length ? `<div class="ledger-show-more"><span class="muted">Showing ${imported.length} of ${importedTotal}</span><button type="button" class="ghost" id="bankStreamShowMore">Show ${Math.min(BANK_STREAM_PAGE_SIZE, importedTotal - imported.length)} more</button></div>` : ""}
         </section>
-        ${categorizationRuleEntries().length || (state.removalRules || []).length ? `<p class="muted learned-rules-pointer">FamilyLoop has learned ${categorizationRuleEntries().length} category rule${categorizationRuleEntries().length === 1 ? "" : "s"}${(state.removalRules || []).length ? ` and ${(state.removalRules || []).length} rule${(state.removalRules || []).length === 1 ? "" : "s"} from rows you removed` : ""}. <button type="button" class="ghost" data-open-learned-rules>Manage in Profile</button></p>` : ""}
-        <section class="card cleanup-card">
-          <div class="card-label">Housekeeping</div><h3>Clean up old transactions</h3>
+        ${categorizationRuleEntries().length || (state.removalRules || []).length ? `<section class="card learned-rules-pointer"><span class="card-label">Learning</span><p class="muted">FamilyLoop has learned ${categorizationRuleEntries().length} category rule${categorizationRuleEntries().length === 1 ? "" : "s"}${(state.removalRules || []).length ? ` and ${(state.removalRules || []).length} rule${(state.removalRules || []).length === 1 ? "" : "s"} from rows you removed` : ""}. </p><button type="button" class="ghost" data-open-learned-rules>Manage in Profile</button></section>` : ""}
+        <details class="card cleanup-card" id="cleanupPanel" data-keep-open ${cleanupPanelOpen ? "open" : ""}>
+          <summary><span class="card-label">Housekeeping</span><b>Clean up old transactions</b><span class="muted">remove old rows for good</span></summary>
           <p class="muted">Permanently remove ledger transactions and/or waiting Bank stream rows from before a date. A CSV backup of exactly what is removed can download first. Linked accounts re-match their bank balance afterwards.</p>
           <label>Remove everything dated before<input type="date" id="cleanupBefore" value="${escapeHtml(cleanupOptions.before)}" ${cleanupOptions.all ? "disabled" : ""}></label>
           <label class="ai-import-toggle"><input type="checkbox" id="cleanupAll" ${cleanupOptions.all ? "checked" : ""}> <span>Every date (remove them all)</span></label>
@@ -4547,7 +4547,7 @@ function renderTransactions() {
           <label class="ai-import-toggle"><input type="checkbox" id="cleanupBackup" ${cleanupOptions.backup ? "checked" : ""}> <span>Download a CSV backup first</span></label>
           <p class="muted" id="cleanupPreview" role="status"></p>
           <button type="button" class="danger-button" id="cleanupButton">Review and remove…</button>
-        </section>
+        </details>
       </aside>
       ${receiptDialogHtml()}
     </section>`;
@@ -13200,6 +13200,7 @@ function bindViewEvents() {
   });
 
   $("#newTransactionDetails")?.addEventListener("toggle", (event) => { newTransactionOpen = event.currentTarget.open; });
+  $("#cleanupPanel")?.addEventListener("toggle", (event) => { cleanupPanelOpen = event.currentTarget.open; });
   $("#pendingBanksDetails")?.addEventListener("toggle", (event) => { pendingBanksOpen = event.currentTarget.open; });
 
   $("#transactionForm")?.addEventListener("submit", async (event) => {
