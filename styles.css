@@ -17,7 +17,7 @@
   --text: oklch(23% 0.02 55);
   --muted: oklch(46% 0.02 60);
   /* Darkened from #13936d / #e05252 so white text on them and the coral text on light panels reach 4.5:1 (they measured 3.9 and 3.7). */
-  --green: #0f8461;
+  --green: #0c7a5a;
   --green-soft: #e6f6ef;
   /* Green text that stays readable on --green-soft: darkened toward --text, so it flips light in dark mode. */
   --green-ink: color-mix(in srgb, var(--green) 75%, var(--text));
@@ -25,7 +25,7 @@
   --gold: #d99a24;
   /* Gold text that stays readable on light surfaces: darkened toward --text, lightened in dark mode. */
   --gold-ink: color-mix(in srgb, var(--gold) 62%, var(--text));
-  --coral: #c93f3f;
+  --coral: #b53232;
   --shadow: 0 14px 34px rgba(80, 60, 30, 0.1);
   --card-radius: 14px;
   --sidebar-text: oklch(88% 0.012 75);
@@ -10540,8 +10540,8 @@ html[data-theme="dark"] :is(.pill, .pill-button, .stock-chip, .event, .event-rec
 .notes-filter-panel .notes-edit-labels { margin: 0; border-style: dashed; color: var(--muted); }
 .notes-workspace { max-width: none; }
 .notes-search, .note-composer, .note-composer-compact { max-width: 680px; margin-inline: auto; }
-.notes-board { display: block; column-width: 270px; column-gap: 0.9rem; }
-.notes-board > .note-card { break-inside: avoid; margin: 0 0 0.9rem; }
+.notes-board { display: flex; align-items: flex-start; gap: 0.9rem; }
+.notes-column { flex: 1 1 0; min-width: 0; display: grid; gap: 0.9rem; align-content: start; }
 .note-body-input { resize: none; }
 .note-body-input:placeholder-shown:not(:focus) { min-height: 0; height: 1.3rem; }
 .note-card-toolbar { border-top-color: transparent; opacity: 0.55; }
@@ -10555,7 +10555,6 @@ html[data-theme="dark"] :is(.pill, .pill-button, .stock-chip, .event, .event-rec
 @media (max-width: 760px) {
   .notes-filter-panel { flex-wrap: nowrap; overflow-x: auto; padding-bottom: 0.2rem; scrollbar-width: none; }
   .notes-filter-panel > button, .notes-filter-panel .notes-filter-label { flex: 0 0 auto; white-space: nowrap; }
-  .notes-board { column-width: auto; column-count: 1; }
 }
 .debt-more > summary { cursor: pointer; color: var(--muted); font-size: 0.82rem; font-weight: 700; margin: 0.3rem 0; }
 .paycheck-more > summary { cursor: pointer; display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 10px; font-weight: 700; font-size: 0.9rem; margin: 0.2rem 0; }
@@ -10590,3 +10589,29 @@ html[data-theme="dark"] :is(.icon-button.danger-button, .mini-tag-remove, .note-
 .note-match-hint { font-size: 0.78rem; color: var(--muted); }
 .note-match-hint[hidden] { display: none; }
 @media (hover: none) { .note-drag-handle { display: none; } .note-card-head { grid-template-columns: minmax(0, 1fr) 34px; } }
+
+/* Tablet widths (found by the layout check): the header's month picker, buttons and user chip were one unbreakable row, 650-870px wide, so on a 768px
+   screen every page scrolled sideways. The row now wraps, and the page columns may shrink below their content instead of widening the page. */
+.topbar > div:first-child { min-width: 0; }
+.topbar-actions { flex-wrap: wrap; justify-content: flex-end; min-width: 0; }
+.work-grid > *, .main-stack, .side-stack { min-width: 0; }
+.note-drag-handle { width: 24px; }
+.note-card-head { grid-template-columns: 24px minmax(0, 1fr) 34px; }
+/* Tablet widths, continued: Budget's rows, Wealth's account list and Investments' two panels had minimum widths wider than the page's content area. */
+@media (max-width: 900px) and (min-width: 761px) {
+  .budget-ledger-head, .budget-money-row { grid-template-columns: minmax(0, 1.5fr) minmax(0, 0.8fr) minmax(0, 1fr) minmax(0, 1fr); gap: 0.5rem; }
+  .budget-ledger-head.has-accounts, .budget-money-row.has-accounts { grid-template-columns: minmax(0, 1.5fr) minmax(0, 0.8fr) minmax(0, 1fr) minmax(0, 1fr) minmax(0, 1.1fr); }
+}
+.net-worth-items { grid-template-columns: minmax(0, 1fr); }
+@media (max-width: 1000px) { .inv-grid2 { grid-template-columns: 1fr; } }
+@media (max-width: 1000px) and (min-width: 761px) {
+  .net-worth-item:not(.liability):not(.stock) { grid-template-columns: minmax(0, 1.25fr) minmax(0, 0.6fr) minmax(0, 0.8fr) minmax(0, 0.8fr); }
+  .net-worth-item.stock { grid-template-columns: repeat(auto-fit, minmax(110px, 1fr)); }
+}
+/* Dark mode: "Paid" ticks and the "$N left" notes used the page green on a dark panel at 2.7-3.2:1; the lighter green clears 4.5:1 there. */
+html[data-theme="dark"] :is(.bills-due-good, .bills-paid-check, .budget-ledger-card small, .budget-line-head small) { --green: #6ee5be; }
+/* Shared Expenses: the three forms fold away (the people and what they owe come first). */
+.ious-fold > summary, .ious-fold-card > summary { cursor: pointer; display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 12px; font-weight: 700; }
+.ious-fold-card > summary .muted { font-weight: 400; font-size: 0.85rem; }
+.ious-fold { margin: 0.6rem 0; }
+.ious-fold[open] > summary, .ious-fold-card[open] > summary { margin-bottom: 0.7rem; }

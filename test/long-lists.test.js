@@ -54,7 +54,7 @@ test("Home shows a dismissible What's new card, kept per device", () => {
 test("phones get 36px touch boxes and readable captions, and the brand green and coral reach 4.5:1 with white / on light panels", () => {
   assert.match(css, /\.pill-button, \.link-button, \.ledger-payback-line \.small-button, button\.small-button \{ min-height: 36px;/);
   assert.match(css, /small, \.muted small \{ font-size: max\(0\.78rem, 12px\); \}/);
-  assert.match(css, /--green: #0f8461;/);
-  assert.match(css, /--coral: #c93f3f;/);
+  assert.match(css, /--green: #0c7a5a;/);
+  assert.match(css, /--coral: #b53232;/);
   assert.match(css, /html\[data-theme="dark"\] \{\s*--coral: #ee6b6b;[^}]*--blue: #7ea6f5;/);
 });

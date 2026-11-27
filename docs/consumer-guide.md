@@ -642,6 +642,8 @@ The page leads with **To do** for the day: type a task and press Add (open **Tim
 
 ![A split-a-bill total with two per-person balance cards, one owed to you and one you owe](../assets/mockup-shared-expenses.svg)
 
+The people and what they owe come first. **+ Add a friend**, **Record a debt** and **Split a bill with friends** are folded away; select one to open its form, and it stays open while you work in it.
+
 1. Add people you split money with under **Friends** — add their email any
    time to send an invite.
 2. Use **Record a debt** for a simple one-off — pick a person, an amount,

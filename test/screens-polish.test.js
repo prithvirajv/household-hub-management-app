@@ -84,7 +84,7 @@ test("the Calendar add/edit form folds away, and its +Add buttons are exempt fro
 
 test("Reports' Sankey has phone rules, and the table-to-stack breakpoint is 1080px", () => {
   assert.ok(css.includes("@media (max-width: 1080px)"));
-  assert.ok(!css.includes("@media (max-width: 1000px)"), "the old breakpoint is gone");
+  assert.ok(!/@media \(max-width: 1000px\) \{\s*\.transactions-grid/.test(css), "the ledger's old 1000px breakpoint is gone (the tablet fixes for Wealth and Investments use 1000px for their own reasons)");
   assert.match(css, /sankey/i);
 });
 
@@ -144,8 +144,9 @@ test("Plan leads with the to-do list: quick add, the day's tasks (timed first), 
 test("Notes: filters are a row of pills, the board is a masonry, row actions show on hover/focus, the composer is centred", () => {
   const notes = css.slice(css.indexOf("Notes redesign:"));
   assert.match(notes, /\.notes-layout \{ grid-template-columns: minmax\(0, 1fr\);/);
-  assert.match(notes, /\.notes-board \{ display: block; column-width: 270px;/);
-  assert.match(notes, /\.notes-board > \.note-card \{ break-inside: avoid;/);
+  assert.match(notes, /\.notes-board \{ display: flex; align-items: flex-start;/);
+  assert.match(notes, /\.notes-column \{ flex: 1 1 0; min-width: 0;/);
+  assert.ok(!/column-width|column-count/.test(css.slice(css.indexOf("Notes redesign:"))), "never a CSS multi-column board: it made Notes take 2-15 seconds to draw");
   assert.match(notes, /\.notes-search, \.note-composer, \.note-composer-compact \{ max-width: 680px; margin-inline: auto; \}/);
   assert.match(notes, /@media \(hover: hover\) \{\s*\.note-check-row \.note-check-level/);
   assert.match(notes, /:focus-within \.note-check-delete/, "keyboard users see the row actions too");
@@ -206,4 +207,30 @@ test("Notes can be reordered by dragging a card's handle onto another card, or w
 
 test("Reports' net-worth trend is a sentence, not a lone dot, when there is no history", () => {
   assert.ok(app.includes("The history draws itself once your balances change from month to month."));
+});
+
+test("the Notes board's columns are real elements filled row by row, resized on a window change that alters the column count", () => {
+  assert.ok(app.includes("function notesBoardColumnsHtml(cardHtmlList)") && app.includes("function notesColumnCount()"));
+  assert.ok(app.includes("cardHtmlList.forEach((html, index) => columns[index % count].push(html));"));
+  assert.equal((app.match(/notesBoardColumnsHtml\(/g) || []).length >= 4, true, "all three boards use it");
+  assert.ok(app.includes('window.addEventListener("resize"') && app.includes("notesColumnCount() !== notesColumnCountShown"));
+});
+
+test("tablet widths: the header wraps instead of widening the page, and Budget/Wealth/Investments rows may shrink (found by scripts/check-layout.js)", () => {
+  assert.match(css, /\.topbar-actions \{ flex-wrap: wrap; justify-content: flex-end; min-width: 0; \}/);
+  assert.match(css, /\.work-grid > \*, \.main-stack, \.side-stack \{ min-width: 0; \}/);
+  assert.match(css, /@media \(max-width: 900px\) and \(min-width: 761px\) \{\s*\.budget-ledger-head, \.budget-money-row \{ grid-template-columns: minmax\(0, 1\.5fr\)/);
+  assert.match(css, /\.net-worth-items \{ grid-template-columns: minmax\(0, 1fr\); \}/);
+  assert.match(css, /@media \(max-width: 1000px\) \{ \.inv-grid2 \{ grid-template-columns: 1fr; \} \}/);
+});
+
+test("Shared Expenses: the add-friend, record-a-debt and split-a-bill forms fold away and remember they were open", () => {
+  assert.ok(app.includes('data-ious-fold="friend" data-keep-open') && app.includes('data-ious-fold="debt" data-keep-open') && app.includes('data-ious-fold="split" data-keep-open'));
+  assert.ok(app.includes("const iousOpenPanels = new Set();") && app.includes("[data-ious-fold]"));
+});
+
+test("scripts/check-layout.js exists and package.json exposes it as check:layout", () => {
+  const pkg = JSON.parse(fs.readFileSync(path.join(__dirname, "..", "package.json"), "utf8"));
+  assert.equal(pkg.scripts["check:layout"], "node scripts/check-layout.js");
+  assert.ok(fs.existsSync(path.join(__dirname, "..", "scripts", "check-layout.js")));
 });

@@ -340,6 +340,7 @@ let cleanupPanelOpen = false;
 let manageSubcategoriesOpen = false;
 let planLogOpen = false;
 const paycheckMoreOpen = new Set();
+const iousOpenPanels = new Set();
 let wealthDocsExpandedKey = null;
 // Investment accounts whose account fields (name, type, opening balance, close date) are open for editing; they stay folded away otherwise.
 const wealthEditingAccounts = new Set();
@@ -5062,6 +5063,23 @@ function addOrRestoreChecklistItem(note, text, parentId = "") {
   return true;
 }
 
+// How many columns the Notes board has: one on a phone, otherwise as many 290px columns as fit beside the sidebar (at most four).
+// The columns are real elements, filled row by row (card 1, 2, 3, 1, 2, 3 ...), NOT a CSS multi-column box: with CSS columns the browser
+// re-flowed the whole board every time a checklist box's height was read, which took 2 seconds for 20 notes and 15 for 200.
+let notesColumnCountShown = 0;
+function notesColumnCount() {
+  const width = window.innerWidth || 1200;
+  if (width <= 760) return 1;
+  return Math.max(1, Math.min(4, Math.floor((width - 300) / 290)));
+}
+function notesBoardColumnsHtml(cardHtmlList) {
+  const count = Math.max(1, Math.min(notesColumnCount(), cardHtmlList.length || 1));
+  notesColumnCountShown = notesColumnCount();
+  const columns = Array.from({ length: count }, () => []);
+  cardHtmlList.forEach((html, index) => columns[index % count].push(html));
+  return columns.map((cards) => `<div class="notes-column">${cards.join("")}</div>`).join("");
+}
+
 function renderNotes() {
   ensureNotesData();
   const notes = visibleNotes();
@@ -5097,7 +5115,7 @@ function renderNotes() {
         ${state.notes.activeView === "notes" && sharedWithMeNotes?.length ? `
           <section class="notes-result-section">
             <div class="notes-section-label">Shared with me</div>
-            <div class="notes-board">${sharedWithMeNotes.map(renderSharedWithMeCard).join("")}</div>
+            <div class="notes-board">${notesBoardColumnsHtml(sharedWithMeNotes.map(renderSharedWithMeCard))}</div>
           </section>` : ""}
         ${state.notes.activeView === "trash" ? `<div class="notes-trash-banner"><span>Notes in Trash are permanently deleted after 7 days.</span><button id="emptyNotesTrashButton" type="button" ${notes.length ? "" : "disabled"}>Empty Trash</button></div>` : ""}
         ${canCompose && !state.notes.composerOpen ? `<button id="openNoteComposerButton" class="note-composer-compact" type="button"><span>Take a note...</span><span aria-hidden="true">☑</span></button>` : ""}
@@ -5122,8 +5140,8 @@ function renderNotes() {
           </div>
         </form>` : ""}
         ${notes.length ? `
-          ${pinned.length ? `<section class="notes-result-section"><div class="notes-section-label">Pinned</div><div class="notes-board">${pinned.map(renderNoteCard).join("")}</div></section>` : ""}
-          ${others.length ? `<section class="notes-result-section"><div class="notes-section-label">${pinned.length ? "Others" : "Notes"}</div><div class="notes-board">${shownOthers.map(renderNoteCard).join("")}</div>${others.length > shownOthers.length ? `<div class="ledger-show-more"><span class="muted">Showing ${shownOthers.length} of ${others.length}</span><button type="button" class="ghost" id="notesShowMore">Show ${Math.min(NOTES_PAGE_SIZE, others.length - shownOthers.length)} more</button></div>` : ""}</section>` : ""}
+          ${pinned.length ? `<section class="notes-result-section"><div class="notes-section-label">Pinned</div><div class="notes-board">${notesBoardColumnsHtml(pinned.map(renderNoteCard))}</div></section>` : ""}
+          ${others.length ? `<section class="notes-result-section"><div class="notes-section-label">${pinned.length ? "Others" : "Notes"}</div><div class="notes-board">${notesBoardColumnsHtml(shownOthers.map(renderNoteCard))}</div>${others.length > shownOthers.length ? `<div class="ledger-show-more"><span class="muted">Showing ${shownOthers.length} of ${others.length}</span><button type="button" class="ghost" id="notesShowMore">Show ${Math.min(NOTES_PAGE_SIZE, others.length - shownOthers.length)} more</button></div>` : ""}</section>` : ""}
         ` : `<div class="notes-empty">${emptyMessage}</div>`}
       </div>
       <dialog id="noteLabelsDialog" class="app-dialog note-labels-dialog">
@@ -7982,15 +8000,18 @@ function renderIOUs() {
       <div class="card">
         <div class="card-label">Shared Expenses</div><h3>Friends</h3>
         <p class="muted">Everyone you've split a debt or expense with - add an email any time to send them an invite.</p>
+        <details class="ious-fold" data-ious-fold="friend" data-keep-open ${iousOpenPanels.has("friend") ? "open" : ""}>
+          <summary>+ Add a friend</summary>
         <form id="addFriendForm" class="mini-form">
           <label>Name<input name="name" placeholder="Jordan" required></label>
           <label>Email (optional)<input name="email" type="email" placeholder="jordan@example.com"></label>
           <button type="submit" class="form-row-full">Add friend</button>
         </form>
+        </details>
         ${friendsList.length ? `<div id="friendListRows">${friendsList.map((friend, index) => friendListRow(friend, index)).join("")}</div>` : `<div class="empty-inline">No friends yet</div>`}
       </div>
-      <div class="card">
-        <div class="card-label">Add</div><h3>Record a debt</h3>
+      <details class="card ious-fold-card" data-ious-fold="debt" data-keep-open ${iousOpenPanels.has("debt") ? "open" : ""}>
+        <summary><span class="card-label">Add</span><b>Record a debt</b><span class="muted">a one-off: you owe them, or they owe you</span></summary>
         <form id="iouForm" class="mini-form iou-form">
           <label>Person
             <div class="custom-combobox friend-name-combobox">
@@ -8009,9 +8030,9 @@ function renderIOUs() {
           ${state.accounts.length ? `<label>Account (optional)<select name="accountId"><option value="">Not linked</option>${accountOptions("")}</select></label>` : ""}
           <button type="submit" class="form-row-full">Add debt</button>
         </form>
-      </div>
-      <div class="card">
-        <div class="card-label">Shared expense</div><h3>Split a bill with friends</h3>
+      </details>
+      <details class="card ious-fold-card" data-ious-fold="split" data-keep-open ${iousOpenPanels.has("split") ? "open" : ""}>
+        <summary><span class="card-label">Shared expense</span><b>Split a bill with friends</b><span class="muted">you paid; they pay you back their shares</span></summary>
         <p class="muted">Enter the total bill including your own share — only your friends' shares are tracked as amounts they owe you.</p>
         <form id="splitExpenseForm" class="mini-form split-expense-form">
           <label>What for<input name="reason" placeholder="Dinner" required></label>
@@ -8030,7 +8051,7 @@ function renderIOUs() {
           <p id="splitBillMessage" class="form-message form-row-full"></p>
           <button type="submit" class="form-row-full">Split and add</button>
         </form>
-      </div>
+      </details>
       ${balances.length ? balances.map(personBalanceCard).join("") : `<div class="card"><div class="empty-inline">No shared expenses yet</div></div>`}
       ${settled.length ? `<details class="card ious-settled-details">
         <summary>Settled (${settled.length})</summary>
@@ -16236,6 +16257,13 @@ function bindViewEvents() {
     });
   });
 
+  document.querySelectorAll("[data-ious-fold]").forEach((details) => {
+    details.addEventListener("toggle", () => {
+      if (details.open) iousOpenPanels.add(details.dataset.iousFold);
+      else iousOpenPanels.delete(details.dataset.iousFold);
+    });
+  });
+
   document.querySelectorAll("[data-paycheck-more]").forEach((details) => {
     details.addEventListener("toggle", () => {
       const key = details.dataset.paycheckMore;
@@ -21664,6 +21692,14 @@ if (typeof navigator !== "undefined" && "serviceWorker" in navigator && location
 setInterval(() => {
   if (currentView === "wealth") refreshAllStockGroupPrices();
 }, 5 * 60 * 1000);
+
+// A window resize that changes how many Notes columns fit redraws the board (not on every pixel).
+let notesResizeTimer = null;
+window.addEventListener("resize", () => {
+  if (currentView !== "notes") return;
+  clearTimeout(notesResizeTimer);
+  notesResizeTimer = setTimeout(() => { if (currentView === "notes" && notesColumnCount() !== notesColumnCountShown) render(); }, 200);
+});
 
 window.addEventListener("popstate", (event) => {
   // Back/Forward carry the view in the history entry; a typed or pasted "#page" change has no state, so the address itself names the page.
